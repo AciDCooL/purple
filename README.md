@@ -1,4 +1,4 @@
-<h1 align="center">🟣 purple (purple-ssh) — Rust TUI SSH Config Manager for OpenSSH</h1>
+<h1 align="center">🟣 purple (purple-ssh) | Rust TUI SSH Config Manager for OpenSSH</h1>
 
 <p align="center"><strong>SSH host launcher and <code>~/.ssh/config</code> editor with cloud sync.</strong></p>
 
