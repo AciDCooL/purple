@@ -60,6 +60,26 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
     }
 }
 
+/// Create an HTTP agent with explicit timeouts.
+pub(crate) fn http_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+}
+
+/// Strip CIDR suffix (/64, /128, etc.) from an IP address.
+/// Some provider APIs return IPv6 addresses with prefix length (e.g. "2600:3c00::1/128").
+/// SSH requires bare addresses without CIDR notation.
+pub(crate) fn strip_cidr(ip: &str) -> &str {
+    // Only strip if it looks like a CIDR suffix (slash followed by digits)
+    if let Some(pos) = ip.rfind('/') {
+        if ip[pos + 1..].bytes().all(|b| b.is_ascii_digit()) && pos + 1 < ip.len() {
+            return &ip[..pos];
+        }
+    }
+    ip
+}
+
 /// Map a ureq error to a ProviderError.
 fn map_ureq_error(err: ureq::Error) -> ProviderError {
     match err {
@@ -67,5 +87,32 @@ fn map_ureq_error(err: ureq::Error) -> ProviderError {
         ureq::Error::Status(429, _) => ProviderError::RateLimited,
         ureq::Error::Status(code, _) => ProviderError::Http(format!("HTTP {}", code)),
         ureq::Error::Transport(t) => ProviderError::Http(t.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_cidr_ipv6_with_prefix() {
+        assert_eq!(strip_cidr("2600:3c00::1/128"), "2600:3c00::1");
+        assert_eq!(strip_cidr("2a01:4f8::1/64"), "2a01:4f8::1");
+    }
+
+    #[test]
+    fn test_strip_cidr_bare_ipv6() {
+        assert_eq!(strip_cidr("2600:3c00::1"), "2600:3c00::1");
+    }
+
+    #[test]
+    fn test_strip_cidr_ipv4_passthrough() {
+        assert_eq!(strip_cidr("1.2.3.4"), "1.2.3.4");
+        assert_eq!(strip_cidr("10.0.0.1/24"), "10.0.0.1");
+    }
+
+    #[test]
+    fn test_strip_cidr_empty() {
+        assert_eq!(strip_cidr(""), "");
     }
 }

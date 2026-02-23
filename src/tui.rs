@@ -30,7 +30,7 @@ impl Tui {
         PANIC_HOOK.call_once(|| {
             let original_hook = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |panic_info| {
-                Self::reset().expect("Failed to reset terminal");
+                let _ = Self::reset();
                 original_hook(panic_info);
             }));
         });

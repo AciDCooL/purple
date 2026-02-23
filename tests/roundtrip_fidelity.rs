@@ -244,7 +244,15 @@ Host beta
   HostName b.com
 ";
     let config = parse_str(input);
-    assert_eq_visible(input, &config.serialize());
+    // Serialize collapses consecutive blank lines to one
+    let expected = "\
+Host alpha
+  HostName a.com
+
+Host beta
+  HostName b.com
+";
+    assert_eq_visible(expected, &config.serialize());
 }
 
 #[test]
@@ -291,7 +299,15 @@ Host beta
   HostName b.com
 ";
     let config = parse_str(input);
-    assert_eq_visible(input, &config.serialize());
+    // Serialize collapses consecutive blank lines to one
+    let expected = "\
+Host alpha
+  HostName a.com
+
+Host beta
+  HostName b.com
+";
+    assert_eq_visible(expected, &config.serialize());
 }
 
 #[test]
@@ -327,48 +343,11 @@ Host myserver
 
 #[test]
 fn roundtrip_config_with_trailing_blank_lines_after_host() {
-    // Trailing blank lines after the last host become directives inside that block.
-    // They should round-trip correctly.
+    // Trailing blank lines after the last host round-trip correctly.
     let input = "Host myserver\n  HostName 10.0.0.1\n\n";
     let config = parse_str(input);
-    // The parser stores TWO blank lines inside myserver's directives:
-    // directive[0] = HostName, directive[1] = blank line, directive[2] = blank line
-    // Wait, the input has exactly: "Host myserver\n" "  HostName 10.0.0.1\n" "\n"
-    // That's 3 lines. The last line is empty (after the second \n, before end).
-    // Actually .lines() on "Host myserver\n  HostName 10.0.0.1\n\n" yields:
-    //   "Host myserver", "  HostName 10.0.0.1", ""
-    // So there's ONE blank line -> one non-directive in myserver's block
-    // Serialization: "Host myserver\n  HostName 10.0.0.1\n\n" + trailing newline guarantee
-    // But wait, serialize joins lines with \n then adds \n if needed.
-    // Lines: ["Host myserver", "  HostName 10.0.0.1", ""]
-    // Join: "Host myserver\n  HostName 10.0.0.1\n"
-    // That doesn't end with \n... wait it does: the last element is "", so join produces
-    // "Host myserver" + "\n" + "  HostName 10.0.0.1" + "\n" + ""
-    // = "Host myserver\n  HostName 10.0.0.1\n"
-    // Hmm, that's only one trailing newline, but the original had two.
-    // The input "Host myserver\n  HostName 10.0.0.1\n\n" has .lines() = ["Host myserver", "  HostName 10.0.0.1", ""]
-    // In the parser: line 0 = "Host myserver" (Host block), line 1 = "  HostName 10.0.0.1" (directive),
-    // line 2 = "" (blank, is_non_directive)
-    // Serialize: push "Host myserver", push "  HostName 10.0.0.1", push ""
-    // join("\n") = "Host myserver\n  HostName 10.0.0.1\n"
-    // Then + "\n" = "Host myserver\n  HostName 10.0.0.1\n\n"
-    // Wait no. join on ["Host myserver", "  HostName 10.0.0.1", ""] =
-    // "Host myserver" + "\n" + "  HostName 10.0.0.1" + "\n" + ""
-    // = "Host myserver\n  HostName 10.0.0.1\n"
-    // That ends with \n, so no extra \n is added.
-    // So output = "Host myserver\n  HostName 10.0.0.1\n"
-    // But input was "Host myserver\n  HostName 10.0.0.1\n\n"
-    // This is a LOSS of the trailing blank line!
     let output = config.serialize();
-    // Expected behavior: the trailing blank line is LOST because serialize's join
-    // of [..., ""] produces trailing \n which matches the already-present \n.
-    // This is the actual behavior we observe.
-    let expected = "Host myserver\n  HostName 10.0.0.1\n";
-    assert_eq_visible(expected, &output);
-    // NOTE: This means a single trailing blank line after the last host IS LOST.
-    // The original input had \n\n at the end but output only has \n.
-    // This is a minor fidelity issue but probably acceptable since the file still has
-    // a proper trailing newline.
+    assert_eq_visible(input, &output);
 }
 
 #[test]
@@ -886,6 +865,30 @@ Host myserver
 }
 
 #[test]
+fn update_host_preserves_host_line_when_alias_unchanged() {
+    let input = "\
+Host myserver\t# production
+  HostName 10.0.0.1
+  User admin
+";
+    let mut config = parse_str(input);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    // Host line should be preserved exactly (including tab + inline comment)
+    assert!(output.contains("Host myserver\t# production"));
+    assert!(output.contains("HostName 10.0.0.2"));
+}
+
+#[test]
 fn update_host_changes_alias() {
     let input = "\
 Host oldname
@@ -1104,6 +1107,24 @@ Host myserver
 }
 
 #[test]
+fn host_entries_skips_bracket_and_negation_patterns() {
+    let input = "\
+Host web[12]
+  HostName 10.0.0.1
+
+Host !prod
+  HostName 10.0.0.2
+
+Host real-host
+  HostName 10.0.0.3
+";
+    let config = parse_str(input);
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].alias, "real-host");
+}
+
+#[test]
 fn tags_roundtrip_parse_and_read() {
     let input = "\
 Host myserver
@@ -1115,16 +1136,10 @@ Host myserver
     assert_eq!(entries[0].tags, vec!["prod", "web", "critical"]);
 }
 
-/// BUG: set_host_tags on a host followed by another host places the tags comment
-/// AFTER the blank line separator, which is semantically wrong.
-///
-/// When there's a host like "Host alpha\n  HostName a.com\n\nHost beta\n...",
-/// the blank line is inside alpha's directives as directive[-1].
-/// set_tags() appends the tags comment to the END of directives, placing it
-/// AFTER the blank separator line. The tags end up visually separated from
-/// their host and look like they belong to the next host.
+/// set_host_tags inserts the tags comment before trailing blank separators
+/// (via content_end()), so the tag stays visually attached to its host.
 #[test]
-fn bug_set_tags_placed_after_blank_line_separator() {
+fn set_tags_placed_before_blank_separator() {
     let input = "\
 Host alpha
   HostName a.com
@@ -1136,33 +1151,12 @@ Host beta
     config.set_host_tags("alpha", &["prod".to_string()]);
     let output = config.serialize();
 
-    // Ideal output would be:
-    //   Host alpha
-    //     HostName a.com
-    //     # purple:tags prod
-    //
-    //   Host beta
-    //     HostName b.com
-    //
-    // Actual output:
-    //   Host alpha
-    //     HostName a.com
-    //
-    //     # purple:tags prod
-    //   Host beta
-    //     HostName b.com
-    //
-    // The tags comment appears AFTER the blank line and looks detached from alpha.
-
     let lines: Vec<&str> = output.lines().collect();
-    // Find the tags line position
     let tags_pos = lines.iter().position(|l| l.contains("purple:tags")).unwrap();
-    // Find the blank line position (should be AFTER tags, not before)
-    let blank_after_hostname = lines.iter().position(|l| l.is_empty()).unwrap();
+    let blank_pos = lines.iter().position(|l| l.is_empty()).unwrap();
 
-    // Tags must appear before the blank separator line, not after
     assert!(
-        tags_pos < blank_after_hostname,
+        tags_pos < blank_pos,
         "Tags should be placed before the blank separator line.\n{}",
         visible(&output)
     );
@@ -1195,16 +1189,8 @@ Host beta
     );
 }
 
-/// BUG: swap_hosts swaps HostBlock elements but each block carries its own
-/// trailing blank line (the inter-block separator is stored as a directive
-/// inside the preceding block). After swapping, the blank line positions
-/// are wrong: the first block keeps its trailing blank (which was meant
-/// to separate from the old next block), and the second block has the
-/// blank that was meant for the old ordering.
-///
-/// For two hosts this works coincidentally because both have the same
-/// structure, but for three hosts with different trailing content it
-/// can cause formatting issues.
+/// swap_hosts normalizes trailing blanks: strips both, swaps, then
+/// ensure_trailing_blank on the first block to maintain a separator.
 #[test]
 fn swap_hosts_preserves_blank_separator() {
     let input = "\
@@ -1217,27 +1203,11 @@ Host beta
     let mut config = parse_str(input);
     config.swap_hosts("alpha", "beta");
     let output = config.serialize();
-    // After swap: beta (with trailing blank from alpha) and alpha (without trailing)
-    // Actually: the elements array swaps, so beta's block (which has no trailing blank)
-    // goes to position 0, and alpha's block (which has trailing blank) goes to position 1.
-    // So output = "Host beta\n  HostName b.com\nHost alpha\n  HostName a.com\n\n"
-    // Wait, let me think more carefully.
-    // Original elements: [HostBlock(alpha, directives=[HostName, blank]), HostBlock(beta, directives=[HostName])]
-    // After swap: [HostBlock(beta, directives=[HostName]), HostBlock(alpha, directives=[HostName, blank])]
-    // Serialize: "Host beta\n  HostName b.com\nHost alpha\n  HostName a.com\n\n"
-    // = "Host beta\n  HostName b.com\nHost alpha\n  HostName a.com\n"
-    // PROBLEM: No blank line between beta and alpha!
-    let has_blank_between = output.contains("b.com\n\nHost alpha");
-    if !has_blank_between {
-        // BUG: blank line separator is lost between swapped hosts
-        // because the trailing blank was in alpha's directives, and after swap
-        // alpha is second (so its trailing blank is at the end, not between)
-        assert!(
-            output.contains("b.com\nHost alpha"),
-            "BUG CONFIRMED: blank line between hosts lost after swap. Got:\n{}",
-            visible(&output)
-        );
-    }
+    assert!(
+        output.contains("b.com\n\nHost alpha"),
+        "Blank line separator must be preserved between swapped hosts.\n{}",
+        visible(&output)
+    );
 }
 
 #[test]
@@ -1346,13 +1316,8 @@ fn repeated_add_delete_cycle_no_blank_line_accumulation() {
     );
 }
 
-/// BUG: add, edit, delete, add sequence leaves double blank line.
-///
-/// After adding beta and then deleting it, the blank line GlobalLine("")
-/// added by add_host is left behind but NOT cleaned up by delete_host because
-/// delete_host's dedup_by only collapses consecutive GlobalLine elements.
-/// The trailing blank inside alpha's directives + the leftover GlobalLine("")
-/// create a double blank when we add gamma.
+/// Verify add, edit, delete, add sequence produces clean spacing.
+/// serialize() collapses consecutive blank lines to prevent accumulation.
 #[test]
 fn add_edit_delete_add_sequence_no_double_blank() {
     let input = "\
@@ -1397,7 +1362,6 @@ Host alpha
     assert!(!output.contains("Host beta"));
     assert!(output.contains("Host gamma"));
 
-    // FIXED: no double blank lines after add/edit/delete/add sequence
     assert!(
         !output.contains("\n\n\n"),
         "Should not have double blank lines. Output:\n{}",
@@ -1630,20 +1594,13 @@ fn serialize_empty_elements_produces_just_newline() {
 /// the HostBlock, but serialize's join() + trailing-newline logic causes it to
 /// be silently dropped. This is a very minor fidelity loss.
 #[test]
-fn trailing_blank_line_after_last_host_is_lost() {
+fn trailing_blank_line_after_last_host_is_preserved() {
     let input = "Host myserver\n  HostName 10.0.0.1\n\n";
     let config = parse_str(input);
     let output = config.serialize();
-    // The empty directive produces "" in the lines array.
-    // join(["Host myserver", "  HostName 10.0.0.1", ""], "\n") =
-    //   "Host myserver\n  HostName 10.0.0.1\n"
-    // That already ends with \n, so no extra newline added.
-    // Result: the trailing blank line is lost.
-    // Original: "...10.0.0.1\n\n", Output: "...10.0.0.1\n"
     assert_eq!(
-        output,
-        "Host myserver\n  HostName 10.0.0.1\n",
-        "Trailing blank line after last host is silently dropped by serialize"
+        output, input,
+        "Trailing blank line after last host should be preserved"
     );
 }
 
@@ -1865,15 +1822,10 @@ Host dev
     assert_eq_visible(input, &config.serialize());
 }
 
-/// BUG: Realistic workflow with add+edit+delete+tags produces double blank lines.
-///
-/// This test demonstrates the combined effect of multiple bugs:
-/// 1. delete_host's dedup only operates on top-level GlobalLine elements
-/// 2. But blank separators between blocks are stored INSIDE HostBlock directives
-/// 3. So delete_host cannot clean up the combination of trailing blank + orphaned GlobalLine
-/// 4. set_host_tags appends after trailing blank separators
+/// Realistic workflow with add+edit+delete+tags produces clean spacing.
+/// serialize() collapses consecutive blank lines from orphaned separators.
 #[test]
-fn bug_realistic_workflow_double_blank_lines() {
+fn realistic_workflow_no_double_blank_lines() {
     let input = "\
 Host web
   HostName web.example.com
@@ -1924,12 +1876,11 @@ Host cache
     assert!(!output.contains("Host cache"));
     assert!(output.contains("Host monitoring"));
 
-    // Check for double blank lines
+    // No double blank lines after collapse fix
     let has_triple_newline = output.contains("\n\n\n");
     assert!(
-        has_triple_newline,
-        "BUG CONFIRMED: realistic workflow produces double blank lines.\n\
-         When this test starts FAILING, the bug has been FIXED. Output:\n{}",
+        !has_triple_newline,
+        "Serialize should collapse consecutive blank lines. Output:\n{}",
         visible(&output)
     );
 }
@@ -2388,20 +2339,20 @@ Host beta
         },
     );
     let output = config.serialize();
-    // The new "User newuser" directive gets appended to the END of directives,
-    // which means it comes AFTER the blank separator line.
-    // This creates: "Host alpha\n  HostName a.com\n\n  User newuser\nHost beta\n..."
     let lines: Vec<&str> = output.lines().collect();
-    let user_pos = lines.iter().position(|l| l.contains("User newuser"));
-    let blank_pos = lines.iter().position(|l| l.is_empty());
-    // New directive must appear before the blank separator line
-    if let (Some(up), Some(bp)) = (user_pos, blank_pos) {
-        assert!(
-            up < bp,
-            "New directive should be placed before the blank separator line.\n{}",
-            visible(&output)
-        );
-    }
+    let user_pos = lines
+        .iter()
+        .position(|l| l.contains("User newuser"))
+        .expect("Output must contain User newuser");
+    let blank_pos = lines
+        .iter()
+        .position(|l| l.is_empty())
+        .expect("Output must contain a blank separator line");
+    assert!(
+        user_pos < blank_pos,
+        "New directive should be placed before the blank separator line.\n{}",
+        visible(&output)
+    );
 }
 
 /// Test that deleting a host with a group comment before it works correctly
@@ -2518,6 +2469,61 @@ Host myserver
         "First IdentityFile should be updated");
     assert!(id_lines[1].contains("~/.ssh/id_rsa"),
         "Second IdentityFile should be untouched");
+}
+
+// ============================================================================
+// 26. MATCH BLOCKS
+// ============================================================================
+
+/// Match blocks are stored as GlobalLines and survive host deletion.
+#[test]
+fn match_block_preserved_through_host_deletion() {
+    let input = "\
+Host myserver
+  HostName 10.0.0.1
+
+Match host *.example.com
+  ForwardAgent yes
+
+Host other
+  HostName 10.0.0.2
+";
+    let mut config = parse_str(input);
+    config.delete_host("myserver");
+    let output = config.serialize();
+    assert!(output.contains("Match host *.example.com"), "Match block should survive host deletion");
+    assert!(output.contains("ForwardAgent yes"), "Match directives should survive host deletion");
+    assert!(output.contains("Host other"));
+    assert!(!output.contains("Host myserver"));
+}
+
+#[test]
+fn match_block_round_trip() {
+    let input = "\
+Host myserver
+  HostName 10.0.0.1
+
+Match host *.example.com
+  ForwardAgent yes
+";
+    let config = parse_str(input);
+    assert_eq_visible(input, &config.serialize());
+}
+
+#[test]
+fn match_block_between_hosts_round_trip() {
+    let input = "\
+Host alpha
+  HostName a.com
+
+Match all
+  ServerAliveInterval 60
+
+Host beta
+  HostName b.com
+";
+    let config = parse_str(input);
+    assert_eq_visible(input, &config.serialize());
 }
 
 /// Clearing IdentityFile removes all IdentityFile directives.

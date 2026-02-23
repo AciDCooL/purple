@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use super::theme;
 
 pub fn render(frame: &mut Frame) {
-    let area = super::centered_rect_fixed(50, 25, frame.area());
+    let area = super::centered_rect_fixed(50, 26, frame.area());
 
     // Clear background
     frame.render_widget(Clear, area);
@@ -25,6 +25,7 @@ pub fn render(frame: &mut Frame) {
         help_line("  /         ", "Search / filter hosts"),
         help_line("  #         ", "Filter by tag"),
         help_line("  s         ", "Cycle sort mode"),
+        help_line("  g         ", "Group by provider"),
         Line::from(""),
         Line::from(Span::styled("  Manage", theme::section_header())),
         help_line("  Enter     ", "Connect to host"),

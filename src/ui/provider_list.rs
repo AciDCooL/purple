@@ -140,7 +140,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
             Span::styled(" save  ", theme::muted()),
             Span::styled("Tab/S-Tab", theme::accent_bold()),
             Span::styled(" navigate  ", theme::muted()),
-            Span::styled("K", theme::accent_bold()),
+            Span::styled("Ctrl+K", theme::accent_bold()),
             Span::styled(" pick key  ", theme::muted()),
             Span::styled("Esc", theme::accent_bold()),
             Span::styled(" cancel", theme::muted()),

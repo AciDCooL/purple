@@ -18,6 +18,8 @@ struct LinodeInstance {
     #[serde(default)]
     ipv4: Vec<String>,
     #[serde(default)]
+    ipv6: Option<String>,
+    #[serde(default)]
     tags: Vec<String>,
 }
 
@@ -58,7 +60,8 @@ impl Provider for Linode {
                 "https://api.linode.com/v4/linode/instances?page={}&page_size=500",
                 page
             );
-            let resp: LinodeResponse = ureq::get(&url)
+            let resp: LinodeResponse = super::http_agent()
+                .get(&url)
                 .set("Authorization", &format!("Bearer {}", token))
                 .call()
                 .map_err(map_ureq_error)?
@@ -66,18 +69,26 @@ impl Provider for Linode {
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
             for instance in &resp.data {
-                // Prefer public IP; fall back to first IP if all are private
+                // Prefer public IPv4; fall back to private IPv4, then IPv6
                 let ip = instance
                     .ipv4
                     .iter()
                     .find(|ip| !is_private_ip(ip))
-                    .or_else(|| instance.ipv4.first());
+                    .or_else(|| instance.ipv4.first())
+                    .cloned()
+                    .or_else(|| {
+                        instance
+                            .ipv6
+                            .as_ref()
+                            .filter(|v| !v.is_empty())
+                            .map(|v| super::strip_cidr(v).to_string())
+                    });
                 if let Some(ip) = ip {
                     if !ip.is_empty() {
                         all_hosts.push(ProviderHost {
                             server_id: instance.id.to_string(),
                             name: instance.label.clone(),
-                            ip: ip.clone(),
+                            ip,
                             tags: instance.tags.clone(),
                         });
                     }
@@ -161,5 +172,39 @@ mod tests {
         assert_eq!(resp.data[0].label, "app-server");
         assert_eq!(resp.data[0].ipv4[0], "9.8.7.6");
         assert!(resp.data[1].ipv4.is_empty());
+    }
+
+    #[test]
+    fn test_ipv6_only_instance_uses_v6() {
+        let json = r#"{
+            "data": [
+                {
+                    "id": 333,
+                    "label": "v6-only",
+                    "ipv4": [],
+                    "ipv6": "2600:3c00::1/128",
+                    "tags": []
+                }
+            ],
+            "page": 1,
+            "pages": 1
+        }"#;
+        let resp: LinodeResponse = serde_json::from_str(json).unwrap();
+        let instance = &resp.data[0];
+        let ip = instance
+            .ipv4
+            .iter()
+            .find(|ip| !is_private_ip(ip))
+            .or_else(|| instance.ipv4.first())
+            .cloned()
+            .or_else(|| {
+                instance
+                    .ipv6
+                    .as_ref()
+                    .filter(|v| !v.is_empty())
+                    .map(|v| crate::providers::strip_cidr(v).to_string())
+            });
+        // CIDR suffix must be stripped for SSH compatibility
+        assert_eq!(ip, Some("2600:3c00::1".to_string()));
     }
 }

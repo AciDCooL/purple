@@ -21,11 +21,13 @@ struct Droplet {
 
 #[derive(Deserialize)]
 struct Networks {
-    v4: Vec<NetworkV4>,
+    v4: Vec<NetworkIp>,
+    #[serde(default)]
+    v6: Vec<NetworkIp>,
 }
 
 #[derive(Deserialize)]
-struct NetworkV4 {
+struct NetworkIp {
     ip_address: String,
     #[serde(rename = "type")]
     net_type: String,
@@ -55,7 +57,8 @@ impl Provider for DigitalOcean {
                 "https://api.digitalocean.com/v2/droplets?page={}&per_page={}",
                 page, per_page
             );
-            let resp: DropletResponse = ureq::get(&url)
+            let resp: DropletResponse = super::http_agent()
+                .get(&url)
                 .set("Authorization", &format!("Bearer {}", token))
                 .call()
                 .map_err(map_ureq_error)?
@@ -63,11 +66,19 @@ impl Provider for DigitalOcean {
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
             for droplet in &resp.droplets {
+                // Prefer public IPv4, fall back to public IPv6
                 let ip = droplet
                     .networks
                     .v4
                     .iter()
                     .find(|n| n.net_type == "public")
+                    .or_else(|| {
+                        droplet
+                            .networks
+                            .v6
+                            .iter()
+                            .find(|n| n.net_type == "public")
+                    })
                     .map(|n| n.ip_address.clone());
                 if let Some(ip) = ip {
                     all_hosts.push(ProviderHost {
@@ -140,5 +151,35 @@ mod tests {
             .iter()
             .find(|n| n.net_type == "public");
         assert!(public_ip.is_none());
+    }
+
+    #[test]
+    fn test_ipv6_only_droplet_uses_v6() {
+        let json = r#"{
+            "droplets": [
+                {
+                    "id": 11111,
+                    "name": "v6-only",
+                    "networks": {
+                        "v4": [],
+                        "v6": [
+                            {"ip_address": "2604:a880::1", "type": "public"}
+                        ]
+                    },
+                    "tags": []
+                }
+            ],
+            "meta": {"total": 1}
+        }"#;
+        let resp: DropletResponse = serde_json::from_str(json).unwrap();
+        let droplet = &resp.droplets[0];
+        let ip = droplet
+            .networks
+            .v4
+            .iter()
+            .find(|n| n.net_type == "public")
+            .or_else(|| droplet.networks.v6.iter().find(|n| n.net_type == "public"))
+            .map(|n| n.ip_address.clone());
+        assert_eq!(ip, Some("2604:a880::1".to_string()));
     }
 }

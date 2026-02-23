@@ -50,7 +50,8 @@ impl Provider for Vultr {
                     c
                 ),
             };
-            let resp: InstanceResponse = ureq::get(&url)
+            let resp: InstanceResponse = super::http_agent()
+                .get(&url)
                 .set("Authorization", &format!("Bearer {}", token))
                 .call()
                 .map_err(map_ureq_error)?

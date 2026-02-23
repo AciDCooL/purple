@@ -67,6 +67,7 @@ impl SshConfigFile {
     }
 
     /// Serialize the config to a string.
+    /// Collapses consecutive blank lines to prevent accumulation after deletions.
     pub fn serialize(&self) -> String {
         let mut lines = Vec::new();
 
@@ -87,10 +88,26 @@ impl SshConfigFile {
             }
         }
 
+        // Collapse consecutive blank lines (keep at most one)
+        let mut collapsed = Vec::with_capacity(lines.len());
+        let mut prev_blank = false;
+        for line in lines {
+            let is_blank = line.trim().is_empty();
+            if is_blank && prev_blank {
+                continue;
+            }
+            prev_blank = is_blank;
+            collapsed.push(line);
+        }
+
         let line_ending = if self.crlf { "\r\n" } else { "\n" };
-        let mut result = lines.join(line_ending);
-        // Ensure file ends with a newline
-        if !result.ends_with('\n') {
+        let mut result = String::new();
+        for line in &collapsed {
+            result.push_str(line);
+            result.push_str(line_ending);
+        }
+        // Ensure non-empty files end with exactly one newline
+        if result.is_empty() {
             result.push_str(line_ending);
         }
         result

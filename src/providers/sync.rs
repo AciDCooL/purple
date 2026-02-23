@@ -34,6 +34,16 @@ fn sanitize_name(name: &str) -> String {
     }
 }
 
+/// Build an alias from prefix + sanitized name.
+/// If prefix is empty, uses just the sanitized name (no leading hyphen).
+fn build_alias(prefix: &str, sanitized: &str) -> String {
+    if prefix.is_empty() {
+        sanitized.to_string()
+    } else {
+        format!("{}-{}", prefix, sanitized)
+    }
+}
+
 /// Display name for a provider (used in group header comments).
 fn provider_header(name: &str) -> &str {
     match name {
@@ -57,11 +67,14 @@ pub fn sync_provider(
 ) -> SyncResult {
     let mut result = SyncResult::default();
 
-    // Build map of server_id -> alias (top-level only, no Include files)
+    // Build map of server_id -> alias (top-level only, no Include files).
+    // Keep first occurrence if duplicate provider markers exist (e.g. manual copy).
     let existing = config.find_hosts_by_provider(provider.name());
     let mut existing_map: HashMap<String, String> = HashMap::new();
     for (alias, server_id) in &existing {
-        existing_map.insert(server_id.clone(), alias.clone());
+        existing_map
+            .entry(server_id.clone())
+            .or_insert_with(|| alias.clone());
     }
 
     // Build alias -> HostEntry lookup once (avoids quadratic host_entries() calls)
@@ -83,30 +96,50 @@ pub fn sync_provider(
         }
 
         if let Some(existing_alias) = existing_map.get(&remote.server_id) {
-            // Host exists, check if IP or tags changed
+            // Host exists, check if alias, IP or tags changed
             if let Some(entry) = entries_map.get(existing_alias) {
                 // Included hosts are read-only; recognize them for dedup but skip mutations
                 if entry.source_file.is_some() {
                     result.unchanged += 1;
                     continue;
                 }
+
+                // Check if alias prefix changed (e.g. "do" → "ocean")
+                let sanitized = sanitize_name(&remote.name);
+                let expected_alias = build_alias(&section.alias_prefix, &sanitized);
+                let alias_changed = *existing_alias != expected_alias;
+
                 let ip_changed = entry.hostname != remote.ip;
                 let mut sorted_local = entry.tags.clone();
                 sorted_local.sort();
                 let mut sorted_remote = remote.tags.clone();
                 sorted_remote.sort();
                 let tags_changed = sorted_local != sorted_remote;
-                if ip_changed || tags_changed {
+                if alias_changed || ip_changed || tags_changed {
                     if !dry_run {
-                        if ip_changed {
+                        // Compute the final alias (dedup handles collisions)
+                        let new_alias = if alias_changed {
+                            config.deduplicate_alias(&expected_alias)
+                        } else {
+                            existing_alias.clone()
+                        };
+
+                        if alias_changed || ip_changed {
                             let updated = HostEntry {
+                                alias: new_alias.clone(),
                                 hostname: remote.ip.clone(),
                                 ..entry.clone()
                             };
                             config.update_host(existing_alias, &updated);
                         }
+                        // Tags lookup uses the new alias after rename
+                        let tags_alias = if alias_changed { &new_alias } else { existing_alias };
                         if tags_changed {
-                            config.set_host_tags(existing_alias, &remote.tags);
+                            config.set_host_tags(tags_alias, &remote.tags);
+                        }
+                        // Update provider marker with new alias
+                        if alias_changed {
+                            config.set_host_provider(&new_alias, provider.name(), &remote.server_id);
                         }
                     }
                     result.updated += 1;
@@ -119,7 +152,7 @@ pub fn sync_provider(
         } else {
             // New host
             let sanitized = sanitize_name(&remote.name);
-            let base_alias = format!("{}-{}", section.alias_prefix, sanitized);
+            let base_alias = build_alias(&section.alias_prefix, &sanitized);
             let alias = if dry_run {
                 base_alias
             } else {
@@ -128,6 +161,7 @@ pub fn sync_provider(
 
             if !dry_run {
                 // Add group header before the very first host for this provider
+                let wrote_header = needs_header;
                 if needs_header {
                     if !config.elements.is_empty() && !config.last_element_has_trailing_blank() {
                         config
@@ -137,7 +171,7 @@ pub fn sync_provider(
                     config
                         .elements
                         .push(ConfigElement::GlobalLine(format!(
-                            "# {}",
+                            "# purple:group {}",
                             provider_header(provider.name())
                         )));
                     needs_header = false;
@@ -154,6 +188,17 @@ pub fn sync_provider(
                     tags: remote.tags.clone(),
                     provider: Some(provider.name().to_string()),
                 };
+
+                // Add blank line separator before host (skip when preceded by group header
+                // so the header stays adjacent to the first host)
+                if !wrote_header
+                    && !config.elements.is_empty()
+                    && !config.last_element_has_trailing_blank()
+                {
+                    config
+                        .elements
+                        .push(ConfigElement::GlobalLine(String::new()));
+                }
 
                 let block = SshConfigFile::entry_to_block(&entry);
                 config.elements.push(ConfigElement::HostBlock(block));
@@ -186,7 +231,7 @@ pub fn sync_provider(
 
         // Clean up orphan provider header if all hosts for this provider were removed
         if config.find_hosts_by_provider(provider.name()).is_empty() {
-            let header_text = format!("# {}", provider_header(provider.name()));
+            let header_text = format!("# purple:group {}", provider_header(provider.name()));
             config
                 .elements
                 .retain(|e| !matches!(e, ConfigElement::GlobalLine(line) if line == &header_text));
@@ -243,6 +288,13 @@ mod tests {
         ) -> Result<Vec<ProviderHost>, super::super::ProviderError> {
             Ok(Vec::new())
         }
+    }
+
+    #[test]
+    fn test_build_alias() {
+        assert_eq!(build_alias("do", "web-1"), "do-web-1");
+        assert_eq!(build_alias("", "web-1"), "web-1");
+        assert_eq!(build_alias("ocean", "db"), "ocean-db");
     }
 
     #[test]
@@ -401,6 +453,45 @@ mod tests {
     }
 
     #[test]
+    fn test_sync_duplicate_local_server_id_keeps_first() {
+        // If duplicate provider markers exist locally, sync should use the first alias
+        let content = "\
+Host do-web-1
+  HostName 1.2.3.4
+  # purple:provider digitalocean:123
+
+Host do-web-1-copy
+  HostName 1.2.3.4
+  # purple:provider digitalocean:123
+";
+        let mut config = SshConfigFile {
+            elements: SshConfigFile::parse_content(content),
+            path: PathBuf::from("/tmp/test_config"),
+            crlf: false,
+        };
+        let section = make_section();
+
+        // Remote has same server_id with updated IP
+        let remote = vec![ProviderHost {
+            server_id: "123".to_string(),
+            name: "web-1".to_string(),
+            ip: "5.6.7.8".to_string(),
+            tags: Vec::new(),
+        }];
+
+        let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+        // Should update the first alias (do-web-1), not the copy
+        assert_eq!(result.updated, 1);
+        assert_eq!(result.added, 0);
+        let entries = config.host_entries();
+        let first = entries.iter().find(|e| e.alias == "do-web-1").unwrap();
+        assert_eq!(first.hostname, "5.6.7.8");
+        // Copy should remain unchanged
+        let copy = entries.iter().find(|e| e.alias == "do-web-1-copy").unwrap();
+        assert_eq!(copy.hostname, "1.2.3.4");
+    }
+
+    #[test]
     fn test_sync_no_duplicate_header_on_repeated_sync() {
         let mut config = empty_config();
         let section = make_section();
@@ -435,7 +526,7 @@ mod tests {
         let header_count = config
             .elements
             .iter()
-            .filter(|e| matches!(e, ConfigElement::GlobalLine(line) if line == "# DigitalOcean"))
+            .filter(|e| matches!(e, ConfigElement::GlobalLine(line) if line == "# purple:group DigitalOcean"))
             .count();
         assert_eq!(header_count, 1);
         assert_eq!(config.host_entries().len(), 2);
@@ -459,7 +550,7 @@ mod tests {
         let has_header = config
             .elements
             .iter()
-            .any(|e| matches!(e, ConfigElement::GlobalLine(line) if line == "# DigitalOcean"));
+            .any(|e| matches!(e, ConfigElement::GlobalLine(line) if line == "# purple:group DigitalOcean"));
         assert!(has_header);
 
         // Remove all hosts (empty remote + remove_deleted)
@@ -470,7 +561,7 @@ mod tests {
         let has_header = config
             .elements
             .iter()
-            .any(|e| matches!(e, ConfigElement::GlobalLine(line) if line == "# DigitalOcean"));
+            .any(|e| matches!(e, ConfigElement::GlobalLine(line) if line == "# purple:group DigitalOcean"));
         assert!(!has_header);
     }
 
@@ -733,5 +824,161 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].alias, "do-web-1");
         assert_eq!(entries[1].alias, "do-web-1-2");
+    }
+
+    #[test]
+    fn test_sync_renames_on_prefix_change() {
+        let mut config = empty_config();
+        let section = make_section(); // prefix = "do"
+
+        // First sync: add host with "do" prefix
+        let remote = vec![ProviderHost {
+            server_id: "123".to_string(),
+            name: "web-1".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+        assert_eq!(config.host_entries()[0].alias, "do-web-1");
+
+        // Second sync: prefix changed to "ocean"
+        let new_section = ProviderSection {
+            alias_prefix: "ocean".to_string(),
+            ..section
+        };
+        let result = sync_provider(&mut config, &MockProvider, &remote, &new_section, false, false);
+        assert_eq!(result.updated, 1);
+        assert_eq!(result.unchanged, 0);
+
+        let entries = config.host_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "ocean-web-1");
+        assert_eq!(entries[0].hostname, "1.2.3.4");
+    }
+
+    #[test]
+    fn test_sync_rename_and_ip_change() {
+        let mut config = empty_config();
+        let section = make_section();
+
+        let remote = vec![ProviderHost {
+            server_id: "123".to_string(),
+            name: "web-1".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+
+        // Change both prefix and IP
+        let new_section = ProviderSection {
+            alias_prefix: "ocean".to_string(),
+            ..section
+        };
+        let remote = vec![ProviderHost {
+            server_id: "123".to_string(),
+            name: "web-1".to_string(),
+            ip: "9.9.9.9".to_string(),
+            tags: Vec::new(),
+        }];
+        let result = sync_provider(&mut config, &MockProvider, &remote, &new_section, false, false);
+        assert_eq!(result.updated, 1);
+
+        let entries = config.host_entries();
+        assert_eq!(entries[0].alias, "ocean-web-1");
+        assert_eq!(entries[0].hostname, "9.9.9.9");
+    }
+
+    #[test]
+    fn test_sync_rename_dry_run_no_mutation() {
+        let mut config = empty_config();
+        let section = make_section();
+
+        let remote = vec![ProviderHost {
+            server_id: "123".to_string(),
+            name: "web-1".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+
+        let new_section = ProviderSection {
+            alias_prefix: "ocean".to_string(),
+            ..section
+        };
+        let result = sync_provider(&mut config, &MockProvider, &remote, &new_section, false, true);
+        assert_eq!(result.updated, 1);
+
+        // Config should be unchanged (dry run)
+        assert_eq!(config.host_entries()[0].alias, "do-web-1");
+    }
+
+    #[test]
+    fn test_sync_no_rename_when_prefix_unchanged() {
+        let mut config = empty_config();
+        let section = make_section();
+
+        let remote = vec![ProviderHost {
+            server_id: "123".to_string(),
+            name: "web-1".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+
+        // Same prefix, same everything — should be unchanged
+        let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+        assert_eq!(result.unchanged, 1);
+        assert_eq!(result.updated, 0);
+        assert_eq!(config.host_entries()[0].alias, "do-web-1");
+    }
+
+    #[test]
+    fn test_sync_manual_comment_survives_cleanup() {
+        // A manual "# DigitalOcean" comment (without purple:group prefix)
+        // should NOT be removed when provider hosts are deleted
+        let content = "# DigitalOcean\nHost do-web\n  HostName 1.2.3.4\n  User root\n  # purple:provider digitalocean:123\n";
+        let mut config = SshConfigFile {
+            elements: SshConfigFile::parse_content(content),
+            path: PathBuf::from("/tmp/test_config"),
+            crlf: false,
+        };
+        let section = make_section();
+
+        // Remove all hosts (empty remote + remove_deleted)
+        sync_provider(&mut config, &MockProvider, &[], &section, true, false);
+
+        // The manual "# DigitalOcean" comment should survive (it doesn't have purple:group prefix)
+        let has_manual = config
+            .elements
+            .iter()
+            .any(|e| matches!(e, ConfigElement::GlobalLine(line) if line == "# DigitalOcean"));
+        assert!(has_manual, "Manual comment without purple:group prefix should survive cleanup");
+    }
+
+    #[test]
+    fn test_sync_rename_skips_included_host() {
+        let mut config = config_with_include_provider_host();
+
+        let new_section = ProviderSection {
+            provider: "digitalocean".to_string(),
+            token: "test".to_string(),
+            alias_prefix: "ocean".to_string(), // Different prefix
+            user: "root".to_string(),
+            identity_file: String::new(),
+        };
+
+        // Remote has the included host's server_id with a different prefix
+        let remote = vec![ProviderHost {
+            server_id: "inc1".to_string(),
+            name: "included".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+        }];
+        let result = sync_provider(&mut config, &MockProvider, &remote, &new_section, false, false);
+        assert_eq!(result.unchanged, 1);
+        assert_eq!(result.updated, 0);
+
+        // Alias should remain unchanged (included hosts are read-only)
+        assert_eq!(config.host_entries()[0].alias, "do-included");
     }
 }

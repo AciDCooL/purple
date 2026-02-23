@@ -152,7 +152,7 @@ purple --completions zsh            # Shell completions
 | Key                 | Action                |
 | ------------------- | --------------------- |
 | `Tab` / `Shift+Tab` | Next / previous field |
-| `K`                 | Pick SSH key          |
+| `Ctrl+K`            | Pick SSH key          |
 | `Enter`             | Save                  |
 | `Esc`               | Cancel                |
 

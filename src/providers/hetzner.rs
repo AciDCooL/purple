@@ -21,11 +21,13 @@ struct HetznerServer {
 
 #[derive(Deserialize)]
 struct PublicNet {
-    ipv4: Option<Ipv4Info>,
+    ipv4: Option<IpInfo>,
+    #[serde(default)]
+    ipv6: Option<IpInfo>,
 }
 
 #[derive(Deserialize)]
-struct Ipv4Info {
+struct IpInfo {
     ip: String,
 }
 
@@ -58,7 +60,8 @@ impl Provider for Hetzner {
                 "https://api.hetzner.cloud/v1/servers?page={}&per_page=50",
                 page
             );
-            let resp: HetznerResponse = ureq::get(&url)
+            let resp: HetznerResponse = super::http_agent()
+                .get(&url)
                 .set("Authorization", &format!("Bearer {}", token))
                 .call()
                 .map_err(map_ureq_error)?
@@ -66,27 +69,42 @@ impl Provider for Hetzner {
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
             for server in &resp.servers {
-                if let Some(ref ipv4) = server.public_net.ipv4 {
-                    if !ipv4.ip.is_empty() {
-                        let mut tags: Vec<String> = server
-                            .labels
-                            .iter()
-                            .map(|(k, v)| {
-                                if v.is_empty() {
-                                    k.clone()
-                                } else {
-                                    format!("{}={}", k, v)
-                                }
-                            })
-                            .collect();
-                        tags.sort();
-                        all_hosts.push(ProviderHost {
-                            server_id: server.id.to_string(),
-                            name: server.name.clone(),
-                            ip: ipv4.ip.clone(),
-                            tags,
-                        });
-                    }
+                // Prefer public IPv4, fall back to public IPv6
+                // IPv6 addresses may include CIDR suffix (e.g. "2a01:4f8::1/64")
+                // which must be stripped for SSH compatibility.
+                let ip_str = server
+                    .public_net
+                    .ipv4
+                    .as_ref()
+                    .filter(|v| !v.ip.is_empty())
+                    .map(|v| v.ip.clone())
+                    .or_else(|| {
+                        server
+                            .public_net
+                            .ipv6
+                            .as_ref()
+                            .filter(|v| !v.ip.is_empty())
+                            .map(|v| super::strip_cidr(&v.ip).to_string())
+                    });
+                if let Some(ip) = ip_str {
+                    let mut tags: Vec<String> = server
+                        .labels
+                        .iter()
+                        .map(|(k, v)| {
+                            if v.is_empty() {
+                                k.clone()
+                            } else {
+                                format!("{}={}", k, v)
+                            }
+                        })
+                        .collect();
+                    tags.sort();
+                    all_hosts.push(ProviderHost {
+                        server_id: server.id.to_string(),
+                        name: server.name.clone(),
+                        ip,
+                        tags,
+                    });
                 }
             }
 
@@ -132,5 +150,41 @@ mod tests {
         assert_eq!(resp.servers[0].name, "my-server");
         assert_eq!(resp.servers[0].public_net.ipv4.as_ref().unwrap().ip, "1.2.3.4");
         assert!(resp.servers[1].public_net.ipv4.is_none());
+    }
+
+    #[test]
+    fn test_ipv6_only_server_uses_v6() {
+        let json = r#"{
+            "servers": [
+                {
+                    "id": 44,
+                    "name": "v6-only",
+                    "public_net": {
+                        "ipv4": null,
+                        "ipv6": {"ip": "2a01:4f8::1/64"}
+                    },
+                    "labels": {}
+                }
+            ],
+            "meta": {"pagination": {"page": 1, "last_page": 1}}
+        }"#;
+        let resp: HetznerResponse = serde_json::from_str(json).unwrap();
+        let server = &resp.servers[0];
+        let ip = server
+            .public_net
+            .ipv4
+            .as_ref()
+            .filter(|v| !v.ip.is_empty())
+            .map(|v| v.ip.clone())
+            .or_else(|| {
+                server
+                    .public_net
+                    .ipv6
+                    .as_ref()
+                    .filter(|v| !v.ip.is_empty())
+                    .map(|v| crate::providers::strip_cidr(&v.ip).to_string())
+            });
+        // CIDR suffix must be stripped for SSH compatibility
+        assert_eq!(ip, Some("2a01:4f8::1".to_string()));
     }
 }

@@ -256,8 +256,10 @@ fn main() -> Result<()> {
 
 fn apply_saved_sort(app: &mut App) {
     let saved = preferences::load_sort_mode();
-    if saved != app::SortMode::Original {
-        app.sort_mode = saved;
+    let group = preferences::load_group_by_provider();
+    app.sort_mode = saved;
+    app.group_by_provider = group;
+    if saved != app::SortMode::Original || group {
         app.apply_sort();
     }
 }
@@ -401,6 +403,7 @@ fn run_tui(mut app: App, config_str: &str) -> Result<()> {
             let config_path = resolve_config_path(config_str)?;
             app.config = SshConfigFile::parse(&config_path)?;
             app.reload_hosts();
+            app.update_last_modified();
         }
     }
 
@@ -435,8 +438,12 @@ fn handle_quick_add(
         eprintln!("Alias can't contain whitespace. Use --alias to pick a simpler name.");
         std::process::exit(1);
     }
-    if alias_str.contains('*') || alias_str.contains('?') {
-        eprintln!("Alias can't contain wildcards. Use --alias to pick a different name.");
+    if alias_str.contains('*')
+        || alias_str.contains('?')
+        || alias_str.contains('[')
+        || alias_str.starts_with('!')
+    {
+        eprintln!("Alias can't contain pattern characters. Use --alias to pick a different name.");
         std::process::exit(1);
     }
 
@@ -600,7 +607,11 @@ fn handle_sync(
     }
 
     if any_changes && !dry_run {
-        config.write()?;
+        if any_failures {
+            eprintln!("! Skipping config write due to sync failures. Fix the errors and re-run.");
+        } else {
+            config.write()?;
+        }
     }
 
     if any_failures {

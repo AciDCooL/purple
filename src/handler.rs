@@ -71,6 +71,7 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
         KeyCode::Char('a') => {
             app.form = HostForm::new();
             app.screen = Screen::AddHost;
+            app.capture_form_mtime();
         }
         KeyCode::Char('e') => {
             if let Some(host) = app.selected_host() {
@@ -86,6 +87,7 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
                 let alias = host.alias.clone();
                 app.form = HostForm::from_entry(host);
                 app.screen = Screen::EditHost { alias };
+                app.capture_form_mtime();
             }
         }
         KeyCode::Char('d') => {
@@ -118,6 +120,7 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
                 form.alias = format!("{}-copy", host.alias);
                 app.form = form;
                 app.screen = Screen::AddHost;
+                app.capture_form_mtime();
             }
         }
         KeyCode::Char('y') => {
@@ -237,6 +240,16 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             let _ = preferences::save_sort_mode(app.sort_mode);
             app.set_status(format!("Sorted by {}.", app.sort_mode.label()), false);
         }
+        KeyCode::Char('g') => {
+            app.group_by_provider = !app.group_by_provider;
+            app.apply_sort();
+            let _ = preferences::save_group_by_provider(app.group_by_provider);
+            if app.group_by_provider {
+                app.set_status("Grouped by provider.", false);
+            } else {
+                app.set_status("Ungrouped.", false);
+            }
+        }
         KeyCode::Char('i') => {
             if let Some(index) = app.selected_host_index() {
                 app.screen = Screen::HostDetail { index };
@@ -342,8 +355,8 @@ fn handle_form(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    // K opens key picker from any field
-    if key.code == KeyCode::Char('K') {
+    // Ctrl+K opens key picker from any field (not bare K, which conflicts with text input)
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('k') {
         app.scan_keys();
         app.show_key_picker = true;
         app.key_picker_state = ratatui::widgets::ListState::default();
@@ -355,6 +368,7 @@ fn handle_form(app: &mut App, key: KeyEvent) {
 
     match key.code {
         KeyCode::Esc => {
+            app.clear_form_mtime();
             app.screen = Screen::HostList;
         }
         KeyCode::Tab | KeyCode::Down => {
@@ -417,6 +431,15 @@ fn maybe_smart_paste(app: &mut App) {
 }
 
 fn submit_form(app: &mut App) {
+    // Check for external config changes since form was opened
+    if app.config_changed_since_form_open() {
+        app.set_status(
+            "Config changed externally. Press Esc and re-open to pick up changes.",
+            true,
+        );
+        return;
+    }
+
     // Validate
     if let Err(msg) = app.form.validate() {
         app.set_status(msg, true);
@@ -501,6 +524,7 @@ fn submit_form(app: &mut App) {
         _ => {}
     }
 
+    app.clear_form_mtime();
     app.screen = Screen::HostList;
 }
 
@@ -734,6 +758,7 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                     app.screen = Screen::ProviderForm {
                         provider: name.to_string(),
                     };
+                    app.capture_provider_form_mtime();
                 }
             }
         }
@@ -763,9 +788,11 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
         KeyCode::Char('d') => {
             if let Some(index) = app.provider_list_state.selected() {
                 if let Some(&name) = providers::PROVIDER_NAMES.get(index) {
-                    if app.provider_config.section(name).is_some() {
+                    if let Some(old_section) = app.provider_config.section(name).cloned() {
                         app.provider_config.remove_section(name);
                         if let Err(e) = app.provider_config.save() {
+                            // Rollback: restore the removed section
+                            app.provider_config.set_section(old_section);
                             app.set_status(format!("Failed to save: {}", e), true);
                         } else {
                             let display_name = match name {
@@ -796,8 +823,8 @@ fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
         return;
     }
 
-    // K opens key picker from any field
-    if key.code == KeyCode::Char('K') {
+    // Ctrl+K opens key picker from any field (not bare K, which conflicts with text input)
+    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('k') {
         app.scan_keys();
         app.show_key_picker = true;
         app.key_picker_state = ratatui::widgets::ListState::default();
@@ -809,6 +836,7 @@ fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
 
     match key.code {
         KeyCode::Esc => {
+            app.clear_form_mtime();
             app.screen = Screen::Providers;
         }
         KeyCode::Tab | KeyCode::Down => {
@@ -835,6 +863,15 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         Screen::ProviderForm { provider } => provider.clone(),
         _ => return,
     };
+
+    // Check for external provider config changes since form was opened
+    if app.provider_config_changed_since_form_open() {
+        app.set_status(
+            "Provider config changed externally. Press Esc and re-open to pick up changes.",
+            true,
+        );
+        return;
+    }
 
     if app.provider_form.token.trim().is_empty() {
         let display_name = match provider_name.as_str() {
@@ -864,8 +901,14 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         identity_file: app.provider_form.identity_file.trim().to_string(),
     };
 
+    let old_section = app.provider_config.section(&provider_name).cloned();
     app.provider_config.set_section(section);
     if let Err(e) = app.provider_config.save() {
+        // Rollback: restore previous state
+        match old_section {
+            Some(old) => app.provider_config.set_section(old),
+            None => app.provider_config.remove_section(&provider_name),
+        }
         app.set_status(format!("Failed to save: {}", e), true);
         return;
     }
@@ -881,6 +924,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     app.syncing_providers.insert(provider_name.clone());
     app.set_status(format!("Saved {} configuration. Syncing...", display_name), false);
     spawn_provider_sync(&provider_name, &token, events_tx.clone());
+    app.clear_form_mtime();
     app.screen = Screen::Providers;
 }
 

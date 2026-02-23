@@ -76,6 +76,16 @@ impl SshConfigFile {
                 }
             }
 
+            // Non-indented Match line = block boundary (flush current Host block).
+            // Match blocks are stored as GlobalLines (inert, never edited/deleted).
+            if !is_indented && Self::is_match_line(trimmed) {
+                if let Some(block) = current_block.take() {
+                    elements.push(ConfigElement::HostBlock(block));
+                }
+                elements.push(ConfigElement::GlobalLine(line.to_string()));
+                continue;
+            }
+
             // Check if this line starts a new Host block
             if let Some(pattern) = Self::parse_host_line(trimmed) {
                 // Flush the previous block if any
@@ -149,38 +159,52 @@ impl SshConfigFile {
     }
 
     /// Resolve an Include pattern to a list of included files.
+    /// Supports multiple space-separated patterns on one line (SSH spec).
     fn resolve_include(
         pattern: &str,
         config_dir: Option<&Path>,
         depth: usize,
     ) -> Vec<IncludedFile> {
-        let expanded = Self::expand_tilde(pattern);
-
-        // If relative path, resolve against config dir
-        let glob_pattern = if expanded.starts_with('/') {
-            expanded
-        } else if let Some(dir) = config_dir {
-            dir.join(&expanded).to_string_lossy().to_string()
-        } else {
-            return Vec::new();
-        };
-
         let mut files = Vec::new();
-        if let Ok(paths) = glob::glob(&glob_pattern) {
-            let mut matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
-            matched.sort();
-            for path in matched {
-                if path.is_file() {
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        let elements = Self::parse_content_with_includes(
-                            &content,
-                            path.parent(),
-                            depth + 1,
-                        );
-                        files.push(IncludedFile {
-                            path: path.clone(),
-                            elements,
-                        });
+        let mut seen = std::collections::HashSet::new();
+
+        for single in pattern.split_whitespace() {
+            let expanded = Self::expand_tilde(single);
+
+            // If relative path, resolve against config dir
+            let glob_pattern = if expanded.starts_with('/') {
+                expanded
+            } else if let Some(dir) = config_dir {
+                dir.join(&expanded).to_string_lossy().to_string()
+            } else {
+                continue;
+            };
+
+            if let Ok(paths) = glob::glob(&glob_pattern) {
+                let mut matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
+                matched.sort();
+                for path in matched {
+                    if path.is_file() && seen.insert(path.clone()) {
+                        match std::fs::read_to_string(&path) {
+                            Ok(content) => {
+                                let elements = Self::parse_content_with_includes(
+                                    &content,
+                                    path.parent(),
+                                    depth + 1,
+                                );
+                                files.push(IncludedFile {
+                                    path: path.clone(),
+                                    elements,
+                                });
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "! Could not read Include file {}: {}",
+                                    path.display(),
+                                    e
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -201,6 +225,7 @@ impl SshConfigFile {
     /// Check if a line is a "Host <pattern>" line.
     /// Returns the pattern if it is.
     /// Handles both space and tab between keyword and value (SSH allows either).
+    /// Strips inline comments (`# ...` preceded by whitespace) from the pattern.
     fn parse_host_line(trimmed: &str) -> Option<String> {
         // Split on first space or tab to isolate the keyword
         let mut parts = trimmed.splitn(2, [' ', '\t']);
@@ -209,11 +234,19 @@ impl SshConfigFile {
             return None;
         }
         // "hostname" splits as keyword="hostname" which fails the check above
-        let pattern = parts.next()?.trim().to_string();
+        let raw_pattern = parts.next()?.trim();
+        let pattern = strip_inline_comment(raw_pattern).to_string();
         if !pattern.is_empty() {
             return Some(pattern);
         }
         None
+    }
+
+    /// Check if a line is a "Match ..." line (block boundary).
+    fn is_match_line(trimmed: &str) -> bool {
+        let mut parts = trimmed.splitn(2, [' ', '\t']);
+        let keyword = parts.next().unwrap_or("");
+        keyword.eq_ignore_ascii_case("match")
     }
 
     /// Parse a "Key Value" directive line.
@@ -507,5 +540,107 @@ Host myserver
         let config = parse_str(content);
         let entries = config.host_entries();
         assert_eq!(entries[0].hostname, "10.0.0.1");
+    }
+
+    #[test]
+    fn test_host_inline_comment_stripped() {
+        let content = "Host alpha # this is a comment\n  HostName 10.0.0.1\n";
+        let config = parse_str(content);
+        let entries = config.host_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "alpha");
+        // Raw line is preserved for round-trip fidelity
+        if let ConfigElement::HostBlock(block) = &config.elements[0] {
+            assert_eq!(block.raw_host_line, "Host alpha # this is a comment");
+            assert_eq!(block.host_pattern, "alpha");
+        } else {
+            panic!("Expected HostBlock");
+        }
+    }
+
+    #[test]
+    fn test_match_block_is_global_line() {
+        let content = "\
+Host myserver
+  HostName 10.0.0.1
+
+Match host *.example.com
+  ForwardAgent yes
+";
+        let config = parse_str(content);
+        // Match line should flush the Host block and become a GlobalLine
+        let host_count = config.elements.iter().filter(|e| matches!(e, ConfigElement::HostBlock(_))).count();
+        assert_eq!(host_count, 1);
+        // Match line itself
+        assert!(config.elements.iter().any(|e| matches!(e, ConfigElement::GlobalLine(s) if s == "Match host *.example.com")));
+        // Indented lines after Match (no current_block) become GlobalLines
+        assert!(config.elements.iter().any(|e| matches!(e, ConfigElement::GlobalLine(s) if s.contains("ForwardAgent"))));
+    }
+
+    #[test]
+    fn test_match_block_survives_host_deletion() {
+        let content = "\
+Host myserver
+  HostName 10.0.0.1
+
+Match host *.example.com
+  ForwardAgent yes
+
+Host other
+  HostName 10.0.0.2
+";
+        let mut config = parse_str(content);
+        config.delete_host("myserver");
+        let output = config.serialize();
+        assert!(output.contains("Match host *.example.com"));
+        assert!(output.contains("ForwardAgent yes"));
+        assert!(output.contains("Host other"));
+        assert!(!output.contains("Host myserver"));
+    }
+
+    #[test]
+    fn test_match_block_round_trip() {
+        let content = "\
+Host myserver
+  HostName 10.0.0.1
+
+Match host *.example.com
+  ForwardAgent yes
+";
+        let config = parse_str(content);
+        assert_eq!(config.serialize(), content);
+    }
+
+    #[test]
+    fn test_match_at_start_of_file() {
+        let content = "\
+Match all
+  ServerAliveInterval 60
+
+Host myserver
+  HostName 10.0.0.1
+";
+        let config = parse_str(content);
+        assert!(matches!(&config.elements[0], ConfigElement::GlobalLine(s) if s == "Match all"));
+        assert!(matches!(&config.elements[1], ConfigElement::GlobalLine(s) if s.contains("ServerAliveInterval")));
+        let entries = config.host_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "myserver");
+    }
+
+    #[test]
+    fn test_host_multi_pattern_with_inline_comment() {
+        // Multi-pattern host with inline comment: "prod staging # servers"
+        // The comment should be stripped, but "prod staging" is still multi-pattern
+        // and gets filtered by host_entries()
+        let content = "Host prod staging # servers\n  HostName 10.0.0.1\n";
+        let config = parse_str(content);
+        if let ConfigElement::HostBlock(block) = &config.elements[0] {
+            assert_eq!(block.host_pattern, "prod staging");
+        } else {
+            panic!("Expected HostBlock");
+        }
+        // Multi-pattern hosts are filtered out of host_entries
+        assert_eq!(config.host_entries().len(), 0);
     }
 }

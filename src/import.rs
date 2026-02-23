@@ -112,6 +112,16 @@ pub fn import_from_known_hosts(
     Ok((imported, skipped, parse_failures, read_errors))
 }
 
+/// Check if a hostname is a bare IP address (not an FQDN).
+fn is_bare_ip(host: &str) -> bool {
+    // IPv4: digits and dots only (e.g., "192.168.1.1")
+    if !host.is_empty() && host.chars().all(|c| c.is_ascii_digit() || c == '.') {
+        return true;
+    }
+    // IPv6: hex digits + colons with at least one colon (e.g., "2001:db8::1")
+    host.contains(':') && host.chars().all(|c| c.is_ascii_hexdigit() || c == ':')
+}
+
 /// Result of parsing a known_hosts line.
 enum KnownHostResult {
     /// Successfully parsed into a HostEntry.
@@ -140,8 +150,21 @@ fn parse_known_hosts_line(line: &str) -> KnownHostResult {
         return KnownHostResult::Skipped;
     }
 
-    // Take the first host if comma-separated
-    let host = host_part.split(',').next().unwrap_or(host_part);
+    // Pick first non-IP host from comma-separated list.
+    // known_hosts may have ip,hostname or hostname,ip pairs.
+    let host = host_part
+        .split(',')
+        .find(|entry| {
+            let bare = if entry.starts_with('[') {
+                entry
+                    .get(1..entry.find(']').unwrap_or(entry.len()))
+                    .unwrap_or(entry)
+            } else {
+                entry
+            };
+            !is_bare_ip(bare)
+        })
+        .unwrap_or_else(|| host_part.split(',').next().unwrap_or(host_part));
 
     // Handle [host]:port format
     let (hostname, port) = if host.starts_with('[') {
@@ -149,13 +172,19 @@ fn parse_known_hosts_line(line: &str) -> KnownHostResult {
             return KnownHostResult::Failed;
         };
         let h = &host[1..end];
-        let p = if host.len() > end + 2 && host.as_bytes()[end + 1] == b':' {
-            match host[end + 2..].parse::<u16>() {
+        let rest = &host[end + 1..];
+        let p = if rest.is_empty() {
+            22
+        } else if let Some(port_str) = rest.strip_prefix(':') {
+            if port_str.is_empty() {
+                return KnownHostResult::Failed; // [host]: with no port
+            }
+            match port_str.parse::<u16>() {
                 Ok(port) if port > 0 => port,
                 _ => return KnownHostResult::Failed,
             }
         } else {
-            22
+            return KnownHostResult::Failed; // [host]junk with no colon
         };
         (h.to_string(), p)
     } else {
@@ -167,19 +196,20 @@ fn parse_known_hosts_line(line: &str) -> KnownHostResult {
         return KnownHostResult::Failed;
     }
 
+    // Skip bare IP addresses (not FQDNs) before alias extraction.
+    if is_bare_ip(&hostname) {
+        return KnownHostResult::Skipped;
+    }
+
     let alias = hostname
         .split('.')
         .next()
         .unwrap_or(&hostname)
         .to_string();
 
-    // Skip bare IP aliases (IPv4: digits only, IPv6: hex+colons with at least one colon)
-    // and wildcard patterns. Require colon for IPv6 to avoid false positives on hex hostnames
-    // like "deadbeef" or "cafe".
-    if alias.chars().all(|c| c.is_ascii_digit()) || (alias.contains(':') && alias.chars().all(|c| c.is_ascii_hexdigit() || c == ':')) {
-        return KnownHostResult::Skipped;
-    }
-    if alias.contains('*') || alias.contains('?') {
+    // Skip wildcard/pattern entries
+    if alias.contains('*') || alias.contains('?') || alias.contains('[') || alias.starts_with('!')
+    {
         return KnownHostResult::Skipped;
     }
 
@@ -196,8 +226,7 @@ fn parse_known_hosts_line(line: &str) -> KnownHostResult {
     })
 }
 
-/// Add entries to config, deduplicating against existing hosts.
-/// Entries with conflicting aliases get auto-suffixed (-2, -3, etc.).
+/// Add entries to config, skipping exact alias duplicates.
 fn add_entries(
     config: &mut SshConfigFile,
     entries: &[HostEntry],
@@ -205,12 +234,16 @@ fn add_entries(
 ) -> Result<(usize, usize), String> {
     let mut imported = 0;
     let mut skipped = 0;
-    let mut first_in_group = group.is_some();
+    let mut header_written = false;
 
-    // Add group comment header if specified
-    if let Some(group_name) = group {
-        if !entries.is_empty() {
-            // Blank separator before group comment (only if config isn't empty/already blank)
+    for entry in entries {
+        if config.has_host(&entry.alias) {
+            skipped += 1;
+            continue;
+        }
+
+        // Write group header before the first actually-imported host
+        if let Some(group_name) = group.filter(|_| !header_written) {
             if !config.elements.is_empty() && !config.last_element_has_trailing_blank() {
                 config.elements.push(
                     crate::ssh_config::model::ConfigElement::GlobalLine(String::new()),
@@ -219,21 +252,15 @@ fn add_entries(
             config.elements.push(
                 crate::ssh_config::model::ConfigElement::GlobalLine(format!("# {}", group_name)),
             );
+            header_written = true;
         }
-    }
 
-    for entry in entries {
-        if config.has_host(&entry.alias) {
-            skipped += 1;
-            continue;
-        }
-        if first_in_group {
+        if group.is_some() && imported == 0 {
             // Push first host directly after group comment (no blank separator between them)
             let block = SshConfigFile::entry_to_block(entry);
-            config.elements.push(
-                crate::ssh_config::model::ConfigElement::HostBlock(block),
-            );
-            first_in_group = false;
+            config
+                .elements
+                .push(crate::ssh_config::model::ConfigElement::HostBlock(block));
         } else {
             config.add_host(entry);
         }
@@ -376,10 +403,125 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_known_hosts_numeric_first_label_not_skipped() {
+        // "123.example.com" has a numeric first label but is a valid FQDN, not an IP
+        let KnownHostResult::Parsed(entry) =
+            parse_known_hosts_line("123.example.com ssh-rsa AAAA...")
+        else {
+            panic!("expected Parsed");
+        };
+        assert_eq!(entry.hostname, "123.example.com");
+        assert_eq!(entry.alias, "123");
+    }
+
+    #[test]
+    fn test_parse_known_hosts_bracket_trailing_colon_fails() {
+        // [host]: with no port number should fail
+        assert!(matches!(
+            parse_known_hosts_line("[myhost]: ssh-rsa AAAA..."),
+            KnownHostResult::Failed
+        ));
+    }
+
+    #[test]
+    fn test_parse_known_hosts_bracket_junk_after_close_fails() {
+        // [host]junk with no colon separator should fail
+        assert!(matches!(
+            parse_known_hosts_line("[myhost]junk ssh-rsa AAAA..."),
+            KnownHostResult::Failed
+        ));
+    }
+
+    #[test]
+    fn test_parse_known_hosts_bracket_no_port() {
+        // [host] with no port should default to 22
+        let KnownHostResult::Parsed(entry) =
+            parse_known_hosts_line("[myhost.com] ssh-rsa AAAA...")
+        else {
+            panic!("expected Parsed");
+        };
+        assert_eq!(entry.hostname, "myhost.com");
+        assert_eq!(entry.port, 22);
+    }
+
+    #[test]
     fn test_parse_known_hosts_wildcard_is_skipped() {
         assert!(matches!(
             parse_known_hosts_line("*.example.com ssh-rsa AAAA..."),
             KnownHostResult::Skipped
         ));
+    }
+
+    #[test]
+    fn test_parse_known_hosts_bracket_pattern_skipped() {
+        // OpenSSH character class pattern [12] should be skipped
+        assert!(matches!(
+            parse_known_hosts_line("web[12].example.com ssh-rsa AAAA..."),
+            KnownHostResult::Skipped
+        ));
+    }
+
+    #[test]
+    fn test_parse_known_hosts_negation_pattern_skipped() {
+        assert!(matches!(
+            parse_known_hosts_line("!prod.example.com ssh-rsa AAAA..."),
+            KnownHostResult::Skipped
+        ));
+    }
+
+    #[test]
+    fn test_parse_known_hosts_ip_first_comma_picks_hostname() {
+        // When IP comes before hostname in comma list, hostname should still be used
+        let KnownHostResult::Parsed(entry) =
+            parse_known_hosts_line("192.0.2.10,web.example.com ssh-rsa AAAA...")
+        else {
+            panic!("expected Parsed");
+        };
+        assert_eq!(entry.hostname, "web.example.com");
+        assert_eq!(entry.alias, "web");
+    }
+
+    #[test]
+    fn test_parse_known_hosts_ipv6_first_comma_picks_hostname() {
+        let KnownHostResult::Parsed(entry) =
+            parse_known_hosts_line("2001:db8::1,server.example.com ssh-rsa AAAA...")
+        else {
+            panic!("expected Parsed");
+        };
+        assert_eq!(entry.hostname, "server.example.com");
+        assert_eq!(entry.alias, "server");
+    }
+
+    #[test]
+    fn test_parse_known_hosts_all_ips_comma_skipped() {
+        // If all comma entries are IPs, skip the whole line
+        assert!(matches!(
+            parse_known_hosts_line("192.0.2.10,10.0.0.1 ssh-rsa AAAA..."),
+            KnownHostResult::Skipped
+        ));
+    }
+
+    #[test]
+    fn test_parse_known_hosts_bracketed_ip_first_comma_picks_hostname() {
+        // [ip]:port,hostname format should pick the hostname
+        let KnownHostResult::Parsed(entry) =
+            parse_known_hosts_line("[192.0.2.10]:2222,web.example.com ssh-rsa AAAA...")
+        else {
+            panic!("expected Parsed");
+        };
+        assert_eq!(entry.hostname, "web.example.com");
+        assert_eq!(entry.alias, "web");
+    }
+
+    #[test]
+    fn test_is_bare_ip() {
+        assert!(is_bare_ip("192.168.1.1"));
+        assert!(is_bare_ip("10.0.0.1"));
+        assert!(is_bare_ip("2001:db8::1"));
+        assert!(is_bare_ip("fe80::1"));
+        assert!(!is_bare_ip("example.com"));
+        assert!(!is_bare_ip("123.example.com"));
+        assert!(!is_bare_ip("deadbeef"));
+        assert!(!is_bare_ip(""));
     }
 }

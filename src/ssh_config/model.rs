@@ -275,18 +275,22 @@ impl SshConfigFile {
     ) {
         for e in elements {
             if let ConfigElement::Include(include) = e {
-                let expanded = Self::expand_tilde(&include.pattern);
-                let resolved = if expanded.starts_with('/') {
-                    PathBuf::from(&expanded)
-                } else if let Some(dir) = config_dir {
-                    dir.join(&expanded)
-                } else {
-                    continue;
-                };
-                if let Some(parent) = resolved.parent() {
-                    let parent = parent.to_path_buf();
-                    if !dirs.contains(&parent) {
-                        dirs.push(parent);
+                // Split on whitespace to handle multi-pattern Includes
+                // (same as resolve_include does)
+                for single in include.pattern.split_whitespace() {
+                    let expanded = Self::expand_tilde(single);
+                    let resolved = if expanded.starts_with('/') {
+                        PathBuf::from(&expanded)
+                    } else if let Some(dir) = config_dir {
+                        dir.join(&expanded)
+                    } else {
+                        continue;
+                    };
+                    if let Some(parent) = resolved.parent() {
+                        let parent = parent.to_path_buf();
+                        if !dirs.contains(&parent) {
+                            dirs.push(parent);
+                        }
                     }
                 }
                 // Recurse into resolved files
@@ -308,9 +312,11 @@ impl SshConfigFile {
         for e in elements {
             match e {
                 ConfigElement::HostBlock(block) => {
-                    // Skip wildcard/multi patterns (*, ?, whitespace-separated)
+                    // Skip wildcard/multi/negation patterns (*, ?, [], !, whitespace-separated)
                     if block.host_pattern.contains('*')
                         || block.host_pattern.contains('?')
+                        || block.host_pattern.contains('[')
+                        || block.host_pattern.starts_with('!')
                         || block.host_pattern.contains(' ')
                         || block.host_pattern.contains('\t')
                     {
@@ -391,9 +397,11 @@ impl SshConfigFile {
         for element in &mut self.elements {
             if let ConfigElement::HostBlock(block) = element {
                 if block.host_pattern == old_alias {
-                    // Update host pattern
-                    block.host_pattern = entry.alias.clone();
-                    block.raw_host_line = format!("Host {}", entry.alias);
+                    // Update host pattern (preserve raw_host_line when alias unchanged)
+                    if entry.alias != block.host_pattern {
+                        block.host_pattern = entry.alias.clone();
+                        block.raw_host_line = format!("Host {}", entry.alias);
+                    }
 
                     // Merge known directives (update existing, add missing, remove empty)
                     Self::upsert_directive(block, "HostName", &entry.hostname);
@@ -561,6 +569,9 @@ impl SshConfigFile {
             matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == alias_b)
         });
         if let (Some(a), Some(b)) = (pos_a, pos_b) {
+            if a == b {
+                return false;
+            }
             let (first, second) = (a.min(b), a.max(b));
 
             // Strip trailing blanks from both blocks before swap

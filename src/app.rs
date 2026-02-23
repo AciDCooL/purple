@@ -132,9 +132,13 @@ impl HostForm {
         if self.alias.contains(char::is_whitespace) {
             return Err("Alias can't contain whitespace. Keep it simple.".to_string());
         }
-        if self.alias.contains('*') || self.alias.contains('?') {
+        if self.alias.contains('*')
+            || self.alias.contains('?')
+            || self.alias.contains('[')
+            || self.alias.starts_with('!')
+        {
             return Err(
-                "Alias can't contain wildcards. That creates a match pattern, not a host."
+                "Alias can't contain pattern characters. That creates a match pattern, not a host."
                     .to_string(),
             );
         }
@@ -306,7 +310,7 @@ impl SortMode {
             "alpha_hostname" => SortMode::AlphaHostname,
             "frecency" => SortMode::Frecency,
             "most_recent" => SortMode::MostRecent,
-            _ => SortMode::Original,
+            _ => SortMode::AlphaAlias,
         }
     }
 }
@@ -376,6 +380,9 @@ pub struct App {
     pub provider_form: ProviderFormFields,
     pub syncing_providers: std::collections::HashSet<String>,
 
+    // Group by provider toggle
+    pub group_by_provider: bool,
+
     // Learning hints
     pub has_pinged: bool,
 
@@ -384,6 +391,14 @@ pub struct App {
     pub last_modified: Option<SystemTime>,
     include_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
     include_dir_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+
+    // Form conflict detection (mtime snapshots when form opened)
+    pub form_open_mtime: Option<SystemTime>,
+    form_open_include_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+    form_open_include_dir_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+
+    // Provider form conflict detection (tracks ~/.purple/providers mtime)
+    provider_form_open_mtime: Option<SystemTime>,
 }
 
 impl App {
@@ -431,12 +446,17 @@ impl App {
             syncing_providers: std::collections::HashSet::new(),
             history: ConnectionHistory::load(),
             sort_mode: SortMode::Original,
+            group_by_provider: false,
             deleted_host: None,
             has_pinged: false,
             config_path,
             last_modified,
             include_mtimes,
             include_dir_mtimes,
+            form_open_mtime: None,
+            form_open_include_mtimes: Vec::new(),
+            form_open_include_dir_mtimes: Vec::new(),
+            provider_form_open_mtime: None,
         }
     }
 
@@ -454,9 +474,10 @@ impl App {
                 ConfigElement::GlobalLine(line) => {
                     let trimmed = line.trim();
                     if trimmed.starts_with('#') {
-                        let text = trimmed.trim_start_matches('#').trim().to_string();
+                        let text = trimmed.trim_start_matches('#').trim();
+                        let text = text.strip_prefix("purple:group ").unwrap_or(text);
                         if !text.is_empty() {
-                            pending_comment = Some(text);
+                            pending_comment = Some(text.to_string());
                         }
                     } else if trimmed.is_empty() {
                         // Blank line breaks the comment-to-host association
@@ -466,9 +487,11 @@ impl App {
                     }
                 }
                 ConfigElement::HostBlock(block) => {
-                    // Skip wildcards (same logic as host_entries)
+                    // Skip patterns (same logic as host_entries)
                     if block.host_pattern.contains('*')
                         || block.host_pattern.contains('?')
+                        || block.host_pattern.contains('[')
+                        || block.host_pattern.starts_with('!')
                         || block.host_pattern.contains(' ')
                         || block.host_pattern.contains('\t')
                     {
@@ -508,6 +531,7 @@ impl App {
     /// Extract a trailing comment from a block's directives.
     /// If the last non-blank line in the directives is a comment, return it as
     /// a potential group header for the next host block.
+    /// Strips `purple:group ` prefix so headers display as the provider name.
     fn extract_trailing_comment(directives: &[crate::ssh_config::model::Directive]) -> Option<String> {
         let d = directives.iter().next_back()?;
         if !d.is_non_directive {
@@ -518,9 +542,15 @@ impl App {
             return None;
         }
         if trimmed.starts_with('#') {
-            let text = trimmed.trim_start_matches('#').trim().to_string();
+            let text = trimmed.trim_start_matches('#').trim();
+            // Skip purple metadata comments (purple:provider, purple:tags)
+            // Only purple:group should produce a group header
+            if text.starts_with("purple:") && !text.starts_with("purple:group ") {
+                return None;
+            }
+            let text = text.strip_prefix("purple:group ").unwrap_or(text);
             if !text.is_empty() {
-                return Some(text);
+                return Some(text.to_string());
             }
         }
         None
@@ -559,9 +589,10 @@ impl App {
                 ConfigElement::GlobalLine(line) => {
                     let trimmed = line.trim();
                     if trimmed.starts_with('#') {
-                        let text = trimmed.trim_start_matches('#').trim().to_string();
+                        let text = trimmed.trim_start_matches('#').trim();
+                        let text = text.strip_prefix("purple:group ").unwrap_or(text);
                         if !text.is_empty() {
-                            pending_comment = Some(text);
+                            pending_comment = Some(text.to_string());
                         }
                     } else {
                         pending_comment = None;
@@ -604,10 +635,14 @@ impl App {
         }
     }
 
-    /// Rebuild the display list based on the current sort mode.
+    /// Rebuild the display list based on the current sort mode and group_by_provider toggle.
     pub fn apply_sort(&mut self) {
-        if self.sort_mode == SortMode::Original {
+        if self.sort_mode == SortMode::Original && !self.group_by_provider {
             self.display_list = Self::build_display_list_from(&self.config, &self.hosts);
+        } else if self.sort_mode == SortMode::Original && self.group_by_provider {
+            // Original order but grouped by provider: extract flat indices from config order
+            let indices: Vec<usize> = (0..self.hosts.len()).collect();
+            self.display_list = Self::group_indices_by_provider(&self.hosts, &indices);
         } else {
             let mut indices: Vec<usize> = (0..self.hosts.len()).collect();
             match self.sort_mode {
@@ -643,12 +678,20 @@ impl App {
                 }
                 _ => {}
             }
-            self.display_list = indices
-                .into_iter()
-                .map(|i| HostListItem::Host { index: i })
-                .collect();
+            if self.group_by_provider {
+                self.display_list = Self::group_indices_by_provider(&self.hosts, &indices);
+            } else {
+                self.display_list = indices
+                    .into_iter()
+                    .map(|i| HostListItem::Host { index: i })
+                    .collect();
+            }
         }
-        // Select first host
+        self.select_first_host();
+    }
+
+    /// Select the first host item in the display list.
+    fn select_first_host(&mut self) {
         if let Some(pos) = self
             .display_list
             .iter()
@@ -656,6 +699,47 @@ impl App {
         {
             self.list_state.select(Some(pos));
         }
+    }
+
+    /// Partition sorted indices by provider, inserting group headers.
+    /// Hosts without provider appear first (no header), then named provider
+    /// groups (in first-appearance order) with headers.
+    fn group_indices_by_provider(hosts: &[HostEntry], sorted_indices: &[usize]) -> Vec<HostListItem> {
+        let mut none_indices: Vec<usize> = Vec::new();
+        let mut provider_groups: Vec<(String, Vec<usize>)> = Vec::new();
+        let mut provider_order: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+        for &idx in sorted_indices {
+            match &hosts[idx].provider {
+                None => none_indices.push(idx),
+                Some(name) => {
+                    if let Some(&group_idx) = provider_order.get(name) {
+                        provider_groups[group_idx].1.push(idx);
+                    } else {
+                        let group_idx = provider_groups.len();
+                        provider_order.insert(name.clone(), group_idx);
+                        provider_groups.push((name.clone(), vec![idx]));
+                    }
+                }
+            }
+        }
+
+        let mut display_list = Vec::new();
+
+        // Non-provider hosts first (no header)
+        for idx in &none_indices {
+            display_list.push(HostListItem::Host { index: *idx });
+        }
+
+        // Then provider groups with headers
+        for (name, indices) in &provider_groups {
+            let header = provider_display_name(name);
+            display_list.push(HostListItem::GroupHeader(header.to_string()));
+            for &idx in indices {
+                display_list.push(HostListItem::Host { index: idx });
+            }
+        }
+        display_list
     }
 
     /// Get the host index from the currently selected display list item.
@@ -735,7 +819,7 @@ impl App {
         let had_search = self.search_query.clone();
 
         self.hosts = self.config.host_entries();
-        if self.sort_mode == SortMode::Original {
+        if self.sort_mode == SortMode::Original && !self.group_by_provider {
             self.display_list = Self::build_display_list_from(&self.config, &self.hosts);
         } else {
             self.apply_sort();
@@ -933,6 +1017,55 @@ impl App {
         self.include_dir_mtimes = Self::snapshot_include_dir_mtimes(&self.config);
     }
 
+    /// Clear form mtime state (call on form cancel or successful submit).
+    pub fn clear_form_mtime(&mut self) {
+        self.form_open_mtime = None;
+        self.form_open_include_mtimes.clear();
+        self.form_open_include_dir_mtimes.clear();
+        self.provider_form_open_mtime = None;
+    }
+
+    /// Capture config and Include file mtimes when opening a host form.
+    pub fn capture_form_mtime(&mut self) {
+        self.form_open_mtime = Self::get_mtime(&self.config_path);
+        self.form_open_include_mtimes = Self::snapshot_include_mtimes(&self.config);
+        self.form_open_include_dir_mtimes = Self::snapshot_include_dir_mtimes(&self.config);
+    }
+
+    /// Capture ~/.purple/providers mtime when opening a provider form.
+    pub fn capture_provider_form_mtime(&mut self) {
+        let path = dirs::home_dir()
+            .map(|h| h.join(".purple/providers"));
+        self.provider_form_open_mtime = path.as_ref().and_then(|p| Self::get_mtime(p));
+    }
+
+    /// Check if config or any Include file/directory has changed since the form was opened.
+    pub fn config_changed_since_form_open(&self) -> bool {
+        match self.form_open_mtime {
+            Some(open_mtime) => {
+                if Self::get_mtime(&self.config_path) != Some(open_mtime) {
+                    return true;
+                }
+                self.form_open_include_mtimes
+                    .iter()
+                    .any(|(path, old_mtime)| Self::get_mtime(path) != *old_mtime)
+                    || self
+                        .form_open_include_dir_mtimes
+                        .iter()
+                        .any(|(path, old_mtime)| Self::get_mtime(path) != *old_mtime)
+            }
+            None => false,
+        }
+    }
+
+    /// Check if ~/.purple/providers has changed since the provider form was opened.
+    pub fn provider_config_changed_since_form_open(&self) -> bool {
+        let path = dirs::home_dir()
+            .map(|h| h.join(".purple/providers"));
+        let current_mtime = path.as_ref().and_then(|p| Self::get_mtime(p));
+        self.provider_form_open_mtime != current_mtime
+    }
+
     /// Snapshot mtimes of all resolved Include files.
     fn snapshot_include_mtimes(config: &SshConfigFile) -> Vec<(PathBuf, Option<SystemTime>)> {
         config
@@ -1026,6 +1159,18 @@ impl App {
     /// Move tag picker selection down.
     pub fn select_next_tag(&mut self) {
         cycle_selection(&mut self.tag_picker_state, self.tag_list.len(), true);
+    }
+}
+
+/// Display name for a provider (used in group headers).
+fn provider_display_name(name: &str) -> &str {
+    match name {
+        "digitalocean" => "DigitalOcean",
+        "vultr" => "Vultr",
+        "linode" => "Linode",
+        "hetzner" => "Hetzner",
+        "upcloud" => "UpCloud",
+        other => other,
     }
 }
 
@@ -1150,5 +1295,135 @@ Host beta
         assert_eq!(app.list_state.selected(), Some(3));
         app.select_prev();
         assert_eq!(app.list_state.selected(), Some(1));
+    }
+
+    #[test]
+    fn test_group_by_provider_creates_headers() {
+        let content = "\
+Host do-web
+  HostName 1.2.3.4
+  # purple:provider digitalocean:123
+
+Host do-db
+  HostName 5.6.7.8
+  # purple:provider digitalocean:456
+
+Host vultr-app
+  HostName 9.9.9.9
+  # purple:provider vultr:789
+";
+        let mut app = make_app(content);
+        app.group_by_provider = true;
+        app.apply_sort();
+
+        // Should have: DigitalOcean header, 2 hosts, Vultr header, 1 host
+        assert_eq!(app.display_list.len(), 5);
+        assert!(matches!(&app.display_list[0], HostListItem::GroupHeader(s) if s == "DigitalOcean"));
+        assert!(matches!(&app.display_list[1], HostListItem::Host { .. }));
+        assert!(matches!(&app.display_list[2], HostListItem::Host { .. }));
+        assert!(matches!(&app.display_list[3], HostListItem::GroupHeader(s) if s == "Vultr"));
+        assert!(matches!(&app.display_list[4], HostListItem::Host { .. }));
+    }
+
+    #[test]
+    fn test_group_by_provider_no_header_for_none() {
+        let content = "\
+Host manual
+  HostName 1.2.3.4
+
+Host do-web
+  HostName 5.6.7.8
+  # purple:provider digitalocean:123
+";
+        let mut app = make_app(content);
+        app.group_by_provider = true;
+        app.apply_sort();
+
+        // manual first (no header), then DigitalOcean header + do-web
+        assert_eq!(app.display_list.len(), 3);
+        // No header before the manual host
+        assert!(matches!(&app.display_list[0], HostListItem::Host { .. }));
+        assert!(matches!(&app.display_list[1], HostListItem::GroupHeader(s) if s == "DigitalOcean"));
+        assert!(matches!(&app.display_list[2], HostListItem::Host { .. }));
+    }
+
+    #[test]
+    fn test_group_by_provider_with_alpha_sort() {
+        let content = "\
+Host do-zeta
+  HostName 1.2.3.4
+  # purple:provider digitalocean:1
+
+Host do-alpha
+  HostName 5.6.7.8
+  # purple:provider digitalocean:2
+";
+        let mut app = make_app(content);
+        app.group_by_provider = true;
+        app.sort_mode = SortMode::AlphaAlias;
+        app.apply_sort();
+
+        // DigitalOcean header + sorted hosts
+        assert_eq!(app.display_list.len(), 3);
+        assert!(matches!(&app.display_list[0], HostListItem::GroupHeader(s) if s == "DigitalOcean"));
+        // First host should be do-alpha (alphabetical)
+        if let HostListItem::Host { index } = &app.display_list[1] {
+            assert_eq!(app.hosts[*index].alias, "do-alpha");
+        } else {
+            panic!("Expected Host item");
+        }
+    }
+
+    #[test]
+    fn test_config_changed_since_form_open_no_mtime() {
+        let app = make_app("Host alpha\n  HostName a.com\n");
+        // No mtime captured — should return false
+        assert!(!app.config_changed_since_form_open());
+    }
+
+    #[test]
+    fn test_config_changed_since_form_open_same_mtime() {
+        let mut app = make_app("Host alpha\n  HostName a.com\n");
+        // Config path is /tmp/test_config which doesn't exist, so mtime is None
+        app.capture_form_mtime();
+        // Immediately checking — mtime should be same (None == None)
+        assert!(!app.config_changed_since_form_open());
+    }
+
+    #[test]
+    fn test_config_changed_since_form_open_detects_change() {
+        let mut app = make_app("Host alpha\n  HostName a.com\n");
+        // Set form_open_mtime to a known past value (different from current None)
+        app.form_open_mtime = Some(SystemTime::UNIX_EPOCH);
+        // Config path doesn't exist (mtime is None), so it differs from UNIX_EPOCH
+        assert!(app.config_changed_since_form_open());
+    }
+
+    #[test]
+    fn test_group_by_provider_toggle_off_restores_flat() {
+        let content = "\
+Host do-web
+  HostName 1.2.3.4
+  # purple:provider digitalocean:123
+
+Host vultr-app
+  HostName 5.6.7.8
+  # purple:provider vultr:456
+";
+        let mut app = make_app(content);
+        app.sort_mode = SortMode::AlphaAlias;
+
+        // Enable grouping
+        app.group_by_provider = true;
+        app.apply_sort();
+        let grouped_len = app.display_list.len();
+        assert!(grouped_len > 2); // Has headers
+
+        // Disable grouping
+        app.group_by_provider = false;
+        app.apply_sort();
+        // Should be flat: just hosts, no headers
+        assert_eq!(app.display_list.len(), 2);
+        assert!(app.display_list.iter().all(|item| matches!(item, HostListItem::Host { .. })));
     }
 }

@@ -66,16 +66,34 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     let title = if host_count == 0 {
         Line::from(Span::styled(" purple. ", theme::brand_badge()))
     } else {
-        let pos = app
-            .selected_host_index()
-            .map(|i| i + 1)
-            .unwrap_or(0);
+        let pos = if let Some(sel) = app.list_state.selected() {
+            if app.search_query.is_some() {
+                app.list_state.selected().map(|i| i + 1).unwrap_or(0)
+            } else {
+                app.display_list[..=sel]
+                    .iter()
+                    .filter(|item| matches!(item, HostListItem::Host { .. }))
+                    .count()
+            }
+        } else {
+            0
+        };
         let mut spans = vec![
             Span::styled(" purple. ", theme::brand_badge()),
             Span::raw(format!(" {}/{} ", pos, host_count)),
         ];
-        if app.sort_mode != SortMode::Original {
-            spans.push(Span::raw(format!("({}) ", app.sort_mode.label())));
+        if app.sort_mode != SortMode::Original || app.group_by_provider {
+            let mut label = String::new();
+            if app.sort_mode != SortMode::Original {
+                label.push_str(app.sort_mode.label());
+            }
+            if app.group_by_provider {
+                if !label.is_empty() {
+                    label.push_str(", ");
+                }
+                label.push_str("grouped");
+            }
+            spans.push(Span::raw(format!("({}) ", label)));
         }
         Line::from(spans)
     };
@@ -363,8 +381,10 @@ fn render_footer(frame: &mut Frame, area: ratatui::layout::Rect) {
         Span::styled(" edit  ", theme::muted()),
         Span::styled("d", theme::accent_bold()),
         Span::styled(" delete  ", theme::muted()),
-        Span::styled("S", theme::accent_bold()),
-        Span::styled(" sync  ", theme::muted()),
+        Span::styled("s", theme::accent_bold()),
+        Span::styled(" sort  ", theme::muted()),
+        Span::styled("g", theme::accent_bold()),
+        Span::styled(" group  ", theme::muted()),
         Span::styled("Enter", theme::primary_action()),
         Span::styled(" connect  ", theme::muted()),
         Span::styled("/", theme::accent_bold()),

@@ -134,7 +134,8 @@ impl Provider for UpCloud {
                 "https://api.upcloud.com/1.3/server?limit={}&offset={}",
                 limit, offset
             );
-            let resp: ServerListResponse = ureq::get(&url)
+            let resp: ServerListResponse = super::http_agent()
+                .get(&url)
                 .set("Authorization", &format!("Bearer {}", token))
                 .call()
                 .map_err(map_ureq_error)?
@@ -157,7 +158,8 @@ impl Provider for UpCloud {
         let mut fetch_failures = 0usize;
         for server in &all_servers {
             let url = format!("https://api.upcloud.com/1.3/server/{}", server.uuid);
-            let detail: ServerDetailResponse = match ureq::get(&url)
+            let detail: ServerDetailResponse = match super::http_agent()
+                .get(&url)
                 .set("Authorization", &format!("Bearer {}", token))
                 .call()
             {
