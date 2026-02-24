@@ -1005,7 +1005,8 @@ impl App {
         if matches!(
             self.screen,
             Screen::AddHost | Screen::EditHost { .. } | Screen::ProviderForm { .. }
-        ) {
+        ) || self.tag_input.is_some()
+        {
             return;
         }
         let current_mtime = Self::get_mtime(&self.reload.config_path);

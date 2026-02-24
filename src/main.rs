@@ -633,10 +633,16 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 std::process::exit(1);
             }
 
+            let alias_prefix = prefix.unwrap_or_else(|| p.short_label().to_string());
+            if ssh_config::model::is_host_pattern(&alias_prefix) {
+                eprintln!("Alias prefix can't contain spaces or pattern characters (*, ?, [, !).");
+                std::process::exit(1);
+            }
+
             let section = providers::config::ProviderSection {
                 provider: provider.clone(),
                 token,
-                alias_prefix: prefix.unwrap_or_else(|| p.short_label().to_string()),
+                alias_prefix,
                 user: user.unwrap_or_else(|| "root".to_string()),
                 identity_file: key.unwrap_or_default(),
             };

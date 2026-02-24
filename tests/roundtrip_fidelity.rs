@@ -2610,6 +2610,25 @@ Host myserver
     assert!(output.contains("IdentityFile ~/.ssh/id_rsa"), "Space-syntax IdentityFile should survive");
 }
 
+#[test]
+fn spaced_equals_syntax_preserved_after_value_change() {
+    let input = "\
+Host myserver
+  HostName = 10.0.0.1
+  User = admin
+  Port = 2222
+";
+    let mut config = parse_str(input);
+    let mut entry = config.host_entries().remove(0);
+    entry.hostname = "10.0.0.2".to_string();
+    entry.user = "deploy".to_string();
+    config.update_host("myserver", &entry);
+    let output = config.serialize();
+    assert!(output.contains("HostName = 10.0.0.2"), "Spaced equals-syntax should be preserved for HostName: {}", output);
+    assert!(output.contains("User = deploy"), "Spaced equals-syntax should be preserved for User: {}", output);
+    assert!(output.contains("Port = 2222"), "Unchanged spaced equals-syntax Port should survive: {}", output);
+}
+
 // ============================================================================
 // 23. CRLF PRESERVATION THROUGH MUTATIONS
 // ============================================================================

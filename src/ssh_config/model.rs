@@ -461,10 +461,19 @@ impl SshConfigFile {
                 // Only rebuild raw_line when value actually changed (preserves inline comments)
                 if d.value != value {
                     d.value = value.to_string();
-                    // Detect equals-syntax from original raw_line and preserve it
+                    // Detect separator style from original raw_line and preserve it.
+                    // Handles: "Key value", "Key=value", "Key = value", "Key =value"
                     let trimmed = d.raw_line.trim_start();
                     let after_key = &trimmed[d.key.len()..];
-                    let sep = if after_key.starts_with('=') { "=" } else { " " };
+                    let sep = if let Some(eq_pos) = after_key.find('=') {
+                        // Separator is everything up to and including '=', plus any
+                        // trailing whitespace (preserves "Key = " style)
+                        let after_eq = &after_key[eq_pos + 1..];
+                        let trailing_ws = after_eq.len() - after_eq.trim_start().len();
+                        after_key[..eq_pos + 1 + trailing_ws].to_string()
+                    } else {
+                        " ".to_string()
+                    };
                     d.raw_line = format!("{}{}{}{}", indent, d.key, sep, value);
                 }
                 return;
@@ -530,12 +539,24 @@ impl SshConfigFile {
 
     /// Generate a unique alias by appending -2, -3, etc. if the base alias is taken.
     pub fn deduplicate_alias(&self, base: &str) -> String {
-        if !self.has_host(base) {
+        self.deduplicate_alias_excluding(base, None)
+    }
+
+    /// Generate a unique alias, optionally excluding one alias from collision detection.
+    /// Used during rename so the host being renamed doesn't collide with itself.
+    pub fn deduplicate_alias_excluding(&self, base: &str, exclude: Option<&str>) -> String {
+        let is_taken = |alias: &str| {
+            if exclude == Some(alias) {
+                return false;
+            }
+            self.has_host(alias)
+        };
+        if !is_taken(base) {
             return base.to_string();
         }
         for n in 2..=9999 {
             let candidate = format!("{}-{}", base, n);
-            if !self.has_host(&candidate) {
+            if !is_taken(&candidate) {
                 return candidate;
             }
         }

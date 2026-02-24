@@ -106,33 +106,50 @@ pub fn sync_provider(
                 sorted_remote.sort();
                 let tags_changed = sorted_local != sorted_remote;
                 if alias_changed || ip_changed || tags_changed {
-                    if !dry_run {
-                        // Compute the final alias (dedup handles collisions)
+                    if dry_run {
+                        result.updated += 1;
+                    } else {
+                        // Compute the final alias (dedup handles collisions,
+                        // excluding the host being renamed so it doesn't collide with itself)
                         let new_alias = if alias_changed {
-                            config.deduplicate_alias(&expected_alias)
+                            config.deduplicate_alias_excluding(
+                                &expected_alias,
+                                Some(existing_alias),
+                            )
                         } else {
                             existing_alias.clone()
                         };
+                        // Re-evaluate: dedup may resolve back to the current alias
+                        let alias_changed = new_alias != *existing_alias;
 
-                        if alias_changed || ip_changed {
-                            let updated = HostEntry {
-                                alias: new_alias.clone(),
-                                hostname: remote.ip.clone(),
-                                ..entry.clone()
-                            };
-                            config.update_host(existing_alias, &updated);
-                        }
-                        // Tags lookup uses the new alias after rename
-                        let tags_alias = if alias_changed { &new_alias } else { existing_alias };
-                        if tags_changed {
-                            config.set_host_tags(tags_alias, &remote.tags);
-                        }
-                        // Update provider marker with new alias
-                        if alias_changed {
-                            config.set_host_provider(&new_alias, provider.name(), &remote.server_id);
+                        if alias_changed || ip_changed || tags_changed {
+                            if alias_changed || ip_changed {
+                                let updated = HostEntry {
+                                    alias: new_alias.clone(),
+                                    hostname: remote.ip.clone(),
+                                    ..entry.clone()
+                                };
+                                config.update_host(existing_alias, &updated);
+                            }
+                            // Tags lookup uses the new alias after rename
+                            let tags_alias =
+                                if alias_changed { &new_alias } else { existing_alias };
+                            if tags_changed {
+                                config.set_host_tags(tags_alias, &remote.tags);
+                            }
+                            // Update provider marker with new alias
+                            if alias_changed {
+                                config.set_host_provider(
+                                    &new_alias,
+                                    provider.name(),
+                                    &remote.server_id,
+                                );
+                            }
+                            result.updated += 1;
+                        } else {
+                            result.unchanged += 1;
                         }
                     }
-                    result.updated += 1;
                 } else {
                     result.unchanged += 1;
                 }
@@ -970,5 +987,49 @@ Host do-web-1-copy
 
         // Alias should remain unchanged (included hosts are read-only)
         assert_eq!(config.host_entries()[0].alias, "do-included");
+    }
+
+    #[test]
+    fn test_sync_rename_stable_with_manual_collision() {
+        let mut config = empty_config();
+        let section = make_section(); // prefix = "do"
+
+        // First sync: add provider host
+        let remote = vec![ProviderHost {
+            server_id: "123".to_string(),
+            name: "web-1".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+        assert_eq!(config.host_entries()[0].alias, "do-web-1");
+
+        // Manually add a host that will collide with the renamed alias
+        let manual = HostEntry {
+            alias: "ocean-web-1".to_string(),
+            hostname: "5.5.5.5".to_string(),
+            ..Default::default()
+        };
+        config.add_host(&manual);
+
+        // Second sync: prefix changes to "ocean", collides with manual host
+        let new_section = ProviderSection {
+            alias_prefix: "ocean".to_string(),
+            ..section.clone()
+        };
+        let result = sync_provider(&mut config, &MockProvider, &remote, &new_section, false, false);
+        assert_eq!(result.updated, 1);
+
+        let entries = config.host_entries();
+        let provider_host = entries.iter().find(|e| e.hostname == "1.2.3.4").unwrap();
+        assert_eq!(provider_host.alias, "ocean-web-1-2");
+
+        // Third sync: same state. Should be stable (not flip to -3)
+        let result = sync_provider(&mut config, &MockProvider, &remote, &new_section, false, false);
+        assert_eq!(result.unchanged, 1, "Should be unchanged on repeat sync");
+
+        let entries = config.host_entries();
+        let provider_host = entries.iter().find(|e| e.hostname == "1.2.3.4").unwrap();
+        assert_eq!(provider_host.alias, "ocean-web-1-2", "Alias should be stable across syncs");
     }
 }

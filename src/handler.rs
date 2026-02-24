@@ -790,10 +790,19 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
 
     let token = app.provider_form.token.trim().to_string();
+    let alias_prefix = app.provider_form.alias_prefix.trim().to_string();
+    if crate::ssh_config::model::is_host_pattern(&alias_prefix) {
+        app.set_status(
+            "Alias prefix can't contain spaces or pattern characters (*, ?, [, !).",
+            true,
+        );
+        return;
+    }
+
     let section = providers::config::ProviderSection {
         provider: provider_name.clone(),
         token: token.clone(),
-        alias_prefix: app.provider_form.alias_prefix.trim().to_string(),
+        alias_prefix,
         user: app.provider_form.user.trim().to_string(),
         identity_file: app.provider_form.identity_file.trim().to_string(),
     };
