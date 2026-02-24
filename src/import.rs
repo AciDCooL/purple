@@ -208,8 +208,7 @@ fn parse_known_hosts_line(line: &str) -> KnownHostResult {
         .to_string();
 
     // Skip wildcard/pattern entries
-    if alias.contains('*') || alias.contains('?') || alias.contains('[') || alias.starts_with('!')
-    {
+    if crate::ssh_config::model::is_host_pattern(&alias) {
         return KnownHostResult::Skipped;
     }
 

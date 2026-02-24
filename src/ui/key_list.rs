@@ -21,7 +21,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::raw(" keys "),
         ])
     } else {
-        let pos = app.key_list_state.selected().map(|i| i + 1).unwrap_or(0);
+        let pos = app.ui.key_list_state.selected().map(|i| i + 1).unwrap_or(0);
         Line::from(vec![
             Span::styled(" purple. ", theme::brand_badge()),
             Span::raw(format!(" keys {}/{} ", pos, app.keys.len())),
@@ -56,7 +56,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 let comment_display = if key.comment.is_empty() {
                     String::new()
                 } else {
-                    truncate_fingerprint(&key.comment, 20)
+                    super::truncate(&key.comment, 20)
                 };
 
                 let line = Line::from(vec![
@@ -98,7 +98,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .highlight_style(theme::selected())
             .highlight_symbol("  ");
 
-        frame.render_stateful_widget(list, inner_chunks[1], &mut app.key_list_state);
+        frame.render_stateful_widget(list, inner_chunks[1], &mut app.ui.key_list_state);
     }
 
     if app.status.is_some() {
@@ -120,12 +120,3 @@ fn render_footer(frame: &mut Frame, area: ratatui::layout::Rect) {
     frame.render_widget(Paragraph::new(footer), area);
 }
 
-/// Truncate a string to `max_len` characters (char-boundary safe).
-fn truncate_fingerprint(fp: &str, max_len: usize) -> String {
-    if fp.chars().count() <= max_len {
-        fp.to_string()
-    } else {
-        let truncated: String = fp.chars().take(max_len.saturating_sub(3)).collect();
-        format!("{}...", truncated)
-    }
-}

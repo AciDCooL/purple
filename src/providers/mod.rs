@@ -6,6 +6,8 @@ pub mod sync;
 mod upcloud;
 mod vultr;
 
+use std::sync::atomic::AtomicBool;
+
 use thiserror::Error;
 
 /// A host discovered from a cloud provider API.
@@ -33,6 +35,8 @@ pub enum ProviderError {
     AuthFailed,
     #[error("Rate limited. Try again in a moment.")]
     RateLimited,
+    #[error("Cancelled.")]
+    Cancelled,
 }
 
 /// Trait implemented by each cloud provider.
@@ -43,6 +47,15 @@ pub trait Provider {
     fn short_label(&self) -> &str;
     /// Fetch all servers from the provider API.
     fn fetch_hosts(&self, token: &str) -> Result<Vec<ProviderHost>, ProviderError>;
+    /// Fetch hosts with cancellation support. Default delegates to fetch_hosts.
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        let _ = cancel;
+        self.fetch_hosts(token)
+    }
 }
 
 /// All known provider names.
@@ -57,6 +70,18 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         "hetzner" => Some(Box::new(hetzner::Hetzner)),
         "upcloud" => Some(Box::new(upcloud::UpCloud)),
         _ => None,
+    }
+}
+
+/// Display name for a provider (e.g. "digitalocean" -> "DigitalOcean").
+pub fn provider_display_name(name: &str) -> &str {
+    match name {
+        "digitalocean" => "DigitalOcean",
+        "vultr" => "Vultr",
+        "linode" => "Linode",
+        "hetzner" => "Hetzner",
+        "upcloud" => "UpCloud",
+        other => other,
     }
 }
 

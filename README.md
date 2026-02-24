@@ -1,6 +1,9 @@
-<h1 align="center">🟣 purple (purple-ssh) | Rust TUI SSH Config Manager for OpenSSH</h1>
+<h1 align="center">purple. Manage SSH configs. Launch connections. All from the terminal.</h1>
 
-<p align="center"><strong>SSH host launcher and <code>~/.ssh/config</code> editor with cloud sync.</strong></p>
+<p align="center">
+  <strong>Stop grepping your SSH config. Start launching from it.</strong><br>
+  Search, tag and connect your hosts. Sync servers from DigitalOcean, Vultr, Linode, Hetzner and UpCloud. Your config stays respected.
+</p>
 
 <p align="center">
   <a href="https://crates.io/crates/purple-ssh"><img src="https://img.shields.io/crates/v/purple-ssh.svg" alt="Crates.io"></a>
@@ -9,55 +12,56 @@
 </p>
 
 <p align="center">
-  A keyboard-driven terminal UI (TUI) for managing OpenSSH hosts and editing <code>~/.ssh/config</code>.<br>
-  Search, tag, ping, sync from DigitalOcean, Vultr, Linode, Hetzner and UpCloud, and connect without leaving the terminal.<br>
-  Reads and writes SSH config files with round-trip fidelity.<br>
-  Your comments, formatting and unknown directives stay exactly where they are.
+  purple is a free, open-source SSH config manager and host launcher written in Rust. It reads your existing <code>~/.ssh/config</code>,
+  lets you search, filter, tag and connect with a single keystroke, and writes changes back without
+  touching your comments or unknown directives. Sync servers from five cloud providers
+  directly into your config. No browser, no YAML files, no context switching.
 </p>
 
-<p align="center"><img src="demo.gif" alt="purple SSH launcher TUI demo" width="700"></p>
+<p align="center"><img src="demo.gif" alt="purple SSH config manager TUI demo showing host search, connect and cloud sync" width="700"></p>
 
----
+## Launch, search and connect
 
-## Features
+🚀 **Instant search.** Filter on alias, hostname, user, tags or provider as you type
 
-🚀 **TUI host launcher** — navigation, search, filter, connect with Enter
+🏷️ **Tags.** Label hosts with #tags, filter with the tag picker or `tag:` search
 
-🔄 **Round-trip SSH config** — reads and writes ~/.ssh/config without losing comments, formatting or unknown directives
+📊 **Connection history.** Frecency sorting surfaces your most-used and most-recent hosts
 
-🏷️ **Tags** — label hosts with #tags, filter with tag picker or search
+📡 **Ping.** TCP connectivity check per host or all at once
 
-☁️ **Cloud provider sync** — pull servers from DigitalOcean, Vultr, Linode, Hetzner and UpCloud into your SSH config
+📥 **Bulk import.** From a hosts file or `~/.ssh/known_hosts`
 
-📂 **Include support** — displays hosts from Include files (read-only)
+🔑 **SSH key management.** Browse keys with metadata and linked hosts
 
-📡 **Ping** — TCP connectivity check per host or all at once
+📋 **Clipboard.** Copy the SSH command or full config block
 
-🔍 **Search** — fuzzy filter on alias, hostname, user, tags and provider
+## Cloud provider sync
 
-📊 **Connection history** — frecency-based sorting (most used / most recent)
+Pull your servers from DigitalOcean, Vultr, Linode, Hetzner and UpCloud directly into `~/.ssh/config`. Sync adds new hosts, updates changed IPs and tags, and optionally removes deleted servers. Preview with `--dry-run`.
 
-📥 **Bulk import** — from hosts file or ~/.ssh/known_hosts
+```bash
+purple provider add digitalocean --token YOUR_TOKEN   # or use PURPLE_TOKEN env var
+purple sync
+```
 
-🔑 **SSH key management** — key browser with metadata and host linking
+Synced hosts are tagged by provider and appear alongside your manual hosts.
 
-📋 **Clipboard** — copy SSH command or config block to clipboard
+## Your config, respected
 
-♻️ **Auto-reload** — detects external config changes and reloads automatically
+🔄 **Round-trip fidelity.** Comments, indentation and unknown directives are preserved through every read-write cycle. Consecutive blank lines are collapsed to keep your config clean.
 
----
+📂 **Include support.** Hosts from Include files are displayed but never modified
 
-## Safe by default
+🔒 **Atomic writes.** Temp file, chmod 600, rename. No half-written configs.
 
-🔒 **Atomic writes** — temp file, chmod 600, rename. No half-written configs.
+💾 **Automatic backups.** Every write to an existing config creates a timestamped backup. Keeps the last 5.
 
-💾 **Automatic backups** — every write creates a timestamped backup. Keeps the last 5.
+♻️ **Auto-reload.** Detects external config changes and reloads automatically
 
-🎨 **Monochrome UI** — works in any terminal, any font. Respects [NO_COLOR](https://no-color.org/).
+🎨 **Monochrome UI.** Works in any terminal, any font. One splash of color (the purple badge). Respects [NO_COLOR](https://no-color.org/).
 
-🐚 **Shell completions** — bash, zsh and fish.
-
----
+🐚 **Shell completions.** Bash, zsh and fish.
 
 ## Install
 
@@ -67,7 +71,7 @@
 brew install erickochen/purple/purple
 ```
 
-**Cargo**
+**Cargo** (crate name: `purple-ssh`)
 
 ```bash
 cargo install purple-ssh
@@ -76,10 +80,18 @@ cargo install purple-ssh
 **From source**
 
 ```bash
-git clone https://github.com/erickochen/purple.git && cd purple && cargo build --release
+git clone https://github.com/erickochen/purple.git
+cd purple
+cargo build --release
 ```
 
----
+## Get started
+
+```bash
+purple
+```
+
+That's it. purple reads your `~/.ssh/config` and shows your hosts. Navigate with `j`/`k`, search with `/`, connect with `Enter`. Press `?` for the full cheat sheet.
 
 ## Usage
 
@@ -96,8 +108,6 @@ purple sync                         # Sync all providers
 purple sync --dry-run               # Preview sync changes
 purple --completions zsh            # Shell completions
 ```
-
----
 
 <details>
 <summary><strong>Keybindings</strong> — press <code>?</code> in the TUI for the cheat sheet</summary>
@@ -136,7 +146,7 @@ purple --completions zsh            # Shell completions
 | `Enter`     | Configure provider     |
 | `s`         | Sync selected provider |
 | `d`         | Remove provider        |
-| `q` / `Esc` | Back                   |
+| `q` / `Esc` | Back (cancels syncs)   |
 
 **Search**
 
@@ -158,7 +168,38 @@ purple --completions zsh            # Shell completions
 
 </details>
 
-<br>
+## What makes purple different?
+
+**It edits your real SSH config.** Most SSH config tools only read. purple reads, edits and writes `~/.ssh/config` directly.
+
+**It doesn't break anything.** Comments, indentation, unknown directives. All preserved through every edit. Tested with 405 tests including round-trip integration.
+
+**It syncs your cloud servers.** purple is the only SSH config manager we know of that pulls hosts from DigitalOcean, Vultr, Linode, Hetzner and UpCloud directly into your config. Configure once, sync anytime.
+
+**It imports what you already have.** Bulk import from host files or `~/.ssh/known_hosts`. No manual re-entry.
+
+**It's a single Rust binary.** No runtime, no daemon, no async framework. Install and run.
+
+## FAQ
+
+**Does purple modify my existing SSH config?**
+Only when you add, edit, delete or sync. Auto-sync runs on startup if you have providers configured. All writes are atomic with automatic backups.
+
+**Will purple break my comments or formatting?**
+No. purple preserves comments, indentation and unknown directives through every read-write cycle. Consecutive blank lines are collapsed to one.
+
+**Does purple need a daemon or background process?**
+No. It's a single binary. Run it, use it, close it.
+
+**Does purple send my SSH config anywhere?**
+No. Everything stays local. Provider sync only calls cloud APIs to fetch server lists. Your config never leaves your machine.
+
+**Why is the crate called `purple-ssh`?**
+The name `purple` was taken on crates.io. The binary is still called `purple`.
+
+## Built with
+
+Rust. 405 tests. Zero clippy warnings. No async runtime. Single binary.
 
 <p align="center">
   💜 <a href="LICENSE">MIT License</a>

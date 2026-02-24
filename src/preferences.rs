@@ -2,49 +2,37 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::app::SortMode;
+use crate::fs_util;
 
 fn path() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".purple/preferences"))
 }
 
-/// Load sort mode from ~/.purple/preferences. Returns AlphaAlias if missing or invalid.
-pub fn load_sort_mode() -> SortMode {
-    let path = match path() {
-        Some(p) => p,
-        None => return SortMode::AlphaAlias,
-    };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return SortMode::AlphaAlias,
-    };
+/// Load a value for a given key from ~/.purple/preferences.
+fn load_value(key: &str) -> Option<String> {
+    let path = path()?;
+    let content = std::fs::read_to_string(path).ok()?;
     for line in content.lines() {
         let line = line.trim();
         if line.starts_with('#') || line.is_empty() {
             continue;
         }
-        if let Some((key, value)) = line.split_once('=') {
-            if key.trim() == "sort_mode" {
-                return SortMode::from_key(value.trim());
+        if let Some((k, v)) = line.split_once('=') {
+            if k.trim() == key {
+                return Some(v.trim().to_string());
             }
         }
     }
-    SortMode::AlphaAlias
+    None
 }
 
-/// Save sort mode to ~/.purple/preferences. Preserves unknown keys and comments.
-/// Uses atomic write (tmp + rename) to prevent corruption.
-pub fn save_sort_mode(mode: SortMode) -> io::Result<()> {
+/// Save a key=value pair to ~/.purple/preferences. Preserves unknown keys and comments.
+fn save_value(key: &str, value: &str) -> io::Result<()> {
     let path = match path() {
         Some(p) => p,
         None => return Ok(()),
     };
 
-    // Ensure parent dir exists
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    // Read existing content to preserve unknown keys
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();
     let mut found = false;
@@ -55,9 +43,9 @@ pub fn save_sort_mode(mode: SortMode) -> io::Result<()> {
             && !trimmed.is_empty()
             && trimmed
                 .split_once('=')
-                .is_some_and(|(k, _)| k.trim() == "sort_mode")
+                .is_some_and(|(k, _)| k.trim() == key)
         {
-            lines.push(format!("sort_mode={}", mode.to_key()));
+            lines.push(format!("{}={}", key, value));
             found = true;
         } else {
             lines.push(line.to_string());
@@ -65,126 +53,34 @@ pub fn save_sort_mode(mode: SortMode) -> io::Result<()> {
     }
 
     if !found {
-        lines.push(format!("sort_mode={}", mode.to_key()));
+        lines.push(format!("{}={}", key, value));
     }
 
     let content = lines.join("\n") + "\n";
 
-    // Atomic write: tmp file (created with 0o600) + rename
-    let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+    fs_util::atomic_write(&path, content.as_bytes())
+}
 
-    #[cfg(unix)]
-    {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp_path)?;
-        file.write_all(content.as_bytes())?;
-    }
+/// Load sort mode from ~/.purple/preferences. Returns AlphaAlias if missing or invalid.
+pub fn load_sort_mode() -> SortMode {
+    load_value("sort_mode")
+        .map(|v| SortMode::from_key(&v))
+        .unwrap_or(SortMode::AlphaAlias)
+}
 
-    #[cfg(not(unix))]
-    std::fs::write(&tmp_path, &content)?;
-
-    let result = std::fs::rename(&tmp_path, &path);
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp_path);
-    }
-    result?;
-    Ok(())
+/// Save sort mode to ~/.purple/preferences.
+pub fn save_sort_mode(mode: SortMode) -> io::Result<()> {
+    save_value("sort_mode", mode.to_key())
 }
 
 /// Load group_by_provider from ~/.purple/preferences. Returns true if missing or invalid.
 pub fn load_group_by_provider() -> bool {
-    let path = match path() {
-        Some(p) => p,
-        None => return true,
-    };
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return true,
-    };
-    for line in content.lines() {
-        let line = line.trim();
-        if line.starts_with('#') || line.is_empty() {
-            continue;
-        }
-        if let Some((key, value)) = line.split_once('=') {
-            if key.trim() == "group_by_provider" {
-                return value.trim() != "false";
-            }
-        }
-    }
-    true
+    load_value("group_by_provider")
+        .map(|v| v != "false")
+        .unwrap_or(true)
 }
 
-/// Save group_by_provider to ~/.purple/preferences. Preserves unknown keys and comments.
-/// Uses atomic write (tmp + rename) to prevent corruption.
+/// Save group_by_provider to ~/.purple/preferences.
 pub fn save_group_by_provider(enabled: bool) -> io::Result<()> {
-    let path = match path() {
-        Some(p) => p,
-        None => return Ok(()),
-    };
-
-    // Ensure parent dir exists
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    // Read existing content to preserve unknown keys
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut lines: Vec<String> = Vec::new();
-    let mut found = false;
-
-    for line in existing.lines() {
-        let trimmed = line.trim();
-        if !trimmed.starts_with('#')
-            && !trimmed.is_empty()
-            && trimmed
-                .split_once('=')
-                .is_some_and(|(k, _)| k.trim() == "group_by_provider")
-        {
-            lines.push(format!("group_by_provider={}", enabled));
-            found = true;
-        } else {
-            lines.push(line.to_string());
-        }
-    }
-
-    if !found {
-        lines.push(format!("group_by_provider={}", enabled));
-    }
-
-    let content = lines.join("\n") + "\n";
-
-    // Atomic write: tmp file (created with 0o600) + rename
-    let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
-
-    #[cfg(unix)]
-    {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp_path)?;
-        file.write_all(content.as_bytes())?;
-    }
-
-    #[cfg(not(unix))]
-    std::fs::write(&tmp_path, &content)?;
-
-    let result = std::fs::rename(&tmp_path, &path);
-    if result.is_err() {
-        let _ = std::fs::remove_file(&tmp_path);
-    }
-    result?;
-    Ok(())
+    save_value("group_by_provider", &enabled.to_string())
 }

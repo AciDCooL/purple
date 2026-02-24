@@ -62,7 +62,7 @@ pub struct Directive {
 }
 
 /// Convenience view for the TUI — extracted from a HostBlock.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct HostEntry {
     pub alias: String,
     pub hostname: String,
@@ -78,6 +78,22 @@ pub struct HostEntry {
     pub provider: Option<String>,
 }
 
+impl Default for HostEntry {
+    fn default() -> Self {
+        Self {
+            alias: String::new(),
+            hostname: String::new(),
+            user: String::new(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            source_file: None,
+            tags: Vec::new(),
+            provider: None,
+        }
+    }
+}
+
 impl HostEntry {
     /// Build the SSH command string for this host (e.g. "ssh -- 'myserver'").
     /// Shell-quotes the alias to prevent injection when pasted into a terminal.
@@ -85,6 +101,18 @@ impl HostEntry {
         let escaped = self.alias.replace('\'', "'\\''");
         format!("ssh -- '{}'", escaped)
     }
+}
+
+/// Returns true if the host pattern contains wildcards, character classes,
+/// negation or whitespace-separated multi-patterns (*, ?, [], !, space/tab).
+/// These are SSH match patterns, not concrete hosts.
+pub fn is_host_pattern(pattern: &str) -> bool {
+    pattern.contains('*')
+        || pattern.contains('?')
+        || pattern.contains('[')
+        || pattern.starts_with('!')
+        || pattern.contains(' ')
+        || pattern.contains('\t')
 }
 
 impl HostBlock {
@@ -216,17 +244,18 @@ impl HostBlock {
             if d.is_non_directive {
                 continue;
             }
-            match d.key.to_lowercase().as_str() {
-                "hostname" => entry.hostname = d.value.clone(),
-                "user" => entry.user = d.value.clone(),
-                "port" => entry.port = d.value.parse().unwrap_or(22),
-                "identityfile" => {
-                    if entry.identity_file.is_empty() {
-                        entry.identity_file = d.value.clone();
-                    }
+            if d.key.eq_ignore_ascii_case("hostname") {
+                entry.hostname = d.value.clone();
+            } else if d.key.eq_ignore_ascii_case("user") {
+                entry.user = d.value.clone();
+            } else if d.key.eq_ignore_ascii_case("port") {
+                entry.port = d.value.parse().unwrap_or(22);
+            } else if d.key.eq_ignore_ascii_case("identityfile") {
+                if entry.identity_file.is_empty() {
+                    entry.identity_file = d.value.clone();
                 }
-                "proxyjump" => entry.proxy_jump = d.value.clone(),
-                _ => {}
+            } else if d.key.eq_ignore_ascii_case("proxyjump") {
+                entry.proxy_jump = d.value.clone();
             }
         }
         entry.tags = self.tags();
@@ -238,7 +267,9 @@ impl HostBlock {
 impl SshConfigFile {
     /// Get all host entries as convenience views (including from Include files).
     pub fn host_entries(&self) -> Vec<HostEntry> {
-        Self::collect_host_entries(&self.elements)
+        let mut entries = Vec::new();
+        Self::collect_host_entries(&self.elements, &mut entries);
+        entries
     }
 
     /// Collect all resolved Include file paths (recursively).
@@ -263,14 +294,16 @@ impl SshConfigFile {
     /// When a file is added/removed under a glob dir, the directory's mtime changes.
     pub fn include_glob_dirs(&self) -> Vec<PathBuf> {
         let config_dir = self.path.parent();
+        let mut seen = std::collections::HashSet::new();
         let mut dirs = Vec::new();
-        Self::collect_include_glob_dirs(&self.elements, config_dir, &mut dirs);
+        Self::collect_include_glob_dirs(&self.elements, config_dir, &mut seen, &mut dirs);
         dirs
     }
 
     fn collect_include_glob_dirs(
         elements: &[ConfigElement],
         config_dir: Option<&std::path::Path>,
+        seen: &mut std::collections::HashSet<PathBuf>,
         dirs: &mut Vec<PathBuf>,
     ) {
         for e in elements {
@@ -288,7 +321,7 @@ impl SshConfigFile {
                     };
                     if let Some(parent) = resolved.parent() {
                         let parent = parent.to_path_buf();
-                        if !dirs.contains(&parent) {
+                        if seen.insert(parent.clone()) {
                             dirs.push(parent);
                         }
                     }
@@ -298,6 +331,7 @@ impl SshConfigFile {
                     Self::collect_include_glob_dirs(
                         &file.elements,
                         file.path.parent(),
+                        seen,
                         dirs,
                     );
                 }
@@ -307,38 +341,29 @@ impl SshConfigFile {
 
 
     /// Recursively collect host entries from a list of elements.
-    fn collect_host_entries(elements: &[ConfigElement]) -> Vec<HostEntry> {
-        let mut entries = Vec::new();
+    fn collect_host_entries(elements: &[ConfigElement], entries: &mut Vec<HostEntry>) {
         for e in elements {
             match e {
                 ConfigElement::HostBlock(block) => {
-                    // Skip wildcard/multi/negation patterns (*, ?, [], !, whitespace-separated)
-                    if block.host_pattern.contains('*')
-                        || block.host_pattern.contains('?')
-                        || block.host_pattern.contains('[')
-                        || block.host_pattern.starts_with('!')
-                        || block.host_pattern.contains(' ')
-                        || block.host_pattern.contains('\t')
-                    {
+                    if is_host_pattern(&block.host_pattern) {
                         continue;
                     }
                     entries.push(block.to_host_entry());
                 }
                 ConfigElement::Include(include) => {
                     for file in &include.resolved_files {
-                        let mut file_entries = Self::collect_host_entries(&file.elements);
-                        for entry in &mut file_entries {
+                        let start = entries.len();
+                        Self::collect_host_entries(&file.elements, entries);
+                        for entry in &mut entries[start..] {
                             if entry.source_file.is_none() {
                                 entry.source_file = Some(file.path.clone());
                             }
                         }
-                        entries.extend(file_entries);
                     }
                 }
                 ConfigElement::GlobalLine(_) => {}
             }
         }
-        entries
     }
 
     /// Check if a host alias already exists (including in Include files).
@@ -412,7 +437,7 @@ impl SshConfigFile {
                         // Remove explicit Port 22 (it's the default)
                         block
                             .directives
-                            .retain(|d| d.is_non_directive || d.key.to_lowercase() != "port");
+                            .retain(|d| d.is_non_directive || !d.key.eq_ignore_ascii_case("port"));
                     }
                     Self::upsert_directive(block, "IdentityFile", &entry.identity_file);
                     Self::upsert_directive(block, "ProxyJump", &entry.proxy_jump);
@@ -427,16 +452,20 @@ impl SshConfigFile {
         if value.is_empty() {
             block
                 .directives
-                .retain(|d| d.is_non_directive || d.key.to_lowercase() != key.to_lowercase());
+                .retain(|d| d.is_non_directive || !d.key.eq_ignore_ascii_case(key));
             return;
         }
         let indent = block.detect_indent();
         for d in &mut block.directives {
-            if !d.is_non_directive && d.key.to_lowercase() == key.to_lowercase() {
+            if !d.is_non_directive && d.key.eq_ignore_ascii_case(key) {
                 // Only rebuild raw_line when value actually changed (preserves inline comments)
                 if d.value != value {
                     d.value = value.to_string();
-                    d.raw_line = format!("{}{} {}", indent, d.key, value);
+                    // Detect equals-syntax from original raw_line and preserve it
+                    let trimmed = d.raw_line.trim_start();
+                    let after_key = &trimmed[d.key.len()..];
+                    let sep = if after_key.starts_with('=') { "=" } else { " " };
+                    d.raw_line = format!("{}{}{}{}", indent, d.key, sep, value);
                 }
                 return;
             }

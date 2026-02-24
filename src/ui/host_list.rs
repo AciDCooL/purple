@@ -6,12 +6,12 @@ use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::theme;
-use crate::app::{App, HostListItem, PingStatus, SortMode};
+use crate::app::{self, App, HostListItem, PingStatus, SortMode};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    let is_searching = app.search_query.is_some();
+    let is_searching = app.search.query.is_some();
     let is_tagging = app.tag_input.is_some();
 
     // Layout: host list + optional input bar + footer/status
@@ -66,15 +66,10 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     let title = if host_count == 0 {
         Line::from(Span::styled(" purple. ", theme::brand_badge()))
     } else {
-        let pos = if let Some(sel) = app.list_state.selected() {
-            if app.search_query.is_some() {
-                app.list_state.selected().map(|i| i + 1).unwrap_or(0)
-            } else {
-                app.display_list[..=sel]
-                    .iter()
-                    .filter(|item| matches!(item, HostListItem::Host { .. }))
-                    .count()
-            }
+        let pos = if let Some(sel) = app.ui.list_state.selected() {
+            app.display_list.get(..=sel)
+                .map(|slice| slice.iter().filter(|item| matches!(item, HostListItem::Host { .. })).count())
+                .unwrap_or(0)
         } else {
             0
         };
@@ -138,15 +133,18 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
                 ListItem::new(line)
             }
             HostListItem::Host { index } => {
-                let host = &app.hosts[*index];
-                build_host_item(
-                    host,
-                    &app.ping_status,
-                    &app.history,
-                    None,
-                    alias_col,
-                    content_width,
-                )
+                if let Some(host) = app.hosts.get(*index) {
+                    build_host_item(
+                        host,
+                        &app.ping_status,
+                        &app.history,
+                        None,
+                        alias_col,
+                        content_width,
+                    )
+                } else {
+                    ListItem::new(Line::from(Span::raw("")))
+                }
             }
         })
         .collect();
@@ -161,7 +159,7 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         .highlight_style(theme::selected())
         .highlight_symbol("  ");
 
-    frame.render_stateful_widget(list, area, &mut app.list_state);
+    frame.render_stateful_widget(list, area, &mut app.ui.list_state);
 }
 
 fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -169,12 +167,12 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
         Span::styled(" purple. ", theme::brand_badge()),
         Span::raw(format!(
             " search: {}/{} ",
-            app.filtered_indices.len(),
+            app.search.filtered_indices.len(),
             app.hosts.len()
         )),
     ]);
 
-    if app.filtered_indices.is_empty() {
+    if app.search.filtered_indices.is_empty() {
         let empty_msg = Paragraph::new("  No matches. Try a different search.")
             .style(theme::muted())
             .block(
@@ -188,28 +186,29 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
     }
 
     let alias_col = app
-        .hosts
+        .search.filtered_indices
         .iter()
+        .filter_map(|&i| app.hosts.get(i))
         .map(|h| h.alias.width())
         .max()
         .unwrap_or(8)
         .clamp(8, 20);
     let content_width = (area.width as usize).saturating_sub(4);
 
-    let query = app.search_query.as_deref();
+    let query = app.search.query.as_deref();
     let items: Vec<ListItem> = app
-        .filtered_indices
+        .search.filtered_indices
         .iter()
-        .map(|&idx| {
-            let host = &app.hosts[idx];
-            build_host_item(
+        .filter_map(|&idx| {
+            let host = app.hosts.get(idx)?;
+            Some(build_host_item(
                 host,
                 &app.ping_status,
                 &app.history,
                 query,
                 alias_col,
                 content_width,
-            )
+            ))
         })
         .collect();
 
@@ -223,7 +222,7 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
         .highlight_style(theme::selected())
         .highlight_symbol("  ");
 
-    frame.render_stateful_widget(list, area, &mut app.list_state);
+    frame.render_stateful_widget(list, area, &mut app.ui.list_state);
 }
 
 fn build_host_item<'a>(
@@ -235,16 +234,12 @@ fn build_host_item<'a>(
     content_width: usize,
 ) -> ListItem<'a> {
     let q = query.unwrap_or("");
-    let q_lower = q.to_lowercase();
 
     // Determine which field matches for search highlighting
-    let alias_matches = !q_lower.is_empty() && host.alias.to_lowercase().contains(&q_lower);
-    let host_matches =
-        !alias_matches && !q_lower.is_empty() && host.hostname.to_lowercase().contains(&q_lower);
-    let user_matches = !alias_matches
-        && !host_matches
-        && !q_lower.is_empty()
-        && host.user.to_lowercase().contains(&q_lower);
+    let alias_matches = !q.is_empty() && app::contains_ci(&host.alias, q);
+    let host_matches = !alias_matches && !q.is_empty() && app::contains_ci(&host.hostname, q);
+    let user_matches =
+        !alias_matches && !host_matches && !q.is_empty() && app::contains_ci(&host.user, q);
 
     // === LEFT: alias (fixed column) + user@hostname:port ===
     let alias_style = if alias_matches {
@@ -285,10 +280,9 @@ fn build_host_item<'a>(
     let mut right_spans: Vec<Span> = Vec::new();
     let mut right_len: usize = 0;
 
-    let tag_matches =
-        !q_lower.is_empty() && !alias_matches && !host_matches && !user_matches;
+    let tag_matches = !q.is_empty() && !alias_matches && !host_matches && !user_matches;
     for tag in &host.tags {
-        let style = if tag_matches && tag.to_lowercase().contains(&q_lower) {
+        let style = if tag_matches && app::contains_ci(tag, q) {
             theme::highlight_bold()
         } else {
             theme::accent()
@@ -299,7 +293,7 @@ fn build_host_item<'a>(
     }
 
     if let Some(ref label) = host.provider {
-        let style = if tag_matches && label.to_lowercase().contains(&q_lower) {
+        let style = if tag_matches && app::contains_ci(label, q) {
             theme::highlight_bold()
         } else {
             theme::accent()
@@ -353,11 +347,11 @@ fn build_host_item<'a>(
 }
 
 fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let query = app.search_query.as_deref().unwrap_or("");
+    let query = app.search.query.as_deref().unwrap_or("");
     let match_info = if query.is_empty() {
         String::new()
     } else {
-        let count = app.filtered_indices.len();
+        let count = app.search.filtered_indices.len();
         match count {
             0 => " (no matches)".to_string(),
             1 => " (1 match)".to_string(),

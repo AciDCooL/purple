@@ -20,14 +20,7 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
     let items: Vec<ListItem> = providers::PROVIDER_NAMES
         .iter()
         .map(|&name| {
-            let display_name = match name {
-                "digitalocean" => "DigitalOcean",
-                "vultr" => "Vultr",
-                "linode" => "Linode",
-                "hetzner" => "Hetzner",
-                "upcloud" => "UpCloud",
-                n => n,
-            };
+            let display_name = crate::providers::provider_display_name(name);
             let configured = app.provider_config.section(name).is_some();
             let status = if configured {
                 "[configured]"
@@ -71,7 +64,7 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         .highlight_style(theme::selected())
         .highlight_symbol("  ");
 
-    frame.render_stateful_widget(list, chunks[0], &mut app.provider_list_state);
+    frame.render_stateful_widget(list, chunks[0], &mut app.ui.provider_list_state);
 
     // Footer
     if app.status.is_some() {
@@ -95,14 +88,7 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
 pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &str) {
     let area = frame.area();
 
-    let display_name = match provider_name {
-        "digitalocean" => "DigitalOcean",
-        "vultr" => "Vultr",
-        "linode" => "Linode",
-        "hetzner" => "Hetzner",
-        "upcloud" => "UpCloud",
-        n => n,
-    };
+    let display_name = crate::providers::provider_display_name(provider_name);
     let title = format!(" Configure {} ", display_name);
 
     let form_area = super::centered_rect(70, 80, area);
@@ -149,7 +135,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
     }
 
     // Key picker popup overlay
-    if app.show_key_picker {
+    if app.ui.show_key_picker {
         super::host_form::render_key_picker_overlay(frame, app);
     }
 }
@@ -212,7 +198,7 @@ fn render_provider_field(
     let display: Span = if value.is_empty() && !is_focused {
         Span::styled(placeholder_for(field), theme::muted())
     } else {
-        Span::raw(display_value.as_str().to_string())
+        Span::raw(display_value)
     };
 
     let paragraph = Paragraph::new(display).block(block);
@@ -224,7 +210,7 @@ fn render_provider_field(
             .saturating_add(1)
             .saturating_add(value.width().min(u16::MAX as usize) as u16);
         let cursor_y = area.y + 1;
-        if cursor_x < area.x + area.width - 1 {
+        if area.width > 1 && cursor_x < area.x.saturating_add(area.width).saturating_sub(1) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     }

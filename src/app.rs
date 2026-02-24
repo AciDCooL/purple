@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use ratatui::widgets::ListState;
@@ -8,6 +10,22 @@ use crate::history::ConnectionHistory;
 use crate::providers::config::ProviderConfig;
 use crate::ssh_config::model::{ConfigElement, HostEntry, SshConfigFile};
 use crate::ssh_keys::{self, SshKeyInfo};
+
+/// Case-insensitive substring check without allocation.
+pub(crate) fn contains_ci(haystack: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// Case-insensitive equality check without allocation.
+fn eq_ci(a: &str, b: &str) -> bool {
+    a.eq_ignore_ascii_case(b)
+}
 
 /// Which screen is currently displayed.
 #[derive(Debug, Clone, PartialEq)]
@@ -132,15 +150,29 @@ impl HostForm {
         if self.alias.contains(char::is_whitespace) {
             return Err("Alias can't contain whitespace. Keep it simple.".to_string());
         }
-        if self.alias.contains('*')
-            || self.alias.contains('?')
-            || self.alias.contains('[')
-            || self.alias.starts_with('!')
-        {
+        if self.alias.contains('#') {
+            return Err("Alias can't contain '#'. That's a comment character in SSH config.".to_string());
+        }
+        if crate::ssh_config::model::is_host_pattern(&self.alias) {
             return Err(
                 "Alias can't contain pattern characters. That creates a match pattern, not a host."
                     .to_string(),
             );
+        }
+        // Reject control characters in all fields
+        let fields = [
+            (&self.alias, "Alias"),
+            (&self.hostname, "Hostname"),
+            (&self.user, "User"),
+            (&self.port, "Port"),
+            (&self.identity_file, "Identity File"),
+            (&self.proxy_jump, "ProxyJump"),
+            (&self.tags, "Tags"),
+        ];
+        for (value, name) in &fields {
+            if value.chars().any(|c| c.is_control()) {
+                return Err(format!("{} contains control characters. That's not going to work.", name));
+            }
         }
         if self.hostname.trim().is_empty() {
             return Err("Hostname can't be empty. Where should we connect to?".to_string());
@@ -306,6 +338,7 @@ impl SortMode {
 
     pub fn from_key(s: &str) -> Self {
         match s {
+            "original" => SortMode::Original,
             "alpha_alias" => SortMode::AlphaAlias,
             "alpha_hostname" => SortMode::AlphaHostname,
             "frecency" => SortMode::Frecency,
@@ -322,83 +355,80 @@ pub struct DeletedHost {
     pub position: usize,
 }
 
+/// Ratatui ListState fields for all list views.
+pub struct UiSelection {
+    pub list_state: ListState,
+    pub key_list_state: ListState,
+    pub show_key_picker: bool,
+    pub key_picker_state: ListState,
+    pub tag_picker_state: ListState,
+    pub provider_list_state: ListState,
+}
+
+/// Search mode state.
+pub struct SearchState {
+    pub query: Option<String>,
+    pub filtered_indices: Vec<usize>,
+    pub pre_search_selection: Option<usize>,
+}
+
+/// Auto-reload mtime tracking.
+pub struct ReloadState {
+    pub config_path: PathBuf,
+    pub last_modified: Option<SystemTime>,
+    pub include_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+    pub include_dir_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+}
+
+/// Form conflict detection mtimes.
+pub struct ConflictState {
+    pub form_mtime: Option<SystemTime>,
+    pub form_include_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+    pub form_include_dir_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+    pub provider_form_mtime: Option<SystemTime>,
+}
+
 /// Main application state.
 pub struct App {
+    // Core
     pub screen: Screen,
     pub running: bool,
     pub config: SshConfigFile,
     pub hosts: Vec<HostEntry>,
-
-    // Host list state
-    pub list_state: ListState,
-
-    // Display list (hosts + group headers)
     pub display_list: Vec<HostListItem>,
-
-    // Search state
-    pub search_query: Option<String>,
-    pub filtered_indices: Vec<usize>,
-    pre_search_selection: Option<usize>,
-
-    // Form state
     pub form: HostForm,
-
-    // Status bar
     pub status: Option<StatusMessage>,
-
-    // Pending SSH connection
     pub pending_connect: Option<String>,
 
-    // Key management state
+    // Sub-structs
+    pub ui: UiSelection,
+    pub search: SearchState,
+    pub reload: ReloadState,
+    pub conflict: ConflictState,
+
+    // Keys
     pub keys: Vec<SshKeyInfo>,
-    pub key_list_state: ListState,
-    pub show_key_picker: bool,
-    pub key_picker_state: ListState,
 
-    // Ping status
-    pub ping_status: HashMap<String, PingStatus>,
-
-    // Tag input
+    // Tags
     pub tag_input: Option<String>,
-
-    // Tag picker
     pub tag_list: Vec<String>,
-    pub tag_picker_state: ListState,
 
-    // Connection history
+    // History + preferences
     pub history: ConnectionHistory,
-
-    // Sort mode
     pub sort_mode: SortMode,
-
-    // Undo state
-    pub deleted_host: Option<DeletedHost>,
-
-    // Provider management
-    pub provider_config: ProviderConfig,
-    pub provider_list_state: ListState,
-    pub provider_form: ProviderFormFields,
-    pub syncing_providers: std::collections::HashSet<String>,
-
-    // Group by provider toggle
     pub group_by_provider: bool,
 
-    // Learning hints
+    // Undo
+    pub deleted_host: Option<DeletedHost>,
+
+    // Providers
+    pub provider_config: ProviderConfig,
+    pub provider_form: ProviderFormFields,
+    pub syncing_providers: HashMap<String, Arc<AtomicBool>>,
+
+    // Hints
+    pub ping_status: HashMap<String, PingStatus>,
     pub has_pinged: bool,
-
-    // Auto-reload state
-    pub config_path: PathBuf,
-    pub last_modified: Option<SystemTime>,
-    include_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
-    include_dir_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
-
-    // Form conflict detection (mtime snapshots when form opened)
-    pub form_open_mtime: Option<SystemTime>,
-    form_open_include_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
-    form_open_include_dir_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
-
-    // Provider form conflict detection (tracks ~/.purple/providers mtime)
-    provider_form_open_mtime: Option<SystemTime>,
 }
 
 impl App {
@@ -424,39 +454,47 @@ impl App {
             running: true,
             config,
             hosts,
-            list_state,
             display_list,
-            search_query: None,
-            filtered_indices: Vec::new(),
-            pre_search_selection: None,
             form: HostForm::new(),
             status: None,
             pending_connect: None,
+            ui: UiSelection {
+                list_state,
+                key_list_state: ListState::default(),
+                show_key_picker: false,
+                key_picker_state: ListState::default(),
+                tag_picker_state: ListState::default(),
+                provider_list_state: ListState::default(),
+            },
+            search: SearchState {
+                query: None,
+                filtered_indices: Vec::new(),
+                pre_search_selection: None,
+            },
+            reload: ReloadState {
+                config_path,
+                last_modified,
+                include_mtimes,
+                include_dir_mtimes,
+            },
+            conflict: ConflictState {
+                form_mtime: None,
+                form_include_mtimes: Vec::new(),
+                form_include_dir_mtimes: Vec::new(),
+                provider_form_mtime: None,
+            },
             keys: Vec::new(),
-            key_list_state: ListState::default(),
-            show_key_picker: false,
-            key_picker_state: ListState::default(),
-            ping_status: HashMap::new(),
             tag_input: None,
             tag_list: Vec::new(),
-            tag_picker_state: ListState::default(),
-            provider_config: ProviderConfig::load(),
-            provider_list_state: ListState::default(),
-            provider_form: ProviderFormFields::new(),
-            syncing_providers: std::collections::HashSet::new(),
             history: ConnectionHistory::load(),
             sort_mode: SortMode::Original,
             group_by_provider: false,
             deleted_host: None,
+            provider_config: ProviderConfig::load(),
+            provider_form: ProviderFormFields::new(),
+            syncing_providers: HashMap::new(),
+            ping_status: HashMap::new(),
             has_pinged: false,
-            config_path,
-            last_modified,
-            include_mtimes,
-            include_dir_mtimes,
-            form_open_mtime: None,
-            form_open_include_mtimes: Vec::new(),
-            form_open_include_dir_mtimes: Vec::new(),
-            provider_form_open_mtime: None,
         }
     }
 
@@ -487,14 +525,7 @@ impl App {
                     }
                 }
                 ConfigElement::HostBlock(block) => {
-                    // Skip patterns (same logic as host_entries)
-                    if block.host_pattern.contains('*')
-                        || block.host_pattern.contains('?')
-                        || block.host_pattern.contains('[')
-                        || block.host_pattern.starts_with('!')
-                        || block.host_pattern.contains(' ')
-                        || block.host_pattern.contains('\t')
-                    {
+                    if crate::ssh_config::model::is_host_pattern(&block.host_pattern) {
                         pending_comment = None;
                         continue;
                     }
@@ -533,7 +564,7 @@ impl App {
     /// a potential group header for the next host block.
     /// Strips `purple:group ` prefix so headers display as the provider name.
     fn extract_trailing_comment(directives: &[crate::ssh_config::model::Directive]) -> Option<String> {
-        let d = directives.iter().next_back()?;
+        let d = directives.last()?;
         if !d.is_non_directive {
             return None;
         }
@@ -573,10 +604,7 @@ impl App {
         if !file_name.is_empty() {
             let has_hosts = elements.iter().any(|e| {
                 matches!(e, ConfigElement::HostBlock(b)
-                    if !b.host_pattern.contains('*')
-                    && !b.host_pattern.contains('?')
-                    && !b.host_pattern.contains(' ')
-                    && !b.host_pattern.contains('\t')
+                    if !crate::ssh_config::model::is_host_pattern(&b.host_pattern)
                 )
             });
             if has_hosts {
@@ -599,11 +627,7 @@ impl App {
                     }
                 }
                 ConfigElement::HostBlock(block) => {
-                    if block.host_pattern.contains('*')
-                        || block.host_pattern.contains('?')
-                        || block.host_pattern.contains(' ')
-                        || block.host_pattern.contains('\t')
-                    {
+                    if crate::ssh_config::model::is_host_pattern(&block.host_pattern) {
                         pending_comment = None;
                         continue;
                     }
@@ -647,20 +671,10 @@ impl App {
             let mut indices: Vec<usize> = (0..self.hosts.len()).collect();
             match self.sort_mode {
                 SortMode::AlphaAlias => {
-                    indices.sort_by(|a, b| {
-                        self.hosts[*a]
-                            .alias
-                            .to_lowercase()
-                            .cmp(&self.hosts[*b].alias.to_lowercase())
-                    });
+                    indices.sort_by_cached_key(|&i| self.hosts[i].alias.to_lowercase());
                 }
                 SortMode::AlphaHostname => {
-                    indices.sort_by(|a, b| {
-                        self.hosts[*a]
-                            .hostname
-                            .to_lowercase()
-                            .cmp(&self.hosts[*b].hostname.to_lowercase())
-                    });
+                    indices.sort_by_cached_key(|&i| self.hosts[i].hostname.to_lowercase());
                 }
                 SortMode::Frecency => {
                     indices.sort_by(|a, b| {
@@ -697,7 +711,7 @@ impl App {
             .iter()
             .position(|item| matches!(item, HostListItem::Host { .. }))
         {
-            self.list_state.select(Some(pos));
+            self.ui.list_state.select(Some(pos));
         }
     }
 
@@ -706,19 +720,19 @@ impl App {
     /// groups (in first-appearance order) with headers.
     fn group_indices_by_provider(hosts: &[HostEntry], sorted_indices: &[usize]) -> Vec<HostListItem> {
         let mut none_indices: Vec<usize> = Vec::new();
-        let mut provider_groups: Vec<(String, Vec<usize>)> = Vec::new();
-        let mut provider_order: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut provider_groups: Vec<(&str, Vec<usize>)> = Vec::new();
+        let mut provider_order: HashMap<&str, usize> = HashMap::new();
 
         for &idx in sorted_indices {
             match &hosts[idx].provider {
                 None => none_indices.push(idx),
                 Some(name) => {
-                    if let Some(&group_idx) = provider_order.get(name) {
+                    if let Some(&group_idx) = provider_order.get(name.as_str()) {
                         provider_groups[group_idx].1.push(idx);
                     } else {
                         let group_idx = provider_groups.len();
-                        provider_order.insert(name.clone(), group_idx);
-                        provider_groups.push((name.clone(), vec![idx]));
+                        provider_order.insert(name, group_idx);
+                        provider_groups.push((name, vec![idx]));
                     }
                 }
             }
@@ -733,7 +747,7 @@ impl App {
 
         // Then provider groups with headers
         for (name, indices) in &provider_groups {
-            let header = provider_display_name(name);
+            let header = crate::providers::provider_display_name(name);
             display_list.push(HostListItem::GroupHeader(header.to_string()));
             for &idx in indices {
                 display_list.push(HostListItem::Host { index: idx });
@@ -744,13 +758,13 @@ impl App {
 
     /// Get the host index from the currently selected display list item.
     pub fn selected_host_index(&self) -> Option<usize> {
-        if self.search_query.is_some() {
+        if self.search.query.is_some() {
             // In search mode, list_state indexes into filtered_indices
-            let sel = self.list_state.selected()?;
-            self.filtered_indices.get(sel).copied()
+            let sel = self.ui.list_state.selected()?;
+            self.search.filtered_indices.get(sel).copied()
         } else {
             // In normal mode, list_state indexes into display_list
-            let sel = self.list_state.selected()?;
+            let sel = self.ui.list_state.selected()?;
             match self.display_list.get(sel) {
                 Some(HostListItem::Host { index }) => Some(*index),
                 _ => None,
@@ -766,8 +780,8 @@ impl App {
 
     /// Move selection up, skipping group headers.
     pub fn select_prev(&mut self) {
-        if self.search_query.is_some() {
-            cycle_selection(&mut self.list_state, self.filtered_indices.len(), false);
+        if self.search.query.is_some() {
+            cycle_selection(&mut self.ui.list_state, self.search.filtered_indices.len(), false);
         } else {
             self.select_prev_in_display_list();
         }
@@ -775,8 +789,8 @@ impl App {
 
     /// Move selection down, skipping group headers.
     pub fn select_next(&mut self) {
-        if self.search_query.is_some() {
-            cycle_selection(&mut self.list_state, self.filtered_indices.len(), true);
+        if self.search.query.is_some() {
+            cycle_selection(&mut self.ui.list_state, self.search.filtered_indices.len(), true);
         } else {
             self.select_next_in_display_list();
         }
@@ -787,12 +801,12 @@ impl App {
             return;
         }
         let len = self.display_list.len();
-        let current = self.list_state.selected().unwrap_or(0);
+        let current = self.ui.list_state.selected().unwrap_or(0);
         // Find next Host item after current
         for offset in 1..=len {
             let idx = (current + offset) % len;
             if matches!(self.display_list[idx], HostListItem::Host { .. }) {
-                self.list_state.select(Some(idx));
+                self.ui.list_state.select(Some(idx));
                 return;
             }
         }
@@ -803,12 +817,12 @@ impl App {
             return;
         }
         let len = self.display_list.len();
-        let current = self.list_state.selected().unwrap_or(0);
+        let current = self.ui.list_state.selected().unwrap_or(0);
         // Find prev Host item before current
         for offset in 1..=len {
             let idx = (current + len - offset) % len;
             if matches!(self.display_list[idx], HostListItem::Host { .. }) {
-                self.list_state.select(Some(idx));
+                self.ui.list_state.select(Some(idx));
                 return;
             }
         }
@@ -816,7 +830,7 @@ impl App {
 
     /// Reload hosts from config.
     pub fn reload_hosts(&mut self) {
-        let had_search = self.search_query.clone();
+        let had_search = self.search.query.take();
 
         self.hosts = self.config.host_entries();
         if self.sort_mode == SortMode::Original && !self.group_by_provider {
@@ -832,27 +846,27 @@ impl App {
 
         // Restore search if it was active, otherwise reset
         if let Some(query) = had_search {
-            self.search_query = Some(query);
+            self.search.query = Some(query);
             self.apply_filter();
         } else {
-            self.search_query = None;
-            self.filtered_indices.clear();
+            self.search.query = None;
+            self.search.filtered_indices.clear();
             // Fix selection for display list mode
             if self.hosts.is_empty() {
-                self.list_state.select(None);
+                self.ui.list_state.select(None);
             } else if let Some(pos) = self
                 .display_list
                 .iter()
                 .position(|item| matches!(item, HostListItem::Host { .. }))
             {
-                let current = self.list_state.selected().unwrap_or(0);
+                let current = self.ui.list_state.selected().unwrap_or(0);
                 if current >= self.display_list.len()
                     || !matches!(self.display_list.get(current), Some(HostListItem::Host { .. }))
                 {
-                    self.list_state.select(Some(pos));
+                    self.ui.list_state.select(Some(pos));
                 }
             } else {
-                self.list_state.select(None);
+                self.ui.list_state.select(None);
             }
         }
     }
@@ -861,94 +875,101 @@ impl App {
 
     /// Enter search mode.
     pub fn start_search(&mut self) {
-        self.pre_search_selection = self.list_state.selected();
-        self.search_query = Some(String::new());
+        self.search.pre_search_selection = self.ui.list_state.selected();
+        self.search.query = Some(String::new());
         self.apply_filter();
     }
 
     /// Start search with an initial query (for positional arg).
     pub fn start_search_with(&mut self, query: &str) {
-        self.pre_search_selection = self.list_state.selected();
-        self.search_query = Some(query.to_string());
+        self.search.pre_search_selection = self.ui.list_state.selected();
+        self.search.query = Some(query.to_string());
         self.apply_filter();
     }
 
     /// Cancel search mode and restore normal view.
     pub fn cancel_search(&mut self) {
-        self.search_query = None;
-        self.filtered_indices.clear();
+        self.search.query = None;
+        self.search.filtered_indices.clear();
         // Restore pre-search position (bounds-checked)
-        if let Some(pos) = self.pre_search_selection.take() {
+        if let Some(pos) = self.search.pre_search_selection.take() {
             if pos < self.display_list.len() {
-                self.list_state.select(Some(pos));
+                self.ui.list_state.select(Some(pos));
             } else if let Some(first) = self
                 .display_list
                 .iter()
                 .position(|item| matches!(item, HostListItem::Host { .. }))
             {
-                self.list_state.select(Some(first));
+                self.ui.list_state.select(Some(first));
             }
         }
     }
 
     /// Apply the current search query to filter hosts.
     pub fn apply_filter(&mut self) {
-        let query = match &self.search_query {
-            Some(q) => q.to_lowercase(),
+        let query = match &self.search.query {
+            Some(q) if !q.is_empty() => q.clone(),
+            Some(_) => {
+                self.search.filtered_indices = (0..self.hosts.len()).collect();
+                if self.search.filtered_indices.is_empty() {
+                    self.ui.list_state.select(None);
+                } else {
+                    self.ui.list_state.select(Some(0));
+                }
+                return;
+            }
             None => return,
         };
 
-        if query.is_empty() {
-            self.filtered_indices = (0..self.hosts.len()).collect();
-        } else if let Some(tag_exact) = query.strip_prefix("tag=") {
+        if let Some(tag_exact) = query.strip_prefix("tag=") {
             // Exact tag match (from tag picker), includes provider name
-            self.filtered_indices = self
+            self.search.filtered_indices = self
                 .hosts
                 .iter()
                 .enumerate()
                 .filter(|(_, host)| {
                     host.tags
                         .iter()
-                        .any(|t| t.to_lowercase() == tag_exact)
-                        || host.provider.as_ref().is_some_and(|p| p.to_lowercase() == tag_exact)
+                        .any(|t| eq_ci(t, tag_exact))
+                        || host.provider.as_ref().is_some_and(|p| eq_ci(p, tag_exact))
                 })
                 .map(|(i, _)| i)
                 .collect();
         } else if let Some(tag_query) = query.strip_prefix("tag:") {
             // Fuzzy tag match (manual search), includes provider name
-            self.filtered_indices = self
+            self.search.filtered_indices = self
                 .hosts
                 .iter()
                 .enumerate()
                 .filter(|(_, host)| {
                     host.tags
                         .iter()
-                        .any(|t| t.to_lowercase().contains(tag_query))
-                        || host.provider.as_ref().is_some_and(|p| p.to_lowercase().contains(tag_query))
+                        .any(|t| contains_ci(t, tag_query))
+                        || host.provider.as_ref().is_some_and(|p| contains_ci(p, tag_query))
                 })
                 .map(|(i, _)| i)
                 .collect();
         } else {
-            self.filtered_indices = self
+            self.search.filtered_indices = self
                 .hosts
                 .iter()
                 .enumerate()
                 .filter(|(_, host)| {
-                    host.alias.to_lowercase().contains(&query)
-                        || host.hostname.to_lowercase().contains(&query)
-                        || host.user.to_lowercase().contains(&query)
-                        || host.tags.iter().any(|t| t.to_lowercase().contains(&query))
-                        || host.provider.as_ref().is_some_and(|p| p.to_lowercase().contains(&query))
+                    contains_ci(&host.alias, &query)
+                        || contains_ci(&host.hostname, &query)
+                        || contains_ci(&host.user, &query)
+                        || host.tags.iter().any(|t| contains_ci(t, &query))
+                        || host.provider.as_ref().is_some_and(|p| contains_ci(p, &query))
                 })
                 .map(|(i, _)| i)
                 .collect();
         }
 
         // Reset selection
-        if self.filtered_indices.is_empty() {
-            self.list_state.select(None);
+        if self.search.filtered_indices.is_empty() {
+            self.ui.list_state.select(None);
         } else {
-            self.list_state.select(Some(0));
+            self.ui.list_state.select(Some(0));
         }
     }
 
@@ -987,23 +1008,25 @@ impl App {
         ) {
             return;
         }
-        let current_mtime = Self::get_mtime(&self.config_path);
-        let changed = current_mtime != self.last_modified
-            || self.include_mtimes.iter().any(|(path, old_mtime)| {
+        let current_mtime = Self::get_mtime(&self.reload.config_path);
+        let changed = current_mtime != self.reload.last_modified
+            || self.reload.include_mtimes.iter().any(|(path, old_mtime)| {
                 Self::get_mtime(path) != *old_mtime
             })
-            || self.include_dir_mtimes.iter().any(|(path, old_mtime)| {
+            || self.reload.include_dir_mtimes.iter().any(|(path, old_mtime)| {
                 Self::get_mtime(path) != *old_mtime
             });
         if changed {
-            if let Ok(new_config) = SshConfigFile::parse(&self.config_path) {
+            if let Ok(new_config) = SshConfigFile::parse(&self.reload.config_path) {
                 self.config = new_config;
                 // Invalidate undo state — config structure may have changed externally
                 self.deleted_host = None;
+                // Clear stale ping status — hosts may have changed
+                self.ping_status.clear();
                 self.reload_hosts();
-                self.last_modified = current_mtime;
-                self.include_mtimes = Self::snapshot_include_mtimes(&self.config);
-                self.include_dir_mtimes = Self::snapshot_include_dir_mtimes(&self.config);
+                self.reload.last_modified = current_mtime;
+                self.reload.include_mtimes = Self::snapshot_include_mtimes(&self.config);
+                self.reload.include_dir_mtimes = Self::snapshot_include_dir_mtimes(&self.config);
                 let count = self.hosts.len();
                 self.set_status(format!("Config reloaded. {} hosts.", count), false);
             }
@@ -1012,45 +1035,45 @@ impl App {
 
     /// Update the last_modified timestamp (call after writing config).
     pub fn update_last_modified(&mut self) {
-        self.last_modified = Self::get_mtime(&self.config_path);
-        self.include_mtimes = Self::snapshot_include_mtimes(&self.config);
-        self.include_dir_mtimes = Self::snapshot_include_dir_mtimes(&self.config);
+        self.reload.last_modified = Self::get_mtime(&self.reload.config_path);
+        self.reload.include_mtimes = Self::snapshot_include_mtimes(&self.config);
+        self.reload.include_dir_mtimes = Self::snapshot_include_dir_mtimes(&self.config);
     }
 
     /// Clear form mtime state (call on form cancel or successful submit).
     pub fn clear_form_mtime(&mut self) {
-        self.form_open_mtime = None;
-        self.form_open_include_mtimes.clear();
-        self.form_open_include_dir_mtimes.clear();
-        self.provider_form_open_mtime = None;
+        self.conflict.form_mtime = None;
+        self.conflict.form_include_mtimes.clear();
+        self.conflict.form_include_dir_mtimes.clear();
+        self.conflict.provider_form_mtime = None;
     }
 
     /// Capture config and Include file mtimes when opening a host form.
     pub fn capture_form_mtime(&mut self) {
-        self.form_open_mtime = Self::get_mtime(&self.config_path);
-        self.form_open_include_mtimes = Self::snapshot_include_mtimes(&self.config);
-        self.form_open_include_dir_mtimes = Self::snapshot_include_dir_mtimes(&self.config);
+        self.conflict.form_mtime = Self::get_mtime(&self.reload.config_path);
+        self.conflict.form_include_mtimes = Self::snapshot_include_mtimes(&self.config);
+        self.conflict.form_include_dir_mtimes = Self::snapshot_include_dir_mtimes(&self.config);
     }
 
     /// Capture ~/.purple/providers mtime when opening a provider form.
     pub fn capture_provider_form_mtime(&mut self) {
         let path = dirs::home_dir()
             .map(|h| h.join(".purple/providers"));
-        self.provider_form_open_mtime = path.as_ref().and_then(|p| Self::get_mtime(p));
+        self.conflict.provider_form_mtime = path.as_ref().and_then(|p| Self::get_mtime(p));
     }
 
     /// Check if config or any Include file/directory has changed since the form was opened.
     pub fn config_changed_since_form_open(&self) -> bool {
-        match self.form_open_mtime {
+        match self.conflict.form_mtime {
             Some(open_mtime) => {
-                if Self::get_mtime(&self.config_path) != Some(open_mtime) {
+                if Self::get_mtime(&self.reload.config_path) != Some(open_mtime) {
                     return true;
                 }
-                self.form_open_include_mtimes
+                self.conflict.form_include_mtimes
                     .iter()
                     .any(|(path, old_mtime)| Self::get_mtime(path) != *old_mtime)
                     || self
-                        .form_open_include_dir_mtimes
+                        .conflict.form_include_dir_mtimes
                         .iter()
                         .any(|(path, old_mtime)| Self::get_mtime(path) != *old_mtime)
             }
@@ -1063,7 +1086,7 @@ impl App {
         let path = dirs::home_dir()
             .map(|h| h.join(".purple/providers"));
         let current_mtime = path.as_ref().and_then(|p| Self::get_mtime(p));
-        self.provider_form_open_mtime != current_mtime
+        self.conflict.provider_form_mtime != current_mtime
     }
 
     /// Snapshot mtimes of all resolved Include files.
@@ -1095,30 +1118,30 @@ impl App {
         if let Some(home) = dirs::home_dir() {
             let ssh_dir = home.join(".ssh");
             self.keys = ssh_keys::discover_keys(Path::new(&ssh_dir), &self.hosts);
-            if !self.keys.is_empty() && self.key_list_state.selected().is_none() {
-                self.key_list_state.select(Some(0));
+            if !self.keys.is_empty() && self.ui.key_list_state.selected().is_none() {
+                self.ui.key_list_state.select(Some(0));
             }
         }
     }
 
     /// Move key list selection up.
     pub fn select_prev_key(&mut self) {
-        cycle_selection(&mut self.key_list_state, self.keys.len(), false);
+        cycle_selection(&mut self.ui.key_list_state, self.keys.len(), false);
     }
 
     /// Move key list selection down.
     pub fn select_next_key(&mut self) {
-        cycle_selection(&mut self.key_list_state, self.keys.len(), true);
+        cycle_selection(&mut self.ui.key_list_state, self.keys.len(), true);
     }
 
     /// Move key picker selection up.
     pub fn select_prev_picker_key(&mut self) {
-        cycle_selection(&mut self.key_picker_state, self.keys.len(), false);
+        cycle_selection(&mut self.ui.key_picker_state, self.keys.len(), false);
     }
 
     /// Move key picker selection down.
     pub fn select_next_picker_key(&mut self) {
-        cycle_selection(&mut self.key_picker_state, self.keys.len(), true);
+        cycle_selection(&mut self.ui.key_picker_state, self.keys.len(), true);
     }
 
     /// Collect all unique tags from hosts, sorted alphabetically.
@@ -1127,50 +1150,143 @@ impl App {
         let mut tags = Vec::new();
         for host in &self.hosts {
             for tag in &host.tags {
-                if seen.insert(tag.clone()) {
+                if seen.insert(tag.as_str()) {
                     tags.push(tag.clone());
                 }
             }
             if let Some(ref provider) = host.provider {
-                if seen.insert(provider.clone()) {
+                if seen.insert(provider.as_str()) {
                     tags.push(provider.clone());
                 }
             }
         }
-        tags.sort_by_key(|a| a.to_lowercase());
+        tags.sort_by_cached_key(|a| a.to_lowercase());
         tags
     }
 
     /// Open the tag picker overlay.
     pub fn open_tag_picker(&mut self) {
         self.tag_list = self.collect_unique_tags();
-        self.tag_picker_state = ListState::default();
+        self.ui.tag_picker_state = ListState::default();
         if !self.tag_list.is_empty() {
-            self.tag_picker_state.select(Some(0));
+            self.ui.tag_picker_state.select(Some(0));
         }
         self.screen = Screen::TagPicker;
     }
 
     /// Move tag picker selection up.
     pub fn select_prev_tag(&mut self) {
-        cycle_selection(&mut self.tag_picker_state, self.tag_list.len(), false);
+        cycle_selection(&mut self.ui.tag_picker_state, self.tag_list.len(), false);
     }
 
     /// Move tag picker selection down.
     pub fn select_next_tag(&mut self) {
-        cycle_selection(&mut self.tag_picker_state, self.tag_list.len(), true);
+        cycle_selection(&mut self.ui.tag_picker_state, self.tag_list.len(), true);
     }
-}
 
-/// Display name for a provider (used in group headers).
-fn provider_display_name(name: &str) -> &str {
-    match name {
-        "digitalocean" => "DigitalOcean",
-        "vultr" => "Vultr",
-        "linode" => "Linode",
-        "hetzner" => "Hetzner",
-        "upcloud" => "UpCloud",
-        other => other,
+    /// Add a new host from the current form. Returns status message.
+    pub fn add_host_from_form(&mut self) -> Result<String, String> {
+        let entry = self.form.to_entry();
+        let alias = entry.alias.clone();
+        if self.config.has_host(&alias) {
+            return Err(format!(
+                "'{}' already exists. Aliases are like fingerprints — unique.",
+                alias
+            ));
+        }
+        let len_before = self.config.elements.len();
+        self.config.add_host(&entry);
+        if !entry.tags.is_empty() {
+            self.config.set_host_tags(&alias, &entry.tags);
+        }
+        if let Err(e) = self.config.write() {
+            self.config.elements.truncate(len_before);
+            return Err(format!("Failed to save: {}", e));
+        }
+        self.update_last_modified();
+        self.reload_hosts();
+        self.select_host_by_alias(&alias);
+        Ok(format!("Welcome aboard, {}!", alias))
+    }
+
+    /// Edit an existing host from the current form. Returns status message.
+    pub fn edit_host_from_form(&mut self, old_alias: &str) -> Result<String, String> {
+        let entry = self.form.to_entry();
+        let alias = entry.alias.clone();
+        if !self.config.has_host(old_alias) {
+            return Err("Host no longer exists.".to_string());
+        }
+        if alias != old_alias && self.config.has_host(&alias) {
+            return Err(format!(
+                "'{}' already exists. Aliases are like fingerprints — unique.",
+                alias
+            ));
+        }
+        let old_entry = self
+            .hosts
+            .iter()
+            .find(|h| h.alias == old_alias)
+            .cloned()
+            .unwrap_or_default();
+        self.config.update_host(old_alias, &entry);
+        self.config.set_host_tags(&entry.alias, &entry.tags);
+        if let Err(e) = self.config.write() {
+            self.config.update_host(&entry.alias, &old_entry);
+            self.config.set_host_tags(&old_entry.alias, &old_entry.tags);
+            return Err(format!("Failed to save: {}", e));
+        }
+        self.update_last_modified();
+        self.reload_hosts();
+        Ok(format!("{} got a makeover.", alias))
+    }
+
+    /// Select a host in the display list by alias.
+    fn select_host_by_alias(&mut self, alias: &str) {
+        for (i, item) in self.display_list.iter().enumerate() {
+            if let HostListItem::Host { index } = item {
+                if self.hosts.get(*index).is_some_and(|h| h.alias == *alias) {
+                    self.ui.list_state.select(Some(i));
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Apply sync results from a background provider fetch.
+    /// Returns status message. Caller must remove from syncing_providers.
+    pub fn apply_sync_result(
+        &mut self,
+        provider: &str,
+        hosts: Vec<crate::providers::ProviderHost>,
+    ) -> String {
+        let section = match self.provider_config.section(provider).cloned() {
+            Some(s) => s,
+            None => return format!("! {} sync skipped: no config.", provider),
+        };
+        let provider_impl = match crate::providers::get_provider(provider) {
+            Some(p) => p,
+            None => return format!("! Unknown provider: {}.", provider),
+        };
+        let result = crate::providers::sync::sync_provider(
+            &mut self.config,
+            &*provider_impl,
+            &hosts,
+            &section,
+            false,
+            false,
+        );
+        if result.added > 0 || result.updated > 0 {
+            if let Err(e) = self.config.write() {
+                return format!("Sync failed to save: {}", e);
+            }
+            self.update_last_modified();
+            self.reload_hosts();
+        }
+        let name = crate::providers::provider_display_name(provider);
+        format!(
+            "Synced {}: added {}, updated {}, unchanged {}.",
+            name, result.added, result.updated, result.unchanged
+        )
     }
 }
 
@@ -1213,34 +1329,34 @@ mod tests {
     fn test_apply_filter_matches_alias() {
         let mut app = make_app("Host alpha\n  HostName a.com\n\nHost beta\n  HostName b.com\n");
         app.start_search();
-        app.search_query = Some("alp".to_string());
+        app.search.query = Some("alp".to_string());
         app.apply_filter();
-        assert_eq!(app.filtered_indices, vec![0]);
+        assert_eq!(app.search.filtered_indices, vec![0]);
     }
 
     #[test]
     fn test_apply_filter_matches_hostname() {
         let mut app = make_app("Host alpha\n  HostName a.com\n\nHost beta\n  HostName b.com\n");
         app.start_search();
-        app.search_query = Some("b.com".to_string());
+        app.search.query = Some("b.com".to_string());
         app.apply_filter();
-        assert_eq!(app.filtered_indices, vec![1]);
+        assert_eq!(app.search.filtered_indices, vec![1]);
     }
 
     #[test]
     fn test_apply_filter_empty_query() {
         let mut app = make_app("Host alpha\n  HostName a.com\n\nHost beta\n  HostName b.com\n");
         app.start_search();
-        assert_eq!(app.filtered_indices, vec![0, 1]);
+        assert_eq!(app.search.filtered_indices, vec![0, 1]);
     }
 
     #[test]
     fn test_apply_filter_no_matches() {
         let mut app = make_app("Host alpha\n  HostName a.com\n");
         app.start_search();
-        app.search_query = Some("zzz".to_string());
+        app.search.query = Some("zzz".to_string());
         app.apply_filter();
-        assert!(app.filtered_indices.is_empty());
+        assert!(app.search.filtered_indices.is_empty());
     }
 
     #[test]
@@ -1289,12 +1405,12 @@ Host beta
 ";
         let mut app = make_app(content);
         // Should start on first Host (index 1 in display_list)
-        assert_eq!(app.list_state.selected(), Some(1));
+        assert_eq!(app.ui.list_state.selected(), Some(1));
         app.select_next();
         // Should skip header at index 2, land on Host at index 3
-        assert_eq!(app.list_state.selected(), Some(3));
+        assert_eq!(app.ui.list_state.selected(), Some(3));
         app.select_prev();
-        assert_eq!(app.list_state.selected(), Some(1));
+        assert_eq!(app.ui.list_state.selected(), Some(1));
     }
 
     #[test]
@@ -1393,8 +1509,8 @@ Host do-alpha
     #[test]
     fn test_config_changed_since_form_open_detects_change() {
         let mut app = make_app("Host alpha\n  HostName a.com\n");
-        // Set form_open_mtime to a known past value (different from current None)
-        app.form_open_mtime = Some(SystemTime::UNIX_EPOCH);
+        // Set form_mtime to a known past value (different from current None)
+        app.conflict.form_mtime = Some(SystemTime::UNIX_EPOCH);
         // Config path doesn't exist (mtime is None), so it differs from UNIX_EPOCH
         assert!(app.config_changed_since_form_open());
     }
@@ -1425,5 +1541,108 @@ Host vultr-app
         // Should be flat: just hosts, no headers
         assert_eq!(app.display_list.len(), 2);
         assert!(app.display_list.iter().all(|item| matches!(item, HostListItem::Host { .. })));
+    }
+
+    // --- New validation tests from review findings ---
+
+    #[test]
+    fn test_validate_rejects_hash_in_alias() {
+        let mut form = HostForm::new();
+        form.alias = "my#host".to_string();
+        form.hostname = "1.2.3.4".to_string();
+        let result = form.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("#"));
+    }
+
+    #[test]
+    fn test_validate_empty_alias() {
+        let mut form = HostForm::new();
+        form.alias = "".to_string();
+        form.hostname = "1.2.3.4".to_string();
+        assert!(form.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_whitespace_alias() {
+        let mut form = HostForm::new();
+        form.alias = "my host".to_string();
+        form.hostname = "1.2.3.4".to_string();
+        assert!(form.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_pattern_alias() {
+        let mut form = HostForm::new();
+        form.alias = "my*host".to_string();
+        form.hostname = "1.2.3.4".to_string();
+        assert!(form.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_empty_hostname() {
+        let mut form = HostForm::new();
+        form.alias = "myhost".to_string();
+        form.hostname = "".to_string();
+        assert!(form.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_invalid_port() {
+        let mut form = HostForm::new();
+        form.alias = "myhost".to_string();
+        form.hostname = "1.2.3.4".to_string();
+        form.port = "abc".to_string();
+        assert!(form.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_port_zero() {
+        let mut form = HostForm::new();
+        form.alias = "myhost".to_string();
+        form.hostname = "1.2.3.4".to_string();
+        form.port = "0".to_string();
+        assert!(form.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_valid_form() {
+        let mut form = HostForm::new();
+        form.alias = "myhost".to_string();
+        form.hostname = "1.2.3.4".to_string();
+        form.port = "22".to_string();
+        assert!(form.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_control_chars() {
+        let mut form = HostForm::new();
+        form.alias = "myhost".to_string();
+        form.hostname = "1.2.3.4\x00".to_string();
+        form.port = "22".to_string();
+        assert!(form.validate().is_err());
+    }
+
+    #[test]
+    fn test_to_entry_parses_tags() {
+        let mut form = HostForm::new();
+        form.alias = "myhost".to_string();
+        form.hostname = "1.2.3.4".to_string();
+        form.tags = "prod, staging, us-east".to_string();
+        let entry = form.to_entry();
+        assert_eq!(entry.tags, vec!["prod", "staging", "us-east"]);
+    }
+
+    #[test]
+    fn test_sort_mode_round_trip() {
+        for mode in [
+            SortMode::Original,
+            SortMode::AlphaAlias,
+            SortMode::AlphaHostname,
+            SortMode::Frecency,
+            SortMode::MostRecent,
+        ] {
+            assert_eq!(SortMode::from_key(mode.to_key()), mode);
+        }
     }
 }

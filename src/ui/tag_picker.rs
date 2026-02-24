@@ -63,5 +63,5 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .highlight_style(theme::selected())
         .highlight_symbol("  ");
 
-    frame.render_stateful_widget(list, area, &mut app.tag_picker_state);
+    frame.render_stateful_widget(list, area, &mut app.ui.tag_picker_state);
 }

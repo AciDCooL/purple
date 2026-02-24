@@ -3,6 +3,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::fs_util;
+
 /// A single history entry for a host.
 #[derive(Debug, Clone)]
 pub struct HistoryEntry {
@@ -21,7 +23,10 @@ pub struct ConnectionHistory {
 impl ConnectionHistory {
     /// Load connection history from disk.
     pub fn load() -> Self {
-        let path = Self::history_path();
+        let path = match Self::history_path() {
+            Some(p) => p,
+            None => return Self::default(),
+        };
         if !path.exists() {
             return Self {
                 entries: HashMap::new(),
@@ -111,48 +116,25 @@ impl ConnectionHistory {
     }
 
     fn save(&self) -> std::io::Result<()> {
-        if let Some(parent) = self.path.parent() {
-            fs::create_dir_all(parent)?;
-        }
         // Sort by alias for deterministic output
         let mut sorted: Vec<_> = self.entries.values().collect();
         sorted.sort_by(|a, b| a.alias.cmp(&b.alias));
-        let content: String = sorted
-            .iter()
-            .map(|e| format!("{}\t{}\t{}", e.alias, e.last_connected, e.count))
-            .collect::<Vec<_>>()
-            .join("\n");
-        // Atomic write: tmp file (created with 0o600) + rename
-        let tmp_path = self.path.with_extension(format!("tmp.{}", std::process::id()));
-
-        #[cfg(unix)]
-        {
-            use std::io::Write;
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&tmp_path)?;
-            file.write_all(content.as_bytes())?;
+        let mut content = String::new();
+        for (i, e) in sorted.iter().enumerate() {
+            if i > 0 {
+                content.push('\n');
+            }
+            content.push_str(&e.alias);
+            content.push('\t');
+            content.push_str(&e.last_connected.to_string());
+            content.push('\t');
+            content.push_str(&e.count.to_string());
         }
-
-        #[cfg(not(unix))]
-        fs::write(&tmp_path, &content)?;
-
-        let result = fs::rename(&tmp_path, &self.path);
-        if result.is_err() {
-            let _ = fs::remove_file(&tmp_path);
-        }
-        result
+        fs_util::atomic_write(&self.path, content.as_bytes())
     }
 
-    fn history_path() -> PathBuf {
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join(".purple")
-            .join("history.tsv")
+    fn history_path() -> Option<PathBuf> {
+        dirs::home_dir().map(|h| h.join(".purple/history.tsv"))
     }
 }
 

@@ -3,6 +3,7 @@ mod clipboard;
 mod connection;
 mod event;
 mod handler;
+mod fs_util;
 mod history;
 mod import;
 mod ping;
@@ -113,9 +114,13 @@ enum ProviderCommands {
         /// Provider name (digitalocean, vultr, linode, hetzner, upcloud)
         provider: String,
 
-        /// API token
+        /// API token (or set PURPLE_TOKEN env var, or use --token-stdin)
         #[arg(long)]
-        token: String,
+        token: Option<String>,
+
+        /// Read token from stdin (e.g. from a password manager)
+        #[arg(long)]
+        token_stdin: bool,
 
         /// Alias prefix (default: provider short label)
         #[arg(long)]
@@ -145,6 +150,21 @@ fn resolve_config_path(path: &str) -> Result<PathBuf> {
     } else {
         Ok(PathBuf::from(path))
     }
+}
+
+fn resolve_token(explicit: Option<String>, from_stdin: bool) -> Result<String> {
+    if let Some(t) = explicit {
+        return Ok(t);
+    }
+    if from_stdin {
+        let mut buf = String::new();
+        std::io::stdin().read_line(&mut buf)?;
+        return Ok(buf.trim().to_string());
+    }
+    if let Ok(t) = std::env::var("PURPLE_TOKEN") {
+        return Ok(t);
+    }
+    anyhow::bail!("No token provided. Use --token, --token-stdin, or set PURPLE_TOKEN env var.")
 }
 
 fn main() -> Result<()> {
@@ -239,19 +259,19 @@ fn main() -> Result<()> {
         let mut app = App::new(config);
         apply_saved_sort(&mut app);
         app.start_search_with(alias);
-        if app.filtered_indices.is_empty() {
+        if app.search.filtered_indices.is_empty() {
             app.set_status(
                 format!("No exact match for '{}'. Here's what we found.", alias),
                 false,
             );
         }
-        return run_tui(app, &cli.config);
+        return run_tui(app);
     }
 
     // Interactive TUI mode
     let mut app = App::new(config);
     apply_saved_sort(&mut app);
-    run_tui(app, &cli.config)
+    run_tui(app)
 }
 
 fn apply_saved_sort(app: &mut App) {
@@ -264,13 +284,21 @@ fn apply_saved_sort(app: &mut App) {
     }
 }
 
-fn run_tui(mut app: App, config_str: &str) -> Result<()> {
+fn run_tui(mut app: App) -> Result<()> {
     // First-launch welcome hint (one-shot: creates .purple/ so it won't show again)
     if app.status.is_none() && !app.hosts.is_empty() {
         if let Some(home) = dirs::home_dir() {
             let purple_dir = home.join(".purple");
             if !purple_dir.exists() {
                 let _ = std::fs::create_dir_all(&purple_dir);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(
+                        &purple_dir,
+                        std::fs::Permissions::from_mode(0o700),
+                    );
+                }
                 app.set_status("Welcome to purple. Press ? for the cheat sheet.", false);
             }
         }
@@ -284,9 +312,9 @@ fn run_tui(mut app: App, config_str: &str) -> Result<()> {
 
     // Auto-sync all configured providers on startup
     for section in app.provider_config.configured_providers().to_vec() {
-        if !app.syncing_providers.contains(&section.provider) {
-            app.syncing_providers.insert(section.provider.clone());
-            handler::spawn_provider_sync(&section.provider, &section.token, events_tx.clone());
+        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        if app.syncing_providers.insert(section.provider.clone(), cancel.clone()).is_none() {
+            handler::spawn_provider_sync(&section.provider, &section.token, events_tx.clone(), cancel);
         }
     }
 
@@ -312,54 +340,13 @@ fn run_tui(mut app: App, config_str: &str) -> Result<()> {
                 app.ping_status.insert(alias, status);
             }
             AppEvent::SyncComplete { provider, hosts } => {
-                let section = app.provider_config.section(&provider).cloned();
-                if let Some(section) = section {
-                    if let Some(provider_impl) = providers::get_provider(&provider) {
-                        let result = providers::sync::sync_provider(
-                            &mut app.config,
-                            &*provider_impl,
-                            &hosts,
-                            &section,
-                            false,
-                            false,
-                        );
-                        if result.added > 0 || result.updated > 0 {
-                            if let Err(e) = app.config.write() {
-                                app.set_status(format!("Sync failed to save: {}", e), true);
-                                app.syncing_providers.remove(&provider);
-                                continue;
-                            }
-                            app.update_last_modified();
-                            app.reload_hosts();
-                        }
-                        let display_name = match provider.as_str() {
-                            "digitalocean" => "DigitalOcean",
-                            "vultr" => "Vultr",
-                            "linode" => "Linode",
-                            "hetzner" => "Hetzner",
-                            "upcloud" => "UpCloud",
-                            name => name,
-                        };
-                        app.set_status(
-                            format!(
-                                "Synced {}: added {}, updated {}, unchanged {}.",
-                                display_name, result.added, result.updated, result.unchanged
-                            ),
-                            false,
-                        );
-                    }
-                }
+                let msg = app.apply_sync_result(&provider, hosts);
+                let is_err = msg.starts_with('!');
+                app.set_status(msg, is_err);
                 app.syncing_providers.remove(&provider);
             }
             AppEvent::SyncError { provider, message } => {
-                let display_name = match provider.as_str() {
-                    "digitalocean" => "DigitalOcean",
-                    "vultr" => "Vultr",
-                    "linode" => "Linode",
-                    "hetzner" => "Hetzner",
-                    "upcloud" => "UpCloud",
-                    name => name,
-                };
+                let display_name = providers::provider_display_name(provider.as_str());
                 app.set_status(
                     format!("! {} sync failed: {}", display_name, message),
                     true,
@@ -400,8 +387,7 @@ fn run_tui(mut app: App, config_str: &str) -> Result<()> {
             events.resume();
             last_config_check = std::time::Instant::now();
             // Reload in case config changed externally
-            let config_path = resolve_config_path(config_str)?;
-            app.config = SshConfigFile::parse(&config_path)?;
+            app.config = SshConfigFile::parse(&app.reload.config_path)?;
             app.reload_hosts();
             app.update_last_modified();
         }
@@ -438,11 +424,7 @@ fn handle_quick_add(
         eprintln!("Alias can't contain whitespace. Use --alias to pick a simpler name.");
         std::process::exit(1);
     }
-    if alias_str.contains('*')
-        || alias_str.contains('?')
-        || alias_str.contains('[')
-        || alias_str.starts_with('!')
-    {
+    if ssh_config::model::is_host_pattern(&alias_str) {
         eprintln!("Alias can't contain pattern characters. Use --alias to pick a different name.");
         std::process::exit(1);
     }
@@ -570,14 +552,7 @@ fn handle_sync(
                 continue;
             }
         };
-        let display_name = match section.provider.as_str() {
-            "digitalocean" => "DigitalOcean",
-            "vultr" => "Vultr",
-            "linode" => "Linode",
-            "hetzner" => "Hetzner",
-            "upcloud" => "UpCloud",
-            name => name,
-        };
+        let display_name = providers::provider_display_name(section.provider.as_str());
         print!("Syncing {}... ", display_name);
 
         match provider.fetch_hosts(&section.token) {
@@ -626,6 +601,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
         ProviderCommands::Add {
             provider,
             token,
+            token_stdin,
             prefix,
             user,
             key,
@@ -640,6 +616,22 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     std::process::exit(1);
                 }
             };
+
+            let token = match resolve_token(token, token_stdin) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("{}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            if token.trim().is_empty() {
+                eprintln!(
+                    "Token can't be empty. Grab one from your {} dashboard.",
+                    providers::provider_display_name(&provider)
+                );
+                std::process::exit(1);
+            }
 
             let section = providers::config::ProviderSection {
                 provider: provider.clone(),
@@ -664,14 +656,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 println!("No providers configured. Run 'purple provider add' to set one up.");
             } else {
                 for s in sections {
-                    let display_name = match s.provider.as_str() {
-                        "digitalocean" => "DigitalOcean",
-                        "vultr" => "Vultr",
-                        "linode" => "Linode",
-                        "hetzner" => "Hetzner",
-                        "upcloud" => "UpCloud",
-                        name => name,
-                    };
+                    let display_name = providers::provider_display_name(s.provider.as_str());
                     println!(
                         "  {:<16} {}-*{:>8}",
                         display_name, s.alias_prefix, s.user

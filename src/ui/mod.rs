@@ -100,6 +100,16 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     .split(vertical[1])[1]
 }
 
+/// Truncate a string to `max_len` characters (char-boundary safe).
+pub(crate) fn truncate(s: &str, max_len: usize) -> String {
+    if s.chars().count() <= max_len {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_len.saturating_sub(3)).collect();
+        format!("{}...", truncated)
+    }
+}
+
 /// Create a centered rect with fixed dimensions.
 pub fn centered_rect_fixed(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + area.width.saturating_sub(width) / 2;

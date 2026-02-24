@@ -44,17 +44,6 @@ fn build_alias(prefix: &str, sanitized: &str) -> String {
     }
 }
 
-/// Display name for a provider (used in group header comments).
-fn provider_header(name: &str) -> &str {
-    match name {
-        "digitalocean" => "DigitalOcean",
-        "vultr" => "Vultr",
-        "linode" => "Linode",
-        "hetzner" => "Hetzner",
-        "upcloud" => "UpCloud",
-        other => other,
-    }
-}
 
 /// Sync hosts from a cloud provider into the SSH config.
 pub fn sync_provider(
@@ -112,7 +101,8 @@ pub fn sync_provider(
                 let ip_changed = entry.hostname != remote.ip;
                 let mut sorted_local = entry.tags.clone();
                 sorted_local.sort();
-                let mut sorted_remote = remote.tags.clone();
+                let mut sorted_remote: Vec<String> =
+                    remote.tags.iter().map(|t| t.trim().to_string()).collect();
                 sorted_remote.sort();
                 let tags_changed = sorted_local != sorted_remote;
                 if alias_changed || ip_changed || tags_changed {
@@ -172,7 +162,7 @@ pub fn sync_provider(
                         .elements
                         .push(ConfigElement::GlobalLine(format!(
                             "# purple:group {}",
-                            provider_header(provider.name())
+                            super::provider_display_name(provider.name())
                         )));
                     needs_header = false;
                 }
@@ -231,7 +221,7 @@ pub fn sync_provider(
 
         // Clean up orphan provider header if all hosts for this provider were removed
         if config.find_hosts_by_provider(provider.name()).is_empty() {
-            let header_text = format!("# purple:group {}", provider_header(provider.name()));
+            let header_text = format!("# purple:group {}", super::provider_display_name(provider.name()));
             config
                 .elements
                 .retain(|e| !matches!(e, ConfigElement::GlobalLine(line) if line == &header_text));

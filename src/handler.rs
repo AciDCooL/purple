@@ -1,4 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -26,7 +28,7 @@ pub fn handle_key_event(
 
     match &app.screen {
         Screen::HostList => {
-            if app.search_query.is_some() {
+            if app.search.query.is_some() {
                 handle_host_list_search(app, key, events_tx);
             } else {
                 handle_host_list(app, key, events_tx);
@@ -140,7 +142,7 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
         KeyCode::Char('x') => {
             if let Some(host) = app.selected_host() {
                 let alias = host.alias.clone();
-                if let Some(block) = serialize_host_block(&app.config.elements, &alias) {
+                if let Some(block) = serialize_host_block(&app.config.elements, &alias, app.config.crlf) {
                     match clipboard::copy_to_clipboard(&block) {
                         Ok(()) => {
                             app.set_status(
@@ -156,34 +158,13 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('p') => {
-            if let Some(host) = app.selected_host() {
-                let alias = host.alias.clone();
-                if !host.proxy_jump.is_empty() {
-                    app.ping_status
-                        .insert(alias.clone(), crate::app::PingStatus::Skipped);
-                    app.set_status(
-                        format!("{} uses ProxyJump. Can't ping directly.", alias),
-                        true,
-                    );
-                } else {
-                    let hostname = host.hostname.clone();
-                    let port = host.port;
-                    app.ping_status
-                        .insert(alias.clone(), crate::app::PingStatus::Checking);
-                    if !app.has_pinged {
-                        app.set_status(
-                            format!("Pinging {}... (Shift+P pings all)", alias),
-                            false,
-                        );
-                        app.has_pinged = true;
-                    } else {
-                        app.set_status(format!("Pinging {}...", alias), false);
-                    }
-                    ping::ping_host(alias, hostname, port, events_tx.clone());
-                }
-            }
+            ping_selected_host(app, events_tx, true);
         }
         KeyCode::Char('P') => {
+            // Skip if a ping-all is already in progress
+            if app.ping_status.values().any(|s| *s == crate::app::PingStatus::Checking) {
+                return;
+            }
             let hosts_to_ping: Vec<(String, String, u16)> = app
                 .hosts
                 .iter()
@@ -237,14 +218,23 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
         KeyCode::Char('s') => {
             app.sort_mode = app.sort_mode.next();
             app.apply_sort();
-            let _ = preferences::save_sort_mode(app.sort_mode);
-            app.set_status(format!("Sorted by {}.", app.sort_mode.label()), false);
+            if let Err(e) = preferences::save_sort_mode(app.sort_mode) {
+                app.set_status(format!("Sorted by {}. (save failed: {})", app.sort_mode.label(), e), true);
+            } else {
+                app.set_status(format!("Sorted by {}.", app.sort_mode.label()), false);
+            }
         }
         KeyCode::Char('g') => {
             app.group_by_provider = !app.group_by_provider;
             app.apply_sort();
-            let _ = preferences::save_group_by_provider(app.group_by_provider);
-            if app.group_by_provider {
+            if let Err(e) = preferences::save_group_by_provider(app.group_by_provider) {
+                let msg = if app.group_by_provider {
+                    format!("Grouped by provider. (save failed: {})", e)
+                } else {
+                    format!("Ungrouped. (save failed: {})", e)
+                };
+                app.set_status(msg, true);
+            } else if app.group_by_provider {
                 app.set_status("Grouped by provider.", false);
             } else {
                 app.set_status("Ungrouped.", false);
@@ -282,8 +272,8 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
         }
         KeyCode::Char('S') => {
             app.provider_config = crate::providers::config::ProviderConfig::load();
-            app.provider_list_state = ratatui::widgets::ListState::default();
-            app.provider_list_state.select(Some(0));
+            app.ui.provider_list_state = ratatui::widgets::ListState::default();
+            app.ui.provider_list_state.select(Some(0));
             app.screen = Screen::Providers;
         }
         KeyCode::Char('?') => {
@@ -312,34 +302,16 @@ fn handle_host_list_search(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sende
             app.select_prev();
         }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            // Ctrl+P also for ping in search mode
-            if let Some(host) = app.selected_host() {
-                let alias = host.alias.clone();
-                if !host.proxy_jump.is_empty() {
-                    app.ping_status
-                        .insert(alias.clone(), crate::app::PingStatus::Skipped);
-                    app.set_status(
-                        format!("{} uses ProxyJump. Can't ping directly.", alias),
-                        true,
-                    );
-                } else {
-                    let hostname = host.hostname.clone();
-                    let port = host.port;
-                    app.ping_status
-                        .insert(alias.clone(), crate::app::PingStatus::Checking);
-                    app.set_status(format!("Pinging {}...", alias), false);
-                    ping::ping_host(alias, hostname, port, events_tx.clone());
-                }
-            }
+            ping_selected_host(app, events_tx, false);
         }
         KeyCode::Char(c) => {
-            if let Some(ref mut query) = app.search_query {
+            if let Some(ref mut query) = app.search.query {
                 query.push(c);
             }
             app.apply_filter();
         }
         KeyCode::Backspace => {
-            if let Some(ref mut query) = app.search_query {
+            if let Some(ref mut query) = app.search.query {
                 query.pop();
             }
             app.apply_filter();
@@ -350,18 +322,18 @@ fn handle_host_list_search(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sende
 
 fn handle_form(app: &mut App, key: KeyEvent) {
     // Dispatch to key picker if it's open
-    if app.show_key_picker {
-        handle_key_picker(app, key);
+    if app.ui.show_key_picker {
+        handle_key_picker_shared(app, key, false);
         return;
     }
 
     // Ctrl+K opens key picker from any field (not bare K, which conflicts with text input)
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('k') {
         app.scan_keys();
-        app.show_key_picker = true;
-        app.key_picker_state = ratatui::widgets::ListState::default();
+        app.ui.show_key_picker = true;
+        app.ui.key_picker_state = ratatui::widgets::ListState::default();
         if !app.keys.is_empty() {
-            app.key_picker_state.select(Some(0));
+            app.ui.key_picker_state.select(Some(0));
         }
         return;
     }
@@ -413,7 +385,7 @@ fn maybe_smart_paste(app: &mut App) {
             app.form.hostname = parsed.hostname.clone();
         }
         if app.form.user.is_empty() && !parsed.user.is_empty() {
-            app.form.user = parsed.user.clone();
+            app.form.user = parsed.user;
         }
         if app.form.port == "22" && parsed.port != 22 {
             app.form.port = parsed.port.to_string();
@@ -446,82 +418,23 @@ fn submit_form(app: &mut App) {
         return;
     }
 
-    let entry = app.form.to_entry();
-    let alias = entry.alias.clone();
-
     // Clear undo buffer on any write
     app.deleted_host = None;
 
-    match &app.screen {
-        Screen::AddHost => {
-            // Check for duplicate alias
-            if app.config.has_host(&alias) {
-                app.set_status(
-                    format!(
-                        "'{}' already exists. Aliases are like fingerprints — unique.",
-                        alias
-                    ),
-                    true,
-                );
-                return;
-            }
-            let len_before = app.config.elements.len();
-            app.config.add_host(&entry);
-            if !entry.tags.is_empty() {
-                app.config.set_host_tags(&alias, &entry.tags);
-            }
-            if let Err(e) = app.config.write() {
-                app.config.elements.truncate(len_before);
-                app.set_status(format!("Failed to save: {}", e), true);
-                return;
-            }
-            app.update_last_modified();
-            app.reload_hosts();
-            // Auto-select the newly added host (find it in display list)
-            for (i, item) in app.display_list.iter().enumerate() {
-                if let crate::app::HostListItem::Host { index } = item {
-                    if app.hosts.get(*index).is_some_and(|h| h.alias == alias) {
-                        app.list_state.select(Some(i));
-                        break;
-                    }
-                }
-            }
-            app.set_status(format!("Welcome aboard, {}!", alias), false);
+    let result = match &app.screen {
+        Screen::AddHost => app.add_host_from_form(),
+        Screen::EditHost { alias } => {
+            let old = alias.clone();
+            app.edit_host_from_form(&old)
         }
-        Screen::EditHost { alias: old_alias } => {
-            let old_alias = old_alias.clone();
-            if !app.config.has_host(&old_alias) {
-                app.set_status("Host no longer exists.", true);
-                app.screen = Screen::HostList;
-                return;
-            }
-            // Check for duplicate if alias changed
-            if alias != old_alias && app.config.has_host(&alias) {
-                app.set_status(
-                    format!(
-                        "'{}' already exists. Aliases are like fingerprints — unique.",
-                        alias
-                    ),
-                    true,
-                );
-                return;
-            }
-            // Snapshot old entry for rollback
-            let old_entry = app.hosts.iter().find(|h| h.alias == old_alias).cloned().unwrap_or_default();
-            app.config.update_host(&old_alias, &entry);
-            app.config.set_host_tags(&entry.alias, &entry.tags);
-            if let Err(e) = app.config.write() {
-                // Rollback: restore old entry and tags
-                app.config.update_host(&entry.alias, &old_entry);
-                app.config.set_host_tags(&old_entry.alias, &old_entry.tags);
-                app.set_status(format!("Failed to save: {}", e), true);
-                return;
-            }
-            app.update_last_modified();
-            app.reload_hosts();
-            app.set_status(format!("{} got a makeover.", alias), false);
+        _ => return,
+    };
+    match result {
+        Ok(msg) => app.set_status(msg, false),
+        Err(msg) => {
+            app.set_status(msg, true);
+            return;
         }
-        _ => {}
     }
 
     app.clear_form_mtime();
@@ -584,7 +497,7 @@ fn handle_key_list(app: &mut App, key: KeyEvent) {
             app.select_prev_key();
         }
         KeyCode::Enter => {
-            if let Some(index) = app.key_list_state.selected() {
+            if let Some(index) = app.ui.key_list_state.selected() {
                 if index < app.keys.len() {
                     app.screen = Screen::KeyDetail { index };
                 }
@@ -604,19 +517,21 @@ fn handle_key_detail(app: &mut App, key: KeyEvent) {
 }
 
 /// Serialize a host block to its raw SSH config text.
-fn serialize_host_block(elements: &[ConfigElement], alias: &str) -> Option<String> {
+fn serialize_host_block(elements: &[ConfigElement], alias: &str, crlf: bool) -> Option<String> {
+    let line_ending = if crlf { "\r\n" } else { "\n" };
     for element in elements {
         match element {
             ConfigElement::HostBlock(block) if block.host_pattern == alias => {
-                let mut lines = vec![block.raw_host_line.clone()];
+                let mut output = block.raw_host_line.clone();
                 for directive in &block.directives {
-                    lines.push(directive.raw_line.clone());
+                    output.push_str(line_ending);
+                    output.push_str(&directive.raw_line);
                 }
-                return Some(lines.join("\n"));
+                return Some(output);
             }
             ConfigElement::Include(include) => {
                 for file in &include.resolved_files {
-                    if let Some(result) = serialize_host_block(&file.elements, alias) {
+                    if let Some(result) = serialize_host_block(&file.elements, alias, crlf) {
                         return Some(result);
                     }
                 }
@@ -700,12 +615,12 @@ fn handle_tag_picker_screen(app: &mut App, key: KeyEvent) {
             app.select_prev_tag();
         }
         KeyCode::Enter => {
-            if let Some(index) = app.tag_picker_state.selected() {
+            if let Some(index) = app.ui.tag_picker_state.selected() {
                 if let Some(tag) = app.tag_list.get(index) {
-                    let tag = tag.clone();
+                    let tag: String = tag.clone();
                     app.screen = Screen::HostList;
                     app.start_search();
-                    app.search_query = Some(format!("tag={}", tag));
+                    app.search.query = Some(format!("tag={}", tag));
                     app.apply_filter();
                 }
             }
@@ -718,16 +633,20 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
     let provider_count = providers::PROVIDER_NAMES.len();
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
+            // Cancel all running syncs
+            for cancel_flag in app.syncing_providers.values() {
+                cancel_flag.store(true, Ordering::Relaxed);
+            }
             app.screen = Screen::HostList;
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            crate::app::cycle_selection(&mut app.provider_list_state, provider_count, true);
+            crate::app::cycle_selection(&mut app.ui.provider_list_state, provider_count, true);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            crate::app::cycle_selection(&mut app.provider_list_state, provider_count, false);
+            crate::app::cycle_selection(&mut app.ui.provider_list_state, provider_count, false);
         }
         KeyCode::Enter => {
-            if let Some(index) = app.provider_list_state.selected() {
+            if let Some(index) = app.ui.provider_list_state.selected() {
                 if let Some(&name) = providers::PROVIDER_NAMES.get(index) {
                     let provider_impl = providers::get_provider(name);
                     let short_label = provider_impl
@@ -763,30 +682,22 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
             }
         }
         KeyCode::Char('s') => {
-            if let Some(index) = app.provider_list_state.selected() {
+            if let Some(index) = app.ui.provider_list_state.selected() {
                 if let Some(&name) = providers::PROVIDER_NAMES.get(index) {
-                    if app.syncing_providers.contains(name) {
-                        return;
-                    }
                     if let Some(section) = app.provider_config.section(name) {
-                        let token = section.token.clone();
-                        let display_name = match name {
-                            "digitalocean" => "DigitalOcean",
-                            "vultr" => "Vultr",
-                            "linode" => "Linode",
-                            "hetzner" => "Hetzner",
-                            "upcloud" => "UpCloud",
-                            n => n,
-                        };
-                        app.syncing_providers.insert(name.to_string());
-                        app.set_status(format!("Syncing {}...", display_name), false);
-                        spawn_provider_sync(name, &token, events_tx.clone());
+                        let cancel = Arc::new(AtomicBool::new(false));
+                        if app.syncing_providers.insert(name.to_string(), cancel.clone()).is_none() {
+                            let token = section.token.clone();
+                            let display_name = crate::providers::provider_display_name(name);
+                            app.set_status(format!("Syncing {}...", display_name), false);
+                            spawn_provider_sync(name, &token, events_tx.clone(), cancel);
+                        }
                     }
                 }
             }
         }
         KeyCode::Char('d') => {
-            if let Some(index) = app.provider_list_state.selected() {
+            if let Some(index) = app.ui.provider_list_state.selected() {
                 if let Some(&name) = providers::PROVIDER_NAMES.get(index) {
                     if let Some(old_section) = app.provider_config.section(name).cloned() {
                         app.provider_config.remove_section(name);
@@ -795,14 +706,7 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                             app.provider_config.set_section(old_section);
                             app.set_status(format!("Failed to save: {}", e), true);
                         } else {
-                            let display_name = match name {
-                                "digitalocean" => "DigitalOcean",
-                                "vultr" => "Vultr",
-                                "linode" => "Linode",
-                                "hetzner" => "Hetzner",
-                                "upcloud" => "UpCloud",
-                                n => n,
-                            };
+                            let display_name = crate::providers::provider_display_name(name);
                             app.set_status(
                                 format!("Removed {} configuration.", display_name),
                                 false,
@@ -818,18 +722,18 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
 
 fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     // Dispatch to key picker if open
-    if app.show_key_picker {
-        handle_provider_key_picker(app, key);
+    if app.ui.show_key_picker {
+        handle_key_picker_shared(app, key, true);
         return;
     }
 
     // Ctrl+K opens key picker from any field (not bare K, which conflicts with text input)
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('k') {
         app.scan_keys();
-        app.show_key_picker = true;
-        app.key_picker_state = ratatui::widgets::ListState::default();
+        app.ui.show_key_picker = true;
+        app.ui.key_picker_state = ratatui::widgets::ListState::default();
         if !app.keys.is_empty() {
-            app.key_picker_state.select(Some(0));
+            app.ui.key_picker_state.select(Some(0));
         }
         return;
     }
@@ -874,14 +778,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
 
     if app.provider_form.token.trim().is_empty() {
-        let display_name = match provider_name.as_str() {
-            "digitalocean" => "DigitalOcean",
-            "vultr" => "Vultr",
-            "linode" => "Linode",
-            "hetzner" => "Hetzner",
-            "upcloud" => "UpCloud",
-            n => n,
-        };
+        let display_name = crate::providers::provider_display_name(provider_name.as_str());
         app.set_status(
             format!(
                 "Token can't be empty. Grab one from your {} dashboard.",
@@ -913,25 +810,24 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         return;
     }
 
-    let display_name = match provider_name.as_str() {
-        "digitalocean" => "DigitalOcean",
-        "vultr" => "Vultr",
-        "linode" => "Linode",
-        "hetzner" => "Hetzner",
-        "upcloud" => "UpCloud",
-        n => n,
-    };
-    app.syncing_providers.insert(provider_name.clone());
-    app.set_status(format!("Saved {} configuration. Syncing...", display_name), false);
-    spawn_provider_sync(&provider_name, &token, events_tx.clone());
+    let display_name = crate::providers::provider_display_name(provider_name.as_str());
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    if app.syncing_providers.insert(provider_name.clone(), cancel.clone()).is_none() {
+        app.set_status(format!("Saved {} configuration. Syncing...", display_name), false);
+        spawn_provider_sync(&provider_name, &token, events_tx.clone(), cancel);
+    } else {
+        app.set_status(format!("Saved {} configuration.", display_name), false);
+    }
     app.clear_form_mtime();
     app.screen = Screen::Providers;
 }
 
-fn handle_provider_key_picker(app: &mut App, key: KeyEvent) {
+/// Unified key picker handler for both host form and provider form.
+fn handle_key_picker_shared(app: &mut App, key: KeyEvent, for_provider: bool) {
     match key.code {
         KeyCode::Esc => {
-            app.show_key_picker = false;
+            app.ui.show_key_picker = false;
         }
         KeyCode::Char('j') | KeyCode::Down => {
             app.select_next_picker_key();
@@ -940,73 +836,99 @@ fn handle_provider_key_picker(app: &mut App, key: KeyEvent) {
             app.select_prev_picker_key();
         }
         KeyCode::Enter => {
-            if let Some(index) = app.key_picker_state.selected() {
+            if let Some(index) = app.ui.key_picker_state.selected() {
                 if let Some(key_info) = app.keys.get(index) {
-                    app.provider_form.identity_file = key_info.display_path.clone();
+                    if for_provider {
+                        app.provider_form.identity_file = key_info.display_path.clone();
+                    } else {
+                        app.form.identity_file = key_info.display_path.clone();
+                    }
                     app.set_status(
                         format!("Locked and loaded with {}.", key_info.name),
                         false,
                     );
                 }
             }
-            app.show_key_picker = false;
+            app.ui.show_key_picker = false;
         }
         _ => {}
     }
 }
 
-fn handle_key_picker(app: &mut App, key: KeyEvent) {
-    match key.code {
-        KeyCode::Esc => {
-            app.show_key_picker = false;
-        }
-        KeyCode::Char('j') | KeyCode::Down => {
-            app.select_next_picker_key();
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            app.select_prev_picker_key();
-        }
-        KeyCode::Enter => {
-            if let Some(index) = app.key_picker_state.selected() {
-                if let Some(key) = app.keys.get(index) {
-                    app.form.identity_file = key.display_path.clone();
-                    app.set_status(format!("Locked and loaded with {}.", key.name), false);
-                }
+/// Ping the currently selected host (shared by 'p' key and Ctrl+P in search mode).
+fn ping_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>, show_hint: bool) {
+    if let Some(host) = app.selected_host() {
+        let alias = host.alias.clone();
+        if !host.proxy_jump.is_empty() {
+            app.ping_status
+                .insert(alias.clone(), crate::app::PingStatus::Skipped);
+            app.set_status(
+                format!("{} uses ProxyJump. Can't ping directly.", alias),
+                true,
+            );
+        } else {
+            let hostname = host.hostname.clone();
+            let port = host.port;
+            app.ping_status
+                .insert(alias.clone(), crate::app::PingStatus::Checking);
+            if show_hint && !app.has_pinged {
+                app.set_status(
+                    format!("Pinging {}... (Shift+P pings all)", alias),
+                    false,
+                );
+                app.has_pinged = true;
+            } else {
+                app.set_status(format!("Pinging {}...", alias), false);
             }
-            app.show_key_picker = false;
+            ping::ping_host(alias, hostname, port, events_tx.clone());
         }
-        _ => {}
     }
 }
 
 /// Spawn a background thread to fetch hosts from a cloud provider.
-pub fn spawn_provider_sync(name: &str, token: &str, tx: mpsc::Sender<AppEvent>) {
+pub fn spawn_provider_sync(
+    name: &str,
+    token: &str,
+    tx: mpsc::Sender<AppEvent>,
+    cancel: Arc<AtomicBool>,
+) {
     let name = name.to_string();
     let token = token.to_string();
-    std::thread::spawn(move || {
-        let provider = match crate::providers::get_provider(&name) {
-            Some(p) => p,
-            None => {
-                let _ = tx.send(AppEvent::SyncError {
-                    provider: name,
-                    message: "Unknown provider.".to_string(),
-                });
-                return;
+    let tx_fallback = tx.clone();
+    let name_fallback = name.clone();
+    if std::thread::Builder::new()
+        .name(format!("sync-{}", name))
+        .spawn(move || {
+            let provider = match crate::providers::get_provider(&name) {
+                Some(p) => p,
+                None => {
+                    let _ = tx.send(AppEvent::SyncError {
+                        provider: name,
+                        message: "Unknown provider.".to_string(),
+                    });
+                    return;
+                }
+            };
+            match provider.fetch_hosts_cancellable(&token, &cancel) {
+                Ok(hosts) => {
+                    let _ = tx.send(AppEvent::SyncComplete {
+                        provider: name,
+                        hosts,
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::SyncError {
+                        provider: name,
+                        message: e.to_string(),
+                    });
+                }
             }
-        };
-        match provider.fetch_hosts(&token) {
-            Ok(hosts) => {
-                let _ = tx.send(AppEvent::SyncComplete {
-                    provider: name,
-                    hosts,
-                });
-            }
-            Err(e) => {
-                let _ = tx.send(AppEvent::SyncError {
-                    provider: name,
-                    message: e.to_string(),
-                });
-            }
-        }
-    });
+        })
+        .is_err()
+    {
+        let _ = tx_fallback.send(AppEvent::SyncError {
+            provider: name_fallback,
+            message: "Failed to start sync thread.".to_string(),
+        });
+    }
 }

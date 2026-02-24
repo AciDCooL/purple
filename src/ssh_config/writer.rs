@@ -4,6 +4,7 @@ use std::time::SystemTime;
 use anyhow::{Context, Result};
 
 use super::model::{ConfigElement, SshConfigFile};
+use crate::fs_util;
 
 impl SshConfigFile {
     /// Write the config back to disk.
@@ -22,46 +23,8 @@ impl SshConfigFile {
 
         let content = self.serialize();
 
-        // Ensure parent directory exists
-        if let Some(parent) = target_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-        }
-
-        // Atomic write: write to temp file (created with 0o600), then rename
-        let tmp_path =
-            target_path.with_extension(format!("purple_tmp.{}", std::process::id()));
-
-        #[cfg(unix)]
-        {
-            use std::io::Write;
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut file = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&tmp_path)
-                .with_context(|| format!("Failed to create temp file {}", tmp_path.display()))?;
-            file.write_all(content.as_bytes())
-                .with_context(|| format!("Failed to write temp file {}", tmp_path.display()))?;
-        }
-
-        #[cfg(not(unix))]
-        fs::write(&tmp_path, &content)
-            .with_context(|| format!("Failed to write temp file {}", tmp_path.display()))?;
-
-        let result = fs::rename(&tmp_path, &target_path);
-        if result.is_err() {
-            let _ = fs::remove_file(&tmp_path);
-        }
-        result.with_context(|| {
-            format!(
-                "Failed to rename {} to {}",
-                tmp_path.display(),
-                target_path.display()
-            )
-        })?;
+        fs_util::atomic_write(&target_path, content.as_bytes())
+            .with_context(|| format!("Failed to write SSH config to {}", target_path.display()))?;
 
         Ok(())
     }
@@ -114,6 +77,7 @@ impl SshConfigFile {
     }
 
     /// Create a timestamped backup of the current config file.
+    /// Backup files are created with chmod 600 to match the source file's sensitivity.
     fn create_backup(&self) -> Result<()> {
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -132,6 +96,14 @@ impl SshConfigFile {
                 backup_path.display()
             )
         })?;
+
+        // Set backup permissions to 600 (owner read/write only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&backup_path, fs::Permissions::from_mode(0o600));
+        }
+
         Ok(())
     }
 

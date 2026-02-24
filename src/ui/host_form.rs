@@ -83,7 +83,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // Key picker popup overlay
-    if app.show_key_picker {
+    if app.ui.show_key_picker {
         render_key_picker_overlay(frame, app);
     }
 }
@@ -119,7 +119,7 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
             let comment = if key.comment.is_empty() {
                 String::new()
             } else {
-                truncate_comment(&key.comment, 22)
+                super::truncate(&key.comment, 22)
             };
             let line = Line::from(vec![
                 Span::styled(format!(" {:<18}", key.name), theme::bold()),
@@ -140,7 +140,7 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
         .highlight_style(theme::selected())
         .highlight_symbol("  ");
 
-    frame.render_stateful_widget(list, area, &mut app.key_picker_state);
+    frame.render_stateful_widget(list, area, &mut app.ui.key_picker_state);
 }
 
 fn render_field(frame: &mut Frame, area: Rect, field: FormField, form: &crate::app::HostForm) {
@@ -192,18 +192,9 @@ fn render_field(frame: &mut Frame, area: Rect, field: FormField, form: &crate::a
             .saturating_add(1)
             .saturating_add(value.width().min(u16::MAX as usize) as u16);
         let cursor_y = area.y + 1;
-        if cursor_x < area.x + area.width - 1 {
+        if area.width > 1 && cursor_x < area.x.saturating_add(area.width).saturating_sub(1) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     }
 }
 
-/// Truncate a comment string to `max_len` characters (char-boundary safe).
-fn truncate_comment(s: &str, max_len: usize) -> String {
-    if s.chars().count() <= max_len {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max_len.saturating_sub(3)).collect();
-        format!("{}...", truncated)
-    }
-}

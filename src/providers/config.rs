@@ -1,6 +1,8 @@
 use std::io;
 use std::path::PathBuf;
 
+use crate::fs_util;
+
 /// A configured provider section from ~/.purple/providers.
 #[derive(Debug, Clone)]
 pub struct ProviderSection {
@@ -90,12 +92,13 @@ impl ProviderConfig {
     pub fn save(&self) -> io::Result<()> {
         let path = match config_path() {
             Some(p) => p,
-            None => return Ok(()),
+            None => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Could not determine home directory",
+                ))
+            }
         };
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
 
         let mut content = String::new();
         for (i, section) in self.sections.iter().enumerate() {
@@ -111,31 +114,7 @@ impl ProviderConfig {
             }
         }
 
-        let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
-
-        #[cfg(unix)]
-        {
-            use std::fs::OpenOptions;
-            use std::io::Write;
-            use std::os::unix::fs::OpenOptionsExt;
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .mode(0o600)
-                .open(&tmp_path)?;
-            file.write_all(content.as_bytes())?;
-        }
-
-        #[cfg(not(unix))]
-        std::fs::write(&tmp_path, &content)?;
-
-        let result = std::fs::rename(&tmp_path, &path);
-        if result.is_err() {
-            let _ = std::fs::remove_file(&tmp_path);
-        }
-        result?;
-        Ok(())
+        fs_util::atomic_write(&path, content.as_bytes())
     }
 
     /// Get a configured provider section by name.

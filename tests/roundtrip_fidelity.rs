@@ -2550,3 +2550,178 @@ Host myserver
     assert!(!output.contains("IdentityFile"),
         "All IdentityFile directives should be removed when cleared");
 }
+
+// ============================================================================
+// 22. EQUALS-SYNTAX PRESERVATION THROUGH MUTATIONS
+// ============================================================================
+
+#[test]
+fn equals_syntax_preserved_after_hostname_change() {
+    let input = "\
+Host myserver
+  HostName=10.0.0.1
+  User=admin
+  Port=2222
+";
+    let mut config = parse_str(input);
+    let mut entry = config.host_entries().remove(0);
+    entry.hostname = "10.0.0.2".to_string();
+    config.update_host("myserver", &entry);
+    let output = config.serialize();
+    assert!(output.contains("HostName=10.0.0.2"), "Equals-syntax should be preserved after value change: {}", output);
+    assert!(output.contains("User=admin"), "Unchanged equals-syntax directive should survive: {}", output);
+    assert!(output.contains("Port=2222"), "Unchanged equals-syntax Port should survive: {}", output);
+}
+
+#[test]
+fn equals_syntax_preserved_after_user_change() {
+    let input = "\
+Host myserver
+  HostName=10.0.0.1
+  User=admin
+";
+    let mut config = parse_str(input);
+    let mut entry = config.host_entries().remove(0);
+    entry.user = "deploy".to_string();
+    config.update_host("myserver", &entry);
+    let output = config.serialize();
+    assert!(output.contains("HostName=10.0.0.1"), "Unchanged equals-syntax HostName should survive");
+    assert!(output.contains("User=deploy"), "Equals-syntax should be preserved after User change: {}", output);
+}
+
+#[test]
+fn mixed_equals_and_space_syntax_preserved() {
+    let input = "\
+Host myserver
+  HostName=10.0.0.1
+  User admin
+  Port=2222
+  IdentityFile ~/.ssh/id_rsa
+";
+    let mut config = parse_str(input);
+    let mut entry = config.host_entries().remove(0);
+    entry.hostname = "10.0.0.2".to_string();
+    entry.user = "deploy".to_string();
+    config.update_host("myserver", &entry);
+    let output = config.serialize();
+    assert!(output.contains("HostName=10.0.0.2"), "Equals-syntax should be preserved for HostName");
+    assert!(output.contains("User deploy"), "Space-syntax should be preserved for User: {}", output);
+    assert!(output.contains("Port=2222"), "Unchanged equals-syntax Port should survive");
+    assert!(output.contains("IdentityFile ~/.ssh/id_rsa"), "Space-syntax IdentityFile should survive");
+}
+
+// ============================================================================
+// 23. CRLF PRESERVATION THROUGH MUTATIONS
+// ============================================================================
+
+#[test]
+fn crlf_preserved_after_hostname_change() {
+    let input = "Host myserver\r\n  HostName 10.0.0.1\r\n  User admin\r\n";
+    let mut config = parse_str(input);
+    assert!(config.crlf, "CRLF should be detected");
+    let mut entry = config.host_entries().remove(0);
+    entry.hostname = "10.0.0.2".to_string();
+    config.update_host("myserver", &entry);
+    let output = config.serialize();
+    assert!(output.contains("\r\n"), "CRLF should be preserved after mutation");
+    assert!(output.contains("HostName 10.0.0.2"), "Hostname should be updated");
+    // Verify no bare \n (every \n should be preceded by \r)
+    for (i, b) in output.bytes().enumerate() {
+        if b == b'\n' && i > 0 {
+            assert_eq!(output.as_bytes()[i - 1], b'\r', "All line endings should be CRLF, found bare LF at byte {}", i);
+        }
+    }
+}
+
+#[test]
+fn crlf_preserved_after_add_host() {
+    let input = "Host existing\r\n  HostName 10.0.0.1\r\n";
+    let mut config = parse_str(input);
+    assert!(config.crlf, "CRLF should be detected");
+    config.add_host(&HostEntry {
+        alias: "newhost".to_string(),
+        hostname: "10.0.0.2".to_string(),
+        user: "root".to_string(),
+        port: 22,
+        ..Default::default()
+    });
+    let output = config.serialize();
+    assert!(output.contains("\r\n"), "CRLF should be preserved after add");
+    // Verify no bare \n
+    for (i, b) in output.bytes().enumerate() {
+        if b == b'\n' && i > 0 {
+            assert_eq!(output.as_bytes()[i - 1], b'\r', "All line endings should be CRLF after add, found bare LF at byte {}", i);
+        }
+    }
+}
+
+#[test]
+fn crlf_preserved_after_delete_host() {
+    let input = "Host first\r\n  HostName 10.0.0.1\r\n\r\nHost second\r\n  HostName 10.0.0.2\r\n";
+    let mut config = parse_str(input);
+    assert!(config.crlf, "CRLF should be detected");
+    config.delete_host("first");
+    let output = config.serialize();
+    assert!(output.contains("\r\n"), "CRLF should be preserved after delete");
+    assert!(output.contains("Host second"), "Second host should survive");
+    for (i, b) in output.bytes().enumerate() {
+        if b == b'\n' && i > 0 {
+            assert_eq!(output.as_bytes()[i - 1], b'\r', "All line endings should be CRLF after delete, found bare LF at byte {}", i);
+        }
+    }
+}
+
+// --- New tests from review findings ---
+
+#[test]
+fn update_host_nonexistent_is_noop() {
+    let input = "Host alpha\n  HostName a.com\n";
+    let mut config = parse_str(input);
+    let entry = HostEntry {
+        alias: "nonexistent".to_string(),
+        hostname: "b.com".to_string(),
+        ..Default::default()
+    };
+    config.update_host("nonexistent", &entry);
+    assert_eq!(config.serialize(), input);
+}
+
+#[test]
+fn set_tags_nonexistent_alias_is_noop() {
+    let input = "Host alpha\n  HostName a.com\n";
+    let mut config = parse_str(input);
+    config.set_host_tags("nonexistent", &["prod".to_string()]);
+    assert_eq!(config.serialize(), input);
+}
+
+#[test]
+fn set_provider_nonexistent_alias_is_noop() {
+    let input = "Host alpha\n  HostName a.com\n";
+    let mut config = parse_str(input);
+    config.set_host_provider("nonexistent", "digitalocean", "123");
+    assert_eq!(config.serialize(), input);
+}
+
+#[test]
+fn deduplicate_alias_basic() {
+    let config = parse_str("Host alpha\n  HostName a.com\n");
+    assert_eq!(config.deduplicate_alias("alpha"), "alpha-2");
+    assert_eq!(config.deduplicate_alias("beta"), "beta");
+}
+
+#[test]
+fn deduplicate_alias_multiple_collisions() {
+    let input = "Host web\n  HostName a.com\n\nHost web-2\n  HostName b.com\n\nHost web-3\n  HostName c.com\n";
+    let config = parse_str(input);
+    assert_eq!(config.deduplicate_alias("web"), "web-4");
+}
+
+#[test]
+fn delete_host_multi_pattern_not_deleted_by_single() {
+    let input = "Host prod staging\n  HostName shared.com\n\nHost other\n  HostName other.com\n";
+    let mut config = parse_str(input);
+    config.delete_host("prod");
+    let output = config.serialize();
+    assert!(output.contains("Host prod staging"), "Multi-pattern host should survive single-pattern delete");
+    assert!(output.contains("Host other"), "Other host should survive");
+}
