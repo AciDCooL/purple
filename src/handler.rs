@@ -685,8 +685,9 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
             if let Some(index) = app.ui.provider_list_state.selected() {
                 if let Some(&name) = providers::PROVIDER_NAMES.get(index) {
                     if let Some(section) = app.provider_config.section(name) {
-                        let cancel = Arc::new(AtomicBool::new(false));
-                        if app.syncing_providers.insert(name.to_string(), cancel.clone()).is_none() {
+                        if !app.syncing_providers.contains_key(name) {
+                            let cancel = Arc::new(AtomicBool::new(false));
+                            app.syncing_providers.insert(name.to_string(), cancel.clone());
                             let token = section.token.clone();
                             let display_name = crate::providers::provider_display_name(name);
                             app.set_status(format!("Syncing {}...", display_name), false);
@@ -821,8 +822,9 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
 
     let display_name = crate::providers::provider_display_name(provider_name.as_str());
 
-    let cancel = Arc::new(AtomicBool::new(false));
-    if app.syncing_providers.insert(provider_name.clone(), cancel.clone()).is_none() {
+    if !app.syncing_providers.contains_key(&provider_name) {
+        let cancel = Arc::new(AtomicBool::new(false));
+        app.syncing_providers.insert(provider_name.clone(), cancel.clone());
         app.set_status(format!("Saved {} configuration. Syncing...", display_name), false);
         spawn_provider_sync(&provider_name, &token, events_tx.clone(), cancel);
     } else {

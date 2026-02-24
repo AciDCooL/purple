@@ -118,8 +118,9 @@ fn is_bare_ip(host: &str) -> bool {
     if !host.is_empty() && host.chars().all(|c| c.is_ascii_digit() || c == '.') {
         return true;
     }
-    // IPv6: hex digits + colons with at least one colon (e.g., "2001:db8::1")
-    host.contains(':') && host.chars().all(|c| c.is_ascii_hexdigit() || c == ':')
+    // IPv6: hex digits + colons + optional zone ID (e.g., "2001:db8::1", "fe80::1%en0")
+    let ipv6_part = host.split('%').next().unwrap_or(host);
+    ipv6_part.contains(':') && ipv6_part.chars().all(|c| c.is_ascii_hexdigit() || c == ':')
 }
 
 /// Result of parsing a known_hosts line.
@@ -518,6 +519,8 @@ mod tests {
         assert!(is_bare_ip("10.0.0.1"));
         assert!(is_bare_ip("2001:db8::1"));
         assert!(is_bare_ip("fe80::1"));
+        assert!(is_bare_ip("fe80::1%en0"));
+        assert!(is_bare_ip("fe80::1%eth0"));
         assert!(!is_bare_ip("example.com"));
         assert!(!is_bare_ip("123.example.com"));
         assert!(!is_bare_ip("deadbeef"));

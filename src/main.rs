@@ -312,8 +312,9 @@ fn run_tui(mut app: App) -> Result<()> {
 
     // Auto-sync all configured providers on startup
     for section in app.provider_config.configured_providers().to_vec() {
-        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        if app.syncing_providers.insert(section.provider.clone(), cancel.clone()).is_none() {
+        if !app.syncing_providers.contains_key(&section.provider) {
+            let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            app.syncing_providers.insert(section.provider.clone(), cancel.clone());
             handler::spawn_provider_sync(&section.provider, &section.token, events_tx.clone(), cancel);
         }
     }

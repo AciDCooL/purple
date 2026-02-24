@@ -55,9 +55,15 @@ impl ProviderConfig {
             }
             if trimmed.starts_with('[') && trimmed.ends_with(']') {
                 if let Some(section) = current.take() {
-                    sections.push(section);
+                    if !sections.iter().any(|s: &ProviderSection| s.provider == section.provider) {
+                        sections.push(section);
+                    }
                 }
                 let name = trimmed[1..trimmed.len() - 1].trim().to_string();
+                if sections.iter().any(|s| s.provider == name) {
+                    current = None;
+                    continue;
+                }
                 let short_label = super::get_provider(&name)
                     .map(|p| p.short_label().to_string())
                     .unwrap_or_else(|| name.clone());
@@ -83,7 +89,9 @@ impl ProviderConfig {
             }
         }
         if let Some(section) = current {
-            sections.push(section);
+            if !sections.iter().any(|s| s.provider == section.provider) {
+                sections.push(section);
+            }
         }
         Self { sections }
     }
@@ -242,6 +250,39 @@ token=mytoken
         let config = ProviderConfig::parse("[digitalocean]\ntoken=abc\n");
         assert!(config.section("digitalocean").is_some());
         assert!(config.section("vultr").is_none());
+    }
+
+    #[test]
+    fn test_parse_duplicate_sections_first_wins() {
+        let content = "\
+[digitalocean]
+token=first
+
+[digitalocean]
+token=second
+";
+        let config = ProviderConfig::parse(content);
+        assert_eq!(config.sections.len(), 1);
+        assert_eq!(config.sections[0].token, "first");
+    }
+
+    #[test]
+    fn test_parse_duplicate_sections_trailing() {
+        let content = "\
+[vultr]
+token=abc
+
+[linode]
+token=xyz
+
+[vultr]
+token=dup
+";
+        let config = ProviderConfig::parse(content);
+        assert_eq!(config.sections.len(), 2);
+        assert_eq!(config.sections[0].provider, "vultr");
+        assert_eq!(config.sections[0].token, "abc");
+        assert_eq!(config.sections[1].provider, "linode");
     }
 
     #[test]

@@ -1268,6 +1268,7 @@ impl App {
             Some(p) => p,
             None => return format!("! Unknown provider: {}.", provider),
         };
+        let config_backup = self.config.clone();
         let result = crate::providers::sync::sync_provider(
             &mut self.config,
             &*provider_impl,
@@ -1278,6 +1279,7 @@ impl App {
         );
         if result.added > 0 || result.updated > 0 {
             if let Err(e) = self.config.write() {
+                self.config = config_backup;
                 return format!("Sync failed to save: {}", e);
             }
             self.update_last_modified();

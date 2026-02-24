@@ -1,4 +1,4 @@
-<h1 align="center">🟣 purple.<br>Manage SSH configs. Launch connections. All from the terminal.</h1>
+<h1 align="center">🟣 purple.<br>Manage SSH configs.<br>Launch connections.<br>All from the terminal.</h1>
 
 <p align="center">
   <strong>Stop grepping your SSH config. Start launching from it.</strong><br>
