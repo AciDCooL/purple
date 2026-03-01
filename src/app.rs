@@ -28,6 +28,14 @@ fn eq_ci(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
 
+/// Record of the last sync result for a provider.
+#[derive(Debug, Clone)]
+pub struct SyncRecord {
+    pub timestamp: u64,
+    pub message: String,
+    pub is_error: bool,
+}
+
 /// Which screen is currently displayed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
@@ -605,6 +613,9 @@ pub struct App {
     // Update
     pub update_available: Option<String>,
     pub update_hint: &'static str,
+
+    // Sync history
+    pub sync_history: HashMap<String, SyncRecord>,
 }
 
 impl App {
@@ -677,6 +688,7 @@ impl App {
             active_tunnels: HashMap::new(),
             update_available: None,
             update_hint: crate::update::update_hint(),
+            sync_history: HashMap::new(),
         }
     }
 
@@ -1520,19 +1532,19 @@ impl App {
     }
 
     /// Apply sync results from a background provider fetch.
-    /// Returns (message, is_error). Caller must remove from syncing_providers.
+    /// Returns (message, is_error, server_count). Caller must remove from syncing_providers.
     pub fn apply_sync_result(
         &mut self,
         provider: &str,
         hosts: Vec<crate::providers::ProviderHost>,
-    ) -> (String, bool) {
+    ) -> (String, bool, usize) {
         let section = match self.provider_config.section(provider).cloned() {
             Some(s) => s,
-            None => return (format!("{} sync skipped: no config.", provider), true),
+            None => return (format!("{} sync skipped: no config.", provider), true, 0),
         };
         let provider_impl = match crate::providers::get_provider(provider) {
             Some(p) => p,
-            None => return (format!("Unknown provider: {}.", provider), true),
+            None => return (format!("Unknown provider: {}.", provider), true, 0),
         };
         let config_backup = self.config.clone();
         let result = crate::providers::sync::sync_provider(
@@ -1543,10 +1555,11 @@ impl App {
             false,
             false,
         );
+        let total = result.added + result.updated + result.unchanged;
         if result.added > 0 || result.updated > 0 {
             if let Err(e) = self.config.write() {
                 self.config = config_backup;
-                return (format!("Sync failed to save: {}", e), true);
+                return (format!("Sync failed to save: {}", e), true, total);
             }
             self.deleted_host = None;
             self.update_last_modified();
@@ -1562,7 +1575,7 @@ impl App {
         (format!(
             "Synced {}: added {}, updated {}, unchanged {}.",
             name, result.added, result.updated, result.unchanged
-        ), false)
+        ), false, total)
     }
 }
 
@@ -2358,5 +2371,144 @@ Host vultr-app
         let before = app.ui.list_state.selected();
         app.select_host_by_alias("beta");
         assert_eq!(app.ui.list_state.selected(), before);
+    }
+
+    fn make_provider_app() -> App {
+        let mut app = make_app("Host test\n  HostName test.com\n");
+        app.provider_config = crate::providers::config::ProviderConfig::default();
+        app.provider_config.set_section(crate::providers::config::ProviderSection {
+            provider: "digitalocean".to_string(),
+            token: "test-token".to_string(),
+            alias_prefix: "do".to_string(),
+            user: "root".to_string(),
+            identity_file: String::new(),
+        });
+        app
+    }
+
+    #[test]
+    fn test_apply_sync_result_no_config() {
+        let mut app = make_app("Host test\n  HostName test.com\n");
+        app.provider_config = crate::providers::config::ProviderConfig::default();
+        let (msg, is_err, total) = app.apply_sync_result("digitalocean", vec![]);
+        assert!(is_err);
+        assert_eq!(total, 0);
+        assert!(msg.contains("no config"));
+    }
+
+    #[test]
+    fn test_apply_sync_result_empty_hosts_returns_zero_total() {
+        let mut app = make_provider_app();
+        let (msg, is_err, total) = app.apply_sync_result("digitalocean", vec![]);
+        assert!(!is_err);
+        assert_eq!(total, 0);
+        assert!(msg.contains("added 0"));
+        assert!(msg.contains("unchanged 0"));
+    }
+
+    #[test]
+    fn test_apply_sync_result_with_hosts_returns_total() {
+        let mut app = make_provider_app();
+        let hosts = vec![
+            crate::providers::ProviderHost {
+                server_id: "s1".to_string(),
+                name: "web".to_string(),
+                ip: "1.2.3.4".to_string(),
+                tags: vec![],
+            },
+            crate::providers::ProviderHost {
+                server_id: "s2".to_string(),
+                name: "db".to_string(),
+                ip: "5.6.7.8".to_string(),
+                tags: vec![],
+            },
+        ];
+        let (msg, is_err, total) = app.apply_sync_result("digitalocean", hosts);
+        assert!(!is_err);
+        assert_eq!(total, 2);
+        assert!(msg.contains("added 2"));
+        assert!(msg.contains("unchanged 0"));
+    }
+
+    #[test]
+    fn test_apply_sync_result_write_failure_preserves_total() {
+        let mut app = make_provider_app();
+        // Point config to a non-writable path so write() fails
+        app.config.path = PathBuf::from("/dev/null/impossible");
+        let hosts = vec![
+            crate::providers::ProviderHost {
+                server_id: "s1".to_string(),
+                name: "web".to_string(),
+                ip: "1.2.3.4".to_string(),
+                tags: vec![],
+            },
+            crate::providers::ProviderHost {
+                server_id: "s2".to_string(),
+                name: "db".to_string(),
+                ip: "5.6.7.8".to_string(),
+                tags: vec![],
+            },
+        ];
+        let (msg, is_err, total) = app.apply_sync_result("digitalocean", hosts);
+        assert!(is_err);
+        assert_eq!(total, 2); // total preserved despite write failure
+        assert!(msg.contains("Sync failed to save"));
+    }
+
+    #[test]
+    fn test_apply_sync_result_unknown_provider() {
+        let mut app = make_provider_app();
+        // Configure a section for the unknown provider name so it passes
+        // the config check but fails on get_provider()
+        app.provider_config.set_section(crate::providers::config::ProviderSection {
+            provider: "nonexistent".to_string(),
+            token: "tok".to_string(),
+            alias_prefix: "nope".to_string(),
+            user: "root".to_string(),
+            identity_file: String::new(),
+        });
+        let (msg, is_err, total) = app.apply_sync_result("nonexistent", vec![]);
+        assert!(is_err);
+        assert_eq!(total, 0);
+        assert!(msg.contains("Unknown provider"));
+    }
+
+    #[test]
+    fn test_sync_history_cleared_on_provider_remove() {
+        let mut app = make_provider_app();
+        // Simulate a completed sync
+        app.sync_history.insert("digitalocean".to_string(), SyncRecord {
+            timestamp: 100,
+            message: "3 servers".to_string(),
+            is_error: false,
+        });
+        assert!(app.sync_history.contains_key("digitalocean"));
+
+        // Simulate provider remove (same as handler.rs 'd' key path)
+        app.provider_config.remove_section("digitalocean");
+        app.sync_history.remove("digitalocean");
+
+        assert!(!app.sync_history.contains_key("digitalocean"));
+    }
+
+    #[test]
+    fn test_sync_history_overwrite_replaces_error_with_success() {
+        let mut app = make_app("Host test\n  HostName test.com\n");
+        // First sync fails
+        app.sync_history.insert("hetzner".to_string(), SyncRecord {
+            timestamp: 100,
+            message: "auth failed".to_string(),
+            is_error: true,
+        });
+        // Second sync succeeds
+        app.sync_history.insert("hetzner".to_string(), SyncRecord {
+            timestamp: 200,
+            message: "5 servers".to_string(),
+            is_error: false,
+        });
+        let record = app.sync_history.get("hetzner").unwrap();
+        assert_eq!(record.timestamp, 200);
+        assert!(!record.is_error);
+        assert_eq!(record.message, "5 servers");
     }
 }

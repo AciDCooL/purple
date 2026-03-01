@@ -2,10 +2,11 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::theme;
 use crate::app::{App, ProviderFormField};
+use crate::history::ConnectionHistory;
 use crate::providers;
 
 /// Render the provider management list screen.
@@ -16,6 +17,9 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         Span::styled(" purple. ", theme::brand_badge()),
         Span::raw(" Providers "),
     ]);
+
+    // Content width inside borders (2 for left+right border)
+    let content_width = area.width.saturating_sub(2) as usize;
 
     let items: Vec<ListItem> = providers::PROVIDER_NAMES
         .iter()
@@ -32,16 +36,42 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
             } else {
                 theme::muted()
             };
+            let name_col = format!("  {:<18}", display_name);
+            let mut used_width = name_col.width() + status.width();
             let mut spans = vec![
-                Span::styled(format!("  {:<18}", display_name), theme::bold()),
+                Span::styled(name_col, theme::bold()),
                 Span::styled(status, status_style),
             ];
             if configured {
                 if let Some(section) = app.provider_config.section(name) {
-                    spans.push(Span::styled(
-                        format!("     {}-*", section.alias_prefix),
-                        theme::muted(),
-                    ));
+                    let prefix_span = format!("     {}-*", section.alias_prefix);
+                    used_width += prefix_span.width();
+                    spans.push(Span::styled(prefix_span, theme::muted()));
+                }
+                let sync_text = if app.syncing_providers.contains_key(name) {
+                    Some(("  syncing...".to_string(), theme::muted()))
+                } else if let Some(record) = app.sync_history.get(name) {
+                    let ago = ConnectionHistory::format_time_ago(record.timestamp);
+                    let detail = if ago.is_empty() {
+                        record.message.clone()
+                    } else {
+                        format!("{}, {}", record.message, ago)
+                    };
+                    let style = if record.is_error {
+                        theme::error()
+                    } else {
+                        theme::muted()
+                    };
+                    let prefix = if record.is_error { "  ! " } else { "  " };
+                    Some((format!("{}{}", prefix, detail), style))
+                } else {
+                    None
+                };
+                if let Some((text, style)) = sync_text {
+                    let max = content_width.saturating_sub(used_width);
+                    if let Some(truncated) = truncate_to_width(&text, max) {
+                        spans.push(Span::styled(truncated, style));
+                    }
                 }
             }
             ListItem::new(Line::from(spans))
@@ -213,5 +243,81 @@ fn render_provider_field(
         if area.width > 1 && cursor_x < area.x.saturating_add(area.width).saturating_sub(1) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
+    }
+}
+
+/// Truncate text to fit within `max_cols` display columns.
+/// Returns None if no room (max_cols <= 1), the original text if it fits,
+/// or truncated text with ellipsis appended.
+fn truncate_to_width(text: &str, max_cols: usize) -> Option<String> {
+    if max_cols <= 1 {
+        return None;
+    }
+    if text.width() <= max_cols {
+        return Some(text.to_string());
+    }
+    let target = max_cols - 1; // reserve 1 column for ellipsis
+    let mut col = 0;
+    let mut byte_end = 0;
+    for ch in text.chars() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if col + w > target {
+            break;
+        }
+        col += w;
+        byte_end += ch.len_utf8();
+    }
+    Some(format!("{}…", &text[..byte_end]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn truncate_fits() {
+        assert_eq!(truncate_to_width("hello", 10), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn truncate_exact_fit() {
+        assert_eq!(truncate_to_width("hello", 5), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn truncate_ascii() {
+        assert_eq!(truncate_to_width("hello world", 8), Some("hello w…".to_string()));
+    }
+
+    #[test]
+    fn truncate_no_room() {
+        assert_eq!(truncate_to_width("hello", 1), None);
+        assert_eq!(truncate_to_width("hello", 0), None);
+    }
+
+    #[test]
+    fn truncate_wide_cjk() {
+        // CJK chars are 2 columns wide each. "你好世界" = 8 columns.
+        // With max 5: target = 4 columns, fits "你好" (4 cols) + "…"
+        assert_eq!(truncate_to_width("你好世界", 5), Some("你好…".to_string()));
+    }
+
+    #[test]
+    fn truncate_wide_cjk_odd_boundary() {
+        // max 4: target = 3 columns, "你" = 2 cols fits, "好" = 2 cols won't
+        assert_eq!(truncate_to_width("你好世界", 4), Some("你…".to_string()));
+    }
+
+    #[test]
+    fn truncate_mixed_ascii_cjk() {
+        // "ab你好" = 2 + 4 = 6 columns. max 5: target = 4, "ab你" fits (4 cols)
+        assert_eq!(truncate_to_width("ab你好", 5), Some("ab你…".to_string()));
+    }
+
+    #[test]
+    fn truncate_multibyte_emoji() {
+        // "🚀🔥" = 2+2 = 4 columns (each emoji is 2 cols wide).
+        // max 3: target = 2, "🚀" fits (2 cols)
+        assert_eq!(truncate_to_width("🚀🔥", 3), Some("🚀…".to_string()));
     }
 }

@@ -84,10 +84,11 @@ Pull your servers from DigitalOcean, Vultr, Linode, Hetzner and UpCloud directly
 
 ```bash
 purple provider add digitalocean --token YOUR_TOKEN   # or use PURPLE_TOKEN env var
+purple provider add digitalocean --token-stdin         # pipe from password manager
 purple sync
 ```
 
-Synced hosts are tagged by provider and appear alongside your manual hosts.
+Synced hosts are tagged by provider and appear alongside your manual hosts. The provider list shows last sync results per provider (server count and time ago or error details).
 
 ## Your config, respected
 
@@ -126,6 +127,7 @@ purple import --known-hosts         # Import from known_hosts
 purple provider add digitalocean    # Configure cloud provider
 purple sync                         # Sync all providers
 purple sync --dry-run               # Preview sync changes
+purple sync --remove                # Remove hosts deleted from provider
 purple sync --reset-tags            # Replace local tags with provider tags
 purple tunnel list                  # List configured tunnels
 purple tunnel add myserver L:8080:localhost:80  # Add forward
@@ -143,7 +145,7 @@ purple --completions zsh            # Shell completions
 
 | Key         | Action                           |
 | ----------- | -------------------------------- |
-| `j` / `k`   | Navigate up and down             |
+| `j` / `k`   | Navigate down and up             |
 | `Enter`     | Connect to selected host         |
 | `a`         | Add new host                     |
 | `e`         | Edit selected host               |
@@ -170,7 +172,7 @@ purple --completions zsh            # Shell completions
 
 | Key         | Action                 |
 | ----------- | ---------------------- |
-| `j` / `k`   | Navigate up and down   |
+| `j` / `k`   | Navigate down and up   |
 | `Enter`     | Start / stop tunnel    |
 | `a`         | Add tunnel             |
 | `e`         | Edit tunnel            |
@@ -181,7 +183,7 @@ purple --completions zsh            # Shell completions
 
 | Key         | Action                 |
 | ----------- | ---------------------- |
-| `j` / `k`   | Navigate up and down   |
+| `j` / `k`   | Navigate down and up   |
 | `Enter`     | Configure provider     |
 | `s`         | Sync selected provider |
 | `d`         | Remove provider        |
@@ -211,7 +213,7 @@ purple --completions zsh            # Shell completions
 
 **It edits your real SSH config.** Most SSH config tools only read. purple reads, edits and writes `~/.ssh/config` directly.
 
-**It doesn't break anything.** Comments, indentation, unknown directives. All preserved through every edit. Tested with 736 tests including round-trip integration.
+**It doesn't break anything.** Comments, indentation, unknown directives. All preserved through every edit. Tested with 751 tests including round-trip integration.
 
 **It syncs your cloud servers.** purple is the only SSH config manager we know of that pulls hosts from DigitalOcean, Vultr, Linode, Hetzner and UpCloud directly into your config. Configure once, sync anytime.
 
@@ -238,7 +240,7 @@ The name `purple` was taken on crates.io. The binary is still called `purple`.
 
 ## Built with
 
-Rust. 736 tests. Zero clippy warnings. No async runtime. Single binary.
+Rust. 751 tests. Zero clippy warnings. No async runtime. Single binary.
 
 <p align="center">
   💜 <a href="LICENSE">MIT License</a>

@@ -1,8 +1,8 @@
 [package]
 name = "purple-ssh"
-version = "1.7.0"
+version = "1.8.0"
 edition = "2024"
-description = "Manage SSH configs and launch connections from the terminal. TUI host manager with search, tags, cloud sync (DigitalOcean, Vultr, Linode, Hetzner, UpCloud) and round-trip fidelity for ~/.ssh/config."
+description = "Manage SSH configs and launch connections from the terminal. TUI host manager with search, tags, tunnels, cloud sync (DigitalOcean, Vultr, Linode, Hetzner, UpCloud), self-update and round-trip fidelity for ~/.ssh/config."
 license = "MIT"
 repository = "https://github.com/erickochen/purple"
 homepage = "https://github.com/erickochen/purple"

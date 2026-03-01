@@ -399,12 +399,39 @@ fn run_tui(mut app: App) -> Result<()> {
                 app.ping_status.insert(alias, status);
             }
             AppEvent::SyncComplete { provider, hosts } => {
-                let (msg, is_err) = app.apply_sync_result(&provider, hosts);
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let (msg, is_err, total) = app.apply_sync_result(&provider, hosts);
+                if is_err {
+                    app.sync_history.insert(provider.clone(), app::SyncRecord {
+                        timestamp: now,
+                        message: msg.clone(),
+                        is_error: true,
+                    });
+                } else {
+                    let label = if total == 1 { "server" } else { "servers" };
+                    app.sync_history.insert(provider.clone(), app::SyncRecord {
+                        timestamp: now,
+                        message: format!("{} {}", total, label),
+                        is_error: false,
+                    });
+                }
                 app.set_status(msg, is_err);
                 app.syncing_providers.remove(&provider);
             }
             AppEvent::SyncError { provider, message } => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
                 let display_name = providers::provider_display_name(provider.as_str());
+                app.sync_history.insert(provider.clone(), app::SyncRecord {
+                    timestamp: now,
+                    message: message.clone(),
+                    is_error: true,
+                });
                 app.set_status(
                     format!("{} sync failed: {}", display_name, message),
                     true,

@@ -727,6 +727,7 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                             app.provider_config.set_section(old_section);
                             app.set_status(format!("Failed to save: {}", e), true);
                         } else {
+                            app.sync_history.remove(name);
                             let display_name = crate::providers::provider_display_name(name);
                             app.set_status(
                                 format!("Removed {} configuration.", display_name),
