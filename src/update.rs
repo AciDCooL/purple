@@ -297,9 +297,11 @@ pub fn self_update() -> Result<()> {
         InstallMethod::CurlOrManual => {}
     }
 
-    // Fetch latest version
+    // Fetch latest version (needs redirects for GitHub release asset downloads)
     print!("  Checking for updates... ");
-    let agent = crate::providers::http_agent();
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(30))
+        .build();
     let latest = check_latest_version(&agent)?;
     let current = current_version();
 
