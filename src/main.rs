@@ -158,6 +158,14 @@ enum ProviderCommands {
         /// Explicitly enable TLS certificate verification (overrides stored setting)
         #[arg(long, conflicts_with = "no_verify_tls")]
         verify_tls: bool,
+
+        /// Enable automatic sync on startup
+        #[arg(long, conflicts_with = "no_auto_sync")]
+        auto_sync: bool,
+
+        /// Disable automatic sync on startup
+        #[arg(long, conflicts_with = "auto_sync")]
+        no_auto_sync: bool,
     },
     /// List configured providers
     List,
@@ -812,6 +820,8 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             url,
             no_verify_tls,
             verify_tls,
+            auto_sync,
+            no_auto_sync,
         } => {
             let p = match providers::get_provider(&provider) {
                 Some(p) => p,
@@ -929,6 +939,17 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 std::process::exit(1);
             }
 
+            // Resolve auto_sync: explicit flags > existing config > provider default
+            let resolved_auto_sync = if auto_sync {
+                true
+            } else if no_auto_sync {
+                false
+            } else if let Some(ref existing) = existing_section {
+                existing.auto_sync
+            } else {
+                provider != "proxmox"
+            };
+
             let section = providers::config::ProviderSection {
                 provider: provider.clone(),
                 token,
@@ -937,7 +958,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 identity_file,
                 url: url.unwrap_or_default(),
                 verify_tls: !no_verify_tls,
-                auto_sync: provider != "proxmox",
+                auto_sync: resolved_auto_sync,
             };
 
             let mut config = providers::config::ProviderConfig::load();

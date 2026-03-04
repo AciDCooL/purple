@@ -11,6 +11,46 @@ pub struct Proxmox {
     pub verify_tls: bool,
 }
 
+// --- Serde helpers ---
+
+/// Deserialize a value that may be `null` or missing as `T::default()`.
+/// `#[serde(default)]` only covers missing keys; this also handles explicit nulls.
+fn null_to_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Default + serde::Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(|o| o.unwrap_or_default())
+}
+
+/// Deserialize a value that may be a string, integer or boolean into `Option<String>`.
+/// Proxmox's Perl JSON serializer sometimes returns integer `1` instead of string `"1"`
+/// for config values like `agent`.
+fn lenient_string<'de, D>(d: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Option::<Value>::deserialize(d)? {
+        Some(Value::String(s)) => Ok(Some(s)),
+        Some(Value::Number(n)) => Ok(Some(n.to_string())),
+        Some(Value::Bool(b)) => Ok(Some(if b { "1".to_string() } else { "0".to_string() })),
+        _ => Ok(None),
+    }
+}
+
+/// Deserialize a value that may be an integer, boolean or null as u8.
+/// Handles `"template": true` (→ 1), `"template": 1`, `"template": null` (→ 0).
+fn lenient_u8<'de, D>(d: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Option::<Value>::deserialize(d)? {
+        Some(Value::Number(n)) => Ok(n.as_u64().unwrap_or(0) as u8),
+        Some(Value::Bool(b)) => Ok(if b { 1 } else { 0 }),
+        _ => Ok(0),
+    }
+}
+
 // --- Serde structs ---
 
 #[derive(Deserialize)]
@@ -22,15 +62,15 @@ struct PveResponse<T> {
 struct ClusterResource {
     #[serde(rename = "type")]
     resource_type: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     vmid: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     node: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     status: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_u8")]
     template: u8,
     #[serde(default)]
     tags: Option<String>,
@@ -40,7 +80,7 @@ struct ClusterResource {
 
 #[derive(Deserialize, Default)]
 struct VmConfig {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_string")]
     agent: Option<String>,
     /// Catch-all for dynamic fields like ipconfig0-9, net0-9.
     #[serde(flatten)]
@@ -48,37 +88,39 @@ struct VmConfig {
 }
 
 // Guest agent response is double-wrapped: {"data": {"result": [...]}}
+// data or result may be null when the agent is starting up or unavailable.
 #[derive(Deserialize)]
 struct GuestAgentNetworkResponse {
+    #[serde(default, deserialize_with = "null_to_default")]
     data: GuestAgentResult,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct GuestAgentResult {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     result: Vec<GuestInterface>,
 }
 
 #[derive(Deserialize)]
 struct GuestInterface {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     name: String,
-    #[serde(default, rename = "ip-addresses")]
+    #[serde(default, deserialize_with = "null_to_default", rename = "ip-addresses")]
     ip_addresses: Vec<GuestIpAddress>,
 }
 
 #[derive(Deserialize)]
 struct GuestIpAddress {
-    #[serde(default, rename = "ip-address")]
+    #[serde(default, deserialize_with = "null_to_default", rename = "ip-address")]
     ip_address: String,
-    #[serde(default, rename = "ip-address-type")]
+    #[serde(default, deserialize_with = "null_to_default", rename = "ip-address-type")]
     ip_address_type: String,
 }
 
 // LXC container interfaces from /lxc/{vmid}/interfaces
 #[derive(Deserialize, Default)]
 struct LxcInterface {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_default")]
     name: String,
     // Legacy PVE format: inet/inet6 CIDR strings
     #[serde(default)]
@@ -86,7 +128,7 @@ struct LxcInterface {
     #[serde(default)]
     inet6: Option<String>,
     // Newer PVE format: same ip-addresses array shape as QEMU guest agent
-    #[serde(default, rename = "ip-addresses")]
+    #[serde(default, deserialize_with = "null_to_default", rename = "ip-addresses")]
     ip_addresses: Vec<GuestIpAddress>,
 }
 
@@ -115,13 +157,28 @@ fn auth_header(token: &str) -> String {
     }
 }
 
-/// Normalize base URL: strip trailing slash and /api2/json suffix.
+/// Normalize base URL: trim whitespace, strip trailing slash and /api2/json suffix.
 fn normalize_url(url: &str) -> String {
-    let mut u = url.trim_end_matches('/').to_string();
+    let mut u = url.trim().trim_end_matches('/').to_string();
     if u.ends_with("/api2/json") {
         u.truncate(u.len() - "/api2/json".len());
     }
     u
+}
+
+/// Returns true if the IP is a loopback or link-local address that should not be
+/// used as an SSH hostname.
+fn is_unusable_ip(ip: &str) -> bool {
+    if ip.is_empty() {
+        return true;
+    }
+    // IPv4 loopback (127.0.0.0/8) and link-local (169.254.0.0/16)
+    if ip.starts_with("127.") || ip.starts_with("169.254.") {
+        return true;
+    }
+    // IPv6 loopback and link-local
+    let ip_lc = ip.to_ascii_lowercase();
+    ip_lc == "::1" || ip_lc.starts_with("fe80:") || ip_lc.starts_with("fe80%")
 }
 
 /// Parse a static IP from ipconfig0 value like "ip=10.0.0.1/24,gw=10.0.0.1".
@@ -132,13 +189,13 @@ fn parse_ipconfig_ip(ipconfig: &str) -> Option<String> {
     for part in ipconfig.split(',') {
         let part = part.trim();
         if let Some(value) = part.strip_prefix("ip=") {
-            if value.eq_ignore_ascii_case("dhcp") {
+            if value.is_empty() || value.eq_ignore_ascii_case("dhcp") || value.eq_ignore_ascii_case("manual") {
                 continue;
             }
             return Some(super::strip_cidr(value).to_string());
         }
         if let Some(value) = part.strip_prefix("ip6=") {
-            if value.eq_ignore_ascii_case("dhcp") || value.eq_ignore_ascii_case("auto") || value.eq_ignore_ascii_case("manual") {
+            if value.is_empty() || value.eq_ignore_ascii_case("dhcp") || value.eq_ignore_ascii_case("auto") || value.eq_ignore_ascii_case("manual") {
                 continue;
             }
             if ipv6_candidate.is_none() {
@@ -156,13 +213,13 @@ fn parse_lxc_net_ip(net0: &str) -> Option<String> {
     for part in net0.split(',') {
         let part = part.trim();
         if let Some(value) = part.strip_prefix("ip=") {
-            if value.eq_ignore_ascii_case("dhcp") {
+            if value.is_empty() || value.eq_ignore_ascii_case("dhcp") || value.eq_ignore_ascii_case("manual") {
                 continue;
             }
             return Some(super::strip_cidr(value).to_string());
         }
         if let Some(value) = part.strip_prefix("ip6=") {
-            if value.eq_ignore_ascii_case("dhcp") || value.eq_ignore_ascii_case("auto") || value.eq_ignore_ascii_case("manual") {
+            if value.is_empty() || value.eq_ignore_ascii_case("dhcp") || value.eq_ignore_ascii_case("auto") || value.eq_ignore_ascii_case("manual") {
                 continue;
             }
             if ipv6_candidate.is_none() {
@@ -206,14 +263,14 @@ fn is_agent_enabled(agent: Option<&str>) -> bool {
     false
 }
 
-/// Parse PVE tags string. PVE 7 uses semicolons, PVE 8 uses commas.
-/// Split on both for compatibility.
+/// Parse PVE tags string. PVE uses semicolons (PVE 7), commas (PVE 8) or spaces
+/// as tag separators. Split on all three for compatibility.
 fn parse_pve_tags(tags: Option<&str>) -> Vec<String> {
     let s = match tags {
         Some(s) if !s.is_empty() => s,
         _ => return Vec::new(),
     };
-    s.split([';', ','])
+    s.split([';', ',', ' '])
         .map(|t| t.trim().to_lowercase())
         .filter(|t| !t.is_empty())
         .collect()
@@ -285,20 +342,23 @@ fn select_lxc_interface_ip(interfaces: &[LxcInterface]) -> Option<String> {
                 ipv6_candidate = Some(ip.to_string());
             }
         }
-        // Newer format: ip-addresses array (same shape as QEMU guest agent response)
+        // Newer format: ip-addresses array.
+        // LXC uses "inet"/"inet6" for ip-address-type (unlike QEMU guest agent
+        // which uses "ipv4"/"ipv6"), so we accept both variants.
         for addr in &iface.ip_addresses {
             let ip = super::strip_cidr(&addr.ip_address);
             if ip.is_empty() {
                 continue;
             }
-            if addr.ip_address_type == "ipv4" {
+            let t = addr.ip_address_type.as_str();
+            if t == "ipv4" || t == "inet" {
                 if ip.starts_with("169.254.") || ip.starts_with("127.") {
                     continue;
                 }
                 if ipv4_candidate.is_none() {
                     ipv4_candidate = Some(ip.to_string());
                 }
-            } else if addr.ip_address_type == "ipv6" {
+            } else if t == "ipv6" || t == "inet6" {
                 let ip_lc = ip.to_ascii_lowercase();
                 if ip_lc.starts_with("fe80:") || ip_lc.starts_with("fe80%") || ip_lc == "::1" {
                     continue;
@@ -359,9 +419,9 @@ impl Provider for Proxmox {
         let agent = self.make_agent()?;
         let auth = auth_header(token);
 
-        // Phase 1: Fetch all cluster resources (unfiltered)
+        // Phase 1: Fetch VM/container resources (type=vm returns both qemu and lxc)
         progress("Fetching resources...");
-        let url = format!("{}/api2/json/cluster/resources", base);
+        let url = format!("{}/api2/json/cluster/resources?type=vm", base);
         let resp: PveResponse<Vec<ClusterResource>> = agent
             .get(&url)
             .set("Authorization", &auth)
@@ -404,7 +464,7 @@ impl Provider for Proxmox {
             // Use the IP from cluster/resources if available (free, no N+1 call).
             let cluster_ip = resource.ip.as_deref()
                 .map(|ip| super::strip_cidr(ip).to_string())
-                .filter(|ip| !ip.is_empty());
+                .filter(|ip| !is_unusable_ip(ip));
             let outcome = if let Some(ip) = cluster_ip {
                 ResolveOutcome::Resolved(ip)
             } else if resource.resource_type == "qemu" {
@@ -628,9 +688,11 @@ impl Proxmox {
             Err(ureq::Error::Status(401, _) | ureq::Error::Status(403, _)) => {
                 ResolveOutcome::AuthFailed
             }
-            Err(ureq::Error::Status(404, _))
+            Err(ureq::Error::Status(500, _))
+            | Err(ureq::Error::Status(404, _))
             | Err(ureq::Error::Status(501, _)) => {
-                // Endpoint may not exist on older PVE
+                // 500: container restarting or PVE hiccup
+                // 404/501: endpoint may not exist on older PVE
                 ResolveOutcome::NoIp
             }
             Err(_) => ResolveOutcome::Failed,
@@ -862,6 +924,52 @@ mod tests {
         assert_eq!(parse_ipconfig_ip("ip=dhcp,ip6=manual"), None);
     }
 
+    #[test]
+    fn test_parse_ipconfig_ip_manual() {
+        assert_eq!(parse_ipconfig_ip("ip=manual"), None);
+    }
+
+    #[test]
+    fn test_parse_ipconfig_ip_empty() {
+        assert_eq!(parse_ipconfig_ip("ip="), None);
+    }
+
+    #[test]
+    fn test_parse_ipconfig_ip6_empty() {
+        assert_eq!(parse_ipconfig_ip("ip6="), None);
+    }
+
+    #[test]
+    fn test_parse_ipconfig_manual_with_ip6_static() {
+        assert_eq!(
+            parse_ipconfig_ip("ip=manual,ip6=fd00::1/64"),
+            Some("fd00::1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_lxc_net_ip_manual() {
+        assert_eq!(parse_lxc_net_ip("name=eth0,bridge=vmbr0,ip=manual"), None);
+    }
+
+    #[test]
+    fn test_parse_lxc_net_ip_empty() {
+        assert_eq!(parse_lxc_net_ip("name=eth0,bridge=vmbr0,ip="), None);
+    }
+
+    #[test]
+    fn test_parse_lxc_net_ip6_empty() {
+        assert_eq!(parse_lxc_net_ip("name=eth0,bridge=vmbr0,ip6="), None);
+    }
+
+    #[test]
+    fn test_parse_lxc_net_manual_with_ip6_static() {
+        assert_eq!(
+            parse_lxc_net_ip("name=eth0,bridge=vmbr0,ip=manual,ip6=fd00::2/64"),
+            Some("fd00::2".to_string())
+        );
+    }
+
     // --- is_agent_enabled tests ---
 
     #[test]
@@ -932,6 +1040,16 @@ mod tests {
         assert_eq!(parse_pve_tags(Some("PROD;Web")), vec!["prod", "web"]);
     }
 
+    #[test]
+    fn test_tags_spaces() {
+        assert_eq!(parse_pve_tags(Some("prod web us-east")), vec!["prod", "web", "us-east"]);
+    }
+
+    #[test]
+    fn test_tags_mixed_all_separators() {
+        assert_eq!(parse_pve_tags(Some("prod;web,db us-east")), vec!["prod", "web", "db", "us-east"]);
+    }
+
     // --- auth_header tests ---
 
     #[test]
@@ -973,6 +1091,13 @@ mod tests {
             normalize_url("https://pve:8006/api2/json/"),
             "https://pve:8006"
         );
+    }
+
+    #[test]
+    fn test_normalize_url_whitespace() {
+        assert_eq!(normalize_url("  https://pve:8006  "), "https://pve:8006");
+        assert_eq!(normalize_url("https://pve:8006 "), "https://pve:8006");
+        assert_eq!(normalize_url(" https://pve:8006"), "https://pve:8006");
     }
 
     // --- select_guest_agent_ip tests ---
@@ -1312,6 +1437,79 @@ mod tests {
         assert_eq!(select_lxc_interface_ip(&interfaces), Some("192.168.1.1".to_string()));
     }
 
+    // LXC ip-addresses uses "inet"/"inet6" (unlike QEMU "ipv4"/"ipv6")
+
+    #[test]
+    fn test_lxc_ip_addresses_inet_type_ipv4() {
+        let interfaces = vec![
+            LxcInterface {
+                name: "eth0".into(),
+                ip_addresses: vec![
+                    GuestIpAddress { ip_address: "10.0.0.5".into(), ip_address_type: "inet".into() },
+                ],
+                ..Default::default()
+            },
+        ];
+        assert_eq!(select_lxc_interface_ip(&interfaces), Some("10.0.0.5".to_string()));
+    }
+
+    #[test]
+    fn test_lxc_ip_addresses_inet6_type() {
+        let interfaces = vec![
+            LxcInterface {
+                name: "eth0".into(),
+                ip_addresses: vec![
+                    GuestIpAddress { ip_address: "2001:db8::1".into(), ip_address_type: "inet6".into() },
+                ],
+                ..Default::default()
+            },
+        ];
+        assert_eq!(select_lxc_interface_ip(&interfaces), Some("2001:db8::1".to_string()));
+    }
+
+    #[test]
+    fn test_lxc_ip_addresses_inet_preferred_over_inet6() {
+        let interfaces = vec![
+            LxcInterface {
+                name: "eth0".into(),
+                ip_addresses: vec![
+                    GuestIpAddress { ip_address: "2001:db8::1".into(), ip_address_type: "inet6".into() },
+                    GuestIpAddress { ip_address: "10.0.0.5".into(), ip_address_type: "inet".into() },
+                ],
+                ..Default::default()
+            },
+        ];
+        assert_eq!(select_lxc_interface_ip(&interfaces), Some("10.0.0.5".to_string()));
+    }
+
+    #[test]
+    fn test_lxc_ip_addresses_inet_skips_loopback() {
+        let interfaces = vec![
+            LxcInterface {
+                name: "eth0".into(),
+                ip_addresses: vec![
+                    GuestIpAddress { ip_address: "127.0.0.1".into(), ip_address_type: "inet".into() },
+                ],
+                ..Default::default()
+            },
+        ];
+        assert_eq!(select_lxc_interface_ip(&interfaces), None);
+    }
+
+    #[test]
+    fn test_lxc_ip_addresses_inet6_skips_link_local() {
+        let interfaces = vec![
+            LxcInterface {
+                name: "eth0".into(),
+                ip_addresses: vec![
+                    GuestIpAddress { ip_address: "fe80::1".into(), ip_address_type: "inet6".into() },
+                ],
+                ..Default::default()
+            },
+        ];
+        assert_eq!(select_lxc_interface_ip(&interfaces), None);
+    }
+
     // --- strip_cidr in guest agent (fix 4) ---
 
     #[test]
@@ -1391,5 +1589,230 @@ mod tests {
             resource.name.clone()
         };
         assert_eq!(name, "lxc-200");
+    }
+
+    // --- null-safe deserialization tests ---
+
+    #[test]
+    fn test_guest_agent_result_null_is_empty() {
+        let json = r#"{"result": null}"#;
+        let result: GuestAgentResult = serde_json::from_str(json).unwrap();
+        assert!(result.result.is_empty());
+    }
+
+    #[test]
+    fn test_guest_agent_result_missing_is_empty() {
+        let json = r#"{}"#;
+        let result: GuestAgentResult = serde_json::from_str(json).unwrap();
+        assert!(result.result.is_empty());
+    }
+
+    #[test]
+    fn test_guest_interface_null_ip_addresses() {
+        let json = r#"{"name": "eth0", "ip-addresses": null}"#;
+        let iface: GuestInterface = serde_json::from_str(json).unwrap();
+        assert_eq!(iface.name, "eth0");
+        assert!(iface.ip_addresses.is_empty());
+    }
+
+    #[test]
+    fn test_lxc_interface_null_ip_addresses() {
+        let json = r#"{"name": "eth0", "ip-addresses": null}"#;
+        let iface: LxcInterface = serde_json::from_str(json).unwrap();
+        assert_eq!(iface.name, "eth0");
+        assert!(iface.ip_addresses.is_empty());
+    }
+
+    #[test]
+    fn test_full_guest_agent_response_with_null_result() {
+        let json = r#"{"data": {"result": null}}"#;
+        let resp: GuestAgentNetworkResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.data.result.is_empty());
+    }
+
+    #[test]
+    fn test_full_guest_agent_response_with_null_data() {
+        let json = r#"{"data": null}"#;
+        let resp: GuestAgentNetworkResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.data.result.is_empty());
+    }
+
+    #[test]
+    fn test_guest_interface_null_name() {
+        let json = r#"{"name": null, "ip-addresses": [{"ip-address": "10.0.0.1", "ip-address-type": "ipv4"}]}"#;
+        let iface: GuestInterface = serde_json::from_str(json).unwrap();
+        assert_eq!(iface.name, "");
+        assert_eq!(iface.ip_addresses.len(), 1);
+    }
+
+    #[test]
+    fn test_guest_ip_address_null_fields() {
+        let json = r#"{"ip-address": null, "ip-address-type": null}"#;
+        let addr: GuestIpAddress = serde_json::from_str(json).unwrap();
+        assert_eq!(addr.ip_address, "");
+        assert_eq!(addr.ip_address_type, "");
+    }
+
+    #[test]
+    fn test_lxc_interface_null_name() {
+        let json = r#"{"name": null, "inet": "10.0.0.1/24"}"#;
+        let iface: LxcInterface = serde_json::from_str(json).unwrap();
+        assert_eq!(iface.name, "");
+        assert_eq!(iface.inet.as_deref(), Some("10.0.0.1/24"));
+    }
+
+    #[test]
+    fn test_guest_agent_response_with_null_interface_name_in_array() {
+        // An interface with null name in the result array must not crash the entire deserialization
+        let json = r#"{"data": {"result": [
+            {"name": null, "ip-addresses": [{"ip-address": "10.0.0.5", "ip-address-type": "ipv4"}]},
+            {"name": "eth0", "ip-addresses": [{"ip-address": "192.168.1.1", "ip-address-type": "ipv4"}]}
+        ]}}"#;
+        let resp: GuestAgentNetworkResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.data.result.len(), 2);
+        // First interface has empty name (from null), should still be processed
+        let ip = select_guest_agent_ip(&resp.data.result);
+        assert_eq!(ip, Some("10.0.0.5".to_string()));
+    }
+
+    // --- is_unusable_ip tests ---
+
+    #[test]
+    fn test_unusable_ip_loopback_ipv4() {
+        assert!(is_unusable_ip("127.0.0.1"));
+        assert!(is_unusable_ip("127.1.2.3"));
+    }
+
+    #[test]
+    fn test_unusable_ip_link_local_ipv4() {
+        assert!(is_unusable_ip("169.254.1.1"));
+        assert!(is_unusable_ip("169.254.0.0"));
+    }
+
+    #[test]
+    fn test_unusable_ip_loopback_ipv6() {
+        assert!(is_unusable_ip("::1"));
+    }
+
+    #[test]
+    fn test_unusable_ip_link_local_ipv6() {
+        assert!(is_unusable_ip("fe80::1"));
+        assert!(is_unusable_ip("FE80::1"));
+        assert!(is_unusable_ip("fe80%eth0"));
+    }
+
+    #[test]
+    fn test_unusable_ip_empty() {
+        assert!(is_unusable_ip(""));
+    }
+
+    #[test]
+    fn test_usable_ip_private() {
+        assert!(!is_unusable_ip("10.0.0.1"));
+        assert!(!is_unusable_ip("192.168.1.1"));
+        assert!(!is_unusable_ip("172.16.0.1"));
+    }
+
+    #[test]
+    fn test_usable_ip_public() {
+        assert!(!is_unusable_ip("8.8.8.8"));
+        assert!(!is_unusable_ip("2001:db8::1"));
+    }
+
+    // --- lenient deserialization tests ---
+
+    #[test]
+    fn test_vmconfig_agent_as_string() {
+        let json = r#"{"agent": "1,fstrim_cloned_disks=1"}"#;
+        let config: VmConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.agent.as_deref(), Some("1,fstrim_cloned_disks=1"));
+    }
+
+    #[test]
+    fn test_vmconfig_agent_as_integer() {
+        // Proxmox Perl JSON serializer may return integer instead of string
+        let json = r#"{"agent": 1}"#;
+        let config: VmConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.agent.as_deref(), Some("1"));
+        assert!(is_agent_enabled(config.agent.as_deref()));
+    }
+
+    #[test]
+    fn test_vmconfig_agent_as_integer_zero() {
+        let json = r#"{"agent": 0}"#;
+        let config: VmConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.agent.as_deref(), Some("0"));
+        assert!(!is_agent_enabled(config.agent.as_deref()));
+    }
+
+    #[test]
+    fn test_vmconfig_agent_as_boolean() {
+        let json = r#"{"agent": true}"#;
+        let config: VmConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.agent.as_deref(), Some("1"));
+        assert!(is_agent_enabled(config.agent.as_deref()));
+    }
+
+    #[test]
+    fn test_vmconfig_agent_as_null() {
+        let json = r#"{"agent": null}"#;
+        let config: VmConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.agent, None);
+        assert!(!is_agent_enabled(config.agent.as_deref()));
+    }
+
+    #[test]
+    fn test_vmconfig_agent_missing() {
+        let json = r#"{}"#;
+        let config: VmConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.agent, None);
+    }
+
+    #[test]
+    fn test_cluster_resource_null_name() {
+        let json = r#"{"type": "qemu", "vmid": 100, "name": null, "node": "pve1", "status": "running", "template": 0}"#;
+        let r: ClusterResource = serde_json::from_str(json).unwrap();
+        assert_eq!(r.name, "");
+    }
+
+    #[test]
+    fn test_cluster_resource_null_vmid() {
+        let json = r#"{"type": "qemu", "vmid": null, "name": "test", "node": "pve1", "status": "running", "template": 0}"#;
+        let r: ClusterResource = serde_json::from_str(json).unwrap();
+        assert_eq!(r.vmid, 0);
+    }
+
+    #[test]
+    fn test_cluster_resource_null_status() {
+        let json = r#"{"type": "qemu", "vmid": 100, "name": "test", "node": "pve1", "status": null, "template": 0}"#;
+        let r: ClusterResource = serde_json::from_str(json).unwrap();
+        assert_eq!(r.status, "");
+    }
+
+    #[test]
+    fn test_cluster_resource_template_as_boolean() {
+        let json = r#"{"type": "qemu", "vmid": 100, "name": "tmpl", "node": "pve1", "status": "stopped", "template": true}"#;
+        let r: ClusterResource = serde_json::from_str(json).unwrap();
+        assert_eq!(r.template, 1);
+    }
+
+    #[test]
+    fn test_cluster_resource_template_as_null() {
+        let json = r#"{"type": "qemu", "vmid": 100, "name": "vm", "node": "pve1", "status": "running", "template": null}"#;
+        let r: ClusterResource = serde_json::from_str(json).unwrap();
+        assert_eq!(r.template, 0);
+    }
+
+    #[test]
+    fn test_cluster_resource_partial_null_in_array() {
+        // One resource with null name in a list must not crash the entire deserialization
+        let json = r#"{"data": [
+            {"type": "qemu", "vmid": 100, "name": null, "node": "pve1", "status": "running", "template": 0},
+            {"type": "lxc", "vmid": 200, "name": "dns-1", "node": "pve1", "status": "running", "template": 0}
+        ]}"#;
+        let resp: PveResponse<Vec<ClusterResource>> = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.data.len(), 2);
+        assert_eq!(resp.data[0].name, "");
+        assert_eq!(resp.data[1].name, "dns-1");
     }
 }
