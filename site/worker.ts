@@ -511,7 +511,7 @@ purple is a free, open-source TUI that turns ~/.ssh/config into a searchable, ta
 
 ## What purple does
 
-purple reads your existing ~/.ssh/config, gives you a terminal UI to search, filter, tag and connect to hosts, and writes changes back without touching your comments, formatting or unknown directives. It syncs servers from six cloud providers directly into your SSH config. No browser, no YAML files, no context switching.
+purple reads your existing ~/.ssh/config and gives you a terminal UI to search, filter, tag and connect to hosts. Changes are written back without touching your comments, formatting or unknown directives. It syncs servers from six cloud providers directly into your SSH config. No browser, no YAML files, no context switching.
 
 ## Key capabilities
 
