@@ -186,7 +186,7 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
         ProviderFormField::Url => "https://pve.example.com:8006",
         ProviderFormField::Token => match provider_name {
             "proxmox" => "user@pam!token=secret",
-            "upcloud" => "username:password",
+            "upcloud" => "your-api-token",
             _ => "your-api-token",
         },
         ProviderFormField::AliasPrefix => match provider_name {

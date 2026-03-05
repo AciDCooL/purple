@@ -16,7 +16,7 @@
 
 ## What is purple?
 
-purple is a free, open-source SSH config manager, editor and host launcher written in Rust. It reads your existing `~/.ssh/config`, lets you search, filter, tag and connect with a single keystroke, and writes changes back without touching your comments or unknown directives. Sync servers from six cloud providers directly into your config. Manage SSH passwords with your OS keychain, 1Password, Bitwarden, pass or HashiCorp Vault. Runs on macOS and Linux. No browser, no YAML files, no context switching.
+purple is a free, open-source SSH config manager, editor and host launcher written in Rust. It reads your existing `~/.ssh/config`, lets you search, filter, tag and connect with a single keystroke. It writes changes back without touching your comments or unknown directives. Sync servers from six cloud providers directly into your config. Manage SSH passwords with your OS keychain, 1Password, Bitwarden, pass or HashiCorp Vault. Runs on macOS and Linux. No browser, no YAML files, no context switching.
 
 ## Install
 
@@ -112,7 +112,7 @@ purple import --known-hosts
 
 Configure a password source per host. Press `Enter` on the Password Source field in the host form to pick a source from the overlay or type it directly. Purple acts as its own SSH_ASKPASS program and retrieves passwords automatically on connect.
 
-Supported sources: **OS Keychain**, **1Password** (`op://`), **Bitwarden** (`bw:`), **pass** (`pass:`), **HashiCorp Vault** (`vault:`), or any custom command. Press `Ctrl+D` in the password picker to set a source as the global default.
+Supported sources: **OS Keychain**, **1Password** (`op://`), **Bitwarden** (`bw:`), **pass** (`pass:`), **HashiCorp Vault** (`vault:`) or any custom command. Press `Ctrl+D` in the password picker to set a source as the global default.
 
 ### SSH key management
 
@@ -153,7 +153,7 @@ purple --completions zsh            # Shell completions
 ```
 
 <details>
-<summary><strong>Keybindings</strong> — press <code>?</code> in the TUI for the cheat sheet</summary>
+<summary><strong>Keybindings</strong>. Press <code>?</code> in the TUI for the cheat sheet</summary>
 
 <br>
 
@@ -239,7 +239,7 @@ purple --completions zsh            # Shell completions
 
 ## Cloud providers
 
-purple syncs servers from six cloud providers into your SSH config. Each provider is configured with an API token (or username/password for UpCloud). Synced hosts get an alias prefix (e.g. `do-web-1`) and are tracked via comments in your config. Run `purple sync` to update all providers at once. Auto-sync runs on startup for providers that have it enabled.
+purple syncs servers from six cloud providers into your SSH config. Each provider is configured with an API token. Synced hosts get an alias prefix (e.g. `do-web-1`) and are tracked via comments in your config. Run `purple sync` to update all providers at once. Auto-sync runs on startup for providers that have it enabled.
 
 ### DigitalOcean
 
@@ -275,10 +275,10 @@ purple provider add hetzner --token YOUR_TOKEN
 
 ### UpCloud
 
-Syncs all servers. Uses the UpCloud API with HTTP Basic authentication (username + password). Requires N+1 API calls (one list request, then one detail request per server to get IP addresses). Tags and labels are both synced.
+Syncs all servers. Uses the UpCloud API with Bearer token authentication. Requires N+1 API calls (one list request, then one detail request per server to get IP addresses). Tags and labels are both synced.
 
 ```bash
-purple provider add upcloud --token user:password
+purple provider add upcloud --token YOUR_TOKEN
 ```
 
 ### Proxmox VE
