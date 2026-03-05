@@ -316,6 +316,8 @@ h1 span { color: #9333ea; }
 .alt-methods a:hover { color: #9333ea; border-color: #9333ea; }
 .demo {
   margin-bottom: 56px;
+  margin-left: calc(50% - min(550px, 50vw));
+  width: min(1100px, 100vw);
 }
 .demo img {
   width: 100%;

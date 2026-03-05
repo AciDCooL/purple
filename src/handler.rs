@@ -868,15 +868,21 @@ fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
             app.provider_form.focused_field = app.provider_form.focused_field.prev(fields);
             app.provider_form.sync_cursor_to_end();
         }
-        KeyCode::Left => {
-            if app.provider_form.cursor_pos > 0 {
-                app.provider_form.cursor_pos -= 1;
-            }
-        }
-        KeyCode::Right => {
-            let len = app.provider_form.focused_value().chars().count();
-            if app.provider_form.cursor_pos < len {
-                app.provider_form.cursor_pos += 1;
+        KeyCode::Left | KeyCode::Right => {
+            let f = app.provider_form.focused_field;
+            if f == crate::app::ProviderFormField::VerifyTls {
+                app.provider_form.verify_tls = !app.provider_form.verify_tls;
+            } else if f == crate::app::ProviderFormField::AutoSync {
+                app.provider_form.auto_sync = !app.provider_form.auto_sync;
+            } else if key.code == KeyCode::Left {
+                if app.provider_form.cursor_pos > 0 {
+                    app.provider_form.cursor_pos -= 1;
+                }
+            } else {
+                let len = app.provider_form.focused_value().chars().count();
+                if app.provider_form.cursor_pos < len {
+                    app.provider_form.cursor_pos += 1;
+                }
             }
         }
         KeyCode::Home => {
