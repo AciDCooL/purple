@@ -1,7 +1,8 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::theme;
@@ -24,9 +25,9 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
 
     let title = Span::styled(" Providers ", theme::brand());
 
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(title)
-        .borders(Borders::ALL)
         .border_style(theme::accent());
 
     let inner = block.inner(area);
@@ -133,39 +134,47 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
     let display_name = crate::providers::provider_display_name(provider_name);
     let title = format!(" Configure {} ", display_name);
 
-    let form_area = super::centered_rect(70, 80, area);
+    let fields = ProviderFormField::fields_for(provider_name);
+
+    // Block: top(1) + fields * 2 (divider + content) + bottom(1)
+    let block_height = 2 + fields.len() as u16 * 2;
+    let total_height = block_height + 1; // + footer
+
+    let base = super::centered_rect(70, 80, area);
+    let form_area = super::centered_rect_fixed(base.width, total_height, area);
     frame.render_widget(Clear, form_area);
 
-    let outer_block = Block::default()
+    let block_area = Rect::new(form_area.x, form_area.y, form_area.width, block_height);
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(Span::styled(title, theme::brand()))
-        .borders(Borders::ALL)
         .border_style(theme::border());
 
-    let inner = outer_block.inner(form_area);
-    frame.render_widget(outer_block, form_area);
+    let inner = block.inner(block_area);
+    frame.render_widget(block, block_area);
 
-    let fields = ProviderFormField::fields_for(provider_name);
-    let mut constraints: Vec<Constraint> = fields.iter().map(|_| {
-        Constraint::Length(3)
-    }).collect();
-    constraints.push(Constraint::Min(1));   // Spacer
-    constraints.push(Constraint::Length(1)); // Footer
+    for (i, &field) in fields.iter().enumerate() {
+        let divider_y = inner.y + (2 * i) as u16;
+        let content_y = divider_y + 1;
 
-    let chunks = Layout::vertical(constraints).split(inner);
-
-    for (i, field) in fields.iter().enumerate() {
-        if *field == ProviderFormField::VerifyTls {
-            render_provider_toggle_field(frame, chunks[i], &app.provider_form);
-        } else if *field == ProviderFormField::AutoSync {
-            render_provider_auto_sync_field(frame, chunks[i], &app.provider_form);
+        let is_focused = app.provider_form.focused_field == field;
+        let label_style = if is_focused { theme::accent_bold() } else { theme::muted() };
+        let is_required = matches!(field, ProviderFormField::Token | ProviderFormField::Url);
+        let label = if is_required {
+            format!(" {}* ", field.label())
         } else {
-            render_provider_field(frame, chunks[i], *field, &app.provider_form, provider_name);
-        }
+            format!(" {} ", field.label())
+        };
+        render_divider(frame, block_area, divider_y, &label, label_style, theme::border());
+
+        let content_area = Rect::new(inner.x, content_y, inner.width, 1);
+        render_field_content(frame, content_area, field, &app.provider_form, provider_name);
     }
 
-    // Footer with status
-    let footer_idx = fields.len() + 1;
-    super::render_footer_with_status(frame, chunks[footer_idx], vec![
+    // Footer below the block
+    let footer_area = Rect::new(form_area.x, form_area.y + block_height, form_area.width, 1);
+    super::render_footer_with_status(frame, footer_area, vec![
         Span::styled(" Enter", theme::primary_action()),
         Span::styled(" save ", theme::muted()),
         Span::styled("\u{2502} ", theme::muted()),
@@ -186,7 +195,6 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
         ProviderFormField::Url => "https://pve.example.com:8006",
         ProviderFormField::Token => match provider_name {
             "proxmox" => "user@pam!token=secret",
-            "upcloud" => "your-api-token",
             _ => "your-api-token",
         },
         ProviderFormField::AliasPrefix => match provider_name {
@@ -200,12 +208,33 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
         },
         ProviderFormField::User => "root",
         ProviderFormField::IdentityFile => "Enter to pick a key",
-        ProviderFormField::VerifyTls => "",
-        ProviderFormField::AutoSync => "",
+        ProviderFormField::VerifyTls | ProviderFormField::AutoSync => "",
     }
 }
 
-fn render_provider_field(
+fn render_divider(
+    frame: &mut Frame,
+    block_area: Rect,
+    y: u16,
+    label: &str,
+    label_style: Style,
+    border_style: Style,
+) {
+    let width = block_area.width as usize;
+    let label_w = label.width();
+    let fill = width.saturating_sub(3 + label_w);
+    let line = Line::from(vec![
+        Span::styled("├─", border_style),
+        Span::styled(label.to_string(), label_style),
+        Span::styled(format!("{}┤", "─".repeat(fill)), border_style),
+    ]);
+    frame.render_widget(
+        Paragraph::new(line),
+        Rect::new(block_area.x, y, block_area.width, 1),
+    );
+}
+
+fn render_field_content(
     frame: &mut Frame,
     area: Rect,
     field: ProviderFormField,
@@ -214,35 +243,36 @@ fn render_provider_field(
 ) {
     let is_focused = form.focused_field == field;
 
+    // Toggle fields
+    if field == ProviderFormField::VerifyTls {
+        let value_text = if form.verify_tls {
+            "yes"
+        } else {
+            "no (accept self-signed)"
+        };
+        render_toggle_content(frame, area, value_text, is_focused);
+        return;
+    }
+    if field == ProviderFormField::AutoSync {
+        let value_text = if form.auto_sync {
+            "yes"
+        } else {
+            "no (sync manually)"
+        };
+        render_toggle_content(frame, area, value_text, is_focused);
+        return;
+    }
+
     let value = match field {
         ProviderFormField::Url => &form.url,
         ProviderFormField::Token => &form.token,
         ProviderFormField::AliasPrefix => &form.alias_prefix,
         ProviderFormField::User => &form.user,
         ProviderFormField::IdentityFile => &form.identity_file,
-        ProviderFormField::VerifyTls => unreachable!("VerifyTls uses render_provider_toggle_field"),
-        ProviderFormField::AutoSync => unreachable!("AutoSync uses render_provider_auto_sync_field"),
+        ProviderFormField::VerifyTls | ProviderFormField::AutoSync => unreachable!(),
     };
 
-    let (border_style, label_style) = if is_focused {
-        (theme::border_focused(), theme::accent_bold())
-    } else {
-        (theme::border(), theme::muted())
-    };
-
-    let is_required = matches!(field, ProviderFormField::Token | ProviderFormField::Url);
-    let label = if is_required {
-        format!(" {}* ", field.label())
-    } else {
-        format!(" {} ", field.label())
-    };
-
-    let block = Block::default()
-        .title(Span::styled(label, label_style))
-        .borders(Borders::ALL)
-        .border_style(border_style);
-
-    // Mask token except last 4 chars
+    // Mask token except last 4 chars when not focused
     let display_value: String = if field == ProviderFormField::Token && !value.is_empty() && !is_focused {
         let char_count = value.chars().count();
         if char_count > 4 {
@@ -260,9 +290,9 @@ fn render_provider_field(
     let content = if value.is_empty() && !is_focused {
         Line::from(Span::styled(placeholder_for(field, provider_name), theme::muted()))
     } else if is_picker && is_focused {
-        let inner_width = area.width.saturating_sub(2) as usize;
+        let inner_width = area.width as usize;
         let arrow_pos = inner_width.saturating_sub(1);
-        let val_width = UnicodeWidthStr::width(display_value.as_str());
+        let val_width = display_value.width();
         let gap = arrow_pos.saturating_sub(val_width);
         Line::from(vec![
             Span::raw(display_value),
@@ -273,49 +303,29 @@ fn render_provider_field(
         Line::from(Span::raw(display_value))
     };
 
-    let paragraph = Paragraph::new(content).block(block);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(Paragraph::new(content), area);
 
     if is_focused {
         let prefix: String = value.chars().take(form.cursor_pos).collect();
         let cursor_x = area
             .x
-            .saturating_add(1)
-            .saturating_add(UnicodeWidthStr::width(prefix.as_str()).min(u16::MAX as usize) as u16);
-        let cursor_y = area.y + 1;
-        if area.width > 1 && cursor_x < area.x.saturating_add(area.width).saturating_sub(1) {
+            .saturating_add(prefix.width().min(u16::MAX as usize) as u16);
+        let cursor_y = area.y;
+        if area.width > 0 && cursor_x < area.x.saturating_add(area.width) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     }
 }
 
-fn render_provider_toggle_field(
+fn render_toggle_content(
     frame: &mut Frame,
     area: Rect,
-    form: &crate::app::ProviderFormFields,
+    value_text: &str,
+    is_focused: bool,
 ) {
-    let is_focused = form.focused_field == ProviderFormField::VerifyTls;
-
-    let (border_style, label_style) = if is_focused {
-        (theme::border_focused(), theme::accent_bold())
-    } else {
-        (theme::border(), theme::muted())
-    };
-
-    let block = Block::default()
-        .title(Span::styled(" Verify TLS ", label_style))
-        .borders(Borders::ALL)
-        .border_style(border_style);
-
-    let value_text = if form.verify_tls {
-        "yes"
-    } else {
-        "no (accept self-signed)"
-    };
-
     let content = if is_focused {
-        let inner_width = area.width.saturating_sub(2) as usize;
-        let val_width = UnicodeWidthStr::width(value_text);
+        let inner_width = area.width as usize;
+        let val_width = value_text.width();
         let gap = inner_width.saturating_sub(val_width + 3);
         Line::from(vec![
             Span::raw(value_text),
@@ -325,50 +335,7 @@ fn render_provider_toggle_field(
     } else {
         Line::from(Span::raw(value_text))
     };
-
-    let paragraph = Paragraph::new(content).block(block);
-    frame.render_widget(paragraph, area);
-}
-
-fn render_provider_auto_sync_field(
-    frame: &mut Frame,
-    area: Rect,
-    form: &crate::app::ProviderFormFields,
-) {
-    let is_focused = form.focused_field == ProviderFormField::AutoSync;
-
-    let (border_style, label_style) = if is_focused {
-        (theme::border_focused(), theme::accent_bold())
-    } else {
-        (theme::border(), theme::muted())
-    };
-
-    let block = Block::default()
-        .title(Span::styled(" Auto Sync ", label_style))
-        .borders(Borders::ALL)
-        .border_style(border_style);
-
-    let value_text = if form.auto_sync {
-        "yes"
-    } else {
-        "no (sync manually)"
-    };
-
-    let content = if is_focused {
-        let inner_width = area.width.saturating_sub(2) as usize;
-        let val_width = UnicodeWidthStr::width(value_text);
-        let gap = inner_width.saturating_sub(val_width + 3);
-        Line::from(vec![
-            Span::raw(value_text),
-            Span::raw(" ".repeat(gap)),
-            Span::styled("\u{25C2} \u{25B8}", theme::muted()),
-        ])
-    } else {
-        Line::from(Span::raw(value_text))
-    };
-
-    let paragraph = Paragraph::new(content).block(block);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(Paragraph::new(content), area);
 }
 
 #[cfg(test)]

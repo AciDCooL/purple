@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, BorderType, Padding, Paragraph};
 
 use super::theme;
 use crate::app::{App, PingStatus};
@@ -14,10 +14,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let host = match app.selected_host() {
         Some(h) => h,
         None => {
-            let block = Block::default()
-                .borders(Borders::ALL)
+            let block = Block::bordered()
+                .border_type(BorderType::Rounded)
+                .padding(Padding::horizontal(1))
                 .border_style(theme::border());
-            let empty = Paragraph::new("  Select a host to see details.")
+            let empty = Paragraph::new(" Select a host to see details.")
                 .style(theme::muted())
                 .block(block);
             frame.render_widget(empty, area);
@@ -26,24 +27,20 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let title = format!(" {} ", host.alias);
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .padding(Padding::horizontal(1))
         .title(Span::styled(title, theme::brand()))
-        .borders(Borders::ALL)
         .border_style(theme::border());
 
-    let inner_width = (area.width as usize).saturating_sub(2); // minus borders
-    let max_value_width = inner_width.saturating_sub(2 + LABEL_WIDTH); // minus indent + label
-    let separator = "─".repeat(inner_width.saturating_sub(4).min(26));
+    let inner_width = (area.width as usize).saturating_sub(4); // minus borders + padding
+    let max_value_width = inner_width.saturating_sub(LABEL_WIDTH); // minus label
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     // Connection section
     lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled("  Connection", theme::section_header())));
-    lines.push(Line::from(Span::styled(
-        format!("  {}", separator),
-        theme::muted(),
-    )));
+    lines.push(section_header("Connection"));
 
     push_field(&mut lines, "Host", &host.hostname, max_value_width);
 
@@ -78,14 +75,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     if history_entry.is_some() || ping.is_some() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  Activity",
-            theme::section_header(),
-        )));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", separator),
-            theme::muted(),
-        )));
+        lines.push(section_header("Activity"));
 
         if let Some(entry) = history_entry {
             let ago = ConnectionHistory::format_time_ago(entry.last_connected);
@@ -104,7 +94,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             };
             lines.push(Line::from(vec![
                 Span::styled(
-                    format!("  {:<width$}", "Status", width = LABEL_WIDTH),
+                    format!("{:<width$}", "Status", width = LABEL_WIDTH),
                     theme::muted(),
                 ),
                 Span::styled(text, style),
@@ -115,13 +105,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     // Tags section
     if !host.tags.is_empty() || host.provider.is_some() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("  Tags", theme::section_header())));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", separator),
-            theme::muted(),
-        )));
+        lines.push(section_header("Tags"));
 
-        let mut tag_spans = vec![Span::raw("  ")];
+        let mut tag_spans = Vec::new();
         for tag in &host.tags {
             tag_spans.push(Span::styled(format!("#{}", tag), theme::accent()));
             tag_spans.push(Span::raw("  "));
@@ -136,19 +122,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let tunnel_active = app.active_tunnels.contains_key(&host.alias);
     if host.tunnel_count > 0 {
         lines.push(Line::from(""));
-        let tunnel_header = if tunnel_active {
-            "  Tunnels (active)"
+        let tunnel_label = if tunnel_active {
+            "Tunnels (active)"
         } else {
-            "  Tunnels"
+            "Tunnels"
         };
-        lines.push(Line::from(Span::styled(
-            tunnel_header,
-            theme::section_header(),
-        )));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", separator),
-            theme::muted(),
-        )));
+        lines.push(section_header(tunnel_label));
 
         let rules = find_tunnel_rules(&app.config.elements, &host.alias);
         let style = if tunnel_active {
@@ -157,11 +136,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             theme::muted()
         };
         for rule in rules.iter().take(5) {
-            lines.push(Line::from(Span::styled(format!("  {}", rule), style)));
+            lines.push(Line::from(Span::styled(rule.to_string(), style)));
         }
         if rules.len() > 5 {
             lines.push(Line::from(Span::styled(
-                format!("  (and {} more...)", rules.len() - 5),
+                format!("(and {} more...)", rules.len() - 5),
                 theme::muted(),
             )));
         }
@@ -172,7 +151,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
         lines.push(Line::from(vec![
             Span::styled(
-                format!("  {:<width$}", "Source", width = LABEL_WIDTH),
+                format!("{:<width$}", "Source", width = LABEL_WIDTH),
                 theme::muted(),
             ),
             Span::styled(source.display().to_string(), theme::muted()),
@@ -193,11 +172,15 @@ fn push_field(lines: &mut Vec<Line<'static>>, label: &'static str, value: &str, 
     };
     lines.push(Line::from(vec![
         Span::styled(
-            format!("  {:<width$}", label, width = LABEL_WIDTH),
+            format!("{:<width$}", label, width = LABEL_WIDTH),
             theme::muted(),
         ),
         Span::styled(display, theme::bold()),
     ]));
+}
+
+fn section_header(label: &str) -> Line<'static> {
+    Line::from(Span::styled(label.to_string(), theme::section_header()))
 }
 
 fn find_tunnel_rules(elements: &[ConfigElement], alias: &str) -> Vec<String> {

@@ -162,39 +162,39 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('p') => {
-            ping_selected_host(app, events_tx, true);
+            if !app.ping_status.is_empty() {
+                app.ping_status.clear();
+                app.status = None;
+            } else {
+                ping_selected_host(app, events_tx, true);
+            }
         }
         KeyCode::Char('P') => {
-            // Skip if a ping-all is already in progress
-            if app.ping_status.values().any(|s| *s == crate::app::PingStatus::Checking) {
-                return;
-            }
-            let hosts_to_ping: Vec<(String, String, u16)> = app
-                .hosts
-                .iter()
-                .filter(|h| !h.hostname.is_empty() && h.proxy_jump.is_empty())
-                .filter(|h| {
-                    !matches!(
-                        app.ping_status.get(&h.alias),
-                        Some(crate::app::PingStatus::Checking)
-                    )
-                })
-                .map(|h| (h.alias.clone(), h.hostname.clone(), h.port))
-                .collect();
-            // Mark ProxyJump hosts as skipped (can't ping directly)
-            for h in &app.hosts {
-                if !h.proxy_jump.is_empty() {
-                    app.ping_status
-                        .insert(h.alias.clone(), crate::app::PingStatus::Skipped);
+            if !app.ping_status.is_empty() {
+                app.ping_status.clear();
+                app.status = None;
+            } else {
+                let hosts_to_ping: Vec<(String, String, u16)> = app
+                    .hosts
+                    .iter()
+                    .filter(|h| !h.hostname.is_empty() && h.proxy_jump.is_empty())
+                    .map(|h| (h.alias.clone(), h.hostname.clone(), h.port))
+                    .collect();
+                // Mark ProxyJump hosts as skipped (can't ping directly)
+                for h in &app.hosts {
+                    if !h.proxy_jump.is_empty() {
+                        app.ping_status
+                            .insert(h.alias.clone(), crate::app::PingStatus::Skipped);
+                    }
                 }
-            }
-            if !hosts_to_ping.is_empty() {
-                for (alias, _, _) in &hosts_to_ping {
-                    app.ping_status
-                        .insert(alias.clone(), crate::app::PingStatus::Checking);
+                if !hosts_to_ping.is_empty() {
+                    for (alias, _, _) in &hosts_to_ping {
+                        app.ping_status
+                            .insert(alias.clone(), crate::app::PingStatus::Checking);
+                    }
+                    app.set_status("Pinging all the things...", false);
+                    ping::ping_all(&hosts_to_ping, events_tx.clone());
                 }
-                app.set_status("Pinging all the things...", false);
-                ping::ping_all(&hosts_to_ping, events_tx.clone());
             }
         }
         KeyCode::Char('/') => {
@@ -325,7 +325,12 @@ fn handle_host_list_search(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sende
             app.select_prev();
         }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            ping_selected_host(app, events_tx, false);
+            if !app.ping_status.is_empty() {
+                app.ping_status.clear();
+                app.status = None;
+            } else {
+                ping_selected_host(app, events_tx, false);
+            }
         }
         KeyCode::Char(c) => {
             if let Some(ref mut query) = app.search.query {

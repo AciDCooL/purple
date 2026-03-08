@@ -2,14 +2,111 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, List, ListItem, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::theme;
 use crate::app::{self, App, HostListItem, PingStatus, SortMode, ViewMode};
+use crate::ssh_config::model::ConfigElement;
 
 /// Minimum terminal width to show the detail panel in detailed view mode.
 const DETAIL_MIN_WIDTH: u16 = 90;
+
+/// Column layout computed from the visible host list.
+struct Columns {
+    alias: usize,
+    tunnel: usize,
+    password: usize,
+    show_ping: bool,
+    history: usize,
+    content: usize,
+}
+
+impl Columns {
+    fn fixed_width(&self) -> usize {
+        let mut w = 0usize;
+        let mut n = 0usize;
+        if self.tunnel > 0 { w += self.tunnel; n += 1; }
+        if self.password > 0 { w += self.password; n += 1; }
+        if self.show_ping { w += 4; n += 1; }
+        if self.history > 0 { w += self.history; n += 1; }
+        if n > 0 { w + (n - 1) * 2 } else { 0 }
+    }
+
+    fn header_right(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        if self.tunnel > 0 { parts.push(format!("{:<width$}", "TUNNEL", width = self.tunnel)); }
+        if self.password > 0 { parts.push(format!("{:<width$}", "PASSWORD", width = self.password)); }
+        if self.show_ping { parts.push("PING".to_string()); }
+        if self.history > 0 { parts.push(format!("{:>width$}", "LAST", width = self.history)); }
+        parts.join("  ")
+    }
+}
+
+/// Short label for a password source suitable for column display.
+fn password_label(source: &str) -> &'static str {
+    if source == "keychain" {
+        "keychain"
+    } else if source.starts_with("op://") {
+        "1password"
+    } else if source.starts_with("bw:") {
+        "bitwarden"
+    } else if source.starts_with("pass:") {
+        "pass"
+    } else if source.starts_with("vault:") {
+        "vault"
+    } else {
+        "custom"
+    }
+}
+
+/// Build a short tunnel summary for a host, e.g. "L:5432" or "L:5432 +1".
+fn tunnel_summary(elements: &[ConfigElement], alias: &str) -> String {
+    let rules = collect_tunnel_labels(elements, alias);
+    if rules.is_empty() {
+        return String::new();
+    }
+    if rules.len() == 1 {
+        rules[0].clone()
+    } else {
+        format!("{} +{}", rules[0], rules.len() - 1)
+    }
+}
+
+fn collect_tunnel_labels(elements: &[ConfigElement], alias: &str) -> Vec<String> {
+    for element in elements {
+        match element {
+            ConfigElement::HostBlock(block) if block.host_pattern == alias => {
+                return block
+                    .directives
+                    .iter()
+                    .filter(|d| !d.is_non_directive)
+                    .filter_map(|d| {
+                        let prefix = match d.key.to_lowercase().as_str() {
+                            "localforward" => "L",
+                            "remoteforward" => "R",
+                            "dynamicforward" => "D",
+                            _ => return None,
+                        };
+                        // Extract just the bind port (first token)
+                        let port = d.value.split_whitespace().next().unwrap_or(&d.value);
+                        Some(format!("{}:{}", prefix, port))
+                    })
+                    .collect();
+            }
+            ConfigElement::Include(include) => {
+                for file in &include.resolved_files {
+                    let result = collect_tunnel_labels(&file.elements, alias);
+                    if !result.is_empty() {
+                        return result;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Vec::new()
+}
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
@@ -108,9 +205,9 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     });
 
     if app.hosts.is_empty() {
-        let mut block = Block::default()
+        let mut block = Block::bordered()
+            .border_type(BorderType::Rounded)
             .title(title)
-            .borders(Borders::ALL)
             .border_style(theme::border());
         if let Some(update) = update_title {
             block = block.title_top(update.right_aligned());
@@ -123,15 +220,51 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         return;
     }
 
-    // Column widths for alignment
-    let alias_col = app
-        .hosts
-        .iter()
-        .map(|h| h.alias.width())
-        .max()
-        .unwrap_or(8)
-        .clamp(8, 20);
-    let content_width = (area.width as usize).saturating_sub(4);
+    // Build block and render border separately for column header
+    let mut block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(title)
+        .border_style(theme::border());
+    if let Some(update) = update_title {
+        block = block.title_top(update.right_aligned());
+    }
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Pre-compute tunnel summaries
+    let tunnel_summaries: std::collections::HashMap<String, String> = app.hosts.iter()
+        .filter(|h| h.tunnel_count > 0)
+        .map(|h| (h.alias.clone(), tunnel_summary(&app.config.elements, &h.alias)))
+        .collect();
+
+    // Compute column layout
+    let cols = Columns {
+        alias: app.hosts.iter().map(|h| h.alias.width()).max().unwrap_or(8).clamp(8, 20),
+        tunnel: tunnel_summaries.values().map(|s| s.width()).max().unwrap_or(0),
+        password: app.hosts.iter()
+            .filter_map(|h| h.askpass.as_deref())
+            .map(|s| password_label(s).width())
+            .max()
+            .unwrap_or(0),
+        show_ping: !app.ping_status.is_empty(),
+        history: app.hosts.iter()
+            .filter_map(|h| app.history.entries.get(&h.alias))
+            .map(|e| crate::history::ConnectionHistory::format_time_ago(e.last_connected))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.width())
+            .max()
+            .unwrap_or(0),
+        content: (inner.width as usize).saturating_sub(3),
+    };
+
+    // Column header + list body
+    let [header_area, list_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .areas(inner);
+
+    render_header(frame, header_area, &cols);
 
     // Count hosts per group for group headers
     let group_counts: std::collections::HashMap<&str, usize> = {
@@ -152,56 +285,46 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
         counts
     };
 
-    let items: Vec<ListItem> = app
-        .display_list
-        .iter()
-        .map(|item| match item {
+    let mut items: Vec<ListItem> = Vec::new();
+    for item in &app.display_list {
+        match item {
             HostListItem::GroupHeader(text) => {
                 let upper = text.to_uppercase();
                 let count = group_counts.get(text.as_str()).copied().unwrap_or(0);
-                let label = format!("{} ({})", upper, count);
-                let label_width = label.width() + 4; // "── " + label + " "
-                let fill = content_width.saturating_sub(label_width);
+                let label = format!("{} ({}) ", upper, count);
+                let fill = cols.content.saturating_sub(label.width());
                 let line = Line::from(vec![
-                    Span::styled("── ", theme::muted()),
                     Span::styled(label, theme::section_header()),
-                    Span::styled(format!(" {}", "─".repeat(fill)), theme::muted()),
+                    Span::styled("─".repeat(fill), theme::muted()),
                 ]);
-                ListItem::new(line)
+                items.push(ListItem::new(line));
             }
             HostListItem::Host { index } => {
                 if let Some(host) = app.hosts.get(*index) {
                     let tunnel_active = app.active_tunnels.contains_key(&host.alias);
-                    build_host_item(
+                    let list_item = build_host_item(
                         host,
                         &app.ping_status,
                         &app.history,
+                        &tunnel_summaries,
                         tunnel_active,
                         None,
-                        alias_col,
-                        content_width,
-                    )
+                        &cols,
+                    );
+                    items.push(list_item);
                 } else {
-                    ListItem::new(Line::from(Span::raw("")))
+                    items.push(ListItem::new(Line::from(Span::raw(""))));
                 }
             }
-        })
-        .collect();
-
-    let mut block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(theme::border());
-    if let Some(update) = update_title {
-        block = block.title_top(update.right_aligned());
+        }
     }
 
     let list = List::new(items)
-        .block(block)
         .highlight_style(theme::selected())
-        .highlight_symbol("  ");
+        .highlight_symbol(" ");
 
-    frame.render_stateful_widget(list, area, &mut app.ui.list_state);
+    frame.render_stateful_widget(list, list_area, &mut app.ui.list_state);
+
 }
 
 fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
@@ -218,65 +341,113 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
         let empty_msg = Paragraph::new("  No matches. Try a different search.")
             .style(theme::muted())
             .block(
-                Block::default()
+                Block::bordered()
+                    .border_type(BorderType::Rounded)
                     .title(title)
-                    .borders(Borders::ALL)
                     .border_style(theme::accent()),
             );
         frame.render_widget(empty_msg, area);
         return;
     }
 
-    let alias_col = app
-        .search.filtered_indices
-        .iter()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(title)
+        .border_style(theme::accent());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Pre-compute tunnel summaries for filtered hosts
+    let tunnel_summaries: std::collections::HashMap<String, String> = app.search.filtered_indices.iter()
         .filter_map(|&i| app.hosts.get(i))
-        .map(|h| h.alias.width())
-        .max()
-        .unwrap_or(8)
-        .clamp(8, 20);
-    let content_width = (area.width as usize).saturating_sub(4);
+        .filter(|h| h.tunnel_count > 0)
+        .map(|h| (h.alias.clone(), tunnel_summary(&app.config.elements, &h.alias)))
+        .collect();
+
+    let cols = Columns {
+        alias: app.search.filtered_indices.iter()
+            .filter_map(|&i| app.hosts.get(i))
+            .map(|h| h.alias.width())
+            .max()
+            .unwrap_or(8)
+            .clamp(8, 20),
+        tunnel: tunnel_summaries.values().map(|s| s.width()).max().unwrap_or(0),
+        password: app.search.filtered_indices.iter()
+            .filter_map(|&i| app.hosts.get(i))
+            .filter_map(|h| h.askpass.as_deref())
+            .map(|s| password_label(s).width())
+            .max()
+            .unwrap_or(0),
+        show_ping: !app.ping_status.is_empty(),
+        history: app.search.filtered_indices.iter()
+            .filter_map(|&i| app.hosts.get(i))
+            .filter_map(|h| app.history.entries.get(&h.alias))
+            .map(|e| crate::history::ConnectionHistory::format_time_ago(e.last_connected))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.width())
+            .max()
+            .unwrap_or(0),
+        content: (inner.width as usize).saturating_sub(3),
+    };
+
+    let [header_area, list_area] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(1),
+    ])
+    .areas(inner);
+
+    render_header(frame, header_area, &cols);
 
     let query = app.search.query.as_deref();
-    let items: Vec<ListItem> = app
-        .search.filtered_indices
-        .iter()
-        .filter_map(|&idx| {
-            let host = app.hosts.get(idx)?;
+    let mut items: Vec<ListItem> = Vec::new();
+    for &idx in app.search.filtered_indices.iter() {
+        if let Some(host) = app.hosts.get(idx) {
             let tunnel_active = app.active_tunnels.contains_key(&host.alias);
-            Some(build_host_item(
+            let list_item = build_host_item(
                 host,
                 &app.ping_status,
                 &app.history,
+                &tunnel_summaries,
                 tunnel_active,
                 query,
-                alias_col,
-                content_width,
-            ))
-        })
-        .collect();
+                &cols,
+            );
+            items.push(list_item);
+        }
+    }
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(theme::accent()),
-        )
         .highlight_style(theme::selected())
-        .highlight_symbol("  ");
+        .highlight_symbol(" ");
 
-    frame.render_stateful_widget(list, area, &mut app.ui.list_state);
+    frame.render_stateful_widget(list, list_area, &mut app.ui.list_state);
+
+}
+
+fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, cols: &Columns) {
+    let header_left = format!(" {:<width$}    HOST", "NAME", width = cols.alias);
+    let header_right = cols.header_right();
+    let header_right_len = header_right.width();
+    let header_pad = cols.content
+        .saturating_sub(header_left.width() + header_right_len);
+    let mut spans = vec![
+        Span::styled(format!(" {}", header_left), theme::muted()),
+        Span::raw(" ".repeat(header_pad)),
+    ];
+    if !header_right.is_empty() {
+        spans.push(Span::styled(header_right, theme::muted()));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 fn build_host_item<'a>(
     host: &'a crate::ssh_config::model::HostEntry,
     ping_status: &'a std::collections::HashMap<String, PingStatus>,
     history: &'a crate::history::ConnectionHistory,
+    tunnel_summaries: &'a std::collections::HashMap<String, String>,
     tunnel_active: bool,
     query: Option<&str>,
-    alias_col: usize,
-    content_width: usize,
+    cols: &Columns,
 ) -> ListItem<'a> {
     let q = query.unwrap_or("");
 
@@ -292,7 +463,7 @@ fn build_host_item<'a>(
     } else {
         theme::bold()
     };
-    let alias_display = format!(" {:<width$} ", host.alias, width = alias_col);
+    let alias_display = format!(" {:<width$}    ", host.alias, width = cols.alias);
     let mut left_len = alias_display.width();
     let mut left_spans = vec![Span::styled(alias_display, alias_style)];
 
@@ -321,31 +492,31 @@ fn build_host_item<'a>(
         left_spans.push(Span::styled(s, theme::muted()));
     }
 
-    // === RIGHT: tags, provider, source, tunnels, ping, history ===
-    let mut right_spans: Vec<Span> = Vec::new();
-    let mut right_len: usize = 0;
+    // === TAGS ===
+    let mut tag_spans: Vec<Span> = Vec::new();
+    let mut tag_len: usize = 0;
 
     let tag_matches = !q.is_empty() && !alias_matches && !host_matches && !user_matches;
     for tag in &host.tags {
         let style = if tag_matches && app::contains_ci(tag, q) {
             theme::highlight_bold()
         } else {
-            theme::accent()
+            theme::muted()
         };
         let s = format!(" #{}", tag);
-        right_len += s.width();
-        right_spans.push(Span::styled(s, style));
+        tag_len += s.width();
+        tag_spans.push(Span::styled(s, style));
     }
 
     if let Some(ref label) = host.provider {
         let style = if tag_matches && app::contains_ci(label, q) {
             theme::highlight_bold()
         } else {
-            theme::accent()
+            theme::muted()
         };
         let s = format!(" #{}", label);
-        right_len += s.width();
-        right_spans.push(Span::styled(s, style));
+        tag_len += s.width();
+        tag_spans.push(Span::styled(s, style));
     }
 
     if let Some(ref source) = host.source_file {
@@ -355,58 +526,91 @@ fn build_host_item<'a>(
             .unwrap_or_default();
         if !file_name.is_empty() {
             let s = format!(" ({})", file_name);
-            right_len += s.width();
-            right_spans.push(Span::styled(s, theme::muted()));
+            tag_len += s.width();
+            tag_spans.push(Span::styled(s, theme::muted()));
         }
     }
 
-    // Password source indicator
-    if host.askpass.is_some() {
-        let indicator = " [P]";
-        right_len += indicator.len();
-        right_spans.push(Span::styled(indicator, theme::muted()));
-    }
+    // === FIXED INDICATOR COLUMNS ===
+    let mut ind_spans: Vec<Span> = Vec::new();
+    let fixed_w = cols.fixed_width();
+    let mut first_col = true;
 
-    // Tunnel indicator
-    if host.tunnel_count > 0 {
-        let (indicator, style) = if tunnel_active {
-            (" [T]", theme::bold())
+    if cols.tunnel > 0 {
+        if !first_col { ind_spans.push(Span::raw("  ")); }
+        if let Some(summary) = tunnel_summaries.get(&host.alias) {
+            let style = if tunnel_active { theme::bold() } else { theme::muted() };
+            ind_spans.push(Span::styled(
+                format!("{:<width$}", summary, width = cols.tunnel),
+                style,
+            ));
         } else {
-            (" [T]", theme::muted())
-        };
-        right_len += indicator.width();
-        right_spans.push(Span::styled(indicator, style));
+            ind_spans.push(Span::raw(" ".repeat(cols.tunnel)));
+        }
+        first_col = false;
     }
 
-    if let Some(status) = ping_status.get(&host.alias) {
-        let (indicator, style) = match status {
-            PingStatus::Checking => ("[..]", theme::muted()),
-            PingStatus::Reachable => ("[ok]", theme::success()),
-            PingStatus::Unreachable => ("[--]", theme::error()),
-            PingStatus::Skipped => ("[??]", theme::muted()),
-        };
-        let sep = " ";
-        right_len += sep.width() + indicator.width();
-        right_spans.push(Span::raw(sep));
-        right_spans.push(Span::styled(indicator, style));
+    if cols.password > 0 {
+        if !first_col { ind_spans.push(Span::raw("  ")); }
+        if let Some(ref source) = host.askpass {
+            ind_spans.push(Span::styled(
+                format!("{:<width$}", password_label(source), width = cols.password),
+                theme::muted(),
+            ));
+        } else {
+            ind_spans.push(Span::raw(" ".repeat(cols.password)));
+        }
+        first_col = false;
     }
 
-    if let Some(entry) = history.entries.get(&host.alias) {
-        let ago = crate::history::ConnectionHistory::format_time_ago(entry.last_connected);
-        if !ago.is_empty() {
-            let s = format!(" {}", ago);
-            right_len += s.width();
-            right_spans.push(Span::styled(s, theme::muted()));
+    if cols.show_ping {
+        if !first_col { ind_spans.push(Span::raw("  ")); }
+        if let Some(status) = ping_status.get(&host.alias) {
+            let (indicator, style) = match status {
+                PingStatus::Checking => ("..", theme::muted()),
+                PingStatus::Reachable => ("ok", theme::success()),
+                PingStatus::Unreachable => ("--", theme::error()),
+                PingStatus::Skipped => ("??", theme::muted()),
+            };
+            ind_spans.push(Span::raw(" "));
+            ind_spans.push(Span::styled(indicator, style));
+            ind_spans.push(Span::raw(" "));
+        } else {
+            ind_spans.push(Span::raw("    "));
+        }
+        first_col = false;
+    }
+
+    if cols.history > 0 {
+        if !first_col { ind_spans.push(Span::raw("  ")); }
+        if let Some(entry) = history.entries.get(&host.alias) {
+            let ago = crate::history::ConnectionHistory::format_time_ago(entry.last_connected);
+            if !ago.is_empty() {
+                ind_spans.push(Span::styled(
+                    format!("{:>width$}", ago, width = cols.history),
+                    theme::muted(),
+                ));
+            } else {
+                ind_spans.push(Span::raw(" ".repeat(cols.history)));
+            }
+        } else {
+            ind_spans.push(Span::raw(" ".repeat(cols.history)));
         }
     }
 
-    // === COMBINE: left + padding + right ===
-    let padding = content_width.saturating_sub(left_len + right_len);
+    // === COMBINE: left + padding + tags + gap + fixed indicators ===
+    let gap = if fixed_w > 0 && tag_len > 0 { 2 } else { 0 };
+    let right_len = tag_len + gap + fixed_w;
+    let padding = cols.content.saturating_sub(left_len + right_len);
     let mut spans = left_spans;
     if padding > 0 {
         spans.push(Span::raw(" ".repeat(padding)));
     }
-    spans.extend(right_spans);
+    spans.extend(tag_spans);
+    if gap > 0 {
+        spans.push(Span::raw("  "));
+    }
+    spans.extend(ind_spans);
 
     ListItem::new(Line::from(spans))
 }

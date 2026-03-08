@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
 use super::theme;
 
@@ -14,9 +14,9 @@ pub fn render(frame: &mut Frame) {
     frame.render_widget(Clear, area);
 
     let title = Span::styled(" Cheat Sheet ", theme::brand());
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(title)
-        .borders(Borders::ALL)
         .border_style(theme::accent());
 
     let inner = block.inner(area);

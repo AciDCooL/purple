@@ -120,7 +120,7 @@ Browse your SSH keys with metadata (type, bits, fingerprint, comment) and see wh
 
 ### Additional features
 
-- **Ping** TCP connectivity check per host or all at once
+- **Ping** TCP connectivity check per host or all at once (toggle to clear)
 - **Clipboard** Copy the SSH command or full config block
 - **Atomic writes** Temp file, chmod 600, rename. No half-written configs.
 - **Automatic backups** Every write creates a timestamped backup (keeps the last 5)
@@ -179,8 +179,8 @@ purple --completions zsh            # Shell completions
 | `i`         | Inspect host details             |
 | `v`         | Toggle detail panel              |
 | `u`         | Undo last delete                 |
-| `p`         | Ping selected host               |
-| `P`         | Ping all hosts                   |
+| `p`         | Ping selected host (toggle)      |
+| `P`         | Ping all hosts (toggle)          |
 | `S`         | Cloud provider sync              |
 | `T`         | Manage host tunnels              |
 | `K`         | SSH key list                     |

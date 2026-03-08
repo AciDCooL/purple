@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph};
 
 use super::theme;
 use crate::app::App;
@@ -31,9 +31,9 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     };
     frame.render_widget(Clear, area);
 
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(title)
-        .borders(Borders::ALL)
         .border_style(theme::accent());
 
     let inner = block.inner(area);

@@ -1,7 +1,8 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::theme;
@@ -18,72 +19,51 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let is_dynamic = app.tunnel_form.tunnel_type == TunnelType::Dynamic;
 
-    // Overlay: percentage-based width, fixed height
-    let height: u16 = if is_dynamic { 10 } else { 15 };
-    let form_area = super::centered_rect(70, 80, area);
-    let form_area = super::centered_rect_fixed(form_area.width, height, area);
+    let fields: Vec<TunnelFormField> = if is_dynamic {
+        vec![TunnelFormField::Type, TunnelFormField::BindPort]
+    } else {
+        vec![
+            TunnelFormField::Type,
+            TunnelFormField::BindPort,
+            TunnelFormField::RemoteHost,
+            TunnelFormField::RemotePort,
+        ]
+    };
 
+    // Block: top(1) + fields * 2 (divider + content) + bottom(1)
+    let block_height = 2 + fields.len() as u16 * 2;
+    let total_height = block_height + 1; // + footer
+
+    let base = super::centered_rect(70, 80, area);
+    let form_area = super::centered_rect_fixed(base.width, total_height, area);
     frame.render_widget(Clear, form_area);
 
-    let outer_block = Block::default()
+    let block_area = Rect::new(form_area.x, form_area.y, form_area.width, block_height);
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(Span::styled(title, theme::brand()))
-        .borders(Borders::ALL)
         .border_style(theme::border());
 
-    let inner = outer_block.inner(form_area);
-    frame.render_widget(outer_block, form_area);
+    let inner = block.inner(block_area);
+    frame.render_widget(block, block_area);
 
-    let mut constraints = vec![
-        Constraint::Length(3), // Type
-        Constraint::Length(3), // Bind Port
-    ];
-    if !is_dynamic {
-        constraints.push(Constraint::Length(3)); // Remote Host
-        constraints.push(Constraint::Length(3)); // Remote Port
-    }
-    constraints.push(Constraint::Min(0));   // Spacer
-    constraints.push(Constraint::Length(1)); // Footer
+    for (i, &field) in fields.iter().enumerate() {
+        let divider_y = inner.y + (2 * i) as u16;
+        let content_y = divider_y + 1;
 
-    let chunks = Layout::vertical(constraints).split(inner);
+        let is_focused = app.tunnel_form.focused_field == field;
+        let label_style = if is_focused { theme::accent_bold() } else { theme::muted() };
+        let label = format!(" {}* ", field.label());
+        render_divider(frame, block_area, divider_y, &label, label_style, theme::border());
 
-    // Type field (special: Left/Right cycle, not text input)
-    render_type_field(frame, chunks[0], &app.tunnel_form);
-
-    // Bind Port
-    render_text_field(
-        frame,
-        chunks[1],
-        TunnelFormField::BindPort,
-        &app.tunnel_form,
-        "8080",
-        true,
-    );
-
-    if !is_dynamic {
-        // Remote Host
-        render_text_field(
-            frame,
-            chunks[2],
-            TunnelFormField::RemoteHost,
-            &app.tunnel_form,
-            "localhost",
-            true,
-        );
-
-        // Remote Port
-        render_text_field(
-            frame,
-            chunks[3],
-            TunnelFormField::RemotePort,
-            &app.tunnel_form,
-            "80",
-            true,
-        );
+        let content_area = Rect::new(inner.x, content_y, inner.width, 1);
+        render_field_content(frame, content_area, field, &app.tunnel_form);
     }
 
-    // Footer with status
-    let footer_idx = chunks.len() - 1;
-    super::render_footer_with_status(frame, chunks[footer_idx], vec![
+    // Footer below the block
+    let footer_area = Rect::new(form_area.x, form_area.y + block_height, form_area.width, 1);
+    super::render_footer_with_status(frame, footer_area, vec![
         Span::styled(" Enter", theme::primary_action()),
         Span::styled(" save ", theme::muted()),
         Span::styled("\u{2502} ", theme::muted()),
@@ -97,88 +77,83 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     ], app);
 }
 
-fn render_type_field(frame: &mut Frame, area: Rect, form: &crate::app::TunnelForm) {
-    let is_focused = form.focused_field == TunnelFormField::Type;
-
-    let (border_style, label_style) = if is_focused {
-        (theme::border_focused(), theme::accent_bold())
-    } else {
-        (theme::border(), theme::muted())
-    };
-
-    let block = Block::default()
-        .title(Span::styled(" Type* ", label_style))
-        .borders(Borders::ALL)
-        .border_style(border_style);
-
-    let type_label = form.tunnel_type.label();
-    let content = if is_focused {
-        let inner_width = area.width.saturating_sub(2) as usize;
-        let val_width = type_label.len();
-        let gap = inner_width.saturating_sub(val_width + 3);
-        Line::from(vec![
-            Span::styled(type_label, theme::bold()),
-            Span::raw(" ".repeat(gap)),
-            Span::styled("\u{25C2} \u{25B8}", theme::muted()),
-        ])
-    } else {
-        Line::from(Span::raw(type_label))
-    };
-    let paragraph = Paragraph::new(content).block(block);
-    frame.render_widget(paragraph, area);
+fn render_divider(
+    frame: &mut Frame,
+    block_area: Rect,
+    y: u16,
+    label: &str,
+    label_style: Style,
+    border_style: Style,
+) {
+    let width = block_area.width as usize;
+    let label_w = label.width();
+    let fill = width.saturating_sub(3 + label_w);
+    let line = Line::from(vec![
+        Span::styled("├─", border_style),
+        Span::styled(label.to_string(), label_style),
+        Span::styled(format!("{}┤", "─".repeat(fill)), border_style),
+    ]);
+    frame.render_widget(
+        Paragraph::new(line),
+        Rect::new(block_area.x, y, block_area.width, 1),
+    );
 }
 
-fn render_text_field(
+fn render_field_content(
     frame: &mut Frame,
     area: Rect,
     field: TunnelFormField,
     form: &crate::app::TunnelForm,
-    placeholder: &str,
-    required: bool,
 ) {
+    let is_focused = form.focused_field == field;
+
+    if field == TunnelFormField::Type {
+        let type_label = form.tunnel_type.label();
+        let content = if is_focused {
+            let inner_width = area.width as usize;
+            let val_width = type_label.len();
+            let gap = inner_width.saturating_sub(val_width + 3);
+            Line::from(vec![
+                Span::styled(type_label, theme::bold()),
+                Span::raw(" ".repeat(gap)),
+                Span::styled("\u{25C2} \u{25B8}", theme::muted()),
+            ])
+        } else {
+            Line::from(Span::raw(type_label))
+        };
+        frame.render_widget(Paragraph::new(content), area);
+        return;
+    }
+
     let value = match field {
         TunnelFormField::BindPort => &form.bind_port,
         TunnelFormField::RemoteHost => &form.remote_host,
         TunnelFormField::RemotePort => &form.remote_port,
-        TunnelFormField::Type => unreachable!("Type uses render_type_field"),
+        TunnelFormField::Type => unreachable!(),
     };
-    let is_focused = form.focused_field == field;
 
-    let (border_style, label_style) = if is_focused {
-        (theme::border_focused(), theme::accent_bold())
+    let placeholder = match field {
+        TunnelFormField::BindPort => "8080",
+        TunnelFormField::RemoteHost => "localhost",
+        TunnelFormField::RemotePort => "80",
+        TunnelFormField::Type => unreachable!(),
+    };
+
+    let content = if value.is_empty() && !is_focused {
+        Line::from(Span::styled(placeholder, theme::muted()))
     } else {
-        (theme::border(), theme::muted())
+        Line::from(Span::raw(value.as_str()))
     };
 
-    let label = if required {
-        format!(" {}* ", field.label())
-    } else {
-        format!(" {} ", field.label())
-    };
+    frame.render_widget(Paragraph::new(content), area);
 
-    let block = Block::default()
-        .title(Span::styled(label, label_style))
-        .borders(Borders::ALL)
-        .border_style(border_style);
-
-    let display: Span = if value.is_empty() && !is_focused {
-        Span::styled(placeholder, theme::muted())
-    } else {
-        Span::raw(value)
-    };
-
-    let paragraph = Paragraph::new(display).block(block);
-    frame.render_widget(paragraph, area);
-
-    // Cursor
     if is_focused {
         let prefix: String = value.chars().take(form.cursor_pos).collect();
         let cursor_x = area
             .x
-            .saturating_add(1)
-            .saturating_add(UnicodeWidthStr::width(prefix.as_str()).min(u16::MAX as usize) as u16);
-        let cursor_y = area.y + 1;
-        if area.width > 1 && cursor_x < area.x.saturating_add(area.width).saturating_sub(1) {
+            .saturating_add(prefix.width().min(u16::MAX as usize) as u16);
+        let cursor_y = area.y;
+        if area.width > 0 && cursor_x < area.x.saturating_add(area.width) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     }

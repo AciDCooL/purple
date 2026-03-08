@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph};
 
 use super::theme;
 use crate::app::App;
@@ -10,9 +10,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.tag_list.is_empty() {
         let area = super::centered_rect_fixed(50, 5, frame.area());
         frame.render_widget(Clear, area);
-        let block = Block::default()
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
             .title(Span::styled(" Filter by Tag ", theme::brand()))
-            .borders(Borders::ALL)
             .border_style(theme::accent());
         let msg = Paragraph::new(Line::from(Span::styled(
             "  No tags yet. Press t on a host to add some.",
@@ -54,9 +54,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         })
         .collect();
 
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(Span::styled(" Filter by Tag ", theme::brand()))
-        .borders(Borders::ALL)
         .border_style(theme::accent());
 
     let inner = block.inner(area);

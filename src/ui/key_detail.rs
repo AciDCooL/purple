@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
 use super::theme;
 use crate::app::App;
@@ -23,9 +23,9 @@ pub fn render(frame: &mut Frame, app: &App, index: usize) {
     frame.render_widget(Clear, area);
 
     let title = format!(" {} ", key.name);
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(Span::styled(title, theme::brand()))
-        .borders(Borders::ALL)
         .border_style(theme::accent());
 
     let type_display = key.type_display();

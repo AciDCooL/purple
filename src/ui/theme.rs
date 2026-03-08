@@ -114,11 +114,6 @@ pub fn border() -> Style {
     Style::default().add_modifier(Modifier::DIM)
 }
 
-/// Focused border.
-pub fn border_focused() -> Style {
-    Style::default().add_modifier(Modifier::BOLD)
-}
-
 /// Danger border (delete dialog).
 pub fn border_danger() -> Style {
     Style::default().add_modifier(Modifier::BOLD)

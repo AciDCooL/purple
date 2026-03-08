@@ -1,6 +1,6 @@
 use ratatui::Frame;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
 use super::theme;
 use crate::app::App;
@@ -12,9 +12,9 @@ pub fn render(frame: &mut Frame, _app: &App, alias: &str) {
     // Clear background
     frame.render_widget(Clear, area);
 
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(Span::styled(" Confirm Delete ", theme::danger()))
-        .borders(Borders::ALL)
         .border_style(theme::border_danger());
 
     let text = vec![
@@ -42,9 +42,9 @@ pub fn render_host_key_reset(frame: &mut Frame, _app: &App, hostname: &str) {
 
     frame.render_widget(Clear, area);
 
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(Span::styled(" Host Key Changed ", theme::danger()))
-        .borders(Borders::ALL)
         .border_style(theme::border_danger());
 
     let text = vec![

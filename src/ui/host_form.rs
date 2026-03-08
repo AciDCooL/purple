@@ -1,7 +1,8 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::theme;
@@ -26,6 +27,18 @@ fn placeholder_for(field: FormField) -> String {
     }
 }
 
+/// All form fields in display order with required flag.
+const FIELDS: &[(FormField, bool)] = &[
+    (FormField::Alias, true),
+    (FormField::Hostname, true),
+    (FormField::User, false),
+    (FormField::Port, false),
+    (FormField::IdentityFile, false),
+    (FormField::ProxyJump, false),
+    (FormField::AskPass, false),
+    (FormField::Tags, false),
+];
+
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
@@ -35,51 +48,45 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         _ => " Host ",
     };
 
-    // Center the form
-    let form_area = super::centered_rect(70, 80, area);
+    // Block: top(1) + fields * 2 (divider + content) + bottom(1)
+    let block_height = 2 + FIELDS.len() as u16 * 2;
+    let total_height = block_height + 1; // + footer
 
-    // Clear background
+    let base = super::centered_rect(70, 80, area);
+    let form_area = super::centered_rect_fixed(base.width, total_height, area);
     frame.render_widget(Clear, form_area);
 
-    let outer_block = Block::default()
+    let block_area = Rect::new(form_area.x, form_area.y, form_area.width, block_height);
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(Span::styled(title, theme::brand()))
-        .borders(Borders::ALL)
         .border_style(theme::border());
 
-    let inner = outer_block.inner(form_area);
-    frame.render_widget(outer_block, form_area);
+    let inner = block.inner(block_area);
+    frame.render_widget(block, block_area);
 
-    // Layout: 8 fields grouped with spacing + footer
-    let chunks = Layout::vertical([
-        Constraint::Length(3), // 0: Alias
-        Constraint::Length(3), // 1: Hostname
-        Constraint::Length(3), // 2: User
-        Constraint::Length(3), // 3: Port
-        Constraint::Length(1), // 4: Spacer (Connection -> Security)
-        Constraint::Length(3), // 5: IdentityFile
-        Constraint::Length(3), // 6: ProxyJump
-        Constraint::Length(3), // 7: AskPass
-        Constraint::Length(1), // 8: Spacer (Security -> Meta)
-        Constraint::Length(3), // 9: Tags
-        Constraint::Min(1),   // 10: Spacer
-        Constraint::Length(1), // 11: Footer or status
-    ])
-    .split(inner);
+    // Render dividers and content for each field
+    for (i, &(field, is_required)) in FIELDS.iter().enumerate() {
+        let divider_y = inner.y + (2 * i) as u16;
+        let content_y = divider_y + 1;
 
-    // Connection
-    render_field(frame, chunks[0], FormField::Alias, &app.form);
-    render_field(frame, chunks[1], FormField::Hostname, &app.form);
-    render_field(frame, chunks[2], FormField::User, &app.form);
-    render_field(frame, chunks[3], FormField::Port, &app.form);
-    // Security
-    render_field(frame, chunks[5], FormField::IdentityFile, &app.form);
-    render_field(frame, chunks[6], FormField::ProxyJump, &app.form);
-    render_field(frame, chunks[7], FormField::AskPass, &app.form);
-    // Meta
-    render_field(frame, chunks[9], FormField::Tags, &app.form);
+        let is_focused = app.form.focused_field == field;
+        let label_style = if is_focused { theme::accent_bold() } else { theme::muted() };
+        let label = if is_required {
+            format!(" {}* ", field.label())
+        } else {
+            format!(" {} ", field.label())
+        };
+        render_divider(frame, block_area, divider_y, &label, label_style, theme::border());
 
-    // Footer with status right-aligned
-    super::render_footer_with_status(frame, chunks[11], vec![
+        let content_area = Rect::new(inner.x, content_y, inner.width, 1);
+        render_field_content(frame, content_area, field, &app.form);
+    }
+
+    // Footer below the block
+    let footer_area = Rect::new(form_area.x, form_area.y + block_height, form_area.width, 1);
+    super::render_footer_with_status(frame, footer_area, vec![
         Span::styled(" Enter", theme::primary_action()),
         Span::styled(" save ", theme::muted()),
         Span::styled("\u{2502} ", theme::muted()),
@@ -106,9 +113,9 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
         // Small popup saying no keys found
         let area = super::centered_rect_fixed(50, 5, frame.area());
         frame.render_widget(Clear, area);
-        let block = Block::default()
+        let block = Block::bordered()
+            .border_type(BorderType::Rounded)
             .title(Span::styled(" Select Key ", theme::brand()))
-            .borders(Borders::ALL)
             .border_style(theme::accent());
         let msg = Paragraph::new(Line::from(Span::styled(
             "  No keys found in ~/.ssh/",
@@ -146,9 +153,9 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
         })
         .collect();
 
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(Span::styled(" Select Key ", theme::brand()))
-        .borders(Borders::ALL)
         .border_style(theme::accent());
 
     let list = List::new(items)
@@ -178,18 +185,18 @@ fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
         })
         .collect();
 
-    let block = Block::default()
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
         .title(Span::styled(" Password Source ", theme::brand()))
-        .borders(Borders::ALL)
         .border_style(theme::accent());
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     // Split into list area and footer
-    let chunks = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(1),
+    let chunks = ratatui::layout::Layout::vertical([
+        ratatui::layout::Constraint::Min(1),
+        ratatui::layout::Constraint::Length(1),
     ])
     .split(inner);
 
@@ -216,7 +223,36 @@ pub fn placeholder_text(field: FormField) -> String {
     placeholder_for(field)
 }
 
-fn render_field(frame: &mut Frame, area: Rect, field: FormField, form: &crate::app::HostForm) {
+/// Render a horizontal divider: ├─ Label ───────┤
+fn render_divider(
+    frame: &mut Frame,
+    block_area: Rect,
+    y: u16,
+    label: &str,
+    label_style: Style,
+    border_style: Style,
+) {
+    let width = block_area.width as usize;
+    let label_w = label.width();
+    let fill = width.saturating_sub(3 + label_w);
+    let line = Line::from(vec![
+        Span::styled("├─", border_style),
+        Span::styled(label.to_string(), label_style),
+        Span::styled(format!("{}┤", "─".repeat(fill)), border_style),
+    ]);
+    frame.render_widget(
+        Paragraph::new(line),
+        Rect::new(block_area.x, y, block_area.width, 1),
+    );
+}
+
+/// Render a single field's content (value or placeholder) and set cursor.
+fn render_field_content(
+    frame: &mut Frame,
+    area: Rect,
+    field: FormField,
+    form: &crate::app::HostForm,
+) {
     let is_focused = form.focused_field == field;
 
     let value = match field {
@@ -230,25 +266,6 @@ fn render_field(frame: &mut Frame, area: Rect, field: FormField, form: &crate::a
         FormField::Tags => &form.tags,
     };
 
-    let (border_style, label_style) = if is_focused {
-        (theme::border_focused(), theme::accent_bold())
-    } else {
-        (theme::border(), theme::muted())
-    };
-
-    // Required fields get an asterisk
-    let is_required = matches!(field, FormField::Alias | FormField::Hostname);
-    let label = if is_required {
-        format!(" {}* ", field.label())
-    } else {
-        format!(" {} ", field.label())
-    };
-
-    let block = Block::default()
-        .title(Span::styled(label, label_style))
-        .borders(Borders::ALL)
-        .border_style(border_style);
-
     let is_picker = matches!(field, FormField::IdentityFile | FormField::AskPass);
 
     // Show placeholder when field is empty and not focused
@@ -256,7 +273,7 @@ fn render_field(frame: &mut Frame, area: Rect, field: FormField, form: &crate::a
         let ph = placeholder_for(field);
         Line::from(Span::styled(ph, theme::muted()))
     } else if is_picker && is_focused {
-        let inner_width = area.width.saturating_sub(2) as usize;
+        let inner_width = area.width as usize;
         let arrow_pos = inner_width.saturating_sub(1);
         let val_width = value.width();
         let gap = arrow_pos.saturating_sub(val_width);
@@ -269,19 +286,16 @@ fn render_field(frame: &mut Frame, area: Rect, field: FormField, form: &crate::a
         Line::from(Span::raw(value.as_str()))
     };
 
-    let paragraph = Paragraph::new(content).block(block);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(Paragraph::new(content), area);
 
     if is_focused {
         let prefix: String = value.chars().take(form.cursor_pos).collect();
         let cursor_x = area
             .x
-            .saturating_add(1)
             .saturating_add(prefix.width().min(u16::MAX as usize) as u16);
-        let cursor_y = area.y + 1;
-        if area.width > 1 && cursor_x < area.x.saturating_add(area.width).saturating_sub(1) {
+        let cursor_y = area.y;
+        if area.width > 0 && cursor_x < area.x.saturating_add(area.width) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
     }
 }
-
