@@ -11,6 +11,7 @@ mod ping;
 mod preferences;
 mod providers;
 mod quick_add;
+mod snippet;
 mod ssh_config;
 mod ssh_keys;
 mod tui;
@@ -18,7 +19,7 @@ mod tunnel;
 mod ui;
 mod update;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -121,6 +122,11 @@ enum Commands {
     Password {
         #[command(subcommand)]
         command: PasswordCommands,
+    },
+    /// Manage command snippets for quick execution on hosts
+    Snippet {
+        #[command(subcommand)]
+        command: SnippetCommands,
     },
     /// Update purple to the latest version
     Update,
@@ -226,6 +232,49 @@ enum PasswordCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum SnippetCommands {
+    /// List all saved snippets
+    List,
+    /// Add a new snippet
+    Add {
+        /// Snippet name (no whitespace)
+        name: String,
+
+        /// Command to run on the remote host
+        command: String,
+
+        /// Short description
+        #[arg(long)]
+        description: Option<String>,
+    },
+    /// Remove a snippet
+    Remove {
+        /// Snippet name
+        name: String,
+    },
+    /// Run a snippet on one or more hosts
+    Run {
+        /// Snippet name
+        name: String,
+
+        /// Host alias (run on a single host)
+        alias: Option<String>,
+
+        /// Run on all hosts matching this tag
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Run on all hosts
+        #[arg(long)]
+        all: bool,
+
+        /// Run on hosts concurrently
+        #[arg(long)]
+        parallel: bool,
+    },
+}
+
 fn resolve_config_path(path: &str) -> Result<PathBuf> {
     if let Some(rest) = path.strip_prefix("~/") {
         let home = dirs::home_dir().context("Could not determine home directory")?;
@@ -303,6 +352,9 @@ fn main() -> Result<()> {
         }
         Some(Commands::Tunnel { command }) => {
             return handle_tunnel_command(config, command);
+        }
+        Some(Commands::Snippet { command }) => {
+            return handle_snippet_command(config, command, &config_path);
         }
         Some(Commands::Provider { .. }) | Some(Commands::Update) | Some(Commands::Password { .. }) => unreachable!(),
         None => {}
@@ -587,6 +639,70 @@ fn run_tui(mut app: App) -> Result<()> {
             events.resume();
             last_config_check = std::time::Instant::now();
             // Reload in case config changed externally
+            app.config = SshConfigFile::parse(&app.reload.config_path)?;
+            app.reload_hosts();
+            app.update_last_modified();
+        }
+
+        // Handle pending snippet execution
+        if let Some((snip, aliases)) = app.pending_snippet.take() {
+            events.pause();
+            terminal.exit()?;
+
+            let multi = aliases.len() > 1;
+            for alias in &aliases {
+                let askpass = app.hosts.iter()
+                    .find(|h| h.alias == *alias)
+                    .and_then(|h| h.askpass.clone())
+                    .or_else(preferences::load_askpass_default);
+                if let Some(token) = ensure_bw_session(app.bw_session.as_deref(), askpass.as_deref()) {
+                    app.bw_session = Some(token);
+                }
+                ensure_keychain_password(alias, askpass.as_deref());
+
+                if multi {
+                    println!("── {} ──", alias);
+                } else {
+                    println!("Running '{}' on {}...\n", snip.name, alias);
+                }
+                match snippet::run_snippet(
+                    alias,
+                    &app.reload.config_path,
+                    &snip.command,
+                    askpass.as_deref(),
+                    app.bw_session.as_deref(),
+                ) {
+                    Ok(r) => {
+                        print!("{}", r.stdout);
+                        if !r.stderr.is_empty() {
+                            eprint!("{}", r.stderr);
+                        }
+                        if r.status.success() {
+                            app.history.record(alias);
+                        } else if multi {
+                            eprintln!("Exited with code {}.", r.status.code().unwrap_or(1));
+                        } else {
+                            println!("\nExited with code {}.", r.status.code().unwrap_or(1));
+                        }
+                    }
+                    Err(e) => eprintln!("[{}] Failed: {}", alias, e),
+                }
+                if multi {
+                    println!();
+                }
+            }
+
+            if !multi {
+                println!("\nDone.");
+            } else {
+                println!("Done. Ran '{}' on {} hosts.", snip.name, aliases.len());
+            }
+            println!("\nPress Enter to continue...");
+            let _ = std::io::stdin().read_line(&mut String::new());
+            terminal.enter()?;
+            events.resume();
+            last_config_check = std::time::Instant::now();
+            // Reload so sort order (e.g. most recent) reflects the new history
             app.config = SshConfigFile::parse(&app.reload.config_path)?;
             app.reload_hosts();
             app.update_last_modified();
@@ -1314,6 +1430,244 @@ fn handle_password_command(command: PasswordCommands) -> Result<()> {
         PasswordCommands::Remove { alias } => {
             askpass::remove_from_keychain(&alias)?;
             println!("Password removed for {}.", alias);
+            Ok(())
+        }
+    }
+}
+
+fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, config_path: &Path) -> Result<()> {
+    match command {
+        SnippetCommands::List => {
+            let store = snippet::SnippetStore::load();
+            if store.snippets.is_empty() {
+                println!("No snippets configured. Use 'purple snippet add' to create one.");
+            } else {
+                for s in &store.snippets {
+                    if s.description.is_empty() {
+                        println!("  {}  {}", s.name, s.command);
+                    } else {
+                        println!("  {}  {}  ({})", s.name, s.command, s.description);
+                    }
+                }
+            }
+            Ok(())
+        }
+        SnippetCommands::Add {
+            name,
+            command,
+            description,
+        } => {
+            if let Err(e) = snippet::validate_name(&name) {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+            if let Err(e) = snippet::validate_command(&command) {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+            if let Some(ref desc) = description {
+                if desc.contains(|c: char| c.is_control()) {
+                    eprintln!("Description contains control characters.");
+                    std::process::exit(1);
+                }
+            }
+            let mut store = snippet::SnippetStore::load();
+            let is_update = store.get(&name).is_some();
+            store.set(snippet::Snippet {
+                name: name.clone(),
+                command,
+                description: description.unwrap_or_default(),
+            });
+            store.save()?;
+            if is_update {
+                println!("Updated snippet '{}'.", name);
+            } else {
+                println!("Added snippet '{}'.", name);
+            }
+            Ok(())
+        }
+        SnippetCommands::Remove { name } => {
+            let mut store = snippet::SnippetStore::load();
+            if store.get(&name).is_none() {
+                eprintln!("No snippet '{}' found.", name);
+                std::process::exit(1);
+            }
+            store.remove(&name);
+            store.save()?;
+            println!("Removed snippet '{}'.", name);
+            Ok(())
+        }
+        SnippetCommands::Run {
+            name,
+            alias,
+            tag,
+            all,
+            parallel,
+        } => {
+            let store = snippet::SnippetStore::load();
+            let snip = match store.get(&name) {
+                Some(s) => s.clone(),
+                None => {
+                    eprintln!("No snippet '{}' found.", name);
+                    std::process::exit(1);
+                }
+            };
+
+            let entries = config.host_entries();
+
+            // Determine target hosts
+            let targets: Vec<&HostEntry> = if let Some(ref alias) = alias {
+                match entries.iter().find(|h| h.alias == *alias) {
+                    Some(h) => vec![h],
+                    None => {
+                        eprintln!("No host '{}' found.", alias);
+                        std::process::exit(1);
+                    }
+                }
+            } else if let Some(ref tag_filter) = tag {
+                let matched: Vec<_> = entries
+                    .iter()
+                    .filter(|h| h.tags.iter().any(|t| t == tag_filter))
+                    .collect();
+                if matched.is_empty() {
+                    eprintln!("No hosts found with tag '{}'.", tag_filter);
+                    std::process::exit(1);
+                }
+                matched
+            } else if all {
+                entries.iter().collect()
+            } else {
+                eprintln!("Specify a host alias, --tag or --all.");
+                std::process::exit(1);
+            };
+
+            if targets.len() == 1 {
+                // Single host: run directly
+                let host = targets[0];
+                let askpass = host.askpass.clone().or_else(preferences::load_askpass_default);
+                let bw_session = ensure_bw_session(None, askpass.as_deref());
+                ensure_keychain_password(&host.alias, askpass.as_deref());
+                match snippet::run_snippet(
+                    &host.alias,
+                    config_path,
+                    &snip.command,
+                    askpass.as_deref(),
+                    bw_session.as_deref(),
+                ) {
+                    Ok(r) => {
+                        print!("{}", r.stdout);
+                        if !r.stderr.is_empty() {
+                            eprint!("{}", r.stderr);
+                        }
+                        if !r.status.success() {
+                            std::process::exit(r.status.code().unwrap_or(1));
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else if parallel {
+                // Multi-host parallel
+                use std::sync::mpsc;
+                use std::thread;
+                let (tx, rx) = mpsc::channel();
+                let max_concurrent: usize = 20;
+                let (slot_tx, slot_rx) = mpsc::channel();
+                for _ in 0..max_concurrent {
+                    let _ = slot_tx.send(());
+                }
+                let config_path = config_path.to_path_buf();
+                // Resolve BW session if any target uses Bitwarden
+                let any_bw = targets.iter().any(|h| {
+                    let askpass = h.askpass.clone().or_else(preferences::load_askpass_default);
+                    askpass.as_deref().unwrap_or("").starts_with("bw:")
+                });
+                let bw_session = if any_bw {
+                    let bw_askpass = targets.iter()
+                        .find_map(|h| h.askpass.as_ref().filter(|a| a.starts_with("bw:")))
+                        .cloned()
+                        .or_else(preferences::load_askpass_default);
+                    ensure_bw_session(None, bw_askpass.as_deref())
+                } else {
+                    None
+                };
+                let targets_info: Vec<_> = targets
+                    .iter()
+                    .map(|h| {
+                        let askpass = h.askpass.clone().or_else(preferences::load_askpass_default);
+                        ensure_keychain_password(&h.alias, askpass.as_deref());
+                        (h.alias.clone(), askpass)
+                    })
+                    .collect();
+                let command = snip.command.clone();
+                thread::spawn(move || {
+                    for (alias, askpass) in targets_info {
+                        let _ = slot_rx.recv();
+                        let slot_tx = slot_tx.clone();
+                        let tx = tx.clone();
+                        let config_path = config_path.clone();
+                        let command = command.clone();
+                        let bw_session = bw_session.clone();
+                        thread::spawn(move || {
+                            let result = snippet::run_snippet(
+                                &alias,
+                                &config_path,
+                                &command,
+                                askpass.as_deref(),
+                                bw_session.as_deref(),
+                            );
+                            let _ = tx.send((alias, result));
+                            let _ = slot_tx.send(());
+                        });
+                    }
+                });
+
+                let host_count = targets.len();
+                for _ in 0..host_count {
+                    if let Ok((alias, result)) = rx.recv() {
+                        match result {
+                            Ok(r) => {
+                                for line in r.stdout.lines() {
+                                    println!("[{}] {}", alias, line);
+                                }
+                                for line in r.stderr.lines() {
+                                    eprintln!("[{}] {}", alias, line);
+                                }
+                            }
+                            Err(e) => eprintln!("[{}] Failed: {}", alias, e),
+                        }
+                    }
+                }
+            } else {
+                // Multi-host sequential
+                let mut bw_session: Option<String> = None;
+                for host in &targets {
+                    let askpass = host.askpass.clone().or_else(preferences::load_askpass_default);
+                    if let Some(token) = ensure_bw_session(bw_session.as_deref(), askpass.as_deref()) {
+                        bw_session = Some(token);
+                    }
+                    ensure_keychain_password(&host.alias, askpass.as_deref());
+                    match snippet::run_snippet(
+                        &host.alias,
+                        config_path,
+                        &snip.command,
+                        askpass.as_deref(),
+                        bw_session.as_deref(),
+                    ) {
+                        Ok(r) => {
+                            for line in r.stdout.lines() {
+                                println!("[{}] {}", host.alias, line);
+                            }
+                            for line in r.stderr.lines() {
+                                eprintln!("[{}] {}", host.alias, line);
+                            }
+                        }
+                        Err(e) => eprintln!("[{}] Failed: {}", host.alias, e),
+                    }
+                }
+            }
             Ok(())
         }
     }

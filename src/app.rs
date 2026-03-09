@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -52,6 +52,8 @@ pub enum Screen {
     ProviderForm { provider: String },
     TunnelList { alias: String },
     TunnelForm { alias: String, editing: Option<usize> },
+    SnippetPicker { target_aliases: Vec<String> },
+    SnippetForm { target_aliases: Vec<String>, editing: Option<usize> },
     ConfirmHostKeyReset {
         alias: String,
         hostname: String,
@@ -122,6 +124,8 @@ pub struct HostForm {
     pub tags: String,
     pub focused_field: FormField,
     pub cursor_pos: usize,
+    /// Real-time validation hint shown in footer.
+    pub form_hint: Option<String>,
 }
 
 impl HostForm {
@@ -137,6 +141,7 @@ impl HostForm {
             tags: String::new(),
             focused_field: FormField::Alias,
             cursor_pos: 0,
+            form_hint: None,
         }
     }
 
@@ -154,6 +159,7 @@ impl HostForm {
             tags: entry.tags.join(", "),
             focused_field: FormField::Alias,
             cursor_pos,
+            form_hint: None,
         }
     }
 
@@ -206,6 +212,55 @@ impl HostForm {
 
     pub fn sync_cursor_to_end(&mut self) {
         self.cursor_pos = self.focused_value().chars().count();
+    }
+
+    /// Run lightweight validation on the focused field and update `form_hint`.
+    pub fn update_hint(&mut self) {
+        self.form_hint = match self.focused_field {
+            FormField::Alias => {
+                let v = self.alias.trim();
+                if v.is_empty() {
+                    None // Don't nag while empty (user may not have typed yet)
+                } else if v.contains(char::is_whitespace) {
+                    Some("Alias can't contain whitespace".into())
+                } else if v.contains('#') {
+                    Some("Alias can't contain '#'".into())
+                } else if crate::ssh_config::model::is_host_pattern(v) {
+                    Some("Alias can't contain pattern characters".into())
+                } else {
+                    None
+                }
+            }
+            FormField::Hostname => {
+                let v = self.hostname.trim();
+                if !v.is_empty() && v.contains(char::is_whitespace) {
+                    Some("Hostname can't contain whitespace".into())
+                } else {
+                    None
+                }
+            }
+            FormField::User => {
+                let v = self.user.trim();
+                if !v.is_empty() && v.contains(char::is_whitespace) {
+                    Some("User can't contain whitespace".into())
+                } else {
+                    None
+                }
+            }
+            FormField::Port => {
+                let v = &self.port;
+                if v.is_empty() || v == "22" {
+                    None
+                } else {
+                    match v.parse::<u16>() {
+                        Ok(0) => Some("Port must be 1-65535".into()),
+                        Err(_) => Some("Not a valid port number".into()),
+                        _ => None,
+                    }
+                }
+            }
+            _ => None,
+        };
     }
 
     /// Validate the form. Returns an error message if invalid.
@@ -608,6 +663,121 @@ impl TunnelForm {
     }
 }
 
+/// Which snippet form field is focused.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SnippetFormField {
+    Name,
+    Command,
+    Description,
+}
+
+impl SnippetFormField {
+    pub const ALL: &[SnippetFormField] = &[
+        SnippetFormField::Name,
+        SnippetFormField::Command,
+        SnippetFormField::Description,
+    ];
+
+    pub fn next(self) -> Self {
+        let idx = Self::ALL.iter().position(|f| *f == self).unwrap_or(0);
+        Self::ALL[(idx + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let idx = Self::ALL.iter().position(|f| *f == self).unwrap_or(0);
+        Self::ALL[(idx + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SnippetFormField::Name => "Name",
+            SnippetFormField::Command => "Command",
+            SnippetFormField::Description => "Description",
+        }
+    }
+}
+
+/// Form state for adding/editing a snippet.
+#[derive(Debug, Clone)]
+pub struct SnippetForm {
+    pub name: String,
+    pub command: String,
+    pub description: String,
+    pub focused_field: SnippetFormField,
+    pub cursor_pos: usize,
+}
+
+impl SnippetForm {
+    pub fn new() -> Self {
+        Self {
+            name: String::new(),
+            command: String::new(),
+            description: String::new(),
+            focused_field: SnippetFormField::Name,
+            cursor_pos: 0,
+        }
+    }
+
+    pub fn from_snippet(snippet: &crate::snippet::Snippet) -> Self {
+        Self {
+            name: snippet.name.clone(),
+            command: snippet.command.clone(),
+            description: snippet.description.clone(),
+            focused_field: SnippetFormField::Name,
+            cursor_pos: snippet.name.chars().count(),
+        }
+    }
+
+    pub fn focused_value(&self) -> &str {
+        match self.focused_field {
+            SnippetFormField::Name => &self.name,
+            SnippetFormField::Command => &self.command,
+            SnippetFormField::Description => &self.description,
+        }
+    }
+
+    pub fn focused_value_mut(&mut self) -> &mut String {
+        match self.focused_field {
+            SnippetFormField::Name => &mut self.name,
+            SnippetFormField::Command => &mut self.command,
+            SnippetFormField::Description => &mut self.description,
+        }
+    }
+
+    pub fn insert_char(&mut self, c: char) {
+        let pos = self.cursor_pos;
+        let val = self.focused_value_mut();
+        let byte_pos = char_to_byte_pos(val, pos);
+        val.insert(byte_pos, c);
+        self.cursor_pos = pos + 1;
+    }
+
+    pub fn delete_char_before_cursor(&mut self) {
+        if self.cursor_pos == 0 {
+            return;
+        }
+        let pos = self.cursor_pos;
+        let val = self.focused_value_mut();
+        let byte_pos = char_to_byte_pos(val, pos);
+        let prev = char_to_byte_pos(val, pos - 1);
+        val.drain(prev..byte_pos);
+        self.cursor_pos = pos - 1;
+    }
+
+    pub fn sync_cursor_to_end(&mut self) {
+        self.cursor_pos = self.focused_value().chars().count();
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        crate::snippet::validate_name(&self.name)?;
+        crate::snippet::validate_command(&self.command)?;
+        if self.description.contains(|c: char| c.is_control()) {
+            return Err("Description contains control characters.".to_string());
+        }
+        Ok(())
+    }
+}
+
 /// Status message displayed at the bottom.
 #[derive(Debug, Clone)]
 pub struct StatusMessage {
@@ -712,6 +882,8 @@ pub struct UiSelection {
     pub tag_picker_state: ListState,
     pub provider_list_state: ListState,
     pub tunnel_list_state: ListState,
+    pub snippet_picker_state: ListState,
+    pub help_scroll: u16,
 }
 
 /// Search mode state.
@@ -796,6 +968,13 @@ pub struct App {
     pub tunnel_form: TunnelForm,
     pub active_tunnels: HashMap<String, crate::tunnel::ActiveTunnel>,
 
+    // Snippets
+    pub snippet_store: crate::snippet::SnippetStore,
+    pub snippet_form: SnippetForm,
+    pub pending_snippet: Option<(crate::snippet::Snippet, Vec<String>)>,
+    /// Host indices selected for multi-host snippet execution (space to toggle).
+    pub multi_select: HashSet<usize>,
+
     // Update
     pub update_available: Option<String>,
     pub update_hint: &'static str,
@@ -846,6 +1025,8 @@ impl App {
                 tag_picker_state: ListState::default(),
                 provider_list_state: ListState::default(),
                 tunnel_list_state: ListState::default(),
+                snippet_picker_state: ListState::default(),
+                help_scroll: 0,
             },
             search: SearchState {
                 query: None,
@@ -881,6 +1062,10 @@ impl App {
             tunnel_list: Vec::new(),
             tunnel_form: TunnelForm::new(),
             active_tunnels: HashMap::new(),
+            snippet_store: crate::snippet::SnippetStore::load(),
+            snippet_form: SnippetForm::new(),
+            pending_snippet: None,
+            multi_select: HashSet::new(),
             update_available: None,
             update_hint: crate::update::update_hint(),
             sync_history: HashMap::new(),
@@ -1218,6 +1403,57 @@ impl App {
         }
     }
 
+    /// Page down in the host list, skipping group headers.
+    pub fn page_down_host(&mut self) {
+        const PAGE_SIZE: usize = 10;
+        if self.search.query.is_some() {
+            page_down(&mut self.ui.list_state, self.search.filtered_indices.len(), PAGE_SIZE);
+        } else {
+            let current = self.ui.list_state.selected().unwrap_or(0);
+            // Jump PAGE_SIZE host items forward (skip group headers)
+            let mut target = current;
+            let mut hosts_skipped = 0;
+            let len = self.display_list.len();
+            for i in (current + 1)..len {
+                if matches!(self.display_list[i], HostListItem::Host { .. }) {
+                    target = i;
+                    hosts_skipped += 1;
+                    if hosts_skipped >= PAGE_SIZE {
+                        break;
+                    }
+                }
+            }
+            if target != current {
+                self.ui.list_state.select(Some(target));
+            }
+        }
+    }
+
+    /// Page up in the host list, skipping group headers.
+    pub fn page_up_host(&mut self) {
+        const PAGE_SIZE: usize = 10;
+        if self.search.query.is_some() {
+            page_up(&mut self.ui.list_state, self.search.filtered_indices.len(), PAGE_SIZE);
+        } else {
+            let current = self.ui.list_state.selected().unwrap_or(0);
+            // Jump PAGE_SIZE host items backward (skip group headers)
+            let mut target = current;
+            let mut hosts_skipped = 0;
+            for i in (0..current).rev() {
+                if matches!(self.display_list[i], HostListItem::Host { .. }) {
+                    target = i;
+                    hosts_skipped += 1;
+                    if hosts_skipped >= PAGE_SIZE {
+                        break;
+                    }
+                }
+            }
+            if target != current {
+                self.ui.list_state.select(Some(target));
+            }
+        }
+    }
+
     /// Reload hosts from config.
     pub fn reload_hosts(&mut self) {
         let had_search = self.search.query.take();
@@ -1229,6 +1465,9 @@ impl App {
         } else {
             self.apply_sort();
         }
+
+        // Multi-select stores indices into hosts; clear to avoid stale refs
+        self.multi_select.clear();
 
         // Prune ping status for hosts that no longer exist
         let valid_aliases: std::collections::HashSet<&str> =
@@ -1424,6 +1663,7 @@ impl App {
             Screen::AddHost | Screen::EditHost { .. } | Screen::ProviderForm { .. }
                 | Screen::TunnelList { .. } | Screen::TunnelForm { .. }
                 | Screen::HostDetail { .. }
+                | Screen::SnippetPicker { .. } | Screen::SnippetForm { .. }
         ) || self.tag_input.is_some()
         {
             return;
@@ -1661,6 +1901,16 @@ impl App {
         cycle_selection(&mut self.ui.tunnel_list_state, self.tunnel_list.len(), true);
     }
 
+    /// Move snippet picker selection up.
+    pub fn select_prev_snippet(&mut self) {
+        cycle_selection(&mut self.ui.snippet_picker_state, self.snippet_store.snippets.len(), false);
+    }
+
+    /// Move snippet picker selection down.
+    pub fn select_next_snippet(&mut self) {
+        cycle_selection(&mut self.ui.snippet_picker_state, self.snippet_store.snippets.len(), true);
+    }
+
     /// Poll active tunnels for exit status. Returns messages for any that exited.
     /// Poll active tunnels for exit. Returns (alias, message, is_error) tuples.
     pub fn poll_tunnels(&mut self) -> Vec<(String, String, bool)> {
@@ -1866,6 +2116,26 @@ pub fn cycle_selection(state: &mut ListState, len: usize, forward: bool) {
         None => 0,
     };
     state.select(Some(i));
+}
+
+/// Jump forward by page_size items, clamping at the end (no wrap).
+pub fn page_down(state: &mut ListState, len: usize, page_size: usize) {
+    if len == 0 {
+        return;
+    }
+    let current = state.selected().unwrap_or(0);
+    let next = (current + page_size).min(len - 1);
+    state.select(Some(next));
+}
+
+/// Jump backward by page_size items, clamping at 0 (no wrap).
+pub fn page_up(state: &mut ListState, len: usize, page_size: usize) {
+    if len == 0 {
+        return;
+    }
+    let current = state.selected().unwrap_or(0);
+    let prev = current.saturating_sub(page_size);
+    state.select(Some(prev));
 }
 
 #[cfg(test)]

@@ -2,11 +2,11 @@
 
 > SSH config manager and host launcher for the terminal
 
-purple is a free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher with full round-trip fidelity. Single Rust binary. macOS and Linux. MIT licensed.
+purple is a free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher with full round-trip fidelity. Run command snippets across multiple hosts. Single Rust binary. macOS and Linux. MIT licensed.
 
 ## What purple does
 
-purple reads your existing ~/.ssh/config and gives you a terminal UI to search, filter, tag and connect to hosts. Changes are written back without touching your comments, formatting or unknown directives. It syncs servers from six cloud providers directly into your SSH config. No browser, no YAML files, no context switching.
+purple reads your existing ~/.ssh/config and gives you a terminal UI to search, filter, tag and connect to hosts. Changes are written back without touching your comments, formatting or unknown directives. Save command snippets and run them on one or many hosts. Sync servers from six cloud providers directly into your SSH config. No browser, no YAML files, no context switching.
 
 ## Key capabilities
 
@@ -15,6 +15,7 @@ purple reads your existing ~/.ssh/config and gives you a terminal UI to search, 
 - Host tagging via SSH config comments (# purple:tags)
 - Cloud provider sync: DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE
 - SSH tunnel management: LocalForward, RemoteForward, DynamicForward. Start/stop from TUI or CLI
+- Command snippets: save commands, run on single host, multi-host selection or all hosts. Sequential and parallel execution. TUI and CLI
 - Password management: OS Keychain, 1Password (op://), Bitwarden (bw:), pass (pass:), HashiCorp Vault (vault:), custom command
 - SSH key browsing with metadata (type, bits, fingerprint) and host linking
 - Bulk import from hosts files or ~/.ssh/known_hosts
@@ -62,6 +63,13 @@ purple tunnel list myserver         # List tunnels for a host
 purple tunnel add myserver L:8080:localhost:80
 purple tunnel remove myserver L:8080:localhost:80
 purple tunnel start myserver        # Start tunnel (Ctrl+C to stop)
+purple snippet list                 # List saved snippets
+purple snippet add NAME "COMMAND"   # Add a snippet
+purple snippet remove NAME          # Remove a snippet
+purple snippet run NAME myserver    # Run on single host
+purple snippet run NAME --tag prod  # Run on hosts with tag
+purple snippet run NAME --all       # Run on all hosts
+purple snippet run NAME --all --parallel  # Run concurrently
 purple password set myserver        # Store password in OS keychain
 purple password remove myserver     # Remove from keychain
 purple update                       # Self-update
@@ -86,6 +94,10 @@ Supported password sources:
 - pass (pass:): entry path in the password store
 - HashiCorp Vault (vault:): secret path
 - Custom command: any shell command that outputs the password. Supports %a (alias) and %h (hostname) substitution. Optional cmd: prefix
+
+## Command snippets
+
+Save frequently used commands and run them on remote hosts via SSH. Snippets are stored in ~/.purple/snippets (INI format). In the TUI: press r to run a snippet on the selected host, Ctrl+Space to multi-select hosts, R to run on all visible hosts. The CLI supports single-host, tag-based and all-host execution with optional parallel mode (--parallel, max 20 concurrent). Askpass integration provides automatic password handling for snippet execution.
 
 ## SSH tunnel management
 

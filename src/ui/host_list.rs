@@ -156,7 +156,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         super::render_footer_with_status(frame, chunks[2], tag_footer_spans(), app);
     } else {
         render_display_list(frame, app, list_area);
-        super::render_footer_with_status(frame, chunks[1], footer_spans(use_detail), app);
+        super::render_footer_with_status(frame, chunks[1], footer_spans(use_detail, app.multi_select.len()), app);
     }
 
     if let Some(detail) = detail_area {
@@ -310,6 +310,7 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
                         tunnel_active,
                         None,
                         &cols,
+                        app.multi_select.contains(index),
                     );
                     items.push(list_item);
                 } else {
@@ -411,6 +412,7 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
                 tunnel_active,
                 query,
                 &cols,
+                app.multi_select.contains(&idx),
             );
             items.push(list_item);
         }
@@ -440,6 +442,7 @@ fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, cols: &Columns)
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_host_item<'a>(
     host: &'a crate::ssh_config::model::HostEntry,
     ping_status: &'a std::collections::HashMap<String, PingStatus>,
@@ -448,6 +451,7 @@ fn build_host_item<'a>(
     tunnel_active: bool,
     query: Option<&str>,
     cols: &Columns,
+    multi_selected: bool,
 ) -> ListItem<'a> {
     let q = query.unwrap_or("");
 
@@ -463,7 +467,8 @@ fn build_host_item<'a>(
     } else {
         theme::bold()
     };
-    let alias_display = format!(" {:<width$}    ", host.alias, width = cols.alias);
+    let marker = if multi_selected { "\u{2713}" } else { " " };
+    let alias_display = format!("{}{:<width$}    ", marker, host.alias, width = cols.alias);
     let mut left_len = alias_display.width();
     let mut left_spans = vec![Span::styled(alias_display, alias_style)];
 
@@ -636,9 +641,9 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     frame.render_widget(Paragraph::new(search_line), area);
 }
 
-fn footer_spans(detail_active: bool) -> Vec<Span<'static>> {
+fn footer_spans(detail_active: bool, multi_count: usize) -> Vec<Span<'static>> {
     let view_label = if detail_active { " compact " } else { " detail " };
-    vec![
+    let mut spans = vec![
         Span::styled(" Enter", theme::primary_action()),
         Span::styled(" connect ", theme::muted()),
         Span::styled("\u{2502} ", theme::muted()),
@@ -658,7 +663,12 @@ fn footer_spans(detail_active: bool) -> Vec<Span<'static>> {
         Span::styled(view_label, theme::muted()),
         Span::styled("?", theme::accent_bold()),
         Span::styled(" help", theme::muted()),
-    ]
+    ];
+    if multi_count > 0 {
+        spans.push(Span::styled("\u{2502} ", theme::muted()));
+        spans.push(Span::styled(format!("{} selected", multi_count), theme::accent_bold()));
+    }
+    spans
 }
 
 fn search_footer_spans<'a>() -> Vec<Span<'a>> {

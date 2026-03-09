@@ -16,7 +16,7 @@
 
 ## What is purple?
 
-purple is a free, open-source SSH config manager, editor and host launcher written in Rust. It reads your existing `~/.ssh/config`, lets you search, filter, tag and connect with a single keystroke. It writes changes back without touching your comments or unknown directives. Sync servers from six cloud providers directly into your config. Manage SSH passwords with your OS keychain, 1Password, Bitwarden, pass or HashiCorp Vault. Runs on macOS and Linux. No browser, no YAML files, no context switching.
+purple is a free, open-source SSH config manager, editor and host launcher written in Rust. It reads your existing `~/.ssh/config`, lets you search, filter, tag and connect with a single keystroke. It writes changes back without touching your comments or unknown directives. Save command snippets and run them on one or many hosts at once. Sync servers from six cloud providers directly into your config. Manage SSH passwords with your OS keychain, 1Password, Bitwarden, pass or HashiCorp Vault. Runs on macOS and Linux. No browser, no YAML files, no context switching.
 
 ## Install
 
@@ -95,6 +95,23 @@ purple tunnel add myserver L:8080:localhost:80
 purple tunnel start myserver
 ```
 
+### Command snippets
+
+Save frequently used commands and run them on one host, a selection of hosts or all visible hosts at once. Multi-host execution runs sequentially in the TUI and supports parallel mode on the CLI. Snippets are stored in `~/.purple/snippets` and managed from the TUI or CLI.
+
+```bash
+purple snippet add check-disk "df -h" --description "Check disk usage"
+purple snippet add uptime "uptime"
+purple snippet run check-disk myserver             # run on single host
+purple snippet run check-disk --tag prod           # run on all hosts with tag
+purple snippet run check-disk --all                # run on all hosts
+purple snippet run check-disk --all --parallel     # run concurrently
+purple snippet list                                # list all snippets
+purple snippet remove check-disk                   # remove a snippet
+```
+
+In the TUI, press `r` to run a snippet on the selected host. Select multiple hosts with `Ctrl+Space` and press `r` to run on all selected. Press `R` to run on all visible hosts.
+
 ### Round-trip fidelity
 
 Comments, indentation, unknown directives, CRLF line endings, equals-syntax and inline comments are all preserved through every read-write cycle. Consecutive blank lines are collapsed. Hosts from `Include` files are displayed but never modified.
@@ -148,6 +165,13 @@ purple sync --reset-tags            # Replace local tags with provider tags
 purple tunnel list                  # List configured tunnels
 purple tunnel add myserver L:8080:localhost:80  # Add forward
 purple tunnel start myserver        # Start tunnel (Ctrl+C to stop)
+purple snippet list                 # List saved snippets
+purple snippet add NAME "COMMAND"   # Add a snippet
+purple snippet remove NAME          # Remove a snippet
+purple snippet run NAME myserver    # Run on a host
+purple snippet run NAME --tag prod  # Run on hosts with tag
+purple snippet run NAME --all       # Run on all hosts
+purple snippet run NAME --all --parallel  # Run concurrently
 purple password set myserver        # Store password in OS keychain
 purple password remove myserver     # Remove password from keychain
 purple update                       # Update to latest version
@@ -182,6 +206,9 @@ purple --completions zsh            # Shell completions
 | `p`         | Ping selected host (toggle)      |
 | `P`         | Ping all hosts (toggle)          |
 | `S`         | Cloud provider sync              |
+| `Ctrl+Space`| Select / deselect host           |
+| `r`         | Run snippet on host(s)           |
+| `R`         | Run snippet on all visible       |
 | `T`         | Manage host tunnels              |
 | `K`         | SSH key list                     |
 | `?`         | Help                             |
@@ -208,6 +235,17 @@ purple --completions zsh            # Shell completions
 | `d`         | Remove provider        |
 | `q` / `Esc` | Back (cancels syncs)   |
 
+**Snippet Picker**
+
+| Key         | Action                 |
+| ----------- | ---------------------- |
+| `j` / `k`   | Navigate down and up   |
+| `Enter`     | Run snippet            |
+| `a`         | Add snippet            |
+| `e`         | Edit snippet           |
+| `d`         | Delete snippet         |
+| `q` / `Esc` | Back                   |
+
 **Search**
 
 | Key                 | Action                 |
@@ -233,6 +271,8 @@ purple --completions zsh            # Shell completions
 **It edits your real SSH config.** Most SSH tools only read. purple reads, edits and writes `~/.ssh/config` directly with full round-trip fidelity.
 
 **It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from DigitalOcean, Vultr, Linode, Hetzner, UpCloud and Proxmox VE into your config. Configure once, sync anytime.
+
+**It runs commands across hosts.** Save command snippets and execute them on one host, a selection or all hosts at once. Sequential or parallel. No Ansible, no Fabric, no extra tools.
 
 **It manages SSH passwords.** Store passwords in your OS keychain or pull them from 1Password, Bitwarden, pass or HashiCorp Vault. Purple handles SSH_ASKPASS automatically.
 

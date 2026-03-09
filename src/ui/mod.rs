@@ -7,6 +7,8 @@ mod host_list;
 mod key_detail;
 mod key_list;
 mod provider_list;
+mod snippet_form;
+mod snippet_picker;
 mod tag_picker;
 pub mod theme;
 mod tunnel_form;
@@ -49,7 +51,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         }
         Screen::Help => {
             host_list::render(frame, app);
-            help::render(frame);
+            help::render(frame, app);
         }
         Screen::KeyList => {
             host_list::render(frame, app);
@@ -89,6 +91,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             host_list::render(frame, app);
             tunnel_list::render(frame, app, &alias);
             tunnel_form::render(frame, app);
+        }
+        Screen::SnippetPicker { .. } => {
+            host_list::render(frame, app);
+            snippet_picker::render(frame, app);
+        }
+        Screen::SnippetForm { .. } => {
+            host_list::render(frame, app);
+            snippet_picker::render(frame, app);
+            snippet_form::render(frame, app);
         }
         Screen::ConfirmHostKeyReset { hostname, .. } => {
             let hostname = hostname.clone();

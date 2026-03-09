@@ -146,6 +146,17 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    // Snippets hint
+    let snippet_count = app.snippet_store.snippets.len();
+    if snippet_count > 0 {
+        lines.push(Line::from(""));
+        lines.push(section_header("Snippets"));
+        lines.push(Line::from(Span::styled(
+            format!("{} available (r to run)", snippet_count),
+            theme::muted(),
+        )));
+    }
+
     // Source section (for included hosts)
     if let Some(ref source) = host.source_file {
         lines.push(Line::from(""));

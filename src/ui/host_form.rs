@@ -86,7 +86,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Footer below the block
     let footer_area = Rect::new(form_area.x, form_area.y + block_height, form_area.width, 1);
-    super::render_footer_with_status(frame, footer_area, vec![
+    let mut footer_spans = vec![
         Span::styled(" Enter", theme::primary_action()),
         Span::styled(" save ", theme::muted()),
         Span::styled("\u{2502} ", theme::muted()),
@@ -94,7 +94,23 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Span::styled(" next  ", theme::muted()),
         Span::styled("Esc", theme::accent_bold()),
         Span::styled(" cancel", theme::muted()),
-    ], app);
+    ];
+    if let Some(ref hint) = app.form.form_hint {
+        let hint_width: usize = hint.width() + 4; // " ⚠ {hint} "
+        let shortcuts_width: usize = footer_spans.iter().map(|s| s.width()).sum();
+        let total = footer_area.width as usize;
+        let gap = total.saturating_sub(shortcuts_width + hint_width);
+        if gap > 0 {
+            footer_spans.push(Span::raw(" ".repeat(gap)));
+            footer_spans.push(Span::styled(format!("\u{26A0} {} ", hint), theme::error()));
+        }
+    }
+    // Only use render_footer_with_status when no form_hint (to avoid double status)
+    if app.form.form_hint.is_some() {
+        frame.render_widget(Paragraph::new(Line::from(footer_spans)), footer_area);
+    } else {
+        super::render_footer_with_status(frame, footer_area, footer_spans, app);
+    }
 
     // Key picker popup overlay
     if app.ui.show_key_picker {

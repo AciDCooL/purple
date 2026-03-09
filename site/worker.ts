@@ -131,19 +131,19 @@ const LANDING_PAGE = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>purple. SSH config manager and host launcher for the terminal</title>
-<meta name="description" content="Free, open-source SSH config manager, editor and host launcher. TUI with search, tags, tunnels, password management (keychain, 1Password, Bitwarden, pass, Vault), cloud provider sync (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE) and round-trip fidelity for ~/.ssh/config. Written in Rust. macOS and Linux.">
-<meta name="keywords" content="SSH config manager, SSH launcher, terminal SSH, TUI SSH, SSH host manager, cloud SSH sync, DigitalOcean SSH, Vultr SSH, Linode SSH, Hetzner SSH, UpCloud SSH, Proxmox SSH, SSH tunnel manager, SSH config editor, Rust SSH tool, purple-ssh, SSH password manager, SSH askpass, SSH keychain, 1Password SSH, Bitwarden SSH">
+<meta name="description" content="Free, open-source SSH config manager, editor and host launcher. TUI with search, tags, tunnels, command snippets, password management (keychain, 1Password, Bitwarden, pass, Vault), cloud provider sync (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE) and round-trip fidelity for ~/.ssh/config. Written in Rust. macOS and Linux.">
+<meta name="keywords" content="SSH config manager, SSH launcher, terminal SSH, TUI SSH, SSH host manager, SSH command snippets, run command multiple hosts, cloud SSH sync, DigitalOcean SSH, Vultr SSH, Linode SSH, Hetzner SSH, UpCloud SSH, Proxmox SSH, SSH tunnel manager, SSH config editor, Rust SSH tool, purple-ssh, SSH password manager, SSH askpass, SSH keychain, 1Password SSH, Bitwarden SSH, multi-host SSH execution, SSH automation">
 <meta name="robots" content="index, follow">
-<meta name="author" content="Erick Ochen">
+<meta name="author" content="Eric Kochen">
 <meta property="og:title" content="purple. SSH config manager and host launcher for the terminal">
-<meta property="og:description" content="Free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher. Sync servers from 6 cloud providers. Manage SSH passwords. Written in Rust.">
+<meta property="og:description" content="Free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher. Run command snippets across hosts. Sync servers from 6 cloud providers. Manage SSH passwords. Written in Rust.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://getpurple.sh">
 <meta property="og:image" content="https://raw.githubusercontent.com/erickochen/purple/master/demo.gif">
 <meta property="og:site_name" content="purple">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="purple. SSH config manager and host launcher">
-<meta name="twitter:description" content="Free, open-source TUI for managing SSH configs. Search, tag, sync cloud providers, manage passwords. Written in Rust.">
+<meta name="twitter:description" content="Free, open-source TUI for managing SSH configs. Search, tag, run command snippets, sync cloud providers, manage passwords. Written in Rust.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/erickochen/purple/master/demo.gif">
 <link rel="canonical" href="https://getpurple.sh">
 <script type="application/ld+json">
@@ -152,13 +152,13 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "@type": "SoftwareApplication",
   "name": "purple",
   "alternateName": "purple-ssh",
-  "description": "SSH config manager, editor and host launcher for the terminal. TUI with search, tags, tunnels, password management and cloud provider sync for ~/.ssh/config.",
+  "description": "SSH config manager, editor and host launcher for the terminal. TUI with search, tags, tunnels, command snippets, password management and cloud provider sync for ~/.ssh/config.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux",
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "1.17.0",
+  "softwareVersion": "1.19.0",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
   "codeRepository": "https://github.com/erickochen/purple",
@@ -169,7 +169,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
   },
   "author": {
     "@type": "Person",
-    "name": "Erick Ochen",
+    "name": "Eric Kochen",
     "url": "https://github.com/erickochen"
   },
   "featureList": [
@@ -177,6 +177,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
     "Fuzzy search across hosts",
     "Host tagging and filtering",
     "SSH tunnel management",
+    "Command snippets with multi-host and parallel execution",
     "Cloud provider sync: DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE",
     "Password management: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault",
     "Bulk import from known_hosts",
@@ -222,6 +223,14 @@ const LANDING_PAGE = `<!DOCTYPE html>
       "acceptedAnswer": {
         "@type": "Answer",
         "text": "No. Your config never leaves your machine. Provider sync calls cloud APIs to fetch server lists. The TUI checks GitHub for new releases on startup (cached for 24 hours). No config data is transmitted."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do command snippets work in purple?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Save commands and run them on remote hosts via SSH. Select one host, multiple hosts or all visible hosts from the TUI. The CLI supports tag-based targeting and parallel execution. Snippets are stored locally in ~/.purple/snippets."
       }
     },
     {
@@ -433,8 +442,8 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
   <div class="features">
     <div><strong>Search.</strong> Fuzzy find across aliases, hostnames, users and tags</div>
     <div><strong>Tags.</strong> Organize hosts with #tags and filter instantly</div>
+    <div><strong>Snippets.</strong> Save commands, run on one or many hosts. Sequential or parallel</div>
     <div><strong>Tunnels.</strong> Manage SSH port forwards (local, remote, dynamic) per host</div>
-    <div><strong>Ping.</strong> TCP connectivity check from the TUI</div>
     <div><strong>Round-trip fidelity.</strong> Preserves comments, formatting and unknown directives</div>
     <div><strong>Bulk import.</strong> From hosts files or ~/.ssh/known_hosts</div>
     <div><strong>Passwords.</strong> OS Keychain, 1Password, Bitwarden, pass, Vault integration</div>
@@ -442,8 +451,8 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
     <div><strong>Cloud sync.</strong> Pull servers from 6 cloud providers into your config</div>
     <div><strong>Self-update.</strong> Run <code>purple update</code></div>
     <div><strong>Atomic writes.</strong> Temp file, chmod 600, rename. Automatic backups</div>
+    <div><strong>Ping.</strong> TCP connectivity check per host or all at once</div>
     <div><strong>Detail panel.</strong> Split-pane view with connection info, history and tunnels</div>
-    <div><strong>Completions.</strong> Bash, zsh and fish via <code>purple --completions</code></div>
   </div>
 
   <section>
@@ -481,6 +490,8 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
       <dd>No. It is a single Rust binary. Run it, use it, close it.</dd>
       <dt>Does purple send my SSH config anywhere?</dt>
       <dd>No. Your config never leaves your machine. Provider sync calls cloud APIs to fetch server lists. No config data is transmitted.</dd>
+      <dt>How do command snippets work?</dt>
+      <dd>Save commands in purple and run them on remote hosts via SSH. Select one host, multiple hosts or all visible hosts. The CLI supports parallel execution with --parallel. Snippets are stored locally in ~/.purple/snippets.</dd>
       <dt>How does password management work?</dt>
       <dd>Set a password source per host via the TUI or a global default. When you connect, purple acts as SSH_ASKPASS and retrieves the password automatically. Supported sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault and custom commands.</dd>
       <dt>Can I use purple with Include files?</dt>
@@ -509,11 +520,11 @@ const LLMS_TXT = `# purple
 
 > SSH config manager and host launcher for the terminal
 
-purple is a free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher with full round-trip fidelity. Single Rust binary. macOS and Linux. MIT licensed.
+purple is a free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher with full round-trip fidelity. Run command snippets across multiple hosts. Single Rust binary. macOS and Linux. MIT licensed.
 
 ## What purple does
 
-purple reads your existing ~/.ssh/config and gives you a terminal UI to search, filter, tag and connect to hosts. Changes are written back without touching your comments, formatting or unknown directives. It syncs servers from six cloud providers directly into your SSH config. No browser, no YAML files, no context switching.
+purple reads your existing ~/.ssh/config and gives you a terminal UI to search, filter, tag and connect to hosts. Changes are written back without touching your comments, formatting or unknown directives. Save command snippets and run them on one or many hosts. Sync servers from six cloud providers directly into your SSH config. No browser, no YAML files, no context switching.
 
 ## Key capabilities
 
@@ -522,6 +533,7 @@ purple reads your existing ~/.ssh/config and gives you a terminal UI to search, 
 - Host tagging via SSH config comments (# purple:tags)
 - Cloud provider sync: DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE
 - SSH tunnel management: LocalForward, RemoteForward, DynamicForward. Start/stop from TUI or CLI
+- Command snippets: save commands, run on single host, multi-host selection or all hosts. Sequential and parallel execution. TUI and CLI
 - Password management: OS Keychain, 1Password (op://), Bitwarden (bw:), pass (pass:), HashiCorp Vault (vault:), custom command
 - SSH key browsing with metadata (type, bits, fingerprint) and host linking
 - Bulk import from hosts files or ~/.ssh/known_hosts
@@ -569,6 +581,13 @@ purple tunnel list myserver         # List tunnels for a host
 purple tunnel add myserver L:8080:localhost:80
 purple tunnel remove myserver L:8080:localhost:80
 purple tunnel start myserver        # Start tunnel (Ctrl+C to stop)
+purple snippet list                 # List saved snippets
+purple snippet add NAME "COMMAND"   # Add a snippet
+purple snippet remove NAME          # Remove a snippet
+purple snippet run NAME myserver    # Run on single host
+purple snippet run NAME --tag prod  # Run on hosts with tag
+purple snippet run NAME --all       # Run on all hosts
+purple snippet run NAME --all --parallel  # Run concurrently
 purple password set myserver        # Store password in OS keychain
 purple password remove myserver     # Remove from keychain
 purple update                       # Self-update
@@ -593,6 +612,10 @@ Supported password sources:
 - pass (pass:): entry path in the password store
 - HashiCorp Vault (vault:): secret path
 - Custom command: any shell command that outputs the password. Supports %a (alias) and %h (hostname) substitution. Optional cmd: prefix
+
+## Command snippets
+
+Save frequently used commands and run them on remote hosts via SSH. Snippets are stored in ~/.purple/snippets (INI format). In the TUI: press r to run a snippet on the selected host, Ctrl+Space to multi-select hosts, R to run on all visible hosts. The CLI supports single-host, tag-based and all-host execution with optional parallel mode (--parallel, max 20 concurrent). Askpass integration provides automatic password handling for snippet execution.
 
 ## SSH tunnel management
 
