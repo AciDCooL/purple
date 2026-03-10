@@ -606,8 +606,9 @@ fn submit_form(app: &mut App) {
                     // Alias renamed — migrate keychain entry
                     if *alias != app.form.alias {
                         if let Ok(pw) = crate::askpass::retrieve_keychain_password(alias) {
-                            let _ = crate::askpass::store_in_keychain(&app.form.alias, &pw);
-                            let _ = crate::askpass::remove_from_keychain(alias);
+                            if crate::askpass::store_in_keychain(&app.form.alias, &pw).is_ok() {
+                                let _ = crate::askpass::remove_from_keychain(alias);
+                            }
                         }
                     }
                 }
