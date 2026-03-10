@@ -25,6 +25,8 @@ struct ServerSummary {
     tags: TagWrapper,
     #[serde(default)]
     labels: LabelWrapper,
+    #[serde(default)]
+    zone: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -230,11 +232,16 @@ impl Provider for UpCloud {
             }
             tags.sort();
 
+            let mut metadata = Vec::new();
+            if !server.zone.is_empty() {
+                metadata.push(("region".to_string(), server.zone.clone()));
+            }
             all_hosts.push(ProviderHost {
                 server_id: server.uuid.clone(),
                 name,
                 ip,
                 tags,
+                metadata,
             });
         }
 
@@ -466,6 +473,7 @@ mod tests {
             labels: LabelWrapper { label: vec![
                 Label { key: "env".into(), value: "prod".into() },
             ]},
+            zone: String::new(),
         };
         let mut tags: Vec<String> = server.tags.tag.iter().map(|t| t.to_lowercase()).collect();
         for label in &server.labels.label {
@@ -487,6 +495,7 @@ mod tests {
             hostname: "my-server.example.com".into(),
             tags: TagWrapper::default(),
             labels: LabelWrapper::default(),
+            zone: String::new(),
         };
         let name = if server.title.is_empty() {
             server.hostname.clone()
@@ -504,6 +513,7 @@ mod tests {
             hostname: "db.example.com".into(),
             tags: TagWrapper::default(),
             labels: LabelWrapper::default(),
+            zone: String::new(),
         };
         let name = if server.title.is_empty() {
             server.hostname.clone()
@@ -669,6 +679,7 @@ mod tests {
             labels: LabelWrapper { label: vec![
                 Label { key: "managed".into(), value: "".into() },
             ]},
+            zone: String::new(),
         };
         let mut tags: Vec<String> = server.tags.tag.iter().map(|t| t.to_lowercase()).collect();
         for label in &server.labels.label {
@@ -690,6 +701,7 @@ mod tests {
             hostname: "h".into(),
             tags: TagWrapper { tag: vec!["WEB".into(), "PROD".into()] },
             labels: LabelWrapper::default(),
+            zone: String::new(),
         };
         let mut tags: Vec<String> = server.tags.tag.iter().map(|t| t.to_lowercase()).collect();
         tags.sort();
@@ -707,6 +719,7 @@ mod tests {
                 Label { key: "env".into(), value: "staging".into() },
                 Label { key: "team".into(), value: "backend".into() },
             ]},
+            zone: String::new(),
         };
         let mut tags: Vec<String> = Vec::new();
         for label in &server.labels.label {

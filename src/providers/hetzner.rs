@@ -19,6 +19,22 @@ struct HetznerServer {
     public_net: PublicNet,
     #[serde(default)]
     labels: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    server_type: Option<HetznerServerType>,
+    #[serde(default)]
+    datacenter: Option<HetznerDatacenter>,
+}
+
+#[derive(Deserialize)]
+struct HetznerServerType {
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct HetznerDatacenter {
+    #[serde(default)]
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -114,11 +130,23 @@ impl Provider for Hetzner {
                         })
                         .collect();
                     tags.sort();
+                    let mut metadata = Vec::new();
+                    if let Some(ref dc) = server.datacenter {
+                        if !dc.name.is_empty() {
+                            metadata.push(("region".to_string(), dc.name.clone()));
+                        }
+                    }
+                    if let Some(ref st) = server.server_type {
+                        if !st.name.is_empty() {
+                            metadata.push(("plan".to_string(), st.name.clone()));
+                        }
+                    }
                     all_hosts.push(ProviderHost {
                         server_id: server.id.to_string(),
                         name: server.name.clone(),
                         ip,
                         tags,
+                        metadata,
                     });
                 }
             }

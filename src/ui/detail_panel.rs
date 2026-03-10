@@ -118,6 +118,21 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(tag_spans));
     }
 
+    // Provider metadata section
+    if !host.provider_meta.is_empty() {
+        lines.push(Line::from(""));
+        let header = match host.provider.as_deref() {
+            Some(name) => crate::providers::provider_display_name(name).to_string(),
+            None => "Provider".to_string(),
+        };
+        lines.push(section_header(&header));
+
+        for (key, value) in &host.provider_meta {
+            let label = meta_label(key);
+            push_field(&mut lines, &label, value, max_value_width);
+        }
+    }
+
     // Tunnels section
     let tunnel_active = app.active_tunnels.contains_key(&host.alias);
     if host.tunnel_count > 0 {
@@ -175,7 +190,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-fn push_field(lines: &mut Vec<Line<'static>>, label: &'static str, value: &str, max_value_width: usize) {
+fn push_field(lines: &mut Vec<Line<'static>>, label: &str, value: &str, max_value_width: usize) {
     let display = if max_value_width > 0 {
         super::truncate(value, max_value_width)
     } else {
@@ -188,6 +203,25 @@ fn push_field(lines: &mut Vec<Line<'static>>, label: &'static str, value: &str, 
         ),
         Span::styled(display, theme::bold()),
     ]));
+}
+
+/// Map metadata keys to human-readable labels.
+fn meta_label(key: &str) -> String {
+    match key {
+        "region" => "Region".to_string(),
+        "plan" => "Plan".to_string(),
+        "os" => "OS".to_string(),
+        "node" => "Node".to_string(),
+        "type" => "Type".to_string(),
+        other => {
+            // Capitalize first letter
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        }
+    }
 }
 
 fn section_header(label: &str) -> Line<'static> {

@@ -3627,12 +3627,7 @@ fn sync_adds_host_to_empty_config() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: vec!["prod".to_string()],
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string()])];
     let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
     assert_eq!(result.added, 1);
 
@@ -3650,12 +3645,7 @@ fn sync_preserves_existing_hosts() {
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "456".to_string(),
-        name: "db-1".to_string(),
-        ip: "5.6.7.8".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("456".to_string(), "db-1".to_string(), "5.6.7.8".to_string(), Vec::new())];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
 
     let output = config.serialize();
@@ -3670,12 +3660,7 @@ fn sync_updates_ip_preserves_formatting() {
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "9.8.7.6".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.8.7.6".to_string(), Vec::new())];
     let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
     assert_eq!(result.updated, 1);
 
@@ -3701,12 +3686,7 @@ Host do-db-1
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
     // Only web-1 in remote, db-1 should be removed
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
     let result = sync_provider(&mut config, &provider, &remote, &section, true, false);
     assert_eq!(result.removed, 1);
     assert_eq!(result.unchanged, 1);
@@ -3728,12 +3708,7 @@ Host do-web-1
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: vec!["prod".to_string(), "us-east".to_string()],
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string(), "us-east".to_string()])];
     let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
     assert_eq!(result.updated, 1); // new tag "us-east" added
 
@@ -3755,12 +3730,7 @@ Host do-web-1
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: vec!["staging".to_string()],
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["staging".to_string()])];
     let result = sync_provider_with_options(&mut config, &provider, &remote, &section, false, false, true);
     assert_eq!(result.updated, 1);
 
@@ -3780,12 +3750,7 @@ Host do-old-name
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "new-name".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "new-name".to_string(), "1.2.3.4".to_string(), Vec::new())];
     let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
     assert_eq!(result.renames.len(), 1);
     assert_eq!(result.renames[0], ("do-old-name".to_string(), "do-new-name".to_string()));
@@ -3802,12 +3767,7 @@ fn sync_with_identity_file() {
     let mut section = test_section("digitalocean", "do");
     section.identity_file = "~/.ssh/do_key".to_string();
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "1".to_string(),
-        name: "web".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
 
     let output = config.serialize();
@@ -3822,20 +3782,10 @@ fn sync_two_providers_coexist() {
     let hetzner_section = test_section("hetzner", "hz");
     let hetzner_provider = TestProvider { name: "hetzner", label: "hetzner" };
 
-    let do_remote = vec![ProviderHost {
-        server_id: "1".to_string(),
-        name: "do-web".to_string(),
-        ip: "1.1.1.1".to_string(),
-        tags: Vec::new(),
-    }];
+    let do_remote = vec![ProviderHost::new("1".to_string(), "do-web".to_string(), "1.1.1.1".to_string(), Vec::new())];
     sync_provider(&mut config, &do_provider, &do_remote, &do_section, false, false);
 
-    let hz_remote = vec![ProviderHost {
-        server_id: "2".to_string(),
-        name: "hz-db".to_string(),
-        ip: "2.2.2.2".to_string(),
-        tags: Vec::new(),
-    }];
+    let hz_remote = vec![ProviderHost::new("2".to_string(), "hz-db".to_string(), "2.2.2.2".to_string(), Vec::new())];
     sync_provider(&mut config, &hetzner_provider, &hz_remote, &hetzner_section, false, false);
 
     let output = config.serialize();
@@ -3864,12 +3814,7 @@ Host do-web-1
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
     // Server exists but has empty IP (stopped VM)
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "".to_string(), // empty = no IP
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "".to_string(), Vec::new())];
     let result = sync_provider(&mut config, &provider, &remote, &section, true, false);
     assert_eq!(result.removed, 0, "should not remove stopped VMs");
     assert_eq!(result.unchanged, 1);
@@ -3890,12 +3835,7 @@ Host do-web-1
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "9.8.7.6".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.8.7.6".to_string(), Vec::new())];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
 
     let output = config.serialize();
@@ -3915,12 +3855,7 @@ Host do-web-1
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "9.8.7.6".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.8.7.6".to_string(), Vec::new())];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
 
     let output = config.serialize();
@@ -3934,12 +3869,7 @@ fn sync_alias_dedup_in_serialized_output() {
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "1".to_string(),
-        name: "web".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
 
     let output = config.serialize();
@@ -3952,12 +3882,7 @@ fn sync_group_header_in_output() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "1".to_string(),
-        name: "web".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
 
     let output = config.serialize();
@@ -3969,12 +3894,7 @@ fn sync_group_header_removed_after_all_deleted() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "1".to_string(),
-        name: "web".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
     let output = config.serialize();
     assert!(output.contains("# purple:group DigitalOcean"));
@@ -3990,12 +3910,7 @@ fn sync_multiple_tags_serialized_comma_separated() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "1".to_string(),
-        name: "web".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: vec!["prod".to_string(), "us-east".to_string(), "web".to_string()],
-    }];
+    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string(), "us-east".to_string(), "web".to_string()])];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
 
     let output = config.serialize();
@@ -4014,12 +3929,7 @@ Host do-web-1
     let mut section = test_section("digitalocean", "ocean");
     section.user = "root".to_string();
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "1.2.3.4".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
 
     let output = config.serialize();
@@ -4040,12 +3950,7 @@ Host do-web-1
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "9.8.7.6".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.8.7.6".to_string(), Vec::new())];
     sync_provider(&mut config, &provider, &remote, &section, false, false);
 
     let output = config.serialize();
@@ -4060,12 +3965,7 @@ fn sync_dry_run_serialized_unchanged() {
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost {
-        server_id: "123".to_string(),
-        name: "web-1".to_string(),
-        ip: "9.9.9.9".to_string(),
-        tags: Vec::new(),
-    }];
+    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.9.9.9".to_string(), Vec::new())];
     let result = sync_provider(&mut config, &provider, &remote, &section, false, true);
     assert_eq!(result.updated, 1);
 
@@ -4080,12 +3980,12 @@ fn sync_large_batch_serialized() {
     let section = test_section("digitalocean", "do");
     let provider = TestProvider { name: "digitalocean", label: "do" };
     let remote: Vec<ProviderHost> = (0..20)
-        .map(|i| ProviderHost {
-            server_id: format!("{}", i),
-            name: format!("server-{}", i),
-            ip: format!("10.0.0.{}", i),
-            tags: Vec::new(),
-        })
+        .map(|i| ProviderHost::new(
+            format!("{}", i),
+            format!("server-{}", i),
+            format!("10.0.0.{}", i),
+            Vec::new(),
+        ))
         .collect();
     let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
     assert_eq!(result.added, 20);
@@ -4098,4 +3998,71 @@ fn sync_large_batch_serialized() {
             i
         );
     }
+}
+
+// ============================================================================
+// Provider metadata roundtrip
+// ============================================================================
+
+#[test]
+fn roundtrip_purple_meta_comment_preserved() {
+    let input = "\
+Host do-web
+  HostName 1.2.3.4
+  User root
+  # purple:provider digitalocean:123
+  # purple:meta region=nyc3,plan=s-1vcpu-1gb
+";
+    let config = parse_str(input);
+    assert_eq_visible(input, &config.serialize());
+}
+
+#[test]
+fn roundtrip_purple_meta_survives_update() {
+    let input = "\
+Host do-web
+  HostName 1.2.3.4
+  User root
+  # purple:provider digitalocean:123
+  # purple:meta region=nyc3,plan=s-1vcpu-1gb
+";
+    let mut config = parse_str(input);
+    let updated = HostEntry {
+        alias: "do-web".to_string(),
+        hostname: "5.6.7.8".to_string(),
+        user: "root".to_string(),
+        ..Default::default()
+    };
+    config.update_host("do-web", &updated);
+    let output = config.serialize();
+    assert!(output.contains("HostName 5.6.7.8"), "IP updated");
+    assert!(output.contains("# purple:provider digitalocean:123"), "provider preserved");
+    assert!(output.contains("# purple:meta region=nyc3,plan=s-1vcpu-1gb"), "meta preserved");
+}
+
+#[test]
+fn sync_adds_metadata_to_config() {
+    let mut config = parse_str("");
+    let section = test_section("digitalocean", "do");
+    let provider = TestProvider { name: "digitalocean", label: "do" };
+    let remote = vec![ProviderHost {
+        server_id: "123".to_string(),
+        name: "web".to_string(),
+        ip: "1.2.3.4".to_string(),
+        tags: vec!["prod".to_string()],
+        metadata: vec![
+            ("region".to_string(), "nyc3".to_string()),
+            ("plan".to_string(), "s-1vcpu-1gb".to_string()),
+        ],
+    }];
+    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let output = config.serialize();
+    assert!(output.contains("# purple:meta region=nyc3,plan=s-1vcpu-1gb"), "meta written");
+
+    // Re-parse and verify
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    assert_eq!(entries[0].provider_meta.len(), 2);
+    assert_eq!(entries[0].provider_meta[0], ("region".to_string(), "nyc3".to_string()));
+    assert_eq!(entries[0].provider_meta[1], ("plan".to_string(), "s-1vcpu-1gb".to_string()));
 }

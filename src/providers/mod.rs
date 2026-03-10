@@ -23,6 +23,22 @@ pub struct ProviderHost {
     pub ip: String,
     /// Provider tags/labels.
     pub tags: Vec<String>,
+    /// Provider metadata (region, plan, etc.) as key-value pairs.
+    pub metadata: Vec<(String, String)>,
+}
+
+impl ProviderHost {
+    /// Create a ProviderHost with no metadata.
+    #[allow(dead_code)]
+    pub fn new(server_id: String, name: String, ip: String, tags: Vec<String>) -> Self {
+        Self {
+            server_id,
+            name,
+            ip,
+            tags,
+            metadata: Vec::new(),
+        }
+    }
 }
 
 /// Errors from provider API calls.
@@ -408,12 +424,7 @@ mod tests {
 
     #[test]
     fn test_provider_host_construction() {
-        let host = ProviderHost {
-            server_id: "12345".to_string(),
-            name: "web-01".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string(), "web".to_string()],
-        };
+        let host = ProviderHost::new("12345".to_string(), "web-01".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string(), "web".to_string()]);
         assert_eq!(host.server_id, "12345");
         assert_eq!(host.name, "web-01");
         assert_eq!(host.ip, "1.2.3.4");
@@ -422,12 +433,7 @@ mod tests {
 
     #[test]
     fn test_provider_host_clone() {
-        let host = ProviderHost {
-            server_id: "1".to_string(),
-            name: "a".to_string(),
-            ip: "1.1.1.1".to_string(),
-            tags: vec![],
-        };
+        let host = ProviderHost::new("1".to_string(), "a".to_string(), "1.1.1.1".to_string(), vec![]);
         let cloned = host.clone();
         assert_eq!(cloned.server_id, host.server_id);
         assert_eq!(cloned.name, host.name);
@@ -492,12 +498,7 @@ mod tests {
     #[test]
     fn test_provider_error_debug_partial_result() {
         let err = ProviderError::PartialResult {
-            hosts: vec![ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: vec![],
-            }],
+            hosts: vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec![])],
             failures: 2,
             total: 5,
         };
@@ -512,12 +513,7 @@ mod tests {
 
     #[test]
     fn test_provider_host_empty_fields() {
-        let host = ProviderHost {
-            server_id: String::new(),
-            name: String::new(),
-            ip: String::new(),
-            tags: vec![],
-        };
+        let host = ProviderHost::new(String::new(), String::new(), String::new(), vec![]);
         assert!(host.server_id.is_empty());
         assert!(host.name.is_empty());
         assert!(host.ip.is_empty());

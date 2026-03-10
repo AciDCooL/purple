@@ -80,6 +80,8 @@ pub struct HostEntry {
     pub tunnel_count: u16,
     /// Password source from purple:askpass comment (e.g. "keychain", "op://...", "pass:...").
     pub askpass: Option<String>,
+    /// Provider metadata from purple:meta comment (region, plan, etc.).
+    pub provider_meta: Vec<(String, String)>,
 }
 
 impl Default for HostEntry {
@@ -96,6 +98,7 @@ impl Default for HostEntry {
             provider: None,
             tunnel_count: 0,
             askpass: None,
+            provider_meta: Vec::new(),
         }
     }
 }
@@ -256,6 +259,61 @@ impl HostBlock {
         }
     }
 
+    /// Extract provider metadata from purple:meta comment in directives.
+    /// Format: `# purple:meta key=value,key=value`
+    pub fn meta(&self) -> Vec<(String, String)> {
+        for d in &self.directives {
+            if d.is_non_directive {
+                let trimmed = d.raw_line.trim();
+                if let Some(rest) = trimmed.strip_prefix("# purple:meta ") {
+                    return rest
+                        .split(',')
+                        .filter_map(|pair| {
+                            let (k, v) = pair.split_once('=')?;
+                            let k = k.trim();
+                            let v = v.trim();
+                            if k.is_empty() {
+                                None
+                            } else {
+                                Some((k.to_string(), v.to_string()))
+                            }
+                        })
+                        .collect();
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    /// Set provider metadata on a host block. Replaces existing purple:meta comment or adds one.
+    /// Pass an empty slice to remove the comment.
+    pub fn set_meta(&mut self, meta: &[(String, String)]) {
+        let indent = self.detect_indent();
+        self.directives.retain(|d| {
+            !(d.is_non_directive && d.raw_line.trim().starts_with("# purple:meta"))
+        });
+        if !meta.is_empty() {
+            let encoded: Vec<String> = meta
+                .iter()
+                .map(|(k, v)| {
+                    let clean_k = k.replace([',', '='], "");
+                    let clean_v = v.replace(',', "");
+                    format!("{}={}", clean_k, clean_v)
+                })
+                .collect();
+            let pos = self.content_end();
+            self.directives.insert(
+                pos,
+                Directive {
+                    key: String::new(),
+                    value: String::new(),
+                    raw_line: format!("{}# purple:meta {}", indent, encoded.join(",")),
+                    is_non_directive: true,
+                },
+            );
+        }
+    }
+
     /// Set tags on a host block. Replaces existing purple:tags comment or adds one.
     pub fn set_tags(&mut self, tags: &[String]) {
         let indent = self.detect_indent();
@@ -305,6 +363,7 @@ impl HostBlock {
         entry.provider = self.provider().map(|(name, _)| name);
         entry.tunnel_count = self.tunnel_count();
         entry.askpass = self.askpass();
+        entry.provider_meta = self.meta();
         entry
     }
 
@@ -790,6 +849,18 @@ impl SshConfigFile {
             if let ConfigElement::HostBlock(block) = element {
                 if block.host_pattern == alias {
                     block.set_askpass(source);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Set provider metadata on a host block by alias.
+    pub fn set_host_meta(&mut self, alias: &str, meta: &[(String, String)]) {
+        for element in &mut self.elements {
+            if let ConfigElement::HostBlock(block) = element {
+                if block.host_pattern == alias {
+                    block.set_meta(meta);
                     return;
                 }
             }
@@ -1727,5 +1798,103 @@ Host myserver
         let entry = first_block(&config).to_host_entry();
         assert_eq!(entry.askpass, Some("pass:ssh/prod".to_string()));
         assert!(entry.tags.contains(&"prod".to_string()));
+    }
+
+    #[test]
+    fn meta_empty_when_no_comment() {
+        let config_str = "Host myhost\n  HostName 1.2.3.4\n";
+        let config = parse_str(config_str);
+        let meta = first_block(&config).meta();
+        assert!(meta.is_empty());
+    }
+
+    #[test]
+    fn meta_parses_key_value_pairs() {
+        let config_str = "\
+Host myhost
+  HostName 1.2.3.4
+  # purple:meta region=nyc3,plan=s-1vcpu-1gb
+";
+        let config = parse_str(config_str);
+        let meta = first_block(&config).meta();
+        assert_eq!(meta.len(), 2);
+        assert_eq!(meta[0], ("region".to_string(), "nyc3".to_string()));
+        assert_eq!(meta[1], ("plan".to_string(), "s-1vcpu-1gb".to_string()));
+    }
+
+    #[test]
+    fn meta_round_trip() {
+        let config_str = "Host myhost\n  HostName 1.2.3.4\n";
+        let mut config = parse_str(config_str);
+        let meta = vec![
+            ("region".to_string(), "fra1".to_string()),
+            ("plan".to_string(), "cx11".to_string()),
+        ];
+        config.set_host_meta("myhost", &meta);
+        let output = config.serialize();
+        assert!(output.contains("# purple:meta region=fra1,plan=cx11"));
+
+        let config2 = parse_str(&output);
+        let parsed = first_block(&config2).meta();
+        assert_eq!(parsed, meta);
+    }
+
+    #[test]
+    fn meta_replaces_existing() {
+        let config_str = "\
+Host myhost
+  HostName 1.2.3.4
+  # purple:meta region=old
+";
+        let mut config = parse_str(config_str);
+        config.set_host_meta(
+            "myhost",
+            &[("region".to_string(), "new".to_string())],
+        );
+        let output = config.serialize();
+        assert!(!output.contains("region=old"));
+        assert!(output.contains("region=new"));
+    }
+
+    #[test]
+    fn meta_removed_when_empty() {
+        let config_str = "\
+Host myhost
+  HostName 1.2.3.4
+  # purple:meta region=nyc3
+";
+        let mut config = parse_str(config_str);
+        config.set_host_meta("myhost", &[]);
+        let output = config.serialize();
+        assert!(!output.contains("purple:meta"));
+    }
+
+    #[test]
+    fn meta_sanitizes_commas_in_values() {
+        let config_str = "Host myhost\n  HostName 1.2.3.4\n";
+        let mut config = parse_str(config_str);
+        let meta = vec![("plan".to_string(), "s-1vcpu,1gb".to_string())];
+        config.set_host_meta("myhost", &meta);
+        let output = config.serialize();
+        // Comma stripped to prevent parse corruption
+        assert!(output.contains("plan=s-1vcpu1gb"));
+
+        let config2 = parse_str(&output);
+        let parsed = first_block(&config2).meta();
+        assert_eq!(parsed[0].1, "s-1vcpu1gb");
+    }
+
+    #[test]
+    fn meta_in_host_entry() {
+        let config_str = "\
+Host myhost
+  HostName 1.2.3.4
+  # purple:meta region=nyc3,plan=s-1vcpu-1gb
+";
+        let config = parse_str(config_str);
+        let entry = first_block(&config).to_host_entry();
+        assert_eq!(entry.provider_meta.len(), 2);
+        assert_eq!(entry.provider_meta[0].0, "region");
+        assert_eq!(entry.provider_meta[1].0, "plan");
     }
 }

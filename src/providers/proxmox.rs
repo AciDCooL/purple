@@ -503,6 +503,12 @@ impl Provider for Proxmox {
             tags.sort();
             tags.dedup();
 
+            let mut metadata = Vec::new();
+            if !resource.node.is_empty() {
+                metadata.push(("node".to_string(), resource.node.clone()));
+            }
+            metadata.push(("type".to_string(), resource.resource_type.clone()));
+
             hosts.push(ProviderHost {
                 server_id: format!("{}:{}", resource.resource_type, resource.vmid),
                 name: if resource.name.is_empty() {
@@ -512,6 +518,7 @@ impl Provider for Proxmox {
                 },
                 ip,
                 tags,
+                metadata,
             });
         }
 

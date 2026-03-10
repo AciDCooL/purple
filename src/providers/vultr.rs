@@ -21,6 +21,12 @@ struct Instance {
     v6_main_ip: String,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    region: String,
+    #[serde(default)]
+    plan: String,
+    #[serde(default)]
+    os: String,
 }
 
 #[derive(Deserialize)]
@@ -86,11 +92,22 @@ impl Provider for Vultr {
                 } else {
                     continue;
                 };
+                let mut metadata = Vec::new();
+                if !instance.region.is_empty() {
+                    metadata.push(("region".to_string(), instance.region.clone()));
+                }
+                if !instance.plan.is_empty() {
+                    metadata.push(("plan".to_string(), instance.plan.clone()));
+                }
+                if !instance.os.is_empty() {
+                    metadata.push(("os".to_string(), instance.os.clone()));
+                }
                 all_hosts.push(ProviderHost {
                     server_id: instance.id.clone(),
                     name: instance.label.clone(),
                     ip,
                     tags: instance.tags.clone(),
+                    metadata,
                 });
             }
 

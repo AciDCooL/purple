@@ -27,7 +27,7 @@ purple reads your existing ~/.ssh/config and gives you a terminal UI to search, 
 - Self-update mechanism (macOS curl installs). Homebrew and cargo users update via their package manager
 - Auto-reload: detects external config changes every 4 seconds
 - Host key reset: detects changed host keys after server reinstalls and offers to remove the old key and reconnect
-- Split-pane detail panel (toggle with v key) showing connection info, activity, tags and tunnels alongside the host list. Auto-fallback to compact view on narrow terminals
+- Split-pane detail panel (toggle with v key) showing connection info, activity, tags, provider metadata, tunnels and snippets alongside the host list. Auto-fallback to compact view on narrow terminals
 - Minimal UI with monochrome base and subtle color for status. Works in any terminal, respects NO_COLOR
 
 ## Install
@@ -79,7 +79,7 @@ purple --completions zsh            # Generate shell completions
 
 Sync servers from cloud providers into ~/.ssh/config. Each synced host is tracked via a comment (# purple:provider name:id) so purple knows which hosts belong to which provider.
 
-Supported providers: DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud and Proxmox VE. Tags and labels from each provider are synced. Proxmox supports self-signed TLS certificates.
+Supported providers: DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud and Proxmox VE. Tags and labels from each provider are synced. Provider metadata (region, plan, OS) is stored in config comments and displayed in the detail panel. Proxmox supports self-signed TLS certificates.
 
 Per-provider auto_sync toggle controls startup sync. Default is true for all providers except Proxmox (default false). Manual sync via the TUI (s key) or CLI always works. Preview changes with --dry-run. Remove deleted hosts with --remove. Replace local tags with --reset-tags.
 

@@ -19,6 +19,15 @@ struct Droplet {
     networks: Networks,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    size_slug: String,
+    #[serde(default)]
+    region: Option<Region>,
+}
+
+#[derive(Deserialize)]
+struct Region {
+    slug: String,
 }
 
 #[derive(Deserialize)]
@@ -96,11 +105,21 @@ impl Provider for DigitalOcean {
                     })
                     .map(|n| n.ip_address.clone());
                 if let Some(ip) = ip {
+                    let mut metadata = Vec::new();
+                    if let Some(ref region) = droplet.region {
+                        if !region.slug.is_empty() {
+                            metadata.push(("region".to_string(), region.slug.clone()));
+                        }
+                    }
+                    if !droplet.size_slug.is_empty() {
+                        metadata.push(("plan".to_string(), droplet.size_slug.clone()));
+                    }
                     all_hosts.push(ProviderHost {
                         server_id: droplet.id.to_string(),
                         name: droplet.name.clone(),
                         ip,
                         tags: droplet.tags.clone(),
+                        metadata,
                     });
                 }
             }

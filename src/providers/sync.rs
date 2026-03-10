@@ -134,6 +134,21 @@ pub fn sync_provider_with_options(
                 let alias_changed = *existing_alias != expected_alias;
 
                 let ip_changed = entry.hostname != remote.ip;
+                let meta_changed = {
+                    let mut local: Vec<(&str, &str)> = entry
+                        .provider_meta
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_str()))
+                        .collect();
+                    local.sort();
+                    let mut remote_m: Vec<(&str, &str)> = remote
+                        .metadata
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_str()))
+                        .collect();
+                    remote_m.sort();
+                    local != remote_m
+                };
                 let trimmed_remote: Vec<String> =
                     remote.tags.iter().map(|t| t.trim().to_string()).collect();
                 let tags_changed = if reset_tags {
@@ -154,7 +169,7 @@ pub fn sync_provider_with_options(
                             .any(|lt| lt.eq_ignore_ascii_case(rt))
                     })
                 };
-                if alias_changed || ip_changed || tags_changed {
+                if alias_changed || ip_changed || tags_changed || meta_changed {
                     if dry_run {
                         result.updated += 1;
                     } else {
@@ -171,7 +186,7 @@ pub fn sync_provider_with_options(
                         // Re-evaluate: dedup may resolve back to the current alias
                         let alias_changed = new_alias != *existing_alias;
 
-                        if alias_changed || ip_changed || tags_changed {
+                        if alias_changed || ip_changed || tags_changed || meta_changed {
                             if alias_changed || ip_changed {
                                 let updated = HostEntry {
                                     alias: new_alias.clone(),
@@ -205,6 +220,10 @@ pub fn sync_provider_with_options(
                                     &remote.server_id,
                                 );
                                 result.renames.push((existing_alias.clone(), new_alias.clone()));
+                            }
+                            // Update metadata
+                            if meta_changed {
+                                config.set_host_meta(tags_alias, &remote.metadata);
                             }
                             result.updated += 1;
                         } else {
@@ -271,6 +290,9 @@ pub fn sync_provider_with_options(
                 config.set_host_provider(&alias, provider.name(), &remote.server_id);
                 if !remote.tags.is_empty() {
                     config.set_host_tags(&alias, &remote.tags);
+                }
+                if !remote.metadata.is_empty() {
+                    config.set_host_meta(&alias, &remote.metadata);
                 }
             }
 
@@ -384,18 +406,8 @@ mod tests {
         let mut config = empty_config();
         let section = make_section();
         let remote = vec![
-            ProviderHost {
-                server_id: "123".to_string(),
-                name: "web-1".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "456".to_string(),
-                name: "db-1".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("456".to_string(), "db-1".to_string(), "5.6.7.8".to_string(), Vec::new()),
         ];
 
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
@@ -416,21 +428,11 @@ mod tests {
         let section = make_section();
 
         // First sync: add host
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Second sync: IP changed
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "9.8.7.6".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.8.7.6".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.updated, 1);
         assert_eq!(result.added, 0);
@@ -444,12 +446,7 @@ mod tests {
         let mut config = empty_config();
         let section = make_section();
 
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Same data again
@@ -464,12 +461,7 @@ mod tests {
         let mut config = empty_config();
         let section = make_section();
 
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries().len(), 1);
 
@@ -485,12 +477,7 @@ mod tests {
         let mut config = empty_config();
         let section = make_section();
 
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
 
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, true);
         assert_eq!(result.added, 1);
@@ -502,18 +489,8 @@ mod tests {
         let mut config = empty_config();
         let section = make_section();
         let remote = vec![
-            ProviderHost {
-                server_id: "123".to_string(),
-                name: "web-1".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "123".to_string(),
-                name: "web-1-dup".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("123".to_string(), "web-1-dup".to_string(), "5.6.7.8".to_string(), Vec::new()),
         ];
 
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
@@ -542,12 +519,7 @@ Host do-web-1-copy
         let section = make_section();
 
         // Remote has same server_id with updated IP
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "5.6.7.8".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "5.6.7.8".to_string(), Vec::new())];
 
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         // Should update the first alias (do-web-1), not the copy
@@ -567,28 +539,13 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: adds header + host
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Second sync: new host added at provider
         let remote = vec![
-            ProviderHost {
-                server_id: "123".to_string(),
-                name: "web-1".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "456".to_string(),
-                name: "db-1".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("456".to_string(), "db-1".to_string(), "5.6.7.8".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
@@ -608,12 +565,7 @@ Host do-web-1-copy
         let section = make_section();
 
         // Add a host
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Verify header exists
@@ -639,12 +591,7 @@ Host do-web-1-copy
     fn test_sync_writes_provider_tags() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["production".to_string(), "us-east".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["production".to_string(), "us-east".to_string()])];
 
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
@@ -658,22 +605,12 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: add with tags
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["staging".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["staging".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].tags, vec!["staging"]);
 
         // Second sync: new provider tags added — existing tags are preserved (merge)
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["production".to_string(), "us-east".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["production".to_string(), "us-east".to_string()])];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.updated, 1);
         assert_eq!(
@@ -689,36 +626,16 @@ Host do-web-1-copy
 
         // First sync: add two hosts
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.1.1.1".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "db".to_string(),
-                ip: "2.2.2.2".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.1.1.1".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "db".to_string(), "2.2.2.2".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries().len(), 2);
 
         // Second sync: host 1 IP changed, host 2 removed, host 3 added
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "9.9.9.9".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "3".to_string(),
-                name: "cache".to_string(),
-                ip: "3.3.3.3".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "9.9.9.9".to_string(), Vec::new()),
+            ProviderHost::new("3".to_string(), "cache".to_string(), "3.3.3.3".to_string(), Vec::new()),
         ];
         let result =
             sync_provider(&mut config, &MockProvider, &remote, &section, true, false);
@@ -739,21 +656,11 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: tags in one order
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["beta".to_string(), "alpha".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["beta".to_string(), "alpha".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Second sync: same tags, different order
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["alpha".to_string(), "beta".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["alpha".to_string(), "beta".to_string()])];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.updated, 0);
@@ -786,12 +693,7 @@ Host do-web-1-copy
         let section = make_section();
 
         // Remote has same server with different IP — should NOT update included host
-        let remote = vec![ProviderHost {
-            server_id: "inc1".to_string(),
-            name: "included".to_string(),
-            ip: "9.9.9.9".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("inc1".to_string(), "included".to_string(), "9.9.9.9".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.updated, 0);
@@ -821,18 +723,8 @@ Host do-web-1-copy
 
         // Add two hosts
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.1.1.1".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "db".to_string(),
-                ip: "2.2.2.2".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.1.1.1".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "db".to_string(), "2.2.2.2".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries().len(), 2);
@@ -849,22 +741,12 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: host with tags
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["production".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["production".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].tags, vec!["production"]);
 
         // Second sync: remote tags empty — local tags preserved (may be user-added)
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.unchanged, 1);
         assert_eq!(config.host_entries()[0].tags, vec!["production"]);
@@ -880,12 +762,7 @@ Host do-web-1-copy
         };
         let section = make_section();
 
-        let remote = vec![ProviderHost {
-            server_id: "999".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("999".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
 
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
@@ -902,12 +779,7 @@ Host do-web-1-copy
         let section = make_section(); // prefix = "do"
 
         // First sync: add host with "do" prefix
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].alias, "do-web-1");
 
@@ -931,12 +803,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
 
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Change both prefix and IP
@@ -944,12 +811,7 @@ Host do-web-1-copy
             alias_prefix: "ocean".to_string(),
             ..section
         };
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "9.9.9.9".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.9.9.9".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &new_section, false, false);
         assert_eq!(result.updated, 1);
 
@@ -963,12 +825,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
 
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         let new_section = ProviderSection {
@@ -987,12 +844,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
 
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Same prefix, same everything — should be unchanged
@@ -1041,12 +893,7 @@ Host do-web-1-copy
         };
 
         // Remote has the included host's server_id with a different prefix
-        let remote = vec![ProviderHost {
-            server_id: "inc1".to_string(),
-            name: "included".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("inc1".to_string(), "included".to_string(), "1.2.3.4".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &new_section, false, false);
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.updated, 0);
@@ -1061,12 +908,7 @@ Host do-web-1-copy
         let section = make_section(); // prefix = "do"
 
         // First sync: add provider host
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].alias, "do-web-1");
 
@@ -1105,12 +947,7 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: add host with provider tag
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["nyc1".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["nyc1".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].tags, vec!["nyc1"]);
 
@@ -1130,24 +967,14 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: add host with provider tag
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["nyc1".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["nyc1".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // User manually adds a tag
         config.set_host_tags("do-web-1", &["nyc1".to_string(), "critical".to_string()]);
 
         // Second sync: provider adds a new tag — user tag must be preserved
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["nyc1".to_string(), "v2".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["nyc1".to_string(), "v2".to_string()])];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.updated, 1);
         let tags = &config.host_entries()[0].tags;
@@ -1162,12 +989,7 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: add host with provider tag
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["nyc1".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["nyc1".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // User manually adds a tag
@@ -1188,21 +1010,11 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: host with tags
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["staging".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["staging".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Second sync with reset_tags: provider removed all tags
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         let result = sync_provider_with_options(
             &mut config, &MockProvider, &remote, &section, false, false, true,
         );
@@ -1216,21 +1028,11 @@ Host do-web-1-copy
         let section = make_section();
 
         // Sync: add host with tags
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string(), "nyc1".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string(), "nyc1".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Reset-tags sync with same tags (different order): unchanged
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["nyc1".to_string(), "prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["nyc1".to_string(), "prod".to_string()])];
         let result = sync_provider_with_options(
             &mut config, &MockProvider, &remote, &section, false, false, true,
         );
@@ -1243,22 +1045,12 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: add host with lowercase tag
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].tags, vec!["prod"]);
 
         // Second sync: provider returns same tag with different casing — no duplicate
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["Prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["Prod".to_string()])];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.unchanged, 1);
         assert_eq!(config.host_entries()[0].tags, vec!["prod"]);
@@ -1270,21 +1062,11 @@ Host do-web-1-copy
         let section = make_section();
 
         // Sync: add host with tag
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Reset-tags sync with different casing: unchanged (case-insensitive comparison)
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["Prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["Prod".to_string()])];
         let result = sync_provider_with_options(
             &mut config, &MockProvider, &remote, &section, false, false, true,
         );
@@ -1297,12 +1079,7 @@ Host do-web-1-copy
     fn test_sync_empty_ip_not_added() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "100".to_string(),
-            name: "stopped-vm".to_string(),
-            ip: String::new(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("100".to_string(), "stopped-vm".to_string(), String::new(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.added, 0);
         assert_eq!(config.host_entries().len(), 0);
@@ -1314,23 +1091,13 @@ Host do-web-1-copy
         let section = make_section();
 
         // First sync: add host with IP
-        let remote = vec![ProviderHost {
-            server_id: "100".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("100".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries().len(), 1);
         assert_eq!(config.host_entries()[0].hostname, "1.2.3.4");
 
         // Second sync: VM stopped, empty IP. Host should stay unchanged.
-        let remote = vec![ProviderHost {
-            server_id: "100".to_string(),
-            name: "web".to_string(),
-            ip: String::new(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("100".to_string(), "web".to_string(), String::new(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.updated, 0);
@@ -1344,18 +1111,8 @@ Host do-web-1-copy
 
         // First sync: add two hosts
         let remote = vec![
-            ProviderHost {
-                server_id: "100".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "200".to_string(),
-                name: "db".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("100".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("200".to_string(), "db".to_string(), "5.6.7.8".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries().len(), 2);
@@ -1363,18 +1120,8 @@ Host do-web-1-copy
         // Second sync with --remove: web is running, db is stopped (empty IP).
         // db must NOT be removed.
         let remote = vec![
-            ProviderHost {
-                server_id: "100".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "200".to_string(),
-                name: "db".to_string(),
-                ip: String::new(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("100".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("200".to_string(), "db".to_string(), String::new(), Vec::new()),
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, true, false);
         assert_eq!(result.removed, 0);
@@ -1389,29 +1136,14 @@ Host do-web-1-copy
 
         // First sync: add two hosts
         let remote = vec![
-            ProviderHost {
-                server_id: "100".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "200".to_string(),
-                name: "db".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("100".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("200".to_string(), "db".to_string(), "5.6.7.8".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries().len(), 2);
 
         // Second sync with --remove: only web exists. db is truly deleted.
-        let remote = vec![ProviderHost {
-            server_id: "100".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("100".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, true, false);
         assert_eq!(result.removed, 1);
         assert_eq!(config.host_entries().len(), 1);
@@ -1425,24 +1157,9 @@ Host do-web-1-copy
 
         // First sync: add three hosts
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "running".to_string(),
-                ip: "1.1.1.1".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "stopped".to_string(),
-                ip: "2.2.2.2".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "3".to_string(),
-                name: "deleted".to_string(),
-                ip: "3.3.3.3".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "running".to_string(), "1.1.1.1".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "stopped".to_string(), "2.2.2.2".to_string(), Vec::new()),
+            ProviderHost::new("3".to_string(), "deleted".to_string(), "3.3.3.3".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries().len(), 3);
@@ -1452,18 +1169,8 @@ Host do-web-1-copy
         // - "stopped" has empty IP (unchanged, not removed)
         // - "deleted" not in list (removed)
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "running".to_string(),
-                ip: "9.9.9.9".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "stopped".to_string(),
-                ip: String::new(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "running".to_string(), "9.9.9.9".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "stopped".to_string(), String::new(), Vec::new()),
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, true, false);
         assert_eq!(result.updated, 1);
@@ -1545,12 +1252,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let mut section = make_section();
         section.user = "admin".to_string();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         let entries = config.host_entries();
         assert_eq!(entries[0].user, "admin");
@@ -1561,12 +1263,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let mut section = make_section();
         section.identity_file = "~/.ssh/id_rsa".to_string();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         let entries = config.host_entries();
         assert_eq!(entries[0].identity_file, "~/.ssh/id_rsa");
@@ -1577,12 +1274,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let mut section = make_section();
         section.user = String::new(); // explicitly clear user
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         let entries = config.host_entries();
         assert!(entries[0].user.is_empty());
@@ -1611,22 +1303,12 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
         // Add initial host
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "old-name".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "old-name".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].alias, "do-old-name");
 
         // Sync with new name (same server_id)
-        let remote_renamed = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "new-name".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote_renamed = vec![ProviderHost::new("1".to_string(), "new-name".to_string(), "1.2.3.4".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote_renamed, &section, false, false);
         // Should rename the alias
         assert!(!result.renames.is_empty() || result.updated > 0);
@@ -1636,12 +1318,7 @@ Host do-web-1-copy
     fn test_sync_idempotent_same_data() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.added, 0);
@@ -1658,21 +1335,11 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
         // Add host with tag "Prod"
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["Prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["Prod".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Sync again with "prod" (lowercase) - should NOT add duplicate
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string()],
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string()])];
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.updated, 0);
@@ -1682,21 +1349,11 @@ Host do-web-1-copy
     fn test_sync_tag_merge_adds_new_remote_tag() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Sync with additional tag "us-east"
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string(), "us-east".to_string()],
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string(), "us-east".to_string()])];
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
         assert_eq!(result.updated, 1);
 
@@ -1711,12 +1368,7 @@ Host do-web-1-copy
     fn test_sync_tag_merge_preserves_local_tags() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Manually add a local tag
@@ -1734,24 +1386,14 @@ Host do-web-1-copy
     fn test_sync_reset_tags_replaces_local() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Add local-only tag
         config.set_host_tags("do-web", &["prod".to_string(), "my-custom".to_string()]);
 
         // Sync with reset_tags=true
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["prod".to_string(), "new-tag".to_string()],
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string(), "new-tag".to_string()])];
         let result = sync_provider_with_options(&mut config, &MockProvider, &remote2, &section, false, false, true);
         assert_eq!(result.updated, 1);
 
@@ -1770,21 +1412,11 @@ Host do-web-1-copy
     fn test_sync_rename_and_ip_change_simultaneously() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "old-name".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "old-name".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Both name and IP change
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "new-name".to_string(),
-            ip: "9.8.7.6".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "new-name".to_string(), "9.8.7.6".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
         assert_eq!(result.updated, 1);
         assert_eq!(result.renames.len(), 1);
@@ -1805,18 +1437,8 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "1".to_string(), // duplicate
-                name: "web-copy".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("1".to_string(), "web-copy".to_string(), "5.6.7.8".to_string(), Vec::new()), // duplicate server_id
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.added, 1); // Only first one added
@@ -1832,18 +1454,8 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "db".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "db".to_string(), "5.6.7.8".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries().len(), 2);
@@ -1862,12 +1474,7 @@ Host do-web-1-copy
     fn test_sync_adds_group_header_on_first_host() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Check that a GlobalLine with group header exists
@@ -1881,12 +1488,7 @@ Host do-web-1-copy
     fn test_sync_removes_header_when_all_hosts_deleted() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Remove all hosts
@@ -1909,12 +1511,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let mut section = make_section();
         section.identity_file = "~/.ssh/do_key".to_string();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         let entries = config.host_entries();
         assert_eq!(entries[0].identity_file, "~/.ssh/do_key");
@@ -1930,18 +1527,8 @@ Host do-web-1-copy
         let section = make_section();
         // Two remote hosts with same sanitized name but different server_ids
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "web".to_string(), // same name, different server
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "web".to_string(), "5.6.7.8".to_string(), Vec::new()), // same name, different server
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.added, 2);
@@ -1961,12 +1548,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let mut section = make_section();
         section.alias_prefix = String::new();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web-1".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         let entries = config.host_entries();
         assert_eq!(entries[0].alias, "web-1"); // No prefix, just sanitized name
@@ -1981,18 +1563,8 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "db".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "db".to_string(), "5.6.7.8".to_string(), Vec::new()),
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, true);
         assert_eq!(result.added, 2);
@@ -2004,12 +1576,7 @@ Host do-web-1-copy
     fn test_sync_dry_run_remove_count_preserves_config() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries().len(), 1);
 
@@ -2030,16 +1597,16 @@ Host do-web-1-copy
         let section = make_section();
         // Add 3 hosts
         let remote = vec![
-            ProviderHost { server_id: "1".to_string(), name: "a".to_string(), ip: "1.1.1.1".to_string(), tags: Vec::new() },
-            ProviderHost { server_id: "2".to_string(), name: "b".to_string(), ip: "2.2.2.2".to_string(), tags: Vec::new() },
-            ProviderHost { server_id: "3".to_string(), name: "c".to_string(), ip: "3.3.3.3".to_string(), tags: Vec::new() },
+            ProviderHost::new("1".to_string(), "a".to_string(), "1.1.1.1".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "b".to_string(), "2.2.2.2".to_string(), Vec::new()),
+            ProviderHost::new("3".to_string(), "c".to_string(), "3.3.3.3".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Sync with: 1 unchanged, 1 ip changed, 1 removed (missing from remote)
         let remote2 = vec![
-            ProviderHost { server_id: "1".to_string(), name: "a".to_string(), ip: "1.1.1.1".to_string(), tags: Vec::new() }, // unchanged
-            ProviderHost { server_id: "2".to_string(), name: "b".to_string(), ip: "9.9.9.9".to_string(), tags: Vec::new() }, // IP changed
+            ProviderHost::new("1".to_string(), "a".to_string(), "1.1.1.1".to_string(), Vec::new()), // unchanged
+            ProviderHost::new("2".to_string(), "b".to_string(), "9.9.9.9".to_string(), Vec::new()), // IP changed
             // server_id "3" missing -> removed
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, true, false);
@@ -2058,14 +1625,14 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
         let remote = vec![
-            ProviderHost { server_id: "1".to_string(), name: "old-a".to_string(), ip: "1.1.1.1".to_string(), tags: Vec::new() },
-            ProviderHost { server_id: "2".to_string(), name: "old-b".to_string(), ip: "2.2.2.2".to_string(), tags: Vec::new() },
+            ProviderHost::new("1".to_string(), "old-a".to_string(), "1.1.1.1".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "old-b".to_string(), "2.2.2.2".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         let remote2 = vec![
-            ProviderHost { server_id: "1".to_string(), name: "new-a".to_string(), ip: "1.1.1.1".to_string(), tags: Vec::new() },
-            ProviderHost { server_id: "2".to_string(), name: "new-b".to_string(), ip: "2.2.2.2".to_string(), tags: Vec::new() },
+            ProviderHost::new("1".to_string(), "new-a".to_string(), "1.1.1.1".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "new-b".to_string(), "2.2.2.2".to_string(), Vec::new()),
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
         assert_eq!(result.renames.len(), 2);
@@ -2081,12 +1648,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
         // Tags with whitespace get trimmed when written to config and parsed back
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["  production  ".to_string(), " us-east ".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["  production  ".to_string(), " us-east ".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         let entries = config.host_entries();
         // Tags are trimmed during the write+parse roundtrip via set_host_tags
@@ -2098,21 +1660,11 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
         // First sync: clean tags
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["production".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["production".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Second sync: same tag but trimmed comparison works correctly
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["  production  ".to_string()], // whitespace trimmed before comparison
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["  production  ".to_string()])]; // whitespace trimmed before comparison
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
         // Trimmed "production" matches existing "production" case-insensitively
         assert_eq!(result.unchanged, 1);
@@ -2156,21 +1708,11 @@ Host do-web-1-copy
         };
 
         // Sync DO hosts
-        let do_remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let do_remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &do_remote, &do_section, false, false);
 
         // Sync Vultr hosts
-        let vultr_remote = vec![ProviderHost {
-            server_id: "abc".to_string(),
-            name: "web".to_string(),
-            ip: "5.6.7.8".to_string(),
-            tags: Vec::new(),
-        }];
+        let vultr_remote = vec![ProviderHost::new("abc".to_string(), "web".to_string(), "5.6.7.8".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider2, &vultr_remote, &vultr_section, false, false);
 
         let entries = config.host_entries();
@@ -2196,20 +1738,10 @@ Host do-web-1-copy
         };
 
         // Add hosts from both providers
-        let do_remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let do_remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &do_remote, &do_section, false, false);
 
-        let vultr_remote = vec![ProviderHost {
-            server_id: "abc".to_string(),
-            name: "db".to_string(),
-            ip: "5.6.7.8".to_string(),
-            tags: Vec::new(),
-        }];
+        let vultr_remote = vec![ProviderHost::new("abc".to_string(), "db".to_string(), "5.6.7.8".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider2, &vultr_remote, &vultr_section, false, false);
         assert_eq!(config.host_entries().len(), 2);
 
@@ -2229,23 +1761,13 @@ Host do-web-1-copy
     fn test_sync_rename_and_tag_change_simultaneously() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "old-name".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["staging".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "old-name".to_string(), "1.2.3.4".to_string(), vec!["staging".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].alias, "do-old-name");
         assert_eq!(config.host_entries()[0].tags, vec!["staging"]);
 
         // Change name and add new tag
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "new-name".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["staging".to_string(), "prod".to_string()],
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "new-name".to_string(), "1.2.3.4".to_string(), vec!["staging".to_string(), "prod".to_string()])];
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
         assert_eq!(result.updated, 1);
         assert_eq!(result.renames.len(), 1);
@@ -2264,12 +1786,7 @@ Host do-web-1-copy
     fn test_sync_all_symbol_name_uses_server_fallback() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "!!!".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "!!!".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         let entries = config.host_entries();
         assert_eq!(entries[0].alias, "do-server");
@@ -2279,12 +1796,7 @@ Host do-web-1-copy
     fn test_sync_unicode_name_uses_ascii_fallback() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "서버".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "서버".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         let entries = config.host_entries();
         // Korean chars stripped, fallback to "server"
@@ -2299,21 +1811,11 @@ Host do-web-1-copy
     fn test_sync_dry_run_update_preserves_config() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Dry-run with IP change
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "9.9.9.9".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "web".to_string(), "9.9.9.9".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, true);
         assert_eq!(result.updated, 1);
         // Config should still have old IP
@@ -2345,12 +1847,7 @@ Host do-web-1-copy
         let mut config = empty_config();
         let section = make_section();
         let remote: Vec<ProviderHost> = (0..100)
-            .map(|i| ProviderHost {
-                server_id: format!("{}", i),
-                name: format!("server-{}", i),
-                ip: format!("10.0.0.{}", i % 256),
-                tags: vec!["batch".to_string()],
-            })
+            .map(|i| ProviderHost::new(format!("{}", i), format!("server-{}", i), format!("10.0.0.{}", i % 256), vec!["batch".to_string()]))
             .collect();
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.added, 100);
@@ -2372,22 +1869,12 @@ Host do-web-1-copy
         // deduplicate_alias_excluding should handle it (no -2 suffix)
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].alias, "do-web");
 
         // Re-sync with same name but different IP -> update, no rename
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "9.9.9.9".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "web".to_string(), "9.9.9.9".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
         assert_eq!(result.updated, 1);
         assert!(result.renames.is_empty());
@@ -2402,22 +1889,12 @@ Host do-web-1-copy
     fn test_sync_reset_tags_with_rename() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "old-name".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["staging".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "old-name".to_string(), "1.2.3.4".to_string(), vec!["staging".to_string()])];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         config.set_host_tags("do-old-name", &["staging".to_string(), "custom".to_string()]);
 
         // Rename + reset_tags
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "new-name".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["production".to_string()],
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "new-name".to_string(), "1.2.3.4".to_string(), vec!["production".to_string()])];
         let result = sync_provider_with_options(
             &mut config, &MockProvider, &remote2, &section, false, false, true,
         );
@@ -2438,12 +1915,7 @@ Host do-web-1-copy
     fn test_sync_empty_ip_with_tags_not_added() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "stopped".to_string(),
-            ip: String::new(),
-            tags: vec!["prod".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "stopped".to_string(), String::new(), vec!["prod".to_string()])];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.added, 0);
         assert!(config.host_entries().is_empty());
@@ -2470,12 +1942,7 @@ Host do-web
             crlf: false,
         };
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.unchanged, 1);
     }
@@ -2489,18 +1956,8 @@ Host do-web
         let mut config = empty_config();
         let section = make_section();
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "db".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "db".to_string(), "5.6.7.8".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
@@ -2525,12 +1982,7 @@ Host do-web
     fn test_sync_without_remove_flag_keeps_deleted() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Sync without remove_deleted - host 1 gone from remote
@@ -2547,12 +1999,7 @@ Host do-web
     fn test_sync_dry_run_rename_no_renames_tracked() {
         let mut config = empty_config();
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "old".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "old".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         let new_section = ProviderSection {
@@ -2819,12 +2266,7 @@ Host do-web
         };
 
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "123".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("123".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
 
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.unchanged, 1);
@@ -2844,22 +2286,12 @@ Host do-web
         let section = make_section();
 
         // Add a host with name "web" -> alias "do-web"
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(config.host_entries()[0].alias, "do-web");
 
         // Manually add another host "do-new-web" that would collide after rename
-        let other = vec![ProviderHost {
-            server_id: "2".to_string(),
-            name: "new-web".to_string(),
-            ip: "5.5.5.5".to_string(),
-            tags: Vec::new(),
-        }];
+        let other = vec![ProviderHost::new("2".to_string(), "new-web".to_string(), "5.5.5.5".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &other, &section, false, false);
 
         // Now rename the remote host "1" to "new-web", but alias "do-new-web" is taken by host "2".
@@ -2870,18 +2302,8 @@ Host do-web
         // but dedup resolves to the same alias.
         // Actually, let's test it differently: rename where nothing else changes
         let remote_same = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "new-web".to_string(),
-                ip: "5.5.5.5".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "new-web".to_string(), "5.5.5.5".to_string(), Vec::new()),
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote_same, &section, false, false);
         assert_eq!(result.unchanged, 2);
@@ -2901,18 +2323,8 @@ Host do-web
         let section = make_section();
 
         let remote = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.1.1.1".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "web".to_string(),
-                ip: "2.2.2.2".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.1.1.1".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "web".to_string(), "2.2.2.2".to_string(), Vec::new()),
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.added, 2);
@@ -2954,12 +2366,7 @@ Host do-web
 
         // Add a non-included host
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "top1".to_string(),
-            name: "toplevel".to_string(),
-            ip: "2.2.2.2".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("top1".to_string(), "toplevel".to_string(), "2.2.2.2".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Dry-run with empty remote (both hosts would be "deleted")
@@ -2980,12 +2387,7 @@ Host do-web
         config.elements.push(ConfigElement::GlobalLine(String::new()));
 
         let section = make_section();
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.added, 1);
 
@@ -3009,12 +2411,7 @@ Host do-web
         let section = make_section();
 
         // First sync: one host, group header added
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         let header_count_before = config
@@ -3026,18 +2423,8 @@ Host do-web
 
         // Second sync: add another host
         let remote2 = vec![
-            ProviderHost {
-                server_id: "1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "2".to_string(),
-                name: "db".to_string(),
-                ip: "5.5.5.5".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new()),
+            ProviderHost::new("2".to_string(), "db".to_string(), "5.5.5.5".to_string(), Vec::new()),
         ];
         sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
 
@@ -3061,18 +2448,8 @@ Host do-web
 
         // Remote with duplicate server_id
         let remote = vec![
-            ProviderHost {
-                server_id: "dup".to_string(),
-                name: "first".to_string(),
-                ip: "1.1.1.1".to_string(),
-                tags: Vec::new(),
-            },
-            ProviderHost {
-                server_id: "dup".to_string(),
-                name: "second".to_string(),
-                ip: "2.2.2.2".to_string(),
-                tags: Vec::new(),
-            },
+            ProviderHost::new("dup".to_string(), "first".to_string(), "1.1.1.1".to_string(), Vec::new()),
+            ProviderHost::new("dup".to_string(), "second".to_string(), "2.2.2.2".to_string(), Vec::new()),
         ];
         let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
         assert_eq!(result.added, 1, "Only the first instance is added");
@@ -3089,21 +2466,11 @@ Host do-web
         let section = make_section();
 
         // Add host
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Re-sync with empty IP (VM stopped)
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: String::new(),
-            tags: Vec::new(),
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "web".to_string(), String::new(), Vec::new())];
         let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, true);
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.removed, 0, "Host with empty IP not removed");
@@ -3119,23 +2486,13 @@ Host do-web
         let mut config = empty_config();
         let section = make_section();
 
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["Production".to_string()],
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["Production".to_string()])];
         sync_provider_with_options(
             &mut config, &MockProvider, &remote, &section, false, false, true,
         );
 
         // Same tag but different case -> unchanged with reset_tags
-        let remote2 = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: vec!["production".to_string()],
-        }];
+        let remote2 = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["production".to_string()])];
         let result = sync_provider_with_options(
             &mut config, &MockProvider, &remote2, &section, false, false, true,
         );
@@ -3151,12 +2508,7 @@ Host do-web
         let mut config = empty_config();
         let section = make_section();
 
-        let remote = vec![ProviderHost {
-            server_id: "1".to_string(),
-            name: "web".to_string(),
-            ip: "1.2.3.4".to_string(),
-            tags: Vec::new(),
-        }];
+        let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
         sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
 
         // Verify group header exists
@@ -3174,5 +2526,200 @@ Host do-web
             matches!(e, ConfigElement::GlobalLine(l) if l.starts_with("# purple:group"))
         });
         assert!(!has_header_after, "Group header removed when all hosts gone");
+    }
+
+    // =========================================================================
+    // Metadata sync tests
+    // =========================================================================
+
+    #[test]
+    fn test_sync_adds_host_with_metadata() {
+        let mut config = empty_config();
+        let section = make_section();
+        let remote = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![
+                ("region".to_string(), "nyc3".to_string()),
+                ("plan".to_string(), "s-1vcpu-1gb".to_string()),
+            ],
+        }];
+        let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+        assert_eq!(result.added, 1);
+        let entries = config.host_entries();
+        assert_eq!(entries[0].provider_meta.len(), 2);
+        assert_eq!(entries[0].provider_meta[0], ("region".to_string(), "nyc3".to_string()));
+        assert_eq!(entries[0].provider_meta[1], ("plan".to_string(), "s-1vcpu-1gb".to_string()));
+    }
+
+    #[test]
+    fn test_sync_updates_changed_metadata() {
+        let mut config = empty_config();
+        let section = make_section();
+        let remote = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![("region".to_string(), "nyc3".to_string())],
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+
+        // Update metadata (region changed, plan added)
+        let remote2 = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![
+                ("region".to_string(), "sfo3".to_string()),
+                ("plan".to_string(), "s-2vcpu-2gb".to_string()),
+            ],
+        }];
+        let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
+        assert_eq!(result.updated, 1);
+        let entries = config.host_entries();
+        assert_eq!(entries[0].provider_meta.len(), 2);
+        assert_eq!(entries[0].provider_meta[0].1, "sfo3");
+        assert_eq!(entries[0].provider_meta[1].1, "s-2vcpu-2gb");
+    }
+
+    #[test]
+    fn test_sync_metadata_unchanged_no_update() {
+        let mut config = empty_config();
+        let section = make_section();
+        let remote = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![("region".to_string(), "nyc3".to_string())],
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+
+        // Same metadata again
+        let result = sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+        assert_eq!(result.unchanged, 1);
+        assert_eq!(result.updated, 0);
+    }
+
+    #[test]
+    fn test_sync_metadata_order_insensitive() {
+        let mut config = empty_config();
+        let section = make_section();
+        let remote = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![
+                ("region".to_string(), "nyc3".to_string()),
+                ("plan".to_string(), "s-1vcpu-1gb".to_string()),
+            ],
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+
+        // Same metadata, different order
+        let remote2 = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![
+                ("plan".to_string(), "s-1vcpu-1gb".to_string()),
+                ("region".to_string(), "nyc3".to_string()),
+            ],
+        }];
+        let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
+        assert_eq!(result.unchanged, 1);
+        assert_eq!(result.updated, 0);
+    }
+
+    #[test]
+    fn test_sync_metadata_with_rename() {
+        let mut config = empty_config();
+        let section = make_section();
+        let remote = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "old-name".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![("region".to_string(), "nyc3".to_string())],
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+        assert_eq!(config.host_entries()[0].provider_meta[0].1, "nyc3");
+
+        // Rename + metadata change
+        let remote2 = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "new-name".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![("region".to_string(), "sfo3".to_string())],
+        }];
+        let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
+        assert_eq!(result.updated, 1);
+        assert!(!result.renames.is_empty());
+        let entries = config.host_entries();
+        assert_eq!(entries[0].alias, "do-new-name");
+        assert_eq!(entries[0].provider_meta[0].1, "sfo3");
+    }
+
+    #[test]
+    fn test_sync_metadata_dry_run_no_mutation() {
+        let mut config = empty_config();
+        let section = make_section();
+        let remote = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![("region".to_string(), "nyc3".to_string())],
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+
+        // Dry-run with metadata change
+        let remote2 = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: Vec::new(),
+            metadata: vec![("region".to_string(), "sfo3".to_string())],
+        }];
+        let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, true);
+        assert_eq!(result.updated, 1);
+        // Config should still have old metadata
+        assert_eq!(config.host_entries()[0].provider_meta[0].1, "nyc3");
+    }
+
+    #[test]
+    fn test_sync_metadata_only_change_triggers_update() {
+        let mut config = empty_config();
+        let section = make_section();
+        let remote = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: vec!["prod".to_string()],
+            metadata: vec![("region".to_string(), "nyc3".to_string())],
+        }];
+        sync_provider(&mut config, &MockProvider, &remote, &section, false, false);
+
+        // Only metadata changes (IP, tags, alias all the same)
+        let remote2 = vec![ProviderHost {
+            server_id: "1".to_string(),
+            name: "web".to_string(),
+            ip: "1.2.3.4".to_string(),
+            tags: vec!["prod".to_string()],
+            metadata: vec![
+                ("region".to_string(), "nyc3".to_string()),
+                ("plan".to_string(), "s-1vcpu-1gb".to_string()),
+            ],
+        }];
+        let result = sync_provider(&mut config, &MockProvider, &remote2, &section, false, false);
+        assert_eq!(result.updated, 1);
+        assert_eq!(config.host_entries()[0].provider_meta.len(), 2);
     }
 }

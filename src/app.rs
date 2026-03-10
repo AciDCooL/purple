@@ -2965,18 +2965,8 @@ Host vultr-app
     fn test_apply_sync_result_with_hosts_returns_total() {
         let mut app = make_provider_app();
         let hosts = vec![
-            crate::providers::ProviderHost {
-                server_id: "s1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: vec![],
-            },
-            crate::providers::ProviderHost {
-                server_id: "s2".to_string(),
-                name: "db".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: vec![],
-            },
+            crate::providers::ProviderHost::new("s1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec![]),
+            crate::providers::ProviderHost::new("s2".to_string(), "db".to_string(), "5.6.7.8".to_string(), vec![]),
         ];
         let (msg, is_err, total) = app.apply_sync_result("digitalocean", hosts);
         assert!(!is_err);
@@ -2991,18 +2981,8 @@ Host vultr-app
         // Point config to a non-writable path so write() fails
         app.config.path = PathBuf::from("/dev/null/impossible");
         let hosts = vec![
-            crate::providers::ProviderHost {
-                server_id: "s1".to_string(),
-                name: "web".to_string(),
-                ip: "1.2.3.4".to_string(),
-                tags: vec![],
-            },
-            crate::providers::ProviderHost {
-                server_id: "s2".to_string(),
-                name: "db".to_string(),
-                ip: "5.6.7.8".to_string(),
-                tags: vec![],
-            },
+            crate::providers::ProviderHost::new("s1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec![]),
+            crate::providers::ProviderHost::new("s2".to_string(), "db".to_string(), "5.6.7.8".to_string(), vec![]),
         ];
         let (msg, is_err, total) = app.apply_sync_result("digitalocean", hosts);
         assert!(is_err);

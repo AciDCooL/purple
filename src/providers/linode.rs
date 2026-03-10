@@ -23,6 +23,10 @@ struct LinodeInstance {
     ipv6: Option<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    region: String,
+    #[serde(default, rename = "type")]
+    instance_type: String,
 }
 
 /// Check if an IP address is in a private/reserved range.
@@ -100,11 +104,19 @@ impl Provider for Linode {
                     });
                 if let Some(ip) = ip {
                     if !ip.is_empty() {
+                        let mut metadata = Vec::new();
+                        if !instance.region.is_empty() {
+                            metadata.push(("region".to_string(), instance.region.clone()));
+                        }
+                        if !instance.instance_type.is_empty() {
+                            metadata.push(("plan".to_string(), instance.instance_type.clone()));
+                        }
                         all_hosts.push(ProviderHost {
                             server_id: instance.id.to_string(),
                             name: instance.label.clone(),
                             ip,
                             tags: instance.tags.clone(),
+                            metadata,
                         });
                     }
                 }
