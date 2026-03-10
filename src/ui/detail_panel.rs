@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
@@ -82,7 +84,20 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             if !ago.is_empty() {
                 push_field(&mut lines, "Last SSH", &ago, max_value_width);
             }
-            push_field(&mut lines, "Connections", &entry.count.to_string(), max_value_width);
+            push_field(
+                &mut lines,
+                "Connections",
+                &entry.count.to_string(),
+                max_value_width,
+            );
+
+            if !entry.timestamps.is_empty() && inner_width >= 10 {
+                let chart_lines = activity_sparkline(&entry.timestamps, inner_width);
+                if !chart_lines.is_empty() {
+                    lines.push(Line::from(""));
+                    lines.extend(chart_lines);
+                }
+            }
         }
 
         if let Some(status) = ping {
@@ -186,7 +201,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     lines.push(Line::from(""));
 
-    let paragraph = Paragraph::new(lines).block(block);
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((app.ui.detail_scroll, 0));
     frame.render_widget(paragraph, area);
 }
 
@@ -229,6 +246,97 @@ fn section_header(label: &str) -> Line<'static> {
     Line::from(Span::styled(label.to_string(), theme::section_header()))
 }
 
+// Block sparkline using lower block elements (▁▂▃▄▅▆▇█).
+// 2 rows tall = 16 height levels. Each character = ~2 days over 12 weeks.
+// History retains 90 days of timestamps; chart shows 84 (12 clean weeks).
+const BLOCKS: [char; 9] = [' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}', '\u{2588}'];
+const CHART_DAYS: u64 = 84;
+
+fn activity_sparkline(timestamps: &[u64], chart_width: usize) -> Vec<Line<'static>> {
+    if chart_width == 0 {
+        return Vec::new();
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let range_secs = CHART_DAYS * 86400;
+    let bucket_secs = range_secs as f64 / chart_width as f64;
+    let cutoff = now.saturating_sub(range_secs);
+
+    let mut buckets = vec![0u64; chart_width];
+    for &ts in timestamps {
+        if ts < cutoff || ts > now {
+            continue;
+        }
+        let age = now.saturating_sub(ts);
+        let idx = chart_width
+            - 1
+            - ((age as f64 / bucket_secs).floor() as usize).min(chart_width - 1);
+        buckets[idx] += 1;
+    }
+
+    if buckets.iter().all(|&v| v == 0) {
+        return Vec::new();
+    }
+
+    let max_val = buckets.iter().copied().max().unwrap_or(1).max(1);
+    let total_levels = 16usize; // 2 rows x 8 levels
+
+    let heights: Vec<usize> = buckets
+        .iter()
+        .map(|&v| {
+            if v == 0 {
+                0
+            } else {
+                ((v as f64 / max_val as f64) * total_levels as f64).ceil() as usize
+            }
+        })
+        .collect();
+
+    let mut chart_lines = Vec::new();
+
+    // Top row (only rendered if any bar exceeds half height)
+    if heights.iter().any(|&h| h > 8) {
+        let mut top = String::with_capacity(chart_width * 3);
+        for &h in &heights {
+            if h > 8 {
+                top.push(BLOCKS[(h - 8).min(8)]);
+            } else {
+                top.push(' ');
+            }
+        }
+        chart_lines.push(Line::from(Span::styled(top, theme::bold())));
+    }
+
+    // Bottom row
+    let mut bottom = String::with_capacity(chart_width * 3);
+    for &h in &heights {
+        if h == 0 {
+            bottom.push(' ');
+        } else if h >= 8 {
+            bottom.push(BLOCKS[8]);
+        } else {
+            bottom.push(BLOCKS[h]);
+        }
+    }
+    chart_lines.push(Line::from(Span::styled(bottom, theme::bold())));
+
+    // Axis labels
+    let left_label = format!("{}w", CHART_DAYS / 7);
+    let right_label = "now";
+    let gap = chart_width.saturating_sub(left_label.len() + right_label.len());
+    chart_lines.push(Line::from(vec![
+        Span::styled(left_label, theme::muted()),
+        Span::raw(" ".repeat(gap)),
+        Span::styled(right_label.to_string(), theme::muted()),
+    ]));
+
+    chart_lines
+}
+
 fn find_tunnel_rules(elements: &[ConfigElement], alias: &str) -> Vec<String> {
     for element in elements {
         match element {
@@ -260,4 +368,82 @@ fn find_tunnel_rules(elements: &[ConfigElement], alias: &str) -> Vec<String> {
         }
     }
     Vec::new()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn now() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    }
+
+    #[test]
+    fn sparkline_empty_timestamps() {
+        let result = activity_sparkline(&[], 40);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn sparkline_all_outside_range() {
+        let old = now() - 100 * 86400;
+        let result = activity_sparkline(&[old], 40);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn sparkline_single_timestamp() {
+        let ts = now() - 86400;
+        let lines = activity_sparkline(&[ts], 40);
+        assert!(!lines.is_empty());
+        // Bottom row + axis = at least 2 lines
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn sparkline_multiple_buckets() {
+        let n = now();
+        let timestamps: Vec<u64> = (0..84).map(|day| n - day * 86400).collect();
+        let lines = activity_sparkline(&timestamps, 40);
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn sparkline_all_in_one_bucket() {
+        let n = now();
+        let timestamps: Vec<u64> = (0..10).map(|i| n - i * 60).collect();
+        let lines = activity_sparkline(&timestamps, 20);
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn sparkline_axis_labels() {
+        let ts = now() - 86400;
+        let lines = activity_sparkline(&[ts], 30);
+        let axis = lines.last().unwrap();
+        let text: String = axis.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.contains("12w"));
+        assert!(text.contains("now"));
+    }
+
+    #[test]
+    fn sparkline_narrow_width() {
+        let ts = now() - 86400;
+        let lines = activity_sparkline(&[ts], 10);
+        assert!(lines.len() >= 2);
+    }
+
+    #[test]
+    fn sparkline_two_rows_for_high_variance() {
+        let n = now();
+        // One bucket with many hits, rest with few
+        let mut timestamps: Vec<u64> = vec![n; 100];
+        timestamps.push(n - 40 * 86400);
+        let lines = activity_sparkline(&timestamps, 20);
+        // Should have top row + bottom row + axis = 3 lines
+        assert_eq!(lines.len(), 3);
+    }
 }

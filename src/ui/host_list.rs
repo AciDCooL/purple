@@ -11,6 +11,7 @@ use crate::ssh_config::model::ConfigElement;
 
 /// Minimum terminal width to show the detail panel in detailed view mode.
 const DETAIL_MIN_WIDTH: u16 = 90;
+const ALIAS_HOST_GAP: &str = "      "; // 6 spaces between NAME and HOST columns
 
 /// Column layout computed from the visible host list.
 struct Columns {
@@ -231,11 +232,16 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Pre-compute tunnel summaries
-    let tunnel_summaries: std::collections::HashMap<String, String> = app.hosts.iter()
-        .filter(|h| h.tunnel_count > 0)
-        .map(|h| (h.alias.clone(), tunnel_summary(&app.config.elements, &h.alias)))
-        .collect();
+    // Populate tunnel summaries cache if empty (invalidated on config reload)
+    if app.tunnel_summaries_cache.is_empty() && app.hosts.iter().any(|h| h.tunnel_count > 0) {
+        for h in &app.hosts {
+            if h.tunnel_count > 0 {
+                let summary = tunnel_summary(&app.config.elements, &h.alias);
+                app.tunnel_summaries_cache.insert(h.alias.clone(), summary);
+            }
+        }
+    }
+    let tunnel_summaries = &app.tunnel_summaries_cache;
 
     // Compute column layout
     let cols = Columns {
@@ -306,7 +312,7 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
                         host,
                         &app.ping_status,
                         &app.history,
-                        &tunnel_summaries,
+                        tunnel_summaries,
                         tunnel_active,
                         None,
                         &cols,
@@ -358,12 +364,16 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Pre-compute tunnel summaries for filtered hosts
-    let tunnel_summaries: std::collections::HashMap<String, String> = app.search.filtered_indices.iter()
-        .filter_map(|&i| app.hosts.get(i))
-        .filter(|h| h.tunnel_count > 0)
-        .map(|h| (h.alias.clone(), tunnel_summary(&app.config.elements, &h.alias)))
-        .collect();
+    // Populate tunnel summaries cache if empty (invalidated on config reload)
+    if app.tunnel_summaries_cache.is_empty() && app.hosts.iter().any(|h| h.tunnel_count > 0) {
+        for h in &app.hosts {
+            if h.tunnel_count > 0 {
+                let summary = tunnel_summary(&app.config.elements, &h.alias);
+                app.tunnel_summaries_cache.insert(h.alias.clone(), summary);
+            }
+        }
+    }
+    let tunnel_summaries = &app.tunnel_summaries_cache;
 
     let cols = Columns {
         alias: app.search.filtered_indices.iter()
@@ -408,7 +418,7 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
                 host,
                 &app.ping_status,
                 &app.history,
-                &tunnel_summaries,
+                tunnel_summaries,
                 tunnel_active,
                 query,
                 &cols,
@@ -427,7 +437,7 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
 }
 
 fn render_header(frame: &mut Frame, area: ratatui::layout::Rect, cols: &Columns) {
-    let header_left = format!(" {:<width$}    HOST", "NAME", width = cols.alias);
+    let header_left = format!(" {:<width$}{}HOST", "NAME", ALIAS_HOST_GAP, width = cols.alias);
     let header_right = cols.header_right();
     let header_right_len = header_right.width();
     let header_pad = cols.content
@@ -468,7 +478,8 @@ fn build_host_item<'a>(
         theme::bold()
     };
     let marker = if multi_selected { "\u{2713}" } else { " " };
-    let alias_display = format!("{}{:<width$}    ", marker, host.alias, width = cols.alias);
+    let alias_truncated = super::truncate(&host.alias, cols.alias);
+    let alias_display = format!("{}{:<width$}{}", marker, alias_truncated, ALIAS_HOST_GAP, width = cols.alias);
     let mut left_len = alias_display.width();
     let mut left_spans = vec![Span::styled(alias_display, alias_style)];
 
@@ -694,9 +705,11 @@ fn render_tag_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn tag_footer_spans<'a>() -> Vec<Span<'a>> {
     vec![
         Span::styled(" Enter", theme::primary_action()),
-        Span::styled(" save  ", theme::muted()),
+        Span::styled(" save ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
         Span::styled("Esc", theme::accent_bold()),
-        Span::styled(" cancel  ", theme::muted()),
+        Span::styled(" cancel ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
         Span::styled("comma-separated", theme::muted()),
     ]
 }

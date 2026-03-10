@@ -884,6 +884,7 @@ pub struct UiSelection {
     pub tunnel_list_state: ListState,
     pub snippet_picker_state: ListState,
     pub help_scroll: u16,
+    pub detail_scroll: u16,
 }
 
 /// Search mode state.
@@ -979,6 +980,9 @@ pub struct App {
     pub update_available: Option<String>,
     pub update_hint: &'static str,
 
+    // Cached tunnel summaries (invalidated on config reload)
+    pub tunnel_summaries_cache: HashMap<String, String>,
+
     // Sync history
     pub sync_history: HashMap<String, SyncRecord>,
 
@@ -1027,6 +1031,7 @@ impl App {
                 tunnel_list_state: ListState::default(),
                 snippet_picker_state: ListState::default(),
                 help_scroll: 0,
+                detail_scroll: 0,
             },
             search: SearchState {
                 query: None,
@@ -1066,6 +1071,7 @@ impl App {
             snippet_form: SnippetForm::new(),
             pending_snippet: None,
             multi_select: HashSet::new(),
+            tunnel_summaries_cache: HashMap::new(),
             update_available: None,
             update_hint: crate::update::update_hint(),
             sync_history: HashMap::new(),
@@ -1355,6 +1361,7 @@ impl App {
 
     /// Move selection up, skipping group headers.
     pub fn select_prev(&mut self) {
+        self.ui.detail_scroll = 0;
         if self.search.query.is_some() {
             cycle_selection(&mut self.ui.list_state, self.search.filtered_indices.len(), false);
         } else {
@@ -1364,6 +1371,7 @@ impl App {
 
     /// Move selection down, skipping group headers.
     pub fn select_next(&mut self) {
+        self.ui.detail_scroll = 0;
         if self.search.query.is_some() {
             cycle_selection(&mut self.ui.list_state, self.search.filtered_indices.len(), true);
         } else {
@@ -1405,6 +1413,7 @@ impl App {
 
     /// Page down in the host list, skipping group headers.
     pub fn page_down_host(&mut self) {
+        self.ui.detail_scroll = 0;
         const PAGE_SIZE: usize = 10;
         if self.search.query.is_some() {
             page_down(&mut self.ui.list_state, self.search.filtered_indices.len(), PAGE_SIZE);
@@ -1431,6 +1440,7 @@ impl App {
 
     /// Page up in the host list, skipping group headers.
     pub fn page_up_host(&mut self) {
+        self.ui.detail_scroll = 0;
         const PAGE_SIZE: usize = 10;
         if self.search.query.is_some() {
             page_up(&mut self.ui.list_state, self.search.filtered_indices.len(), PAGE_SIZE);
@@ -1459,6 +1469,7 @@ impl App {
         let had_search = self.search.query.take();
         let selected_alias = self.selected_host().map(|h| h.alias.clone());
 
+        self.tunnel_summaries_cache.clear();
         self.hosts = self.config.host_entries();
         if self.sort_mode == SortMode::Original && !self.group_by_provider {
             self.display_list = Self::build_display_list_from(&self.config, &self.hosts);

@@ -57,7 +57,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let label = format!(" {}* ", field.label());
         render_divider(frame, block_area, divider_y, &label, label_style, theme::border());
 
-        let content_area = Rect::new(inner.x, content_y, inner.width, 1);
+        let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
         render_field_content(frame, content_area, field, &app.tunnel_form);
     }
 
@@ -119,7 +119,7 @@ fn render_field_content(
                 Span::styled("\u{25C2} \u{25B8}", theme::muted()),
             ])
         } else {
-            Line::from(Span::raw(type_label))
+            Line::from(Span::styled(type_label, theme::bold()))
         };
         frame.render_widget(Paragraph::new(content), area);
         return;
@@ -139,10 +139,12 @@ fn render_field_content(
         TunnelFormField::Type => unreachable!(),
     };
 
-    let content = if value.is_empty() && !is_focused {
+    let content = if value.is_empty() && is_focused {
         Line::from(Span::styled(placeholder, theme::muted()))
+    } else if value.is_empty() {
+        Line::from(Span::raw(""))
     } else {
-        Line::from(Span::raw(value.as_str()))
+        Line::from(Span::styled(value.to_string(), theme::bold()))
     };
 
     frame.render_widget(Paragraph::new(content), area);

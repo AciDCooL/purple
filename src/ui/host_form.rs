@@ -80,7 +80,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         };
         render_divider(frame, block_area, divider_y, &label, label_style, theme::border());
 
-        let content_area = Rect::new(inner.x, content_y, inner.width, 1);
+        let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
         render_field_content(frame, content_area, field, &app.form);
     }
 
@@ -342,22 +342,29 @@ fn render_field_content(
 
     let is_picker = matches!(field, FormField::IdentityFile | FormField::ProxyJump | FormField::AskPass);
 
-    // Show placeholder when field is empty and not focused
-    let content = if value.is_empty() && !is_focused {
+    // Show placeholder only when field is empty and focused
+    let content = if value.is_empty() && is_focused && !is_picker {
         let ph = placeholder_for(field);
         Line::from(Span::styled(ph, theme::muted()))
     } else if is_picker && is_focused {
         let inner_width = area.width as usize;
         let arrow_pos = inner_width.saturating_sub(1);
-        let val_width = value.width();
+        let (display, display_style) = if value.is_empty() {
+            (placeholder_for(field), theme::muted())
+        } else {
+            (value.to_string(), theme::bold())
+        };
+        let val_width = display.width();
         let gap = arrow_pos.saturating_sub(val_width);
         Line::from(vec![
-            Span::raw(value.as_str()),
+            Span::styled(display, display_style),
             Span::raw(" ".repeat(gap)),
             Span::styled("\u{25B8}", theme::muted()),
         ])
+    } else if value.is_empty() {
+        Line::from(Span::raw(""))
     } else {
-        Line::from(Span::raw(value.as_str()))
+        Line::from(Span::styled(value.to_string(), theme::bold()))
     };
 
     frame.render_widget(Paragraph::new(content), area);

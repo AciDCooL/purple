@@ -262,7 +262,14 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
                 ViewMode::Compact => ViewMode::Detailed,
                 ViewMode::Detailed => ViewMode::Compact,
             };
+            app.ui.detail_scroll = 0;
             let _ = preferences::save_view_mode(app.view_mode);
+        }
+        KeyCode::Char(']') if app.view_mode == ViewMode::Detailed => {
+            app.ui.detail_scroll = app.ui.detail_scroll.saturating_add(1);
+        }
+        KeyCode::Char('[') if app.view_mode == ViewMode::Detailed => {
+            app.ui.detail_scroll = app.ui.detail_scroll.saturating_sub(1);
         }
         KeyCode::Char('u') => {
             if let Some(deleted) = app.deleted_host.take() {
@@ -1903,9 +1910,10 @@ mod tests {
     use std::sync::mpsc;
 
     fn test_provider_config() -> ProviderConfig {
-        let mut c = ProviderConfig::default();
-        c.path_override = Some(PathBuf::from("/tmp/purple_test_providers"));
-        c
+        ProviderConfig {
+            path_override: Some(PathBuf::from("/tmp/purple_test_providers")),
+            ..Default::default()
+        }
     }
 
     fn make_app(content: &str) -> App {

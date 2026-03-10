@@ -540,8 +540,10 @@ foo=bar
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("snippets");
 
-        let mut store = SnippetStore::default();
-        store.path_override = Some(path.clone());
+        let mut store = SnippetStore {
+            path_override: Some(path.clone()),
+            ..Default::default()
+        };
         store.set(Snippet {
             name: "test".to_string(),
             command: "echo hello".to_string(),

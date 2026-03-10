@@ -171,7 +171,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
         };
         render_divider(frame, block_area, divider_y, &label, label_style, theme::border());
 
-        let content_area = Rect::new(inner.x, content_y, inner.width, 1);
+        let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
         render_field_content(frame, content_area, field, &app.provider_form, provider_name);
     }
 
@@ -290,20 +290,27 @@ fn render_field_content(
 
     let is_picker = field == ProviderFormField::IdentityFile;
 
-    let content = if value.is_empty() && !is_focused {
+    let content = if value.is_empty() && is_focused && !is_picker {
         Line::from(Span::styled(placeholder_for(field, provider_name), theme::muted()))
     } else if is_picker && is_focused {
         let inner_width = area.width as usize;
         let arrow_pos = inner_width.saturating_sub(1);
-        let val_width = display_value.width();
+        let (display, display_style) = if value.is_empty() {
+            (placeholder_for(field, provider_name).to_string(), theme::muted())
+        } else {
+            (display_value.clone(), theme::bold())
+        };
+        let val_width = display.width();
         let gap = arrow_pos.saturating_sub(val_width);
         Line::from(vec![
-            Span::raw(display_value),
+            Span::styled(display, display_style),
             Span::raw(" ".repeat(gap)),
             Span::styled("\u{25B8}", theme::muted()),
         ])
+    } else if display_value.is_empty() {
+        Line::from(Span::raw(""))
     } else {
-        Line::from(Span::raw(display_value))
+        Line::from(Span::styled(display_value, theme::bold()))
     };
 
     frame.render_widget(Paragraph::new(content), area);
@@ -331,12 +338,12 @@ fn render_toggle_content(
         let val_width = value_text.width();
         let gap = inner_width.saturating_sub(val_width + 3);
         Line::from(vec![
-            Span::raw(value_text),
+            Span::styled(value_text, theme::bold()),
             Span::raw(" ".repeat(gap)),
             Span::styled("\u{25C2} \u{25B8}", theme::muted()),
         ])
     } else {
-        Line::from(Span::raw(value_text))
+        Line::from(Span::styled(value_text, theme::bold()))
     };
     frame.render_widget(Paragraph::new(content), area);
 }

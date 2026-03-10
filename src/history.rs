@@ -5,12 +5,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::fs_util;
 
+/// Timestamps older than this are pruned on load and after each record().
+const RETENTION_SECS: u64 = 90 * 86400;
+
+/// Hard cap on stored timestamps per host to bound memory and serialisation cost.
+const MAX_TIMESTAMPS: usize = 10_000;
+
 /// A single history entry for a host.
 #[derive(Debug, Clone)]
 pub struct HistoryEntry {
     pub alias: String,
     pub last_connected: u64,
     pub count: u32,
+    /// Individual connection timestamps (last 90 days) for activity charts.
+    pub timestamps: Vec<u64>,
 }
 
 /// Connection history tracking.
@@ -36,18 +44,39 @@ impl ConnectionHistory {
         let content = fs::read_to_string(&path).unwrap_or_default();
         let mut entries = HashMap::new();
         for line in content.lines() {
-            let parts: Vec<&str> = line.splitn(3, '\t').collect();
-            if parts.len() == 3 {
+            let parts: Vec<&str> = line.splitn(4, '\t').collect();
+            if parts.len() >= 3 {
                 if let (Ok(ts), Ok(count)) = (parts[1].parse::<u64>(), parts[2].parse::<u32>()) {
+                    let timestamps = if parts.len() == 4 && !parts[3].is_empty() {
+                        parts[3]
+                            .split(',')
+                            .filter_map(|s| s.parse::<u64>().ok())
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
                     entries.insert(
                         parts[0].to_string(),
                         HistoryEntry {
                             alias: parts[0].to_string(),
                             last_connected: ts,
                             count,
+                            timestamps,
                         },
                     );
                 }
+            }
+        }
+        let cutoff = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            .saturating_sub(RETENTION_SECS);
+        for entry in entries.values_mut() {
+            entry.timestamps.retain(|&t| t >= cutoff);
+            if entry.timestamps.len() > MAX_TIMESTAMPS {
+                let excess = entry.timestamps.len() - MAX_TIMESTAMPS;
+                entry.timestamps.drain(..excess);
             }
         }
         Self { entries, path }
@@ -66,9 +95,17 @@ impl ConnectionHistory {
                 alias: alias.to_string(),
                 last_connected: 0,
                 count: 0,
+                timestamps: Vec::new(),
             });
         entry.last_connected = now;
-        entry.count += 1;
+        entry.count = entry.count.saturating_add(1);
+        entry.timestamps.push(now);
+        let cutoff = now.saturating_sub(RETENTION_SECS);
+        entry.timestamps.retain(|&t| t >= cutoff);
+        if entry.timestamps.len() > MAX_TIMESTAMPS {
+            let excess = entry.timestamps.len() - MAX_TIMESTAMPS;
+            entry.timestamps.drain(..excess);
+        }
         let _ = self.save();
     }
 
@@ -129,6 +166,12 @@ impl ConnectionHistory {
             content.push_str(&e.last_connected.to_string());
             content.push('\t');
             content.push_str(&e.count.to_string());
+            if !e.timestamps.is_empty() {
+                content.push('\t');
+                let ts_strs: Vec<String> =
+                    e.timestamps.iter().map(|t| t.to_string()).collect();
+                content.push_str(&ts_strs.join(","));
+            }
         }
         fs_util::atomic_write(&self.path, content.as_bytes())
     }
@@ -151,6 +194,144 @@ mod tests {
     #[test]
     fn test_format_time_ago_zero() {
         assert_eq!(ConnectionHistory::format_time_ago(0), "");
+    }
+
+    #[test]
+    fn test_timestamps_parsing_roundtrip() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let tsv = format!("myhost\t{}\t5\t{},{},{}", now, now - 100, now - 200, now - 300);
+        let dir = std::env::temp_dir().join(format!(
+            "purple_test_history_{}",
+            format!("{:?}", std::thread::current().id())
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("history.tsv");
+        std::fs::write(&path, &tsv).unwrap();
+
+        let mut history = ConnectionHistory {
+            entries: HashMap::new(),
+            path: path.clone(),
+        };
+        let content = std::fs::read_to_string(&path).unwrap();
+        for line in content.lines() {
+            let parts: Vec<&str> = line.splitn(4, '\t').collect();
+            if parts.len() >= 3 {
+                if let (Ok(ts), Ok(count)) = (parts[1].parse::<u64>(), parts[2].parse::<u32>()) {
+                    let timestamps = if parts.len() == 4 && !parts[3].is_empty() {
+                        parts[3].split(',').filter_map(|s| s.parse::<u64>().ok()).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    history.entries.insert(
+                        parts[0].to_string(),
+                        HistoryEntry {
+                            alias: parts[0].to_string(),
+                            last_connected: ts,
+                            count,
+                            timestamps,
+                        },
+                    );
+                }
+            }
+        }
+
+        let entry = history.entries.get("myhost").unwrap();
+        assert_eq!(entry.count, 5);
+        assert_eq!(entry.timestamps.len(), 3);
+        assert_eq!(entry.timestamps[0], now - 100);
+
+        // Save and reload to verify roundtrip
+        history.save().unwrap();
+        let reloaded = std::fs::read_to_string(&path).unwrap();
+        assert!(reloaded.contains("myhost"));
+        assert!(reloaded.contains(&(now - 100).to_string()));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_timestamps_retention_prunes_old() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let old = now - 100 * 86400; // 100 days ago — beyond 90-day retention
+        let recent = now - 10 * 86400; // 10 days ago — within retention
+
+        let dir = std::env::temp_dir().join(format!(
+            "purple_test_retention_{}",
+            format!("{:?}", std::thread::current().id())
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("history.tsv");
+        let tsv = format!("host1\t{}\t2\t{},{}", now, old, recent);
+        std::fs::write(&path, &tsv).unwrap();
+
+        // Simulate load with retention pruning
+        let mut entries = HashMap::new();
+        let cutoff = now.saturating_sub(RETENTION_SECS);
+        entries.insert(
+            "host1".to_string(),
+            HistoryEntry {
+                alias: "host1".to_string(),
+                last_connected: now,
+                count: 2,
+                timestamps: vec![old, recent],
+            },
+        );
+        for entry in entries.values_mut() {
+            entry.timestamps.retain(|&t| t >= cutoff);
+        }
+
+        let entry = entries.get("host1").unwrap();
+        assert_eq!(entry.timestamps.len(), 1, "old timestamp should be pruned");
+        assert_eq!(entry.timestamps[0], recent);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_timestamps_cap() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let mut timestamps: Vec<u64> = (0..MAX_TIMESTAMPS + 500)
+            .map(|i| now - (i as u64))
+            .collect();
+        timestamps.sort();
+
+        let cutoff = now.saturating_sub(RETENTION_SECS);
+        timestamps.retain(|&t| t >= cutoff);
+        if timestamps.len() > MAX_TIMESTAMPS {
+            let excess = timestamps.len() - MAX_TIMESTAMPS;
+            timestamps.drain(..excess);
+        }
+
+        assert!(timestamps.len() <= MAX_TIMESTAMPS);
+        // Should keep the most recent timestamps
+        assert_eq!(*timestamps.last().unwrap(), now);
+    }
+
+    #[test]
+    fn test_timestamps_empty_fourth_column() {
+        // A 3-column line (no timestamps) should parse with empty timestamps
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let line = format!("oldhost\t{}\t10", now);
+        let parts: Vec<&str> = line.splitn(4, '\t').collect();
+        assert_eq!(parts.len(), 3);
+        let timestamps: Vec<u64> = if parts.len() == 4 && !parts[3].is_empty() {
+            parts[3].split(',').filter_map(|s| s.parse::<u64>().ok()).collect()
+        } else {
+            Vec::new()
+        };
+        assert!(timestamps.is_empty());
     }
 
     #[test]
