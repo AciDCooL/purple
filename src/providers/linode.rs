@@ -27,6 +27,10 @@ struct LinodeInstance {
     region: String,
     #[serde(default, rename = "type")]
     instance_type: String,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    image: Option<String>,
 }
 
 /// Check if an IP address is in a private/reserved range.
@@ -110,6 +114,14 @@ impl Provider for Linode {
                         }
                         if !instance.instance_type.is_empty() {
                             metadata.push(("plan".to_string(), instance.instance_type.clone()));
+                        }
+                        if let Some(ref image) = instance.image {
+                            if !image.is_empty() {
+                                metadata.push(("os".to_string(), image.clone()));
+                            }
+                        }
+                        if !instance.status.is_empty() {
+                            metadata.push(("status".to_string(), instance.status.clone()));
                         }
                         all_hosts.push(ProviderHost {
                             server_id: instance.id.to_string(),

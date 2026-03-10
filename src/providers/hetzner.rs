@@ -23,6 +23,16 @@ struct HetznerServer {
     server_type: Option<HetznerServerType>,
     #[serde(default)]
     datacenter: Option<HetznerDatacenter>,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    image: Option<HetznerImage>,
+}
+
+#[derive(Deserialize)]
+struct HetznerImage {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -140,6 +150,16 @@ impl Provider for Hetzner {
                         if !st.name.is_empty() {
                             metadata.push(("plan".to_string(), st.name.clone()));
                         }
+                    }
+                    if let Some(ref image) = server.image {
+                        if let Some(ref name) = image.name {
+                            if !name.is_empty() {
+                                metadata.push(("os".to_string(), name.clone()));
+                            }
+                        }
+                    }
+                    if !server.status.is_empty() {
+                        metadata.push(("status".to_string(), server.status.clone()));
                     }
                     all_hosts.push(ProviderHost {
                         server_id: server.id.to_string(),

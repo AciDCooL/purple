@@ -46,6 +46,13 @@ fn build_alias(prefix: &str, sanitized: &str) -> String {
     }
 }
 
+/// Whether a metadata key is volatile (changes frequently without user action).
+/// Volatile keys are excluded from the sync diff comparison so that a status
+/// change alone does not trigger an SSH config rewrite. The value is still
+/// stored and displayed when the host is updated for other reasons.
+fn is_volatile_meta(key: &str) -> bool {
+    key == "status"
+}
 
 /// Sync hosts from a cloud provider into the SSH config.
 pub fn sync_provider(
@@ -138,12 +145,14 @@ pub fn sync_provider_with_options(
                     let mut local: Vec<(&str, &str)> = entry
                         .provider_meta
                         .iter()
+                        .filter(|(k, _)| !is_volatile_meta(k))
                         .map(|(k, v)| (k.as_str(), v.as_str()))
                         .collect();
                     local.sort();
                     let mut remote_m: Vec<(&str, &str)> = remote
                         .metadata
                         .iter()
+                        .filter(|(k, _)| !is_volatile_meta(k))
                         .map(|(k, v)| (k.as_str(), v.as_str()))
                         .collect();
                     remote_m.sort();

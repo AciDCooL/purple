@@ -507,7 +507,12 @@ impl Provider for Proxmox {
             if !resource.node.is_empty() {
                 metadata.push(("node".to_string(), resource.node.clone()));
             }
-            metadata.push(("type".to_string(), resource.resource_type.clone()));
+            if !resource.resource_type.is_empty() {
+                metadata.push(("type".to_string(), resource.resource_type.clone()));
+            }
+            if !resource.status.is_empty() {
+                metadata.push(("status".to_string(), resource.status.clone()));
+            }
 
             hosts.push(ProviderHost {
                 server_id: format!("{}:{}", resource.resource_type, resource.vmid),

@@ -99,22 +99,30 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     let mut spans: Vec<Span<'_>> = Vec::new();
     if is_active {
         spans.push(Span::styled(" Enter", theme::primary_action()));
-        spans.push(Span::styled(" stop  ", theme::muted()));
+        spans.push(Span::styled(" stop ", theme::muted()));
     } else if !app.tunnel_list.is_empty() {
         spans.push(Span::styled(" Enter", theme::primary_action()));
-        spans.push(Span::styled(" start  ", theme::muted()));
+        spans.push(Span::styled(" start ", theme::muted()));
     }
     if !is_readonly {
+        if !spans.is_empty() {
+            spans.push(Span::styled("\u{2502} ", theme::muted()));
+        }
         spans.push(Span::styled("a", theme::accent_bold()));
-        spans.push(Span::styled(" add  ", theme::muted()));
+        spans.push(Span::styled(" add ", theme::muted()));
         if !app.tunnel_list.is_empty() {
             spans.push(Span::styled("e", theme::accent_bold()));
-            spans.push(Span::styled(" edit  ", theme::muted()));
+            spans.push(Span::styled(" edit ", theme::muted()));
             spans.push(Span::styled("d", theme::accent_bold()));
-            spans.push(Span::styled(" delete  ", theme::muted()));
+            spans.push(Span::styled(" delete ", theme::muted()));
         }
     }
-    spans.push(Span::styled("Esc", theme::accent_bold()));
+    if spans.is_empty() {
+        spans.push(Span::styled(" Esc", theme::accent_bold()));
+    } else {
+        spans.push(Span::styled("\u{2502} ", theme::muted()));
+        spans.push(Span::styled("Esc", theme::accent_bold()));
+    }
     spans.push(Span::styled(" back", theme::muted()));
     super::render_footer_with_status(frame, chunks[1], spans, app);
 }

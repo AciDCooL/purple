@@ -74,11 +74,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     frame.render_stateful_widget(list, chunks[0], &mut app.ui.tag_picker_state);
 
-    let footer = Line::from(vec![
+    let spans = vec![
         Span::styled(" Enter", theme::primary_action()),
-        Span::styled(" select  ", theme::muted()),
+        Span::styled(" select ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
         Span::styled("Esc", theme::accent_bold()),
         Span::styled(" back", theme::muted()),
-    ]);
-    frame.render_widget(Paragraph::new(footer), chunks[1]);
+    ];
+    super::render_footer_with_status(frame, chunks[1], spans, app);
 }

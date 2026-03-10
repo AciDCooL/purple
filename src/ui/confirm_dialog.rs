@@ -63,7 +63,7 @@ pub fn render_host_key_reset(frame: &mut Frame, _app: &App, hostname: &str) {
         )),
         Line::from(""),
         Line::from(vec![
-            Span::styled("    y", theme::accent_bold()),
+            Span::styled("    y", theme::danger()),
             Span::styled(" yes   ", theme::muted()),
             Span::styled("Esc", theme::accent_bold()),
             Span::styled(" no", theme::muted()),

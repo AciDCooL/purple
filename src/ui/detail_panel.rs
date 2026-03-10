@@ -213,6 +213,7 @@ fn meta_label(key: &str) -> String {
         "os" => "OS".to_string(),
         "node" => "Node".to_string(),
         "type" => "Type".to_string(),
+        "status" => "State".to_string(),
         other => {
             // Capitalize first letter
             let mut chars = other.chars();

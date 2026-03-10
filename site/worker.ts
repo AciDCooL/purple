@@ -158,7 +158,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "1.20.0",
+  "softwareVersion": "1.21.0",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
   "codeRepository": "https://github.com/erickochen/purple",
@@ -183,7 +183,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
     "Bulk import from known_hosts",
     "SSH key management",
     "Atomic writes with automatic backups",
-    "Split-pane detail panel with connection info, activity and provider metadata",
+    "Split-pane detail panel with connection info, activity, provider metadata, tunnels and snippets",
     "Shell completions for Bash, zsh, fish"
   ]
 }
@@ -452,12 +452,12 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
     <div><strong>Self-update.</strong> Run <code>purple update</code></div>
     <div><strong>Atomic writes.</strong> Temp file, chmod 600, rename. Automatic backups</div>
     <div><strong>Ping.</strong> TCP connectivity check per host or all at once</div>
-    <div><strong>Detail panel.</strong> Split-pane view with connection info, history, provider metadata and tunnels</div>
+    <div><strong>Detail panel.</strong> Split-pane view with connection info, history, provider metadata, tunnels and snippets</div>
   </div>
 
   <section>
     <h2>Cloud provider sync</h2>
-    <p>Pull servers from six cloud providers directly into your <code>~/.ssh/config</code>. Sync adds new hosts, updates changed IPs and merges tags. Provider metadata (region, plan, OS) is stored in config comments and displayed in the detail panel. Tags you add manually are preserved across syncs.</p>
+    <p>Pull servers from six cloud providers directly into your <code>~/.ssh/config</code>. Sync adds new hosts, updates changed IPs and merges tags. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Tags you add manually are preserved across syncs.</p>
     <div class="providers">
       <div>DigitalOcean</div>
       <div>Vultr</div>
@@ -597,7 +597,7 @@ purple --completions zsh            # Generate shell completions
 
 Sync servers from cloud providers into ~/.ssh/config. Each synced host is tracked via a comment (# purple:provider name:id) so purple knows which hosts belong to which provider.
 
-Supported providers: DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud and Proxmox VE. Tags and labels from each provider are synced. Provider metadata (region, plan, OS) is stored in config comments and displayed in the detail panel. Proxmox supports self-signed TLS certificates.
+Supported providers: DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud and Proxmox VE. Tags and labels from each provider are synced. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Proxmox supports self-signed TLS certificates.
 
 Per-provider auto_sync toggle controls startup sync. Default is true for all providers except Proxmox (default false). Manual sync via the TUI (s key) or CLI always works. Preview changes with --dry-run. Remove deleted hosts with --remove. Replace local tags with --reset-tags.
 

@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Alignment, Constraint, Layout};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
@@ -42,21 +42,21 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_widget(para, chunks[0]);
 
     let can_scroll = total_lines > max_body;
-    let footer = if can_scroll {
-        Line::from(vec![
+    let spans = if can_scroll {
+        vec![
             Span::styled(" j/k", theme::accent_bold()),
             Span::styled(" scroll ", theme::muted()),
             Span::styled("\u{2502} ", theme::muted()),
             Span::styled("Esc", theme::accent_bold()),
             Span::styled(" close", theme::muted()),
-        ])
+        ]
     } else {
-        Line::from(vec![
+        vec![
             Span::styled(" Esc", theme::accent_bold()),
             Span::styled(" close", theme::muted()),
-        ])
+        ]
     };
-    frame.render_widget(Paragraph::new(footer), chunks[1]);
+    super::render_footer_with_status(frame, chunks[1], spans, app);
 }
 
 fn help_text() -> Vec<Line<'static>> {
@@ -106,6 +106,21 @@ fn help_text() -> Vec<Line<'static>> {
         help_line(" tag=name   ", "exact tag filter"),
         Line::from(""),
         help_line(" q / Esc    ", "quit / close"),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("purple v{} ", env!("CARGO_PKG_VERSION")),
+            theme::brand(),
+        ))
+        .alignment(Alignment::Right),
+        Line::from(""),
+        Line::from(Span::styled("by Eric Kochen ", theme::muted())).alignment(Alignment::Right),
+        Line::from(Span::styled("https://getpurple.sh ", theme::muted()))
+            .alignment(Alignment::Right),
+        Line::from(Span::styled(
+            "https://github.com/erickochen/purple ",
+            theme::muted(),
+        ))
+        .alignment(Alignment::Right),
     ]
 }
 

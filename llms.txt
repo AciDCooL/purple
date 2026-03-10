@@ -79,7 +79,7 @@ purple --completions zsh            # Generate shell completions
 
 Sync servers from cloud providers into ~/.ssh/config. Each synced host is tracked via a comment (# purple:provider name:id) so purple knows which hosts belong to which provider.
 
-Supported providers: DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud and Proxmox VE. Tags and labels from each provider are synced. Provider metadata (region, plan, OS) is stored in config comments and displayed in the detail panel. Proxmox supports self-signed TLS certificates.
+Supported providers: DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud and Proxmox VE. Tags and labels from each provider are synced. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Proxmox supports self-signed TLS certificates.
 
 Per-provider auto_sync toggle controls startup sync. Default is true for all providers except Proxmox (default false). Manual sync via the TUI (s key) or CLI always works. Preview changes with --dry-run. Remove deleted hosts with --remove. Replace local tags with --reset-tags.
 

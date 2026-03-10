@@ -95,11 +95,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_stateful_widget(list, inner_chunks[1], &mut app.ui.key_list_state);
 
     // Footer
-    let footer = Line::from(vec![
+    let spans = vec![
         Span::styled(" Enter", theme::primary_action()),
-        Span::styled(" details  ", theme::muted()),
+        Span::styled(" details ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
         Span::styled("Esc", theme::accent_bold()),
         Span::styled(" back", theme::muted()),
-    ]);
-    frame.render_widget(Paragraph::new(footer), inner_chunks[2]);
+    ];
+    super::render_footer_with_status(frame, inner_chunks[2], spans, app);
 }

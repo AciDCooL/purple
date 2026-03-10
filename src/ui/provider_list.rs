@@ -109,18 +109,21 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         super::render_footer_with_status(frame, chunks[1], vec![
             Span::styled(format!(" Remove {}? ", display), theme::bold()),
             Span::styled("y", theme::accent_bold()),
-            Span::styled(" yes  ", theme::muted()),
+            Span::styled(" yes ", theme::muted()),
+            Span::styled("\u{2502} ", theme::muted()),
             Span::styled("Esc", theme::accent_bold()),
             Span::styled(" no", theme::muted()),
         ], app);
     } else {
         super::render_footer_with_status(frame, chunks[1], vec![
             Span::styled(" s", theme::accent_bold()),
-            Span::styled(" sync  ", theme::muted()),
+            Span::styled(" sync ", theme::muted()),
             Span::styled("Enter", theme::primary_action()),
-            Span::styled(" configure  ", theme::muted()),
+            Span::styled(" configure ", theme::muted()),
+            Span::styled("\u{2502} ", theme::muted()),
             Span::styled("d", theme::accent_bold()),
-            Span::styled(" remove  ", theme::muted()),
+            Span::styled(" remove ", theme::muted()),
+            Span::styled("\u{2502} ", theme::muted()),
             Span::styled("Esc", theme::accent_bold()),
             Span::styled(" back", theme::muted()),
         ], app);

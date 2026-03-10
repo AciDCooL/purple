@@ -104,9 +104,17 @@ pub fn success() -> Style {
     }
 }
 
-/// Danger action key (delete confirmation).
+/// Danger action key (delete confirmation). Red when color is available.
 pub fn danger() -> Style {
-    Style::default().add_modifier(Modifier::BOLD)
+    match COLOR_MODE.load(Ordering::Acquire) {
+        0 => Style::default().add_modifier(Modifier::BOLD),
+        2 => Style::default()
+            .fg(Color::Rgb(239, 68, 68))
+            .add_modifier(Modifier::BOLD),
+        _ => Style::default()
+            .fg(Color::Red)
+            .add_modifier(Modifier::BOLD),
+    }
 }
 
 /// Default border (unfocused).
@@ -114,9 +122,17 @@ pub fn border() -> Style {
     Style::default().add_modifier(Modifier::DIM)
 }
 
-/// Danger border (delete dialog).
+/// Danger border (delete dialog). Red when color is available.
 pub fn border_danger() -> Style {
-    Style::default().add_modifier(Modifier::BOLD)
+    match COLOR_MODE.load(Ordering::Acquire) {
+        0 => Style::default().add_modifier(Modifier::BOLD),
+        2 => Style::default()
+            .fg(Color::Rgb(239, 68, 68))
+            .add_modifier(Modifier::BOLD),
+        _ => Style::default()
+            .fg(Color::Red)
+            .add_modifier(Modifier::BOLD),
+    }
 }
 
 /// Bold text (labels, emphasis).

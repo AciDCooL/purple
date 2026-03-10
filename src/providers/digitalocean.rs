@@ -23,6 +23,16 @@ struct Droplet {
     size_slug: String,
     #[serde(default)]
     region: Option<Region>,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    image: Option<DropletImage>,
+}
+
+#[derive(Deserialize)]
+struct DropletImage {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -113,6 +123,16 @@ impl Provider for DigitalOcean {
                     }
                     if !droplet.size_slug.is_empty() {
                         metadata.push(("plan".to_string(), droplet.size_slug.clone()));
+                    }
+                    if let Some(ref image) = droplet.image {
+                        if let Some(ref name) = image.name {
+                            if !name.is_empty() {
+                                metadata.push(("os".to_string(), name.clone()));
+                            }
+                        }
+                    }
+                    if !droplet.status.is_empty() {
+                        metadata.push(("status".to_string(), droplet.status.clone()));
                     }
                     all_hosts.push(ProviderHost {
                         server_id: droplet.id.to_string(),

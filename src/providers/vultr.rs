@@ -27,6 +27,8 @@ struct Instance {
     plan: String,
     #[serde(default)]
     os: String,
+    #[serde(default)]
+    power_status: String,
 }
 
 #[derive(Deserialize)]
@@ -101,6 +103,9 @@ impl Provider for Vultr {
                 }
                 if !instance.os.is_empty() {
                     metadata.push(("os".to_string(), instance.os.clone()));
+                }
+                if !instance.power_status.is_empty() {
+                    metadata.push(("status".to_string(), instance.power_status.clone()));
                 }
                 all_hosts.push(ProviderHost {
                     server_id: instance.id.clone(),
