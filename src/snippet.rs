@@ -183,13 +183,16 @@ pub fn validate_command(command: &str) -> Result<(), String> {
 }
 
 /// Run a snippet on a single host via SSH.
-/// Stdout and stderr are piped and captured.
+/// When `capture` is true, stdout/stderr are piped and returned in the result.
+/// When `capture` is false, stdout/stderr are inherited (streamed to terminal
+/// in real-time) and the returned strings are empty.
 pub fn run_snippet(
     alias: &str,
     config_path: &Path,
     command: &str,
     askpass: Option<&str>,
     bw_session: Option<&str>,
+    capture: bool,
 ) -> anyhow::Result<SnippetResult> {
     let mut cmd = Command::new("ssh");
     cmd.arg("-F")
@@ -199,9 +202,13 @@ pub fn run_snippet(
         .arg("--")
         .arg(alias)
         .arg(command)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stdin(Stdio::inherit());
+
+    if capture {
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+    } else {
+        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    }
 
     if askpass.is_some() {
         let exe = std::env::current_exe()
@@ -220,15 +227,27 @@ pub fn run_snippet(
         cmd.env("BW_SESSION", token);
     }
 
-    let output = cmd
-        .output()
-        .map_err(|e| anyhow::anyhow!("Failed to run ssh for '{}': {}", alias, e))?;
+    if capture {
+        let output = cmd
+            .output()
+            .map_err(|e| anyhow::anyhow!("Failed to run ssh for '{}': {}", alias, e))?;
 
-    Ok(SnippetResult {
-        status: output.status,
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-    })
+        Ok(SnippetResult {
+            status: output.status,
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        })
+    } else {
+        let status = cmd
+            .status()
+            .map_err(|e| anyhow::anyhow!("Failed to run ssh for '{}': {}", alias, e))?;
+
+        Ok(SnippetResult {
+            status,
+            stdout: String::new(),
+            stderr: String::new(),
+        })
+    }
 }
 
 #[cfg(test)]

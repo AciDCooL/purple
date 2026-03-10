@@ -671,12 +671,9 @@ fn run_tui(mut app: App) -> Result<()> {
                     &snip.command,
                     askpass.as_deref(),
                     app.bw_session.as_deref(),
+                    false,
                 ) {
                     Ok(r) => {
-                        print!("{}", r.stdout);
-                        if !r.stderr.is_empty() {
-                            eprint!("{}", r.stderr);
-                        }
                         if r.status.success() {
                             app.history.record(alias);
                         } else if multi {
@@ -1553,12 +1550,9 @@ fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, confi
                     &snip.command,
                     askpass.as_deref(),
                     bw_session.as_deref(),
+                    false,
                 ) {
                     Ok(r) => {
-                        print!("{}", r.stdout);
-                        if !r.stderr.is_empty() {
-                            eprint!("{}", r.stderr);
-                        }
                         if !r.status.success() {
                             std::process::exit(r.status.code().unwrap_or(1));
                         }
@@ -1617,6 +1611,7 @@ fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, confi
                                 &command,
                                 askpass.as_deref(),
                                 bw_session.as_deref(),
+                                true,
                             );
                             let _ = tx.send((alias, result));
                             let _ = slot_tx.send(());
@@ -1649,23 +1644,26 @@ fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, confi
                         bw_session = Some(token);
                     }
                     ensure_keychain_password(&host.alias, askpass.as_deref());
+                    println!("── {} ──", host.alias);
                     match snippet::run_snippet(
                         &host.alias,
                         config_path,
                         &snip.command,
                         askpass.as_deref(),
                         bw_session.as_deref(),
+                        false,
                     ) {
                         Ok(r) => {
-                            for line in r.stdout.lines() {
-                                println!("[{}] {}", host.alias, line);
-                            }
-                            for line in r.stderr.lines() {
-                                eprintln!("[{}] {}", host.alias, line);
+                            if !r.status.success() {
+                                eprintln!(
+                                    "Exited with code {}.",
+                                    r.status.code().unwrap_or(1)
+                                );
                             }
                         }
                         Err(e) => eprintln!("[{}] Failed: {}", host.alias, e),
                     }
+                    println!();
                 }
             }
             Ok(())
