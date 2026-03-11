@@ -91,7 +91,7 @@ enum Commands {
         #[arg(short, long)]
         group: Option<String>,
     },
-    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE)
+    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, AWS EC2)
     Sync {
         /// Sync a specific provider (default: all configured)
         provider: Option<String>,
@@ -136,7 +136,7 @@ enum Commands {
 enum ProviderCommands {
     /// Add or update a provider configuration
     Add {
-        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox)
+        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws)
         provider: String,
 
         /// API token (or set PURPLE_TOKEN env var, or use --token-stdin)
@@ -162,6 +162,14 @@ enum ProviderCommands {
         /// Base URL for self-hosted providers (required for Proxmox)
         #[arg(long)]
         url: Option<String>,
+
+        /// AWS credential profile from ~/.aws/credentials
+        #[arg(long)]
+        profile: Option<String>,
+
+        /// Comma-separated AWS regions (e.g. us-east-1,eu-west-1)
+        #[arg(long)]
+        regions: Option<String>,
 
         /// Skip TLS certificate verification (for self-signed certs)
         #[arg(long, conflicts_with = "verify_tls")]
@@ -854,7 +862,7 @@ fn handle_sync(
     let sections: Vec<&providers::config::ProviderSection> = if let Some(name) = provider_name {
         if providers::get_provider(name).is_none() {
             eprintln!(
-                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox.",
+                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws.",
                 name
             );
             std::process::exit(1);
@@ -887,7 +895,7 @@ fn handle_sync(
             Some(p) => p,
             None => {
                 eprintln!(
-                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox.",
+                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws.",
                     section.provider
                 );
                 any_failures = true;
@@ -988,6 +996,8 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             mut user,
             mut key,
             url,
+            mut profile,
+            mut regions,
             no_verify_tls,
             verify_tls,
             auto_sync,
@@ -997,7 +1007,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 Some(p) => p,
                 None => {
                     eprintln!(
-                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox.",
+                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws.",
                         provider
                     );
                     std::process::exit(1);
@@ -1021,6 +1031,17 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 if verify_tls {
                     eprintln!("Warning: --verify-tls is only used by the Proxmox provider. Ignoring.");
                     verify_tls = false;
+                }
+            }
+            // --profile and --regions are AWS-only
+            if provider != "aws" {
+                if profile.is_some() {
+                    eprintln!("Warning: --profile is only used by the AWS provider. Ignoring.");
+                    profile = None;
+                }
+                if regions.is_some() {
+                    eprintln!("Warning: --regions is only used by the AWS provider. Ignoring.");
+                    regions = None;
                 }
             }
 
@@ -1050,6 +1071,15 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 if !no_verify_tls && !verify_tls && !existing.verify_tls {
                     no_verify_tls = true;
                 }
+                // AWS: fall back to stored profile/regions
+                if provider == "aws" {
+                    if profile.is_none() && !existing.profile.is_empty() {
+                        profile = Some(existing.profile.clone());
+                    }
+                    if regions.is_none() && !existing.regions.is_empty() {
+                        regions = Some(existing.regions.clone());
+                    }
+                }
             }
 
             // Proxmox requires --url
@@ -1065,15 +1095,21 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 }
             }
 
-            let token = match resolve_token(token, token_stdin) {
-                Ok(t) => t,
-                Err(e) => {
-                    eprintln!("{}", e);
-                    std::process::exit(1);
+            // AWS allows empty token when --profile is set
+            let aws_has_profile = provider == "aws" && profile.as_deref().is_some_and(|p| !p.trim().is_empty());
+            let token = if aws_has_profile && token.is_none() && !token_stdin && std::env::var("PURPLE_TOKEN").is_err() {
+                String::new()
+            } else {
+                match resolve_token(token, token_stdin) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("{}", e);
+                        std::process::exit(1);
+                    }
                 }
             };
 
-            if token.trim().is_empty() {
+            if token.trim().is_empty() && !aws_has_profile {
                 eprintln!(
                     "Token can't be empty. Grab one from your {} dashboard.",
                     providers::provider_display_name(&provider)
@@ -1092,12 +1128,16 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
 
             // Reject control characters in all fields (prevents INI injection)
             let url_value = url.clone().unwrap_or_default();
+            let profile_value = profile.clone().unwrap_or_default();
+            let regions_value = regions.clone().unwrap_or_default();
             for (value, name) in [
                 (&url_value, "URL"),
                 (&token, "Token"),
                 (&alias_prefix, "Alias prefix"),
                 (&user, "User"),
                 (&identity_file, "Identity file"),
+                (&profile_value, "Profile"),
+                (&regions_value, "Regions"),
             ] {
                 if value.chars().any(|c| c.is_control()) {
                     eprintln!("{} contains control characters.", name);
@@ -1117,8 +1157,17 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             } else if let Some(ref existing) = existing_section {
                 existing.auto_sync
             } else {
-                provider != "proxmox"
+                !matches!(provider.as_str(), "proxmox")
             };
+
+            let resolved_profile = profile.unwrap_or_default();
+            let resolved_regions = regions.unwrap_or_default();
+
+            // AWS requires at least one region
+            if provider == "aws" && resolved_regions.trim().is_empty() {
+                eprintln!("AWS requires --regions (e.g. --regions us-east-1,eu-west-1).");
+                std::process::exit(1);
+            }
 
             let section = providers::config::ProviderSection {
                 provider: provider.clone(),
@@ -1129,6 +1178,8 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 url: url.unwrap_or_default(),
                 verify_tls: !no_verify_tls,
                 auto_sync: resolved_auto_sync,
+                profile: resolved_profile,
+                regions: resolved_regions,
             };
 
             let mut config = providers::config::ProviderConfig::load();

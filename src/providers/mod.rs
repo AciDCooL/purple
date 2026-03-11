@@ -1,3 +1,4 @@
+pub mod aws;
 pub mod config;
 mod digitalocean;
 mod hetzner;
@@ -93,7 +94,7 @@ pub trait Provider {
 }
 
 /// All known provider names.
-pub const PROVIDER_NAMES: &[&str] = &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "proxmox"];
+pub const PROVIDER_NAMES: &[&str] = &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "proxmox", "aws"];
 
 /// Get a provider implementation by name.
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
@@ -106,6 +107,10 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         "proxmox" => Some(Box::new(proxmox::Proxmox {
             base_url: String::new(),
             verify_tls: true,
+        })),
+        "aws" => Some(Box::new(aws::Aws {
+            regions: Vec::new(),
+            profile: String::new(),
         })),
         _ => None,
     }
@@ -120,6 +125,13 @@ pub fn get_provider_with_config(name: &str, section: &config::ProviderSection) -
             base_url: section.url.clone(),
             verify_tls: section.verify_tls,
         })),
+        "aws" => Some(Box::new(aws::Aws {
+            regions: section.regions.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            profile: section.profile.clone(),
+        })),
         _ => get_provider(name),
     }
 }
@@ -133,6 +145,7 @@ pub fn provider_display_name(name: &str) -> &str {
         "hetzner" => "Hetzner",
         "upcloud" => "UpCloud",
         "proxmox" => "Proxmox VE",
+        "aws" => "AWS EC2",
         other => other,
     }
 }
@@ -272,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_get_provider_unknown_returns_none() {
-        assert!(get_provider("aws").is_none());
+        assert!(get_provider("gcp").is_none());
         assert!(get_provider("").is_none());
         assert!(get_provider("DigitalOcean").is_none()); // case-sensitive
     }
@@ -299,6 +312,8 @@ mod tests {
             url: "https://pve.example.com:8006".to_string(),
             verify_tls: false,
             auto_sync: false,
+            profile: String::new(),
+            regions: String::new(),
         };
         let p = get_provider_with_config("proxmox", &section).unwrap();
         assert_eq!(p.name(), "proxmox");
@@ -315,6 +330,8 @@ mod tests {
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         };
         let p = get_provider_with_config("digitalocean", &section).unwrap();
         assert_eq!(p.name(), "digitalocean");
@@ -323,7 +340,7 @@ mod tests {
     #[test]
     fn test_get_provider_with_config_unknown_returns_none() {
         let section = config::ProviderSection {
-            provider: "aws".to_string(),
+            provider: "gcp".to_string(),
             token: String::new(),
             alias_prefix: String::new(),
             user: String::new(),
@@ -331,8 +348,10 @@ mod tests {
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         };
-        assert!(get_provider_with_config("aws", &section).is_none());
+        assert!(get_provider_with_config("gcp", &section).is_none());
     }
 
     // =========================================================================
@@ -347,11 +366,12 @@ mod tests {
         assert_eq!(provider_display_name("hetzner"), "Hetzner");
         assert_eq!(provider_display_name("upcloud"), "UpCloud");
         assert_eq!(provider_display_name("proxmox"), "Proxmox VE");
+        assert_eq!(provider_display_name("aws"), "AWS EC2");
     }
 
     #[test]
     fn test_display_name_unknown_returns_input() {
-        assert_eq!(provider_display_name("aws"), "aws");
+        assert_eq!(provider_display_name("gcp"), "gcp");
         assert_eq!(provider_display_name(""), "");
     }
 
@@ -361,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_provider_names_count() {
-        assert_eq!(PROVIDER_NAMES.len(), 6);
+        assert_eq!(PROVIDER_NAMES.len(), 7);
     }
 
     #[test]
@@ -372,6 +392,7 @@ mod tests {
         assert!(PROVIDER_NAMES.contains(&"hetzner"));
         assert!(PROVIDER_NAMES.contains(&"upcloud"));
         assert!(PROVIDER_NAMES.contains(&"proxmox"));
+        assert!(PROVIDER_NAMES.contains(&"aws"));
     }
 
     // =========================================================================
@@ -539,6 +560,8 @@ mod tests {
                 },
                 verify_tls: true,
                 auto_sync: true,
+                profile: String::new(),
+                regions: String::new(),
             };
             let p = get_provider_with_config(name, &section);
             assert!(p.is_some(), "get_provider_with_config({}) should return Some", name);
@@ -581,11 +604,12 @@ mod tests {
         assert_eq!(provider_display_name("hetzner"), "Hetzner");
         assert_eq!(provider_display_name("upcloud"), "UpCloud");
         assert_eq!(provider_display_name("proxmox"), "Proxmox VE");
+        assert_eq!(provider_display_name("aws"), "AWS EC2");
     }
 
     #[test]
     fn test_provider_display_name_unknown() {
-        assert_eq!(provider_display_name("foobar"), "foobar");
+        assert_eq!(provider_display_name("gcp"), "gcp");
     }
 
     // =========================================================================
@@ -601,7 +625,7 @@ mod tests {
 
     #[test]
     fn test_get_provider_case_sensitive_and_unknown() {
-        assert!(get_provider("aws").is_none());
+        assert!(get_provider("gcp").is_none());
         assert!(get_provider("DigitalOcean").is_none()); // Case-sensitive
         assert!(get_provider("VULTR").is_none());
         assert!(get_provider("").is_none());
@@ -612,10 +636,11 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_provider_names_has_all_six() {
-        assert_eq!(PROVIDER_NAMES.len(), 6);
+    fn test_provider_names_has_all_seven() {
+        assert_eq!(PROVIDER_NAMES.len(), 7);
         assert!(PROVIDER_NAMES.contains(&"digitalocean"));
         assert!(PROVIDER_NAMES.contains(&"proxmox"));
+        assert!(PROVIDER_NAMES.contains(&"aws"));
     }
 
     // =========================================================================
@@ -631,6 +656,7 @@ mod tests {
             ("hetzner", "hetzner"),
             ("upcloud", "uc"),
             ("proxmox", "pve"),
+            ("aws", "aws"),
         ];
         for (name, expected_label) in &cases {
             let p = get_provider(name).unwrap();

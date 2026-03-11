@@ -337,6 +337,8 @@ impl HostForm {
 pub enum ProviderFormField {
     Url,
     Token,
+    Profile,
+    Regions,
     AliasPrefix,
     User,
     IdentityFile,
@@ -363,9 +365,20 @@ impl ProviderFormField {
         ProviderFormField::AutoSync,
     ];
 
+    const AWS_FIELDS: &[ProviderFormField] = &[
+        ProviderFormField::Token,
+        ProviderFormField::Profile,
+        ProviderFormField::Regions,
+        ProviderFormField::AliasPrefix,
+        ProviderFormField::User,
+        ProviderFormField::IdentityFile,
+        ProviderFormField::AutoSync,
+    ];
+
     pub fn fields_for(provider: &str) -> &'static [ProviderFormField] {
         match provider {
             "proxmox" => Self::PROXMOX_FIELDS,
+            "aws" => Self::AWS_FIELDS,
             _ => Self::CLOUD_FIELDS,
         }
     }
@@ -384,6 +397,8 @@ impl ProviderFormField {
         match self {
             ProviderFormField::Url => "URL",
             ProviderFormField::Token => "Token",
+            ProviderFormField::Profile => "Profile",
+            ProviderFormField::Regions => "Regions",
             ProviderFormField::AliasPrefix => "Alias Prefix",
             ProviderFormField::User => "User",
             ProviderFormField::IdentityFile => "Identity File",
@@ -398,6 +413,8 @@ impl ProviderFormField {
 pub struct ProviderFormFields {
     pub url: String,
     pub token: String,
+    pub profile: String,
+    pub regions: String,
     pub alias_prefix: String,
     pub user: String,
     pub identity_file: String,
@@ -412,6 +429,8 @@ impl ProviderFormFields {
         Self {
             url: String::new(),
             token: String::new(),
+            profile: String::new(),
+            regions: String::new(),
             alias_prefix: String::new(),
             user: "root".to_string(),
             identity_file: String::new(),
@@ -426,6 +445,8 @@ impl ProviderFormFields {
         match self.focused_field {
             ProviderFormField::Url => &self.url,
             ProviderFormField::Token => &self.token,
+            ProviderFormField::Profile => &self.profile,
+            ProviderFormField::Regions => &self.regions,
             ProviderFormField::AliasPrefix => &self.alias_prefix,
             ProviderFormField::User => &self.user,
             ProviderFormField::IdentityFile => &self.identity_file,
@@ -437,6 +458,8 @@ impl ProviderFormFields {
         match self.focused_field {
             ProviderFormField::Url => &mut self.url,
             ProviderFormField::Token => &mut self.token,
+            ProviderFormField::Profile => &mut self.profile,
+            ProviderFormField::Regions => &mut self.regions,
             ProviderFormField::AliasPrefix => &mut self.alias_prefix,
             ProviderFormField::User => &mut self.user,
             ProviderFormField::IdentityFile => &mut self.identity_file,
@@ -883,6 +906,8 @@ pub struct UiSelection {
     pub provider_list_state: ListState,
     pub tunnel_list_state: ListState,
     pub snippet_picker_state: ListState,
+    pub show_region_picker: bool,
+    pub region_picker_cursor: usize,
     pub help_scroll: u16,
     pub detail_scroll: u16,
 }
@@ -1030,6 +1055,8 @@ impl App {
                 provider_list_state: ListState::default(),
                 tunnel_list_state: ListState::default(),
                 snippet_picker_state: ListState::default(),
+                show_region_picker: false,
+                region_picker_cursor: 0,
                 help_scroll: 0,
                 detail_scroll: 0,
             },
@@ -2948,6 +2975,8 @@ Host vultr-app
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         });
         app
     }
@@ -3015,6 +3044,8 @@ Host vultr-app
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         });
         let (msg, is_err, total) = app.apply_sync_result("nonexistent", vec![]);
         assert!(is_err);
@@ -3073,6 +3104,8 @@ Host vultr-app
             url: if provider == "proxmox" { "https://pve:8006".to_string() } else { String::new() },
             verify_tls: true,
             auto_sync,
+            profile: String::new(),
+            regions: String::new(),
         }
     }
 
@@ -3149,12 +3182,15 @@ Host vultr-app
     }
 
     #[test]
-    fn test_provider_form_field_auto_sync_is_last_in_both_field_lists() {
+    fn test_provider_form_field_auto_sync_is_last_in_all_field_lists() {
         let cloud = ProviderFormField::fields_for("digitalocean");
         assert_eq!(*cloud.last().unwrap(), ProviderFormField::AutoSync);
 
         let proxmox = ProviderFormField::fields_for("proxmox");
         assert_eq!(*proxmox.last().unwrap(), ProviderFormField::AutoSync);
+
+        let aws = ProviderFormField::fields_for("aws");
+        assert_eq!(*aws.last().unwrap(), ProviderFormField::AutoSync);
     }
 
     #[test]

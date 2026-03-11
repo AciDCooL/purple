@@ -371,6 +371,8 @@ mod tests {
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         }
     }
 
@@ -899,6 +901,8 @@ Host do-web-1-copy
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         };
 
         // Remote has the included host's server_id with a different prefix
@@ -1714,6 +1718,8 @@ Host do-web-1-copy
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         };
 
         // Sync DO hosts
@@ -1744,6 +1750,8 @@ Host do-web-1-copy
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         };
 
         // Add hosts from both providers

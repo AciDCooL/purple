@@ -3619,6 +3619,8 @@ fn test_section(provider: &str, prefix: &str) -> ProviderSection {
         url: String::new(),
         verify_tls: true,
         auto_sync: true,
+        profile: String::new(),
+        regions: String::new(),
     }
 }
 

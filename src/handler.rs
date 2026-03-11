@@ -967,6 +967,8 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                         ProviderFormFields {
                             url: section.url.clone(),
                             token: section.token.clone(),
+                            profile: section.profile.clone(),
+                            regions: section.regions.clone(),
                             alias_prefix: section.alias_prefix.clone(),
                             user: section.user.clone(),
                             identity_file: section.identity_file.clone(),
@@ -979,11 +981,13 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                         ProviderFormFields {
                             url: String::new(),
                             token: String::new(),
+                            profile: String::new(),
+                            regions: String::new(),
                             alias_prefix: short_label,
                             user: "root".to_string(),
                             identity_file: String::new(),
                             verify_tls: true,
-                            auto_sync: name.as_str() != "proxmox",
+                            auto_sync: !matches!(name.as_str(), "proxmox"),
                             focused_field: first_field,
                             cursor_pos: 0,
                         }
@@ -1034,10 +1038,33 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
     }
 }
 
+/// Show a non-blocking warning when leaving the Token field with an invalid format.
+fn warn_aws_token_format(app: &mut App, provider_name: &str) {
+    if provider_name != "aws" {
+        return;
+    }
+    if app.provider_form.focused_field != crate::app::ProviderFormField::Token {
+        return;
+    }
+    let token = app.provider_form.token.trim();
+    if token.is_empty() {
+        return;
+    }
+    if !token.contains(':') {
+        app.set_status("Token format: AccessKeyId:SecretAccessKey", true);
+    }
+}
+
 fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     // Dispatch to key picker if open
     if app.ui.show_key_picker {
         handle_key_picker_shared(app, key, true);
+        return;
+    }
+
+    // Dispatch to region picker if open
+    if app.ui.show_region_picker {
+        handle_region_picker(app, key);
         return;
     }
 
@@ -1046,6 +1073,12 @@ fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
         _ => return,
     };
     let fields = crate::app::ProviderFormField::fields_for(&provider_name);
+    let is_toggle = |f: crate::app::ProviderFormField| {
+        matches!(f, crate::app::ProviderFormField::VerifyTls | crate::app::ProviderFormField::AutoSync)
+    };
+    let is_picker = |f: crate::app::ProviderFormField| {
+        matches!(f, crate::app::ProviderFormField::IdentityFile | crate::app::ProviderFormField::Regions)
+    };
 
     match key.code {
         KeyCode::Esc => {
@@ -1053,10 +1086,12 @@ fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
             app.screen = Screen::Providers;
         }
         KeyCode::Tab | KeyCode::Down => {
+            warn_aws_token_format(app, &provider_name);
             app.provider_form.focused_field = app.provider_form.focused_field.next(fields);
             app.provider_form.sync_cursor_to_end();
         }
         KeyCode::BackTab | KeyCode::Up => {
+            warn_aws_token_format(app, &provider_name);
             app.provider_form.focused_field = app.provider_form.focused_field.prev(fields);
             app.provider_form.sync_cursor_to_end();
         }
@@ -1084,13 +1119,17 @@ fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
             app.provider_form.sync_cursor_to_end();
         }
         KeyCode::Enter => {
-            if app.provider_form.focused_field == crate::app::ProviderFormField::IdentityFile {
+            let f = app.provider_form.focused_field;
+            if f == crate::app::ProviderFormField::IdentityFile {
                 app.scan_keys();
                 app.ui.show_key_picker = true;
                 app.ui.key_picker_state = ratatui::widgets::ListState::default();
                 if !app.keys.is_empty() {
                     app.ui.key_picker_state.select(Some(0));
                 }
+            } else if f == crate::app::ProviderFormField::Regions {
+                app.ui.show_region_picker = true;
+                app.ui.region_picker_cursor = 0;
             } else {
                 submit_provider_form(app, events_tx);
             }
@@ -1103,15 +1142,102 @@ fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
         }
         KeyCode::Char(c) => {
             let f = app.provider_form.focused_field;
-            if f != crate::app::ProviderFormField::VerifyTls && f != crate::app::ProviderFormField::AutoSync {
+            if !is_toggle(f) && !is_picker(f) {
                 app.provider_form.insert_char(c);
             }
         }
         KeyCode::Backspace => {
             let f = app.provider_form.focused_field;
-            if f != crate::app::ProviderFormField::VerifyTls && f != crate::app::ProviderFormField::AutoSync {
+            if !is_toggle(f) && !is_picker(f) {
                 app.provider_form.delete_char_before_cursor();
             }
+        }
+        _ => {}
+    }
+}
+
+/// Build the same row list used by the region picker renderer.
+fn region_picker_rows() -> Vec<Option<&'static str>> {
+    let regions = crate::providers::aws::AWS_REGIONS;
+    let mut rows = Vec::new();
+    for &(_, start, end) in crate::providers::aws::AWS_REGION_GROUPS {
+        rows.push(None); // group header
+        for &(code, _) in &regions[start..end] {
+            rows.push(Some(code));
+        }
+    }
+    rows
+}
+
+/// Rebuild the regions string from the selected set, preserving display order.
+fn rebuild_regions_string(selected: &std::collections::HashSet<String>) -> String {
+    let ordered: Vec<&str> = crate::providers::aws::AWS_REGIONS
+        .iter()
+        .filter(|(code, _)| selected.contains(*code))
+        .map(|(code, _)| *code)
+        .collect();
+    ordered.join(",")
+}
+
+fn handle_region_picker(app: &mut App, key: KeyEvent) {
+    let rows = region_picker_rows();
+    let total = rows.len();
+
+    // Parse current regions into a set for toggling
+    let mut selected: std::collections::HashSet<String> = app
+        .provider_form
+        .regions
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter => {
+            app.provider_form.regions = rebuild_regions_string(&selected);
+            app.provider_form.sync_cursor_to_end();
+            app.ui.show_region_picker = false;
+            let count = selected.len();
+            if count > 0 {
+                app.set_status(format!("{} region{} selected.", count, if count == 1 { "" } else { "s" }), false);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if app.ui.region_picker_cursor + 1 < total {
+                app.ui.region_picker_cursor += 1;
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if app.ui.region_picker_cursor > 0 {
+                app.ui.region_picker_cursor -= 1;
+            }
+        }
+        KeyCode::Char(' ') => {
+            let cursor = app.ui.region_picker_cursor;
+            if let Some(Some(code)) = rows.get(cursor) {
+                // Toggle single region
+                if selected.contains(*code) {
+                    selected.remove(*code);
+                } else {
+                    selected.insert(code.to_string());
+                }
+            } else {
+                // Group header: toggle all regions in this group
+                let group_codes: Vec<&str> = rows[cursor + 1..]
+                    .iter()
+                    .take_while(|r| r.is_some())
+                    .filter_map(|r| *r)
+                    .collect();
+                let all_selected = group_codes.iter().all(|c| selected.contains(*c));
+                for code in group_codes {
+                    if all_selected {
+                        selected.remove(code);
+                    } else {
+                        selected.insert(code.to_string());
+                    }
+                }
+            }
+            app.provider_form.regions = rebuild_regions_string(&selected);
         }
         _ => {}
     }
@@ -1139,6 +1265,8 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         (&app.provider_form.alias_prefix, "Alias Prefix"),
         (&app.provider_form.user, "User"),
         (&app.provider_form.identity_file, "Identity File"),
+        (&app.provider_form.profile, "Profile"),
+        (&app.provider_form.regions, "Regions"),
     ];
     for (value, name) in &pf_fields {
         if value.chars().any(|c| c.is_control()) {
@@ -1163,7 +1291,10 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         }
     }
 
-    if app.provider_form.token.trim().is_empty() {
+    // AWS allows empty token when profile is set (credentials from ~/.aws/credentials)
+    if app.provider_form.token.trim().is_empty()
+        && (provider_name != "aws" || app.provider_form.profile.trim().is_empty())
+    {
         let display_name = crate::providers::provider_display_name(provider_name.as_str());
         app.set_status(
             format!(
@@ -1172,6 +1303,12 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
             ),
             true,
         );
+        return;
+    }
+
+    // AWS requires at least one region
+    if provider_name == "aws" && app.provider_form.regions.trim().is_empty() {
+        app.set_status("Select at least one AWS region.", true);
         return;
     }
 
@@ -1203,6 +1340,8 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         url: app.provider_form.url.trim().to_string(),
         verify_tls: app.provider_form.verify_tls,
         auto_sync: app.provider_form.auto_sync,
+        profile: app.provider_form.profile.trim().to_string(),
+        regions: app.provider_form.regions.trim().to_string(),
     };
 
     let old_section = app.provider_config.section(&provider_name).cloned();
@@ -1948,6 +2087,8 @@ mod tests {
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         });
         app
     }
@@ -1965,6 +2106,8 @@ mod tests {
             url: "https://pve.local:8006".to_string(),
             verify_tls: true,
             auto_sync: false,
+            profile: String::new(),
+            regions: String::new(),
         });
         app
     }
@@ -2015,6 +2158,8 @@ mod tests {
             url: String::new(),
             verify_tls: true,
             auto_sync: false,
+            profile: String::new(),
+            regions: String::new(),
         });
         open_provider_form(&mut app, "digitalocean");
         assert!(
@@ -2056,6 +2201,8 @@ mod tests {
         app.provider_form = ProviderFormFields {
             url: String::new(),
             token: "tok".to_string(),
+            profile: String::new(),
+            regions: String::new(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
             identity_file: String::new(),
@@ -2155,6 +2302,8 @@ mod tests {
         app.provider_form = ProviderFormFields {
             url: String::new(),
             token: "tok".to_string(),
+            profile: String::new(),
+            regions: String::new(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
             identity_file: String::new(),
@@ -2185,6 +2334,8 @@ mod tests {
         app.provider_form = ProviderFormFields {
             url: String::new(),
             token: "tok".to_string(),
+            profile: String::new(),
+            regions: String::new(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
             identity_file: String::new(),
@@ -2587,7 +2738,7 @@ mod tests {
 
     #[test]
     fn test_all_cloud_providers_default_auto_sync_true() {
-        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud"] {
+        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws"] {
             let mut app = make_app("Host test\n  HostName test.com\n");
             app.screen = Screen::Providers;
             app.provider_config = test_provider_config();

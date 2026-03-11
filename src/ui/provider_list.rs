@@ -163,7 +163,9 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
 
         let is_focused = app.provider_form.focused_field == field;
         let label_style = if is_focused { theme::accent_bold() } else { theme::muted() };
-        let is_required = matches!(field, ProviderFormField::Token | ProviderFormField::Url);
+        let is_required = matches!(field, ProviderFormField::Url)
+            || (field == ProviderFormField::Token && provider_name != "aws")
+            || (field == ProviderFormField::Regions && provider_name == "aws");
         let label = if is_required {
             format!(" {}* ", field.label())
         } else {
@@ -191,6 +193,11 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
     if app.ui.show_key_picker {
         super::host_form::render_key_picker_overlay(frame, app);
     }
+
+    // Region picker popup overlay
+    if app.ui.show_region_picker {
+        render_region_picker_overlay(frame, app);
+    }
 }
 
 fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static str {
@@ -198,8 +205,11 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
         ProviderFormField::Url => "https://pve.example.com:8006",
         ProviderFormField::Token => match provider_name {
             "proxmox" => "user@pam!token=secret",
+            "aws" => "AccessKeyId:Secret (or use Profile)",
             _ => "your-api-token",
         },
+        ProviderFormField::Profile => "Name from ~/.aws/credentials (or use Token)",
+        ProviderFormField::Regions => "Enter to select regions",
         ProviderFormField::AliasPrefix => match provider_name {
             "digitalocean" => "do",
             "vultr" => "vultr",
@@ -207,9 +217,13 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
             "hetzner" => "hetzner",
             "upcloud" => "uc",
             "proxmox" => "pve",
+            "aws" => "aws",
             _ => "prefix",
         },
-        ProviderFormField::User => "root",
+        ProviderFormField::User => match provider_name {
+            "aws" => "ec2-user",
+            _ => "root",
+        },
         ProviderFormField::IdentityFile => "Enter to pick a key",
         ProviderFormField::VerifyTls | ProviderFormField::AutoSync => "",
     }
@@ -269,6 +283,8 @@ fn render_field_content(
     let value = match field {
         ProviderFormField::Url => &form.url,
         ProviderFormField::Token => &form.token,
+        ProviderFormField::Profile => &form.profile,
+        ProviderFormField::Regions => &form.regions,
         ProviderFormField::AliasPrefix => &form.alias_prefix,
         ProviderFormField::User => &form.user,
         ProviderFormField::IdentityFile => &form.identity_file,
@@ -288,7 +304,7 @@ fn render_field_content(
         value.clone()
     };
 
-    let is_picker = field == ProviderFormField::IdentityFile;
+    let is_picker = matches!(field, ProviderFormField::IdentityFile | ProviderFormField::Regions);
 
     let content = if value.is_empty() && is_focused && !is_picker {
         Line::from(Span::styled(placeholder_for(field, provider_name), theme::muted()))
@@ -346,6 +362,114 @@ fn render_toggle_content(
         Line::from(Span::styled(value_text, theme::bold()))
     };
     frame.render_widget(Paragraph::new(content), area);
+}
+
+/// Build display rows for the grouped region picker.
+/// Returns a list of (label, Option<region_code>) pairs.
+/// Group headers have None as region_code, regions have Some(code).
+fn build_region_rows() -> Vec<(String, Option<&'static str>)> {
+    let regions = crate::providers::aws::AWS_REGIONS;
+    let mut rows = Vec::new();
+    for &(label, start, end) in crate::providers::aws::AWS_REGION_GROUPS {
+        rows.push((format!(" {}", label), None));
+        for &(code, name) in &regions[start..end] {
+            rows.push((format!("{}  {}", code, name), Some(code)));
+        }
+    }
+    rows
+}
+
+fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
+    use ratatui::widgets::Clear;
+    let rows = build_region_rows();
+    let selected: std::collections::HashSet<&str> = app
+        .provider_form
+        .regions
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let area = frame.area();
+    let visible_rows = 18u16;
+    let block_height = visible_rows + 2; // top + bottom border
+    let total_height = block_height + 1; // + footer
+    let base = super::centered_rect(60, 80, area);
+    let picker_area = super::centered_rect_fixed(base.width, total_height, area);
+    frame.render_widget(Clear, picker_area);
+
+    let count = selected.len();
+    let title = format!(" Select Regions ({} selected) ", count);
+    let block_area = Rect::new(picker_area.x, picker_area.y, picker_area.width, block_height);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(title, theme::brand()))
+        .border_style(theme::accent());
+    let inner = block.inner(block_area);
+    frame.render_widget(block, block_area);
+
+    // Scroll so cursor is always visible
+    let cursor = app.ui.region_picker_cursor;
+    let scroll_offset = if cursor >= visible_rows as usize {
+        cursor - visible_rows as usize + 1
+    } else {
+        0
+    };
+
+    for (i, y) in (0..visible_rows as usize).zip(inner.y..) {
+        let idx = scroll_offset + i;
+        if idx >= rows.len() {
+            break;
+        }
+        let (label, region_code) = &rows[idx];
+        let is_cursor = idx == cursor;
+
+        if let Some(code) = region_code {
+            // Region row
+            let is_selected = selected.contains(code);
+            let check = if is_selected { " \u{2713} " } else { "   " };
+            let display = format!("{}{}", check, label);
+            let style = if is_cursor {
+                theme::selected()
+            } else if is_selected {
+                theme::bold()
+            } else {
+                theme::muted()
+            };
+            let row_area = Rect::new(inner.x, y, inner.width, 1);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    super::truncate(&display, inner.width as usize),
+                    style,
+                ))),
+                row_area,
+            );
+        } else {
+            // Group header
+            let style = if is_cursor {
+                theme::selected()
+            } else {
+                theme::accent_bold()
+            };
+            let row_area = Rect::new(inner.x, y, inner.width, 1);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    super::truncate(label, inner.width as usize),
+                    style,
+                ))),
+                row_area,
+            );
+        }
+    }
+
+    let footer_area = Rect::new(picker_area.x, picker_area.y + block_height, picker_area.width, 1);
+    super::render_footer_with_status(frame, footer_area, vec![
+        Span::styled(" Space", theme::primary_action()),
+        Span::styled(" toggle ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
+        Span::styled("Enter/Esc", theme::accent_bold()),
+        Span::styled(" done", theme::muted()),
+    ], app);
 }
 
 #[cfg(test)]

@@ -14,11 +14,13 @@ pub struct ProviderSection {
     pub url: String,
     pub verify_tls: bool,
     pub auto_sync: bool,
+    pub profile: String,
+    pub regions: String,
 }
 
 /// Default for auto_sync: false for proxmox (N+1 API calls), true for all others.
 fn default_auto_sync(provider: &str) -> bool {
-    provider != "proxmox"
+    !matches!(provider, "proxmox")
 }
 
 /// Parsed provider configuration from ~/.purple/providers.
@@ -88,6 +90,8 @@ impl ProviderConfig {
                     url: String::new(),
                     verify_tls: true,
                     auto_sync: auto_sync_default,
+                    profile: String::new(),
+                    regions: String::new(),
                 });
             } else if let Some(ref mut section) = current {
                 if let Some((key, value)) = trimmed.split_once('=') {
@@ -105,6 +109,8 @@ impl ProviderConfig {
                         "auto_sync" => section.auto_sync = !matches!(
                             value.to_lowercase().as_str(), "false" | "0" | "no"
                         ),
+                        "profile" => section.profile = value,
+                        "regions" => section.regions = value,
                         _ => {}
                     }
                 }
@@ -151,6 +157,12 @@ impl ProviderConfig {
             }
             if !section.verify_tls {
                 content.push_str("verify_tls=false\n");
+            }
+            if !section.profile.is_empty() {
+                content.push_str(&format!("profile={}\n", section.profile));
+            }
+            if !section.regions.is_empty() {
+                content.push_str(&format!("regions={}\n", section.regions));
             }
             if section.auto_sync != default_auto_sync(&section.provider) {
                 content.push_str(if section.auto_sync { "auto_sync=true\n" } else { "auto_sync=false\n" });
@@ -257,6 +269,8 @@ token=mytoken
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         });
         assert_eq!(config.sections.len(), 1);
     }
@@ -273,6 +287,8 @@ token=mytoken
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         });
         assert_eq!(config.sections.len(), 1);
         assert_eq!(config.sections[0].token, "new");
@@ -406,6 +422,8 @@ verify_tls=false
             url: String::new(),     // empty: not written
             verify_tls: true,       // default: not written
             auto_sync: true,        // default for non-proxmox: not written
+            profile: String::new(),
+            regions: String::new(),
         };
         let mut config = ProviderConfig::default();
         config.set_section(section);
@@ -434,6 +452,8 @@ verify_tls=false
             url: existing_url,
             verify_tls: true,
             auto_sync: false,
+            profile: String::new(),
+            regions: String::new(),
         });
         assert_eq!(config.sections[0].token, "new");
         assert_eq!(config.sections[0].url, "https://pve.local:8006");
@@ -476,6 +496,8 @@ verify_tls=false
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         });
         // Re-parse: auto_sync should still be true (default)
         assert!(config.sections[0].auto_sync);
@@ -491,6 +513,8 @@ verify_tls=false
             url: "https://pve:8006".to_string(),
             verify_tls: true,
             auto_sync: false,
+            profile: String::new(),
+            regions: String::new(),
         });
         assert!(!config2.sections[0].auto_sync);
     }
@@ -534,6 +558,8 @@ verify_tls=false
             url: "https://pve:8006".to_string(),
             verify_tls: true,
             auto_sync: true, // non-default for proxmox
+            profile: String::new(),
+            regions: String::new(),
         });
         // Simulate save by rebuilding content string (same logic as save())
         let content =
@@ -724,7 +750,7 @@ verify_tls=false
 
     #[test]
     fn test_auto_sync_default_all_others_true() {
-        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud"] {
+        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws"] {
             let content = format!("[{}]\ntoken=abc\n", provider);
             let config = ProviderConfig::parse(&content);
             assert!(config.sections[0].auto_sync, "auto_sync should default to true for {}", provider);
@@ -759,6 +785,8 @@ verify_tls=false
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         };
         config.set_section(section);
         assert_eq!(config.sections.len(), 1);
@@ -778,6 +806,8 @@ verify_tls=false
             url: String::new(),
             verify_tls: true,
             auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
         };
         config.set_section(section);
         assert_eq!(config.sections.len(), 1);
@@ -1037,6 +1067,8 @@ verify_tls=false
                 url: String::new(),
                 verify_tls: true,
                 auto_sync: true,
+                profile: String::new(),
+                regions: String::new(),
             });
         }
         assert_eq!(config.sections.len(), 3);
