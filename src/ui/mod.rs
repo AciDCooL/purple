@@ -16,8 +16,10 @@ mod tunnel_list;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
+use unicode_width::UnicodeWidthStr;
 
 use crate::app::{App, Screen};
 
@@ -174,6 +176,29 @@ pub(crate) fn truncate(s: &str, max_cols: usize) -> String {
         byte_end += ch.len_utf8();
     }
     format!("{}…", &s[..byte_end])
+}
+
+/// Render a horizontal divider: ├─ Label ───────┤
+pub(crate) fn render_divider(
+    frame: &mut Frame,
+    block_area: Rect,
+    y: u16,
+    label: &str,
+    label_style: Style,
+    border_style: Style,
+) {
+    let width = block_area.width as usize;
+    let label_w = label.width();
+    let fill = width.saturating_sub(3 + label_w);
+    let line = Line::from(vec![
+        Span::styled("├─", border_style),
+        Span::styled(label.to_string(), label_style),
+        Span::styled(format!("{}┤", "─".repeat(fill)), border_style),
+    ]);
+    frame.render_widget(
+        Paragraph::new(line),
+        Rect::new(block_area.x, y, block_area.width, 1),
+    );
 }
 
 /// Create a centered rect with fixed dimensions.

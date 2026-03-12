@@ -944,6 +944,12 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
         KeyCode::Char('k') | KeyCode::Up => {
             crate::app::cycle_selection(&mut app.ui.provider_list_state, provider_count, false);
         }
+        KeyCode::PageDown => {
+            crate::app::page_down(&mut app.ui.provider_list_state, provider_count, 10);
+        }
+        KeyCode::PageUp => {
+            crate::app::page_up(&mut app.ui.provider_list_state, provider_count, 10);
+        }
         KeyCode::Enter => {
             if let Some(index) = app.ui.provider_list_state.selected() {
                 let sorted = app.sorted_provider_names();
@@ -1574,6 +1580,44 @@ fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
         _ => return,
     };
 
+    // Handle pending tunnel delete confirmation first
+    if app.pending_tunnel_delete.is_some() {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                let sel = app.pending_tunnel_delete.take().unwrap();
+                if let Some(rule) = app.tunnel_list.get(sel) {
+                    let key = rule.tunnel_type.directive_key().to_string();
+                    let value = rule.to_directive_value();
+                    let config_backup = app.config.clone();
+                    if !app.config.remove_forward(&alias, &key, &value) {
+                        app.set_status("Tunnel not found in config.", true);
+                        return;
+                    }
+                    if let Err(e) = app.config.write() {
+                        app.config = config_backup;
+                        app.set_status(format!("Failed to save: {}", e), true);
+                    } else {
+                        app.deleted_host = None;
+                        app.update_last_modified();
+                        app.refresh_tunnel_list(&alias);
+                        app.reload_hosts();
+                        if app.tunnel_list.is_empty() {
+                            app.ui.tunnel_list_state.select(None);
+                        } else if sel >= app.tunnel_list.len() {
+                            app.ui.tunnel_list_state.select(Some(app.tunnel_list.len() - 1));
+                        }
+                        app.set_status("Tunnel removed.", false);
+                    }
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                app.pending_tunnel_delete = None;
+            }
+            _ => {}
+        }
+        return;
+    }
+
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.screen = Screen::HostList;
@@ -1633,30 +1677,8 @@ fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
                 }
             }
             if let Some(sel) = app.ui.tunnel_list_state.selected() {
-                if let Some(rule) = app.tunnel_list.get(sel) {
-                    let key = rule.tunnel_type.directive_key().to_string();
-                    let value = rule.to_directive_value();
-                    let config_backup = app.config.clone();
-                    if !app.config.remove_forward(&alias, &key, &value) {
-                        app.set_status("Tunnel not found in config.", true);
-                        return;
-                    }
-                    if let Err(e) = app.config.write() {
-                        app.config = config_backup;
-                        app.set_status(format!("Failed to save: {}", e), true);
-                    } else {
-                        app.deleted_host = None; // Clear undo buffer — positions may have shifted
-                        app.update_last_modified();
-                        app.refresh_tunnel_list(&alias);
-                        app.reload_hosts();
-                        // Fix selection
-                        if app.tunnel_list.is_empty() {
-                            app.ui.tunnel_list_state.select(None);
-                        } else if sel >= app.tunnel_list.len() {
-                            app.ui.tunnel_list_state.select(Some(app.tunnel_list.len() - 1));
-                        }
-                        app.set_status("Tunnel removed.", false);
-                    }
+                if sel < app.tunnel_list.len() {
+                    app.pending_tunnel_delete = Some(sel);
                 }
             }
         }
@@ -1824,6 +1846,35 @@ fn handle_snippet_picker(app: &mut App, key: KeyEvent) {
         _ => return,
     };
 
+    // Handle pending snippet delete confirmation first
+    if app.pending_snippet_delete.is_some() {
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                let sel = app.pending_snippet_delete.take().unwrap();
+                if sel < app.snippet_store.snippets.len() {
+                    let removed = app.snippet_store.snippets.remove(sel);
+                    if let Err(e) = app.snippet_store.save() {
+                        app.snippet_store.snippets.insert(sel, removed);
+                        app.set_status(format!("Failed to save: {}", e), true);
+                    } else {
+                        if app.snippet_store.snippets.is_empty() {
+                            app.ui.snippet_picker_state.select(None);
+                        } else if sel >= app.snippet_store.snippets.len() {
+                            app.ui.snippet_picker_state
+                                .select(Some(app.snippet_store.snippets.len() - 1));
+                        }
+                        app.set_status(format!("Removed snippet '{}'.", removed.name), false);
+                    }
+                }
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                app.pending_snippet_delete = None;
+            }
+            _ => {}
+        }
+        return;
+    }
+
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.screen = Screen::HostList;
@@ -1861,19 +1912,7 @@ fn handle_snippet_picker(app: &mut App, key: KeyEvent) {
         KeyCode::Char('d') => {
             if let Some(sel) = app.ui.snippet_picker_state.selected() {
                 if sel < app.snippet_store.snippets.len() {
-                    let removed = app.snippet_store.snippets.remove(sel);
-                    if let Err(e) = app.snippet_store.save() {
-                        app.snippet_store.snippets.insert(sel, removed);
-                        app.set_status(format!("Failed to save: {}", e), true);
-                    } else {
-                        if app.snippet_store.snippets.is_empty() {
-                            app.ui.snippet_picker_state.select(None);
-                        } else if sel >= app.snippet_store.snippets.len() {
-                            app.ui.snippet_picker_state
-                                .select(Some(app.snippet_store.snippets.len() - 1));
-                        }
-                        app.set_status(format!("Removed snippet '{}'.", removed.name), false);
-                    }
+                    app.pending_snippet_delete = Some(sel);
                 }
             }
         }
@@ -4287,7 +4326,14 @@ Host gamma
         let _ = app.snippet_store.save(); // ensure file exists
         let (tx, _rx) = mpsc::channel();
 
+        // d sets pending confirmation
         let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
+        assert_eq!(app.pending_snippet_delete, Some(0));
+        assert_eq!(app.snippet_store.snippets.len(), 2); // not yet deleted
+
+        // y confirms deletion
+        let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+        assert_eq!(app.pending_snippet_delete, None);
         assert_eq!(app.snippet_store.snippets.len(), 1);
         assert_eq!(app.snippet_store.snippets[0].name, "uptime");
         assert_eq!(app.ui.snippet_picker_state.selected(), Some(0));
@@ -4306,6 +4352,9 @@ Host gamma
         let (tx, _rx) = mpsc::channel();
 
         let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
+        assert_eq!(app.pending_snippet_delete, Some(0));
+
+        let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
         assert!(app.snippet_store.snippets.is_empty());
         assert_eq!(app.ui.snippet_picker_state.selected(), None);
     }
@@ -4318,6 +4367,9 @@ Host gamma
         let (tx, _rx) = mpsc::channel();
 
         let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
+        assert_eq!(app.pending_snippet_delete, Some(0));
+
+        let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
         // Rollback: snippet should still be there
         assert_eq!(app.snippet_store.snippets.len(), 2);
         assert_eq!(app.snippet_store.snippets[0].name, "check-disk");

@@ -76,18 +76,7 @@ fn render_divider(
     label_style: Style,
     border_style: Style,
 ) {
-    let width = block_area.width as usize;
-    let label_w = label.width();
-    let fill = width.saturating_sub(3 + label_w);
-    let line = Line::from(vec![
-        Span::styled("├─", border_style),
-        Span::styled(label.to_string(), label_style),
-        Span::styled(format!("{}┤", "─".repeat(fill)), border_style),
-    ]);
-    frame.render_widget(
-        Paragraph::new(line),
-        Rect::new(block_area.x, y, block_area.width, 1),
-    );
+    super::render_divider(frame, block_area, y, label, label_style, border_style);
 }
 
 fn render_field_content(

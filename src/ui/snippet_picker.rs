@@ -79,22 +79,37 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // Footer
-    let mut spans: Vec<Span<'_>> = Vec::new();
-    if !app.snippet_store.snippets.is_empty() {
-        spans.push(Span::styled(" Enter", theme::primary_action()));
-        spans.push(Span::styled(" run ", theme::muted()));
+    if app.pending_snippet_delete.is_some() {
+        let name = app.pending_snippet_delete
+            .and_then(|i| app.snippet_store.snippets.get(i))
+            .map(|s| s.name.as_str())
+            .unwrap_or("");
+        super::render_footer_with_status(frame, chunks[1], vec![
+            Span::styled(format!(" Remove '{}'? ", super::truncate(name, 20)), theme::bold()),
+            Span::styled("y", theme::accent_bold()),
+            Span::styled(" yes ", theme::muted()),
+            Span::styled("\u{2502} ", theme::muted()),
+            Span::styled("Esc", theme::accent_bold()),
+            Span::styled(" no", theme::muted()),
+        ], app);
+    } else {
+        let mut spans: Vec<Span<'_>> = Vec::new();
+        if !app.snippet_store.snippets.is_empty() {
+            spans.push(Span::styled(" Enter", theme::primary_action()));
+            spans.push(Span::styled(" run ", theme::muted()));
+            spans.push(Span::styled("\u{2502} ", theme::muted()));
+        }
+        spans.push(Span::styled("a", theme::accent_bold()));
+        spans.push(Span::styled(" add ", theme::muted()));
+        if !app.snippet_store.snippets.is_empty() {
+            spans.push(Span::styled("e", theme::accent_bold()));
+            spans.push(Span::styled(" edit ", theme::muted()));
+            spans.push(Span::styled("d", theme::accent_bold()));
+            spans.push(Span::styled(" delete ", theme::muted()));
+        }
         spans.push(Span::styled("\u{2502} ", theme::muted()));
+        spans.push(Span::styled("Esc", theme::accent_bold()));
+        spans.push(Span::styled(" back", theme::muted()));
+        super::render_footer_with_status(frame, chunks[1], spans, app);
     }
-    spans.push(Span::styled("a", theme::accent_bold()));
-    spans.push(Span::styled(" add ", theme::muted()));
-    if !app.snippet_store.snippets.is_empty() {
-        spans.push(Span::styled("e", theme::accent_bold()));
-        spans.push(Span::styled(" edit ", theme::muted()));
-        spans.push(Span::styled("d", theme::accent_bold()));
-        spans.push(Span::styled(" delete ", theme::muted()));
-    }
-    spans.push(Span::styled("\u{2502} ", theme::muted()));
-    spans.push(Span::styled("Esc", theme::accent_bold()));
-    spans.push(Span::styled(" back", theme::muted()));
-    super::render_footer_with_status(frame, chunks[1], spans, app);
 }

@@ -96,33 +96,44 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     }
 
     // Footer
-    let mut spans: Vec<Span<'_>> = Vec::new();
-    if is_active {
-        spans.push(Span::styled(" Enter", theme::primary_action()));
-        spans.push(Span::styled(" stop ", theme::muted()));
-    } else if !app.tunnel_list.is_empty() {
-        spans.push(Span::styled(" Enter", theme::primary_action()));
-        spans.push(Span::styled(" start ", theme::muted()));
-    }
-    if !is_readonly {
-        if !spans.is_empty() {
-            spans.push(Span::styled("\u{2502} ", theme::muted()));
-        }
-        spans.push(Span::styled("a", theme::accent_bold()));
-        spans.push(Span::styled(" add ", theme::muted()));
-        if !app.tunnel_list.is_empty() {
-            spans.push(Span::styled("e", theme::accent_bold()));
-            spans.push(Span::styled(" edit ", theme::muted()));
-            spans.push(Span::styled("d", theme::accent_bold()));
-            spans.push(Span::styled(" delete ", theme::muted()));
-        }
-    }
-    if spans.is_empty() {
-        spans.push(Span::styled(" Esc", theme::accent_bold()));
+    if app.pending_tunnel_delete.is_some() {
+        super::render_footer_with_status(frame, chunks[1], vec![
+            Span::styled(" Remove tunnel? ", theme::bold()),
+            Span::styled("y", theme::accent_bold()),
+            Span::styled(" yes ", theme::muted()),
+            Span::styled("\u{2502} ", theme::muted()),
+            Span::styled("Esc", theme::accent_bold()),
+            Span::styled(" no", theme::muted()),
+        ], app);
     } else {
-        spans.push(Span::styled("\u{2502} ", theme::muted()));
-        spans.push(Span::styled("Esc", theme::accent_bold()));
+        let mut spans: Vec<Span<'_>> = Vec::new();
+        if is_active {
+            spans.push(Span::styled(" Enter", theme::primary_action()));
+            spans.push(Span::styled(" stop ", theme::muted()));
+        } else if !app.tunnel_list.is_empty() {
+            spans.push(Span::styled(" Enter", theme::primary_action()));
+            spans.push(Span::styled(" start ", theme::muted()));
+        }
+        if !is_readonly {
+            if !spans.is_empty() {
+                spans.push(Span::styled("\u{2502} ", theme::muted()));
+            }
+            spans.push(Span::styled("a", theme::accent_bold()));
+            spans.push(Span::styled(" add ", theme::muted()));
+            if !app.tunnel_list.is_empty() {
+                spans.push(Span::styled("e", theme::accent_bold()));
+                spans.push(Span::styled(" edit ", theme::muted()));
+                spans.push(Span::styled("d", theme::accent_bold()));
+                spans.push(Span::styled(" delete ", theme::muted()));
+            }
+        }
+        if spans.is_empty() {
+            spans.push(Span::styled(" Esc", theme::accent_bold()));
+        } else {
+            spans.push(Span::styled("\u{2502} ", theme::muted()));
+            spans.push(Span::styled("Esc", theme::accent_bold()));
+        }
+        spans.push(Span::styled(" back", theme::muted()));
+        super::render_footer_with_status(frame, chunks[1], spans, app);
     }
-    spans.push(Span::styled(" back", theme::muted()));
-    super::render_footer_with_status(frame, chunks[1], spans, app);
 }

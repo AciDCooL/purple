@@ -994,6 +994,8 @@ pub struct App {
     pub provider_form: ProviderFormFields,
     pub syncing_providers: HashMap<String, Arc<AtomicBool>>,
     pub pending_provider_delete: Option<String>,
+    pub pending_snippet_delete: Option<usize>,
+    pub pending_tunnel_delete: Option<usize>,
 
     // Hints
     pub ping_status: HashMap<String, PingStatus>,
@@ -1099,6 +1101,8 @@ impl App {
             provider_form: ProviderFormFields::new(),
             syncing_providers: HashMap::new(),
             pending_provider_delete: None,
+            pending_snippet_delete: None,
+            pending_tunnel_delete: None,
             ping_status: HashMap::new(),
             has_pinged: false,
             tunnel_list: Vec::new(),
