@@ -91,7 +91,7 @@ enum Commands {
         #[arg(short, long)]
         group: Option<String>,
     },
-    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, AWS EC2)
+    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, AWS EC2, Scaleway)
     Sync {
         /// Sync a specific provider (default: all configured)
         provider: Option<String>,
@@ -136,7 +136,7 @@ enum Commands {
 enum ProviderCommands {
     /// Add or update a provider configuration
     Add {
-        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws)
+        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway)
         provider: String,
 
         /// API token (or set PURPLE_TOKEN env var, or use --token-stdin)
@@ -167,7 +167,7 @@ enum ProviderCommands {
         #[arg(long)]
         profile: Option<String>,
 
-        /// Comma-separated AWS regions (e.g. us-east-1,eu-west-1)
+        /// Comma-separated regions or zones (e.g. us-east-1,eu-west-1 for AWS or fr-par-1,nl-ams-1 for Scaleway)
         #[arg(long)]
         regions: Option<String>,
 
@@ -862,7 +862,7 @@ fn handle_sync(
     let sections: Vec<&providers::config::ProviderSection> = if let Some(name) = provider_name {
         if providers::get_provider(name).is_none() {
             eprintln!(
-                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws.",
+                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway.",
                 name
             );
             std::process::exit(1);
@@ -895,7 +895,7 @@ fn handle_sync(
             Some(p) => p,
             None => {
                 eprintln!(
-                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws.",
+                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway.",
                     section.provider
                 );
                 any_failures = true;
@@ -1007,7 +1007,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 Some(p) => p,
                 None => {
                     eprintln!(
-                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws.",
+                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway.",
                         provider
                     );
                     std::process::exit(1);
@@ -1033,16 +1033,14 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     verify_tls = false;
                 }
             }
-            // --profile and --regions are AWS-only
-            if provider != "aws" {
-                if profile.is_some() {
-                    eprintln!("Warning: --profile is only used by the AWS provider. Ignoring.");
-                    profile = None;
-                }
-                if regions.is_some() {
-                    eprintln!("Warning: --regions is only used by the AWS provider. Ignoring.");
-                    regions = None;
-                }
+            // --profile is AWS-only, --regions is AWS/Scaleway
+            if provider != "aws" && profile.is_some() {
+                eprintln!("Warning: --profile is only used by the AWS provider. Ignoring.");
+                profile = None;
+            }
+            if provider != "aws" && provider != "scaleway" && regions.is_some() {
+                eprintln!("Warning: --regions is only used by the AWS and Scaleway providers. Ignoring.");
+                regions = None;
             }
 
             // When updating an existing section, fall back to stored values for fields not supplied
@@ -1072,13 +1070,14 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     no_verify_tls = true;
                 }
                 // AWS: fall back to stored profile/regions
-                if provider == "aws" {
-                    if profile.is_none() && !existing.profile.is_empty() {
-                        profile = Some(existing.profile.clone());
-                    }
-                    if regions.is_none() && !existing.regions.is_empty() {
-                        regions = Some(existing.regions.clone());
-                    }
+                if provider == "aws"
+                    && profile.is_none() && !existing.profile.is_empty() {
+                    profile = Some(existing.profile.clone());
+                }
+                // AWS/Scaleway: fall back to stored regions
+                if matches!(provider.as_str(), "aws" | "scaleway")
+                    && regions.is_none() && !existing.regions.is_empty() {
+                    regions = Some(existing.regions.clone());
                 }
             }
 
@@ -1163,9 +1162,13 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             let resolved_profile = profile.unwrap_or_default();
             let resolved_regions = regions.unwrap_or_default();
 
-            // AWS requires at least one region
+            // AWS/Scaleway requires at least one region/zone
             if provider == "aws" && resolved_regions.trim().is_empty() {
                 eprintln!("AWS requires --regions (e.g. --regions us-east-1,eu-west-1).");
+                std::process::exit(1);
+            }
+            if provider == "scaleway" && resolved_regions.trim().is_empty() {
+                eprintln!("Scaleway requires --regions with one or more zones (e.g. --regions fr-par-1,nl-ams-1).");
                 std::process::exit(1);
             }
 

@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>purple. SSH config manager and host launcher for the terminal</title>
-<meta name="description" content="Free, open-source SSH config manager, editor and host launcher. TUI with search, tags, tunnels, command snippets, password management (keychain, 1Password, Bitwarden, pass, Vault), cloud provider sync (AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE) and round-trip fidelity for ~/.ssh/config. Written in Rust. macOS and Linux.">
-<meta name="keywords" content="SSH config manager, SSH launcher, terminal SSH, TUI SSH, SSH host manager, SSH command snippets, run command multiple hosts, cloud SSH sync, AWS EC2 SSH, DigitalOcean SSH, Vultr SSH, Linode SSH, Hetzner SSH, UpCloud SSH, Proxmox SSH, SSH tunnel manager, SSH config editor, Rust SSH tool, purple-ssh, SSH password manager, SSH askpass, SSH keychain, 1Password SSH, Bitwarden SSH, multi-host SSH execution, SSH automation">
+<meta name="description" content="Free, open-source SSH config manager, editor and host launcher. TUI with search, tags, tunnels, command snippets, password management (keychain, 1Password, Bitwarden, pass, Vault), cloud provider sync (AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway) and round-trip fidelity for ~/.ssh/config. Written in Rust. macOS and Linux.">
+<meta name="keywords" content="SSH config manager, SSH launcher, terminal SSH, TUI SSH, SSH host manager, SSH command snippets, run command multiple hosts, cloud SSH sync, AWS EC2 SSH, DigitalOcean SSH, Vultr SSH, Linode SSH, Hetzner SSH, UpCloud SSH, Proxmox SSH, Scaleway SSH, SSH tunnel manager, SSH config editor, Rust SSH tool, purple-ssh, SSH password manager, SSH askpass, SSH keychain, 1Password SSH, Bitwarden SSH, multi-host SSH execution, SSH automation">
 <meta name="robots" content="index, follow">
 <meta name="author" content="Eric Kochen">
 <meta property="og:title" content="purple. SSH config manager and host launcher for the terminal">
-<meta property="og:description" content="Free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher. Run command snippets across hosts. Sync servers from 7 cloud providers. Manage SSH passwords. Written in Rust.">
+<meta property="og:description" content="Free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher. Run command snippets across hosts. Sync servers from 8 cloud providers. Manage SSH passwords. Written in Rust.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://getpurple.sh">
 <meta property="og:image" content="https://raw.githubusercontent.com/erickochen/purple/master/preview.png">
@@ -32,7 +32,7 @@
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "1.24.0",
+  "softwareVersion": "1.25.0",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
   "codeRepository": "https://github.com/erickochen/purple",
@@ -52,7 +52,7 @@
     "Host tagging and filtering",
     "SSH tunnel management",
     "Command snippets with multi-host and parallel execution",
-    "Cloud provider sync: AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE",
+    "Cloud provider sync: AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway",
     "Password management: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault",
     "Bulk import from known_hosts",
     "SSH key management",
@@ -128,7 +128,7 @@
       "name": "What cloud providers does purple support?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "purple syncs servers from seven cloud providers: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud and Proxmox VE. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync."
+        "text": "purple syncs servers from eight cloud providers: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE and Scaleway. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync."
       }
     }
   ]
@@ -330,7 +330,7 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
     <div><strong>Bulk import.</strong> From hosts files or ~/.ssh/known_hosts</div>
     <div><strong>Passwords.</strong> OS Keychain, 1Password, Bitwarden, pass, Vault integration</div>
     <div><strong>SSH keys.</strong> Browse keys with metadata and linked hosts</div>
-    <div><strong>Cloud sync.</strong> Pull servers from 7 cloud providers into your config</div>
+    <div><strong>Cloud sync.</strong> Pull servers from 8 cloud providers into your config</div>
     <div><strong>Self-update.</strong> Run <code>purple update</code></div>
     <div><strong>Atomic writes.</strong> Temp file, chmod 600, rename. Automatic backups</div>
     <div><strong>Ping.</strong> TCP connectivity check per host or all at once</div>
@@ -339,7 +339,7 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
 
   <section>
     <h2>Cloud provider sync</h2>
-    <p>Pull servers from seven cloud providers directly into your <code>~/.ssh/config</code>. Sync adds new hosts, updates changed IPs and merges tags. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Tags you add manually are preserved across syncs.</p>
+    <p>Pull servers from eight cloud providers directly into your <code>~/.ssh/config</code>. Sync adds new hosts, updates changed IPs and merges tags. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Tags you add manually are preserved across syncs.</p>
     <div class="providers">
       <div>AWS EC2</div>
       <div>DigitalOcean</div>
@@ -348,6 +348,7 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
       <div>Hetzner</div>
       <div>UpCloud</div>
       <div>Proxmox VE</div>
+      <div>Scaleway</div>
     </div>
     <p>Preview changes with <code>--dry-run</code>. Remove deleted hosts with <code>--remove</code>. Replace local tags with <code>--reset-tags</code>.</p>
   </section>
@@ -359,7 +360,7 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
 
   <section>
     <h2>Built with Rust</h2>
-    <p>Single binary. No runtime, no daemon, no async framework. 2600+ tests. Zero clippy warnings. MIT licensed.</p>
+    <p>Single binary. No runtime, no daemon, no async framework. 2700+ tests. Zero clippy warnings. MIT licensed.</p>
   </section>
 
   <section>
@@ -380,7 +381,7 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
       <dt>Can I use purple with Include files?</dt>
       <dd>Yes. Hosts from Include files are displayed in the TUI but never modified. purple resolves Include directives recursively (up to depth 5) with tilde and glob expansion.</dd>
       <dt>What cloud providers does purple support?</dt>
-      <dd>AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud and Proxmox VE. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync.</dd>
+      <dd>AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE and Scaleway. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync.</dd>
     </dl>
   </section>
 

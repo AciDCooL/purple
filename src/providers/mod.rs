@@ -4,6 +4,7 @@ mod digitalocean;
 mod hetzner;
 mod linode;
 mod proxmox;
+pub mod scaleway;
 pub mod sync;
 mod upcloud;
 mod vultr;
@@ -94,7 +95,7 @@ pub trait Provider {
 }
 
 /// All known provider names.
-pub const PROVIDER_NAMES: &[&str] = &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "proxmox", "aws"];
+pub const PROVIDER_NAMES: &[&str] = &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "proxmox", "aws", "scaleway"];
 
 /// Get a provider implementation by name.
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
@@ -111,6 +112,9 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         "aws" => Some(Box::new(aws::Aws {
             regions: Vec::new(),
             profile: String::new(),
+        })),
+        "scaleway" => Some(Box::new(scaleway::Scaleway {
+            zones: Vec::new(),
         })),
         _ => None,
     }
@@ -132,6 +136,12 @@ pub fn get_provider_with_config(name: &str, section: &config::ProviderSection) -
                 .collect(),
             profile: section.profile.clone(),
         })),
+        "scaleway" => Some(Box::new(scaleway::Scaleway {
+            zones: section.regions.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+        })),
         _ => get_provider(name),
     }
 }
@@ -146,6 +156,7 @@ pub fn provider_display_name(name: &str) -> &str {
         "upcloud" => "UpCloud",
         "proxmox" => "Proxmox VE",
         "aws" => "AWS EC2",
+        "scaleway" => "Scaleway",
         other => other,
     }
 }
@@ -367,6 +378,7 @@ mod tests {
         assert_eq!(provider_display_name("upcloud"), "UpCloud");
         assert_eq!(provider_display_name("proxmox"), "Proxmox VE");
         assert_eq!(provider_display_name("aws"), "AWS EC2");
+        assert_eq!(provider_display_name("scaleway"), "Scaleway");
     }
 
     #[test]
@@ -381,7 +393,7 @@ mod tests {
 
     #[test]
     fn test_provider_names_count() {
-        assert_eq!(PROVIDER_NAMES.len(), 7);
+        assert_eq!(PROVIDER_NAMES.len(), 8);
     }
 
     #[test]
@@ -393,6 +405,7 @@ mod tests {
         assert!(PROVIDER_NAMES.contains(&"upcloud"));
         assert!(PROVIDER_NAMES.contains(&"proxmox"));
         assert!(PROVIDER_NAMES.contains(&"aws"));
+        assert!(PROVIDER_NAMES.contains(&"scaleway"));
     }
 
     // =========================================================================
@@ -605,6 +618,7 @@ mod tests {
         assert_eq!(provider_display_name("upcloud"), "UpCloud");
         assert_eq!(provider_display_name("proxmox"), "Proxmox VE");
         assert_eq!(provider_display_name("aws"), "AWS EC2");
+        assert_eq!(provider_display_name("scaleway"), "Scaleway");
     }
 
     #[test]
@@ -636,11 +650,12 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_provider_names_has_all_seven() {
-        assert_eq!(PROVIDER_NAMES.len(), 7);
+    fn test_provider_names_has_all_eight() {
+        assert_eq!(PROVIDER_NAMES.len(), 8);
         assert!(PROVIDER_NAMES.contains(&"digitalocean"));
         assert!(PROVIDER_NAMES.contains(&"proxmox"));
         assert!(PROVIDER_NAMES.contains(&"aws"));
+        assert!(PROVIDER_NAMES.contains(&"scaleway"));
     }
 
     // =========================================================================
@@ -657,6 +672,7 @@ mod tests {
             ("upcloud", "uc"),
             ("proxmox", "pve"),
             ("aws", "aws"),
+            ("scaleway", "scw"),
         ];
         for (name, expected_label) in &cases {
             let p = get_provider(name).unwrap();

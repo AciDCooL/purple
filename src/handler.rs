@@ -1157,12 +1157,12 @@ fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
 }
 
 /// Build the same row list used by the region picker renderer.
-fn region_picker_rows() -> Vec<Option<&'static str>> {
-    let regions = crate::providers::aws::AWS_REGIONS;
+fn region_picker_rows(provider: &str) -> Vec<Option<&'static str>> {
+    let (zones, groups) = zone_data_for(provider);
     let mut rows = Vec::new();
-    for &(_, start, end) in crate::providers::aws::AWS_REGION_GROUPS {
+    for &(_, start, end) in groups {
         rows.push(None); // group header
-        for &(code, _) in &regions[start..end] {
+        for &(code, _) in &zones[start..end] {
             rows.push(Some(code));
         }
     }
@@ -1170,8 +1170,9 @@ fn region_picker_rows() -> Vec<Option<&'static str>> {
 }
 
 /// Rebuild the regions string from the selected set, preserving display order.
-fn rebuild_regions_string(selected: &std::collections::HashSet<String>) -> String {
-    let ordered: Vec<&str> = crate::providers::aws::AWS_REGIONS
+fn rebuild_regions_string(selected: &std::collections::HashSet<String>, provider: &str) -> String {
+    let (zones, _) = zone_data_for(provider);
+    let ordered: Vec<&str> = zones
         .iter()
         .filter(|(code, _)| selected.contains(*code))
         .map(|(code, _)| *code)
@@ -1179,8 +1180,30 @@ fn rebuild_regions_string(selected: &std::collections::HashSet<String>) -> Strin
     ordered.join(",")
 }
 
+type ZoneList = &'static [(&'static str, &'static str)];
+type ZoneGroups = &'static [(&'static str, usize, usize)];
+
+/// Return the zone/region data for a provider (aws or scaleway).
+pub(crate) fn zone_data_for(provider: &str) -> (ZoneList, ZoneGroups) {
+    match provider {
+        "scaleway" => (
+            crate::providers::scaleway::SCW_ZONES,
+            crate::providers::scaleway::SCW_ZONE_GROUPS,
+        ),
+        "aws" => (
+            crate::providers::aws::AWS_REGIONS,
+            crate::providers::aws::AWS_REGION_GROUPS,
+        ),
+        _ => unreachable!("zone_data_for called for unsupported provider: {}", provider),
+    }
+}
+
 fn handle_region_picker(app: &mut App, key: KeyEvent) {
-    let rows = region_picker_rows();
+    let provider_name = match &app.screen {
+        Screen::ProviderForm { provider } => provider.clone(),
+        _ => return,
+    };
+    let rows = region_picker_rows(&provider_name);
     let total = rows.len();
 
     // Parse current regions into a set for toggling
@@ -1192,14 +1215,16 @@ fn handle_region_picker(app: &mut App, key: KeyEvent) {
         .filter(|s| !s.is_empty())
         .collect();
 
+    let zone_label = if provider_name == "scaleway" { "zone" } else { "region" };
+
     match key.code {
         KeyCode::Esc | KeyCode::Enter => {
-            app.provider_form.regions = rebuild_regions_string(&selected);
+            app.provider_form.regions = rebuild_regions_string(&selected, &provider_name);
             app.provider_form.sync_cursor_to_end();
             app.ui.show_region_picker = false;
             let count = selected.len();
             if count > 0 {
-                app.set_status(format!("{} region{} selected.", count, if count == 1 { "" } else { "s" }), false);
+                app.set_status(format!("{} {}{} selected.", count, zone_label, if count == 1 { "" } else { "s" }), false);
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
@@ -1237,7 +1262,7 @@ fn handle_region_picker(app: &mut App, key: KeyEvent) {
                     }
                 }
             }
-            app.provider_form.regions = rebuild_regions_string(&selected);
+            app.provider_form.regions = rebuild_regions_string(&selected, &provider_name);
         }
         _ => {}
     }
@@ -1306,9 +1331,13 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         return;
     }
 
-    // AWS requires at least one region
+    // AWS/Scaleway require at least one region/zone
     if provider_name == "aws" && app.provider_form.regions.trim().is_empty() {
         app.set_status("Select at least one AWS region.", true);
+        return;
+    }
+    if provider_name == "scaleway" && app.provider_form.regions.trim().is_empty() {
+        app.set_status("Select at least one Scaleway zone.", true);
         return;
     }
 

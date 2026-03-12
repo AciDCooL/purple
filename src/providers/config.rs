@@ -750,7 +750,7 @@ verify_tls=false
 
     #[test]
     fn test_auto_sync_default_all_others_true() {
-        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws"] {
+        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws", "scaleway"] {
             let content = format!("[{}]\ntoken=abc\n", provider);
             let config = ProviderConfig::parse(&content);
             assert!(config.sections[0].auto_sync, "auto_sync should default to true for {}", provider);

@@ -375,10 +375,20 @@ impl ProviderFormField {
         ProviderFormField::AutoSync,
     ];
 
+    const SCALEWAY_FIELDS: &[ProviderFormField] = &[
+        ProviderFormField::Token,
+        ProviderFormField::Regions,
+        ProviderFormField::AliasPrefix,
+        ProviderFormField::User,
+        ProviderFormField::IdentityFile,
+        ProviderFormField::AutoSync,
+    ];
+
     pub fn fields_for(provider: &str) -> &'static [ProviderFormField] {
         match provider {
             "proxmox" => Self::PROXMOX_FIELDS,
             "aws" => Self::AWS_FIELDS,
+            "scaleway" => Self::SCALEWAY_FIELDS,
             _ => Self::CLOUD_FIELDS,
         }
     }
@@ -3191,6 +3201,14 @@ Host vultr-app
 
         let aws = ProviderFormField::fields_for("aws");
         assert_eq!(*aws.last().unwrap(), ProviderFormField::AutoSync);
+
+        let scaleway = ProviderFormField::fields_for("scaleway");
+        assert_eq!(*scaleway.last().unwrap(), ProviderFormField::AutoSync);
+        assert!(scaleway.contains(&ProviderFormField::Regions));
+        assert!(scaleway.contains(&ProviderFormField::Token));
+        assert!(!scaleway.contains(&ProviderFormField::Profile));
+        assert!(!scaleway.contains(&ProviderFormField::Url));
+        assert!(!scaleway.contains(&ProviderFormField::VerifyTls));
     }
 
     #[test]

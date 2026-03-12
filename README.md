@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Stop grepping your SSH config. Start launching from it.</strong><br>
-  A fast, open-source TUI that turns <code>~/.ssh/config</code> into a searchable, taggable host launcher. Sync servers from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud and Proxmox VE. Your config stays respected.
+  A fast, open-source TUI that turns <code>~/.ssh/config</code> into a searchable, taggable host launcher. Sync servers from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE and Scaleway. Your config stays respected.
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 
 ## What is purple?
 
-purple is a free, open-source SSH config manager, editor and host launcher written in Rust. It reads your existing `~/.ssh/config`, lets you search, filter, tag and connect with a single keystroke. It writes changes back without touching your comments or unknown directives. Save command snippets and run them on one or many hosts at once. Sync servers from seven cloud providers directly into your config. Manage SSH passwords with your OS keychain, 1Password, Bitwarden, pass or HashiCorp Vault. Runs on macOS and Linux. No browser, no YAML files, no context switching.
+purple is a free, open-source SSH config manager, editor and host launcher written in Rust. It reads your existing `~/.ssh/config`, lets you search, filter, tag and connect with a single keystroke. It writes changes back without touching your comments or unknown directives. Save command snippets and run them on one or many hosts at once. Sync servers from eight cloud providers directly into your config. Manage SSH passwords with your OS keychain, 1Password, Bitwarden, pass or HashiCorp Vault. Runs on macOS and Linux. No browser, no YAML files, no context switching.
 
 ## Install
 
@@ -70,7 +70,7 @@ Label hosts with `#tags`. Filter with the tag picker (`#` key) or type `tag:web`
 
 ### Cloud provider sync
 
-Pull servers from **AWS EC2**, **DigitalOcean**, **Vultr**, **Linode (Akamai)**, **Hetzner**, **UpCloud** and **Proxmox VE** directly into `~/.ssh/config`. Sync adds new hosts, updates changed IPs and optionally removes deleted servers. Tags from your cloud provider are merged with local tags.
+Pull servers from **AWS EC2**, **DigitalOcean**, **Vultr**, **Linode (Akamai)**, **Hetzner**, **UpCloud**, **Proxmox VE** and **Scaleway** directly into `~/.ssh/config`. Sync adds new hosts, updates changed IPs and optionally removes deleted servers. Tags from your cloud provider are merged with local tags.
 
 ```bash
 purple provider add digitalocean --token YOUR_TOKEN   # or use PURPLE_TOKEN env var
@@ -272,7 +272,7 @@ purple --completions zsh            # Shell completions
 
 **It edits your real SSH config.** Most SSH tools only read. purple reads, edits and writes `~/.ssh/config` directly with full round-trip fidelity.
 
-**It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud and Proxmox VE into your config. Configure once, sync anytime.
+**It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE and Scaleway into your config. Configure once, sync anytime.
 
 **It runs commands across hosts.** Save command snippets and execute them on one host, a selection or all hosts at once. Sequential or parallel. No Ansible, no Fabric, no extra tools.
 
@@ -284,7 +284,7 @@ purple --completions zsh            # Shell completions
 
 ## Cloud providers
 
-purple syncs servers from seven cloud providers into your SSH config. Each provider is configured with an API token (or AWS credentials profile). Synced hosts get an alias prefix (e.g. `do-web-1`) and are tracked via comments in your config. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Run `purple sync` to update all providers at once. Auto-sync runs on startup for providers that have it enabled.
+purple syncs servers from eight cloud providers into your SSH config. Each provider is configured with an API token (or AWS credentials profile). Synced hosts get an alias prefix (e.g. `do-web-1`) and are tracked via comments in your config. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Run `purple sync` to update all providers at once. Auto-sync runs on startup for providers that have it enabled.
 
 ### AWS EC2
 
@@ -342,6 +342,14 @@ Syncs QEMU VMs and LXC containers from a Proxmox VE cluster. Requires an API tok
 ```bash
 purple provider add proxmox --url https://pve.example.com:8006 --token user@pam!token=secret
 purple provider add proxmox --url https://pve:8006 --token TOKEN --no-verify-tls
+```
+
+### Scaleway
+
+Syncs instances across multiple availability zones (Paris, Amsterdam, Warsaw, Milan). Uses the Scaleway Instance API with `X-Auth-Token` header authentication and page-based pagination. Instance tags are synced. IP selection prefers public IPv4, falls back to IPv6 and then private IP.
+
+```bash
+purple provider add scaleway --token YOUR_TOKEN --regions fr-par-1,nl-ams-1
 ```
 
 ### Shared sync options
@@ -461,7 +469,7 @@ Found a bug or have a feature request? [Open an issue on GitHub](https://github.
 
 ## Built with
 
-Rust. 2600+ tests. Zero clippy warnings. No async runtime. Single binary.
+Rust. 2700+ tests. Zero clippy warnings. No async runtime. Single binary.
 
 <p align="center">
   <a href="LICENSE">MIT License</a>

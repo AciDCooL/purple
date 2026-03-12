@@ -165,11 +165,16 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
         let label_style = if is_focused { theme::accent_bold() } else { theme::muted() };
         let is_required = matches!(field, ProviderFormField::Url)
             || (field == ProviderFormField::Token && provider_name != "aws")
-            || (field == ProviderFormField::Regions && provider_name == "aws");
-        let label = if is_required {
-            format!(" {}* ", field.label())
+            || (field == ProviderFormField::Regions && matches!(provider_name, "aws" | "scaleway"));
+        let field_label = if field == ProviderFormField::Regions && provider_name == "scaleway" {
+            "Zones"
         } else {
-            format!(" {} ", field.label())
+            field.label()
+        };
+        let label = if is_required {
+            format!(" {}* ", field_label)
+        } else {
+            format!(" {} ", field_label)
         };
         render_divider(frame, block_area, divider_y, &label, label_style, theme::border());
 
@@ -209,7 +214,10 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
             _ => "your-api-token",
         },
         ProviderFormField::Profile => "Name from ~/.aws/credentials (or use Token)",
-        ProviderFormField::Regions => "Enter to select regions",
+        ProviderFormField::Regions => match provider_name {
+            "scaleway" => "Enter to select zones",
+            _ => "Enter to select regions",
+        },
         ProviderFormField::AliasPrefix => match provider_name {
             "digitalocean" => "do",
             "vultr" => "vultr",
@@ -218,6 +226,7 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
             "upcloud" => "uc",
             "proxmox" => "pve",
             "aws" => "aws",
+            "scaleway" => "scw",
             _ => "prefix",
         },
         ProviderFormField::User => match provider_name {
@@ -364,15 +373,15 @@ fn render_toggle_content(
     frame.render_widget(Paragraph::new(content), area);
 }
 
-/// Build display rows for the grouped region picker.
+/// Build display rows for the grouped region/zone picker.
 /// Returns a list of (label, Option<region_code>) pairs.
 /// Group headers have None as region_code, regions have Some(code).
-fn build_region_rows() -> Vec<(String, Option<&'static str>)> {
-    let regions = crate::providers::aws::AWS_REGIONS;
+fn build_region_rows(provider: &str) -> Vec<(String, Option<&'static str>)> {
+    let (zones, groups) = crate::handler::zone_data_for(provider);
     let mut rows = Vec::new();
-    for &(label, start, end) in crate::providers::aws::AWS_REGION_GROUPS {
+    for &(label, start, end) in groups {
         rows.push((format!(" {}", label), None));
-        for &(code, name) in &regions[start..end] {
+        for &(code, name) in &zones[start..end] {
             rows.push((format!("{}  {}", code, name), Some(code)));
         }
     }
@@ -380,8 +389,11 @@ fn build_region_rows() -> Vec<(String, Option<&'static str>)> {
 }
 
 fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
-    use ratatui::widgets::Clear;
-    let rows = build_region_rows();
+    let provider_name = match &app.screen {
+        crate::app::Screen::ProviderForm { provider } => provider.as_str(),
+        _ => "aws",
+    };
+    let rows = build_region_rows(provider_name);
     let selected: std::collections::HashSet<&str> = app
         .provider_form
         .regions
@@ -399,7 +411,8 @@ fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Clear, picker_area);
 
     let count = selected.len();
-    let title = format!(" Select Regions ({} selected) ", count);
+    let zone_label = if provider_name == "scaleway" { "Zones" } else { "Regions" };
+    let title = format!(" Select {} ({} selected) ", zone_label, count);
     let block_area = Rect::new(picker_area.x, picker_area.y, picker_area.width, block_height);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
