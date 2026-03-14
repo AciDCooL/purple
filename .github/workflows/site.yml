@@ -7,6 +7,9 @@ on:
   pull_request:
     paths: [site/**, .github/workflows/site.yml]
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
