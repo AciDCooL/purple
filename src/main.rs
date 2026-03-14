@@ -91,7 +91,7 @@ enum Commands {
         #[arg(short, long)]
         group: Option<String>,
     },
-    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, AWS EC2, Scaleway)
+    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, AWS EC2, Scaleway, GCP)
     Sync {
         /// Sync a specific provider (default: all configured)
         provider: Option<String>,
@@ -136,7 +136,7 @@ enum Commands {
 enum ProviderCommands {
     /// Add or update a provider configuration
     Add {
-        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway)
+        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp)
         provider: String,
 
         /// API token (or set PURPLE_TOKEN env var, or use --token-stdin)
@@ -167,9 +167,13 @@ enum ProviderCommands {
         #[arg(long)]
         profile: Option<String>,
 
-        /// Comma-separated regions or zones (e.g. us-east-1,eu-west-1 for AWS or fr-par-1,nl-ams-1 for Scaleway)
+        /// Comma-separated regions or zones (e.g. us-east-1,eu-west-1 for AWS, fr-par-1,nl-ams-1 for Scaleway or us-central1-a,europe-west1-b for GCP zones)
         #[arg(long)]
         regions: Option<String>,
+
+        /// GCP project ID
+        #[arg(long)]
+        project: Option<String>,
 
         /// Skip TLS certificate verification (for self-signed certs)
         #[arg(long, conflicts_with = "verify_tls")]
@@ -865,7 +869,7 @@ fn handle_sync(
     let sections: Vec<&providers::config::ProviderSection> = if let Some(name) = provider_name {
         if providers::get_provider(name).is_none() {
             eprintln!(
-                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway.",
+                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp.",
                 name
             );
             std::process::exit(1);
@@ -898,7 +902,7 @@ fn handle_sync(
             Some(p) => p,
             None => {
                 eprintln!(
-                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway.",
+                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp.",
                     section.provider
                 );
                 any_failures = true;
@@ -1001,6 +1005,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             url,
             mut profile,
             mut regions,
+            mut project,
             no_verify_tls,
             verify_tls,
             auto_sync,
@@ -1010,7 +1015,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 Some(p) => p,
                 None => {
                     eprintln!(
-                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway.",
+                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp.",
                         provider
                     );
                     std::process::exit(1);
@@ -1036,14 +1041,18 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     verify_tls = false;
                 }
             }
-            // --profile is AWS-only, --regions is AWS/Scaleway
+            // --profile is AWS-only, --regions is AWS/Scaleway/GCP, --project is GCP-only
             if provider != "aws" && profile.is_some() {
                 eprintln!("Warning: --profile is only used by the AWS provider. Ignoring.");
                 profile = None;
             }
-            if provider != "aws" && provider != "scaleway" && regions.is_some() {
-                eprintln!("Warning: --regions is only used by the AWS and Scaleway providers. Ignoring.");
+            if !matches!(provider.as_str(), "aws" | "scaleway" | "gcp") && regions.is_some() {
+                eprintln!("Warning: --regions is only used by the AWS, Scaleway and GCP providers. Ignoring.");
                 regions = None;
+            }
+            if provider != "gcp" && project.is_some() {
+                eprintln!("Warning: --project is only used by the GCP provider. Ignoring.");
+                project = None;
             }
 
             // When updating an existing section, fall back to stored values for fields not supplied
@@ -1077,10 +1086,14 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     && profile.is_none() && !existing.profile.is_empty() {
                     profile = Some(existing.profile.clone());
                 }
-                // AWS/Scaleway: fall back to stored regions
-                if matches!(provider.as_str(), "aws" | "scaleway")
+                // AWS/Scaleway/GCP: fall back to stored regions
+                if matches!(provider.as_str(), "aws" | "scaleway" | "gcp")
                     && regions.is_none() && !existing.regions.is_empty() {
                     regions = Some(existing.regions.clone());
+                }
+                // GCP: fall back to stored project
+                if provider == "gcp" && project.is_none() && !existing.project.is_empty() {
+                    project = Some(existing.project.clone());
                 }
             }
 
@@ -1112,10 +1125,14 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             };
 
             if token.trim().is_empty() && !aws_has_profile {
-                eprintln!(
-                    "Token can't be empty. Grab one from your {} dashboard.",
-                    providers::provider_display_name(&provider)
-                );
+                if provider == "gcp" {
+                    eprintln!("Token can't be empty. Provide a service account JSON key file path or access token.");
+                } else {
+                    eprintln!(
+                        "Token can't be empty. Grab one from your {} dashboard.",
+                        providers::provider_display_name(&provider)
+                    );
+                }
                 std::process::exit(1);
             }
 
@@ -1132,6 +1149,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             let url_value = url.clone().unwrap_or_default();
             let profile_value = profile.clone().unwrap_or_default();
             let regions_value = regions.clone().unwrap_or_default();
+            let project_value = project.clone().unwrap_or_default();
             for (value, name) in [
                 (&url_value, "URL"),
                 (&token, "Token"),
@@ -1139,6 +1157,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 (&user, "User"),
                 (&identity_file, "Identity file"),
                 (&profile_value, "Profile"),
+                (&project_value, "Project"),
                 (&regions_value, "Regions"),
             ] {
                 if value.chars().any(|c| c.is_control()) {
@@ -1164,6 +1183,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
 
             let resolved_profile = profile.unwrap_or_default();
             let resolved_regions = regions.unwrap_or_default();
+            let resolved_project = project.unwrap_or_default();
 
             // AWS/Scaleway requires at least one region/zone
             if provider == "aws" && resolved_regions.trim().is_empty() {
@@ -1172,6 +1192,11 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             }
             if provider == "scaleway" && resolved_regions.trim().is_empty() {
                 eprintln!("Scaleway requires --regions with one or more zones (e.g. --regions fr-par-1,nl-ams-1).");
+                std::process::exit(1);
+            }
+            // GCP requires --project
+            if provider == "gcp" && resolved_project.trim().is_empty() {
+                eprintln!("GCP requires --project (e.g. --project my-gcp-project-id).");
                 std::process::exit(1);
             }
 
@@ -1186,6 +1211,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 auto_sync: resolved_auto_sync,
                 profile: resolved_profile,
                 regions: resolved_regions,
+                project: resolved_project,
             };
 
             let mut config = providers::config::ProviderConfig::load();

@@ -974,6 +974,7 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                             url: section.url.clone(),
                             token: section.token.clone(),
                             profile: section.profile.clone(),
+                            project: section.project.clone(),
                             regions: section.regions.clone(),
                             alias_prefix: section.alias_prefix.clone(),
                             user: section.user.clone(),
@@ -988,6 +989,7 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                             url: String::new(),
                             token: String::new(),
                             profile: String::new(),
+                            project: String::new(),
                             regions: String::new(),
                             alias_prefix: short_label,
                             user: "root".to_string(),
@@ -1200,6 +1202,10 @@ pub(crate) fn zone_data_for(provider: &str) -> (ZoneList, ZoneGroups) {
             crate::providers::aws::AWS_REGIONS,
             crate::providers::aws::AWS_REGION_GROUPS,
         ),
+        "gcp" => (
+            crate::providers::gcp::GCP_ZONES,
+            crate::providers::gcp::GCP_ZONE_GROUPS,
+        ),
         _ => unreachable!("zone_data_for called for unsupported provider: {}", provider),
     }
 }
@@ -1221,7 +1227,7 @@ fn handle_region_picker(app: &mut App, key: KeyEvent) {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let zone_label = if provider_name == "scaleway" { "zone" } else { "region" };
+    let zone_label = if matches!(provider_name.as_str(), "scaleway" | "gcp") { "zone" } else { "region" };
 
     match key.code {
         KeyCode::Esc | KeyCode::Enter => {
@@ -1297,6 +1303,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         (&app.provider_form.user, "User"),
         (&app.provider_form.identity_file, "Identity File"),
         (&app.provider_form.profile, "Profile"),
+        (&app.provider_form.project, "Project ID"),
         (&app.provider_form.regions, "Regions"),
     ];
     for (value, name) in &pf_fields {
@@ -1326,14 +1333,24 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     if app.provider_form.token.trim().is_empty()
         && (provider_name != "aws" || app.provider_form.profile.trim().is_empty())
     {
-        let display_name = crate::providers::provider_display_name(provider_name.as_str());
-        app.set_status(
+        let hint = if provider_name == "gcp" {
+            "Token can't be empty. Provide a service account JSON key file path or access token."
+                .to_string()
+        } else {
+            let display_name =
+                crate::providers::provider_display_name(provider_name.as_str());
             format!(
                 "Token can't be empty. Grab one from your {} dashboard.",
                 display_name
-            ),
-            true,
-        );
+            )
+        };
+        app.set_status(hint, true);
+        return;
+    }
+
+    // GCP requires a project ID
+    if provider_name == "gcp" && app.provider_form.project.trim().is_empty() {
+        app.set_status("Project ID can't be empty. Set your GCP project ID.", true);
         return;
     }
 
@@ -1377,6 +1394,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         auto_sync: app.provider_form.auto_sync,
         profile: app.provider_form.profile.trim().to_string(),
         regions: app.provider_form.regions.trim().to_string(),
+        project: app.provider_form.project.trim().to_string(),
     };
 
     let old_section = app.provider_config.section(&provider_name).cloned();
@@ -2157,6 +2175,7 @@ mod tests {
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         });
         app
     }
@@ -2176,6 +2195,7 @@ mod tests {
             auto_sync: false,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         });
         app
     }
@@ -2228,6 +2248,7 @@ mod tests {
             auto_sync: false,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         });
         open_provider_form(&mut app, "digitalocean");
         assert!(
@@ -2270,6 +2291,7 @@ mod tests {
             url: String::new(),
             token: "tok".to_string(),
             profile: String::new(),
+            project: String::new(),
             regions: String::new(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
@@ -2371,6 +2393,7 @@ mod tests {
             url: String::new(),
             token: "tok".to_string(),
             profile: String::new(),
+            project: String::new(),
             regions: String::new(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
@@ -2403,6 +2426,7 @@ mod tests {
             url: String::new(),
             token: "tok".to_string(),
             profile: String::new(),
+            project: String::new(),
             regions: String::new(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
@@ -2563,6 +2587,92 @@ mod tests {
         submit_form(&mut app);
         assert!(matches!(app.screen, Screen::ProviderForm { .. }));
         assert_status_contains(&app, "whitespace");
+    }
+
+    // =========================================================================
+    // GCP-specific form validation
+    // =========================================================================
+
+    fn make_gcp_form_app() -> App {
+        let mut app = make_app("Host test\n  HostName test.com\n");
+        app.screen = Screen::ProviderForm { provider: "gcp".to_string() };
+        app.provider_form = ProviderFormFields {
+            url: String::new(),
+            token: "/path/to/sa.json".to_string(),
+            profile: String::new(),
+            project: "my-project".to_string(),
+            regions: String::new(),
+            alias_prefix: "gcp".to_string(),
+            user: "root".to_string(),
+            identity_file: String::new(),
+            verify_tls: true,
+            auto_sync: true,
+            focused_field: ProviderFormField::Token,
+            cursor_pos: 0,
+        };
+        app
+    }
+
+    #[test]
+    fn test_submit_gcp_rejects_empty_project() {
+        let mut app = make_gcp_form_app();
+        app.provider_form.project = "".to_string();
+        submit_form(&mut app);
+        assert!(matches!(app.screen, Screen::ProviderForm { .. }));
+        assert_status_contains(&app, "Project ID");
+    }
+
+    #[test]
+    fn test_submit_gcp_rejects_whitespace_only_project() {
+        let mut app = make_gcp_form_app();
+        app.provider_form.project = "   ".to_string();
+        submit_form(&mut app);
+        assert!(matches!(app.screen, Screen::ProviderForm { .. }));
+        assert_status_contains(&app, "Project ID");
+    }
+
+    #[test]
+    fn test_submit_gcp_rejects_empty_token() {
+        let mut app = make_gcp_form_app();
+        app.provider_form.token = "".to_string();
+        submit_form(&mut app);
+        assert!(matches!(app.screen, Screen::ProviderForm { .. }));
+        assert_status_contains(&app, "Token");
+    }
+
+    #[test]
+    fn test_submit_gcp_empty_token_shows_gcp_specific_hint() {
+        let mut app = make_gcp_form_app();
+        app.provider_form.token = "".to_string();
+        submit_form(&mut app);
+        assert_status_contains(&app, "service account");
+    }
+
+    #[test]
+    fn test_gcp_form_has_project_field() {
+        let fields = ProviderFormField::fields_for("gcp");
+        assert!(fields.contains(&ProviderFormField::Project));
+    }
+
+    #[test]
+    fn test_gcp_form_tab_cycles_through_project() {
+        let mut app = make_gcp_form_app();
+        app.provider_form.focused_field = ProviderFormField::Token;
+        let (tx, _rx) = mpsc::channel();
+        let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+        assert_eq!(app.provider_form.focused_field, ProviderFormField::Project);
+        let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+        assert_eq!(app.provider_form.focused_field, ProviderFormField::Regions);
+    }
+
+    #[test]
+    fn test_provider_form_init_new_gcp_defaults() {
+        let mut app = make_app("Host test\n  HostName test.com\n");
+        app.screen = Screen::Providers;
+        app.provider_config = test_provider_config();
+        open_provider_form(&mut app, "gcp");
+        assert!(app.provider_form.project.is_empty());
+        assert!(app.provider_form.auto_sync);
     }
 
     // =========================================================================
@@ -2806,7 +2916,7 @@ mod tests {
 
     #[test]
     fn test_all_cloud_providers_default_auto_sync_true() {
-        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws"] {
+        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws", "scaleway", "gcp"] {
             let mut app = make_app("Host test\n  HostName test.com\n");
             app.screen = Screen::Providers;
             app.provider_config = test_provider_config();

@@ -1,6 +1,7 @@
 pub mod aws;
 pub mod config;
 mod digitalocean;
+pub mod gcp;
 mod hetzner;
 mod linode;
 mod proxmox;
@@ -95,7 +96,7 @@ pub trait Provider {
 }
 
 /// All known provider names.
-pub const PROVIDER_NAMES: &[&str] = &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "proxmox", "aws", "scaleway"];
+pub const PROVIDER_NAMES: &[&str] = &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "proxmox", "aws", "scaleway", "gcp"];
 
 /// Get a provider implementation by name.
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
@@ -115,6 +116,10 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         })),
         "scaleway" => Some(Box::new(scaleway::Scaleway {
             zones: Vec::new(),
+        })),
+        "gcp" => Some(Box::new(gcp::Gcp {
+            zones: Vec::new(),
+            project: String::new(),
         })),
         _ => None,
     }
@@ -142,6 +147,13 @@ pub fn get_provider_with_config(name: &str, section: &config::ProviderSection) -
                 .filter(|s| !s.is_empty())
                 .collect(),
         })),
+        "gcp" => Some(Box::new(gcp::Gcp {
+            zones: section.regions.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            project: section.project.clone(),
+        })),
         _ => get_provider(name),
     }
 }
@@ -157,6 +169,7 @@ pub fn provider_display_name(name: &str) -> &str {
         "proxmox" => "Proxmox VE",
         "aws" => "AWS EC2",
         "scaleway" => "Scaleway",
+        "gcp" => "GCP",
         other => other,
     }
 }
@@ -296,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_get_provider_unknown_returns_none() {
-        assert!(get_provider("gcp").is_none());
+        assert!(get_provider("azure").is_none());
         assert!(get_provider("").is_none());
         assert!(get_provider("DigitalOcean").is_none()); // case-sensitive
     }
@@ -325,6 +338,7 @@ mod tests {
             auto_sync: false,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         };
         let p = get_provider_with_config("proxmox", &section).unwrap();
         assert_eq!(p.name(), "proxmox");
@@ -343,15 +357,35 @@ mod tests {
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         };
         let p = get_provider_with_config("digitalocean", &section).unwrap();
         assert_eq!(p.name(), "digitalocean");
     }
 
     #[test]
-    fn test_get_provider_with_config_unknown_returns_none() {
+    fn test_get_provider_with_config_gcp_uses_project_and_zones() {
         let section = config::ProviderSection {
             provider: "gcp".to_string(),
+            token: "sa.json".to_string(),
+            alias_prefix: "gcp".to_string(),
+            user: String::new(),
+            identity_file: String::new(),
+            url: String::new(),
+            verify_tls: true,
+            auto_sync: true,
+            profile: String::new(),
+            regions: "us-central1-a, europe-west1-b".to_string(),
+            project: "my-project".to_string(),
+        };
+        let p = get_provider_with_config("gcp", &section).unwrap();
+        assert_eq!(p.name(), "gcp");
+    }
+
+    #[test]
+    fn test_get_provider_with_config_unknown_returns_none() {
+        let section = config::ProviderSection {
+            provider: "azure".to_string(),
             token: String::new(),
             alias_prefix: String::new(),
             user: String::new(),
@@ -361,8 +395,9 @@ mod tests {
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         };
-        assert!(get_provider_with_config("gcp", &section).is_none());
+        assert!(get_provider_with_config("azure", &section).is_none());
     }
 
     // =========================================================================
@@ -379,11 +414,12 @@ mod tests {
         assert_eq!(provider_display_name("proxmox"), "Proxmox VE");
         assert_eq!(provider_display_name("aws"), "AWS EC2");
         assert_eq!(provider_display_name("scaleway"), "Scaleway");
+        assert_eq!(provider_display_name("gcp"), "GCP");
     }
 
     #[test]
     fn test_display_name_unknown_returns_input() {
-        assert_eq!(provider_display_name("gcp"), "gcp");
+        assert_eq!(provider_display_name("azure"), "azure");
         assert_eq!(provider_display_name(""), "");
     }
 
@@ -393,7 +429,7 @@ mod tests {
 
     #[test]
     fn test_provider_names_count() {
-        assert_eq!(PROVIDER_NAMES.len(), 8);
+        assert_eq!(PROVIDER_NAMES.len(), 9);
     }
 
     #[test]
@@ -406,6 +442,7 @@ mod tests {
         assert!(PROVIDER_NAMES.contains(&"proxmox"));
         assert!(PROVIDER_NAMES.contains(&"aws"));
         assert!(PROVIDER_NAMES.contains(&"scaleway"));
+        assert!(PROVIDER_NAMES.contains(&"gcp"));
     }
 
     // =========================================================================
@@ -575,6 +612,7 @@ mod tests {
                 auto_sync: true,
                 profile: String::new(),
                 regions: String::new(),
+                project: String::new(),
             };
             let p = get_provider_with_config(name, &section);
             assert!(p.is_some(), "get_provider_with_config({}) should return Some", name);
@@ -619,11 +657,12 @@ mod tests {
         assert_eq!(provider_display_name("proxmox"), "Proxmox VE");
         assert_eq!(provider_display_name("aws"), "AWS EC2");
         assert_eq!(provider_display_name("scaleway"), "Scaleway");
+        assert_eq!(provider_display_name("gcp"), "GCP");
     }
 
     #[test]
     fn test_provider_display_name_unknown() {
-        assert_eq!(provider_display_name("gcp"), "gcp");
+        assert_eq!(provider_display_name("azure"), "azure");
     }
 
     // =========================================================================
@@ -639,7 +678,7 @@ mod tests {
 
     #[test]
     fn test_get_provider_case_sensitive_and_unknown() {
-        assert!(get_provider("gcp").is_none());
+        assert!(get_provider("azure").is_none());
         assert!(get_provider("DigitalOcean").is_none()); // Case-sensitive
         assert!(get_provider("VULTR").is_none());
         assert!(get_provider("").is_none());
@@ -650,8 +689,8 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_provider_names_has_all_eight() {
-        assert_eq!(PROVIDER_NAMES.len(), 8);
+    fn test_provider_names_has_all_nine() {
+        assert_eq!(PROVIDER_NAMES.len(), 9);
         assert!(PROVIDER_NAMES.contains(&"digitalocean"));
         assert!(PROVIDER_NAMES.contains(&"proxmox"));
         assert!(PROVIDER_NAMES.contains(&"aws"));
@@ -673,6 +712,7 @@ mod tests {
             ("proxmox", "pve"),
             ("aws", "aws"),
             ("scaleway", "scw"),
+            ("gcp", "gcp"),
         ];
         for (name, expected_label) in &cases {
             let p = get_provider(name).unwrap();

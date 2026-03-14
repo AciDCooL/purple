@@ -1,8 +1,8 @@
 [package]
 name = "purple-ssh"
-version = "1.26.1"
+version = "1.27.0"
 edition = "2024"
-description = "Manage SSH configs and launch connections from the terminal. TUI host manager with search, tags, tunnels, command snippets, password management (keychain, 1Password, Bitwarden, pass, Vault), cloud sync (AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway), self-update and round-trip fidelity for ~/.ssh/config."
+description = "Manage SSH configs and launch connections from the terminal. TUI host manager with search, tags, tunnels, command snippets, password management (keychain, 1Password, Bitwarden, pass, Vault), cloud sync (AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway, GCP), self-update and round-trip fidelity for ~/.ssh/config."
 license = "MIT"
 repository = "https://github.com/erickochen/purple"
 homepage = "https://getpurple.sh"
@@ -36,6 +36,8 @@ serde_json = "1"
 sha2 = "0.10"
 hmac = "0.12"
 quick-xml = { version = "0.37", features = ["serde", "serialize"] }
+rsa = { version = "0.9", features = ["sha2"] }
+base64 = "0.22"
 
 [profile.release]
 strip = true

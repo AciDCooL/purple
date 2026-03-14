@@ -16,6 +16,7 @@ pub struct ProviderSection {
     pub auto_sync: bool,
     pub profile: String,
     pub regions: String,
+    pub project: String,
 }
 
 /// Default for auto_sync: false for proxmox (N+1 API calls), true for all others.
@@ -92,6 +93,7 @@ impl ProviderConfig {
                     auto_sync: auto_sync_default,
                     profile: String::new(),
                     regions: String::new(),
+                    project: String::new(),
                 });
             } else if let Some(ref mut section) = current {
                 if let Some((key, value)) = trimmed.split_once('=') {
@@ -111,6 +113,7 @@ impl ProviderConfig {
                         ),
                         "profile" => section.profile = value,
                         "regions" => section.regions = value,
+                        "project" => section.project = value,
                         _ => {}
                     }
                 }
@@ -163,6 +166,9 @@ impl ProviderConfig {
             }
             if !section.regions.is_empty() {
                 content.push_str(&format!("regions={}\n", section.regions));
+            }
+            if !section.project.is_empty() {
+                content.push_str(&format!("project={}\n", section.project));
             }
             if section.auto_sync != default_auto_sync(&section.provider) {
                 content.push_str(if section.auto_sync { "auto_sync=true\n" } else { "auto_sync=false\n" });
@@ -271,6 +277,7 @@ token=mytoken
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         });
         assert_eq!(config.sections.len(), 1);
     }
@@ -289,6 +296,7 @@ token=mytoken
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         });
         assert_eq!(config.sections.len(), 1);
         assert_eq!(config.sections[0].token, "new");
@@ -424,6 +432,7 @@ verify_tls=false
             auto_sync: true,        // default for non-proxmox: not written
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         };
         let mut config = ProviderConfig::default();
         config.set_section(section);
@@ -454,6 +463,7 @@ verify_tls=false
             auto_sync: false,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         });
         assert_eq!(config.sections[0].token, "new");
         assert_eq!(config.sections[0].url, "https://pve.local:8006");
@@ -498,6 +508,7 @@ verify_tls=false
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         });
         // Re-parse: auto_sync should still be true (default)
         assert!(config.sections[0].auto_sync);
@@ -515,6 +526,7 @@ verify_tls=false
             auto_sync: false,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         });
         assert!(!config2.sections[0].auto_sync);
     }
@@ -560,6 +572,7 @@ verify_tls=false
             auto_sync: true, // non-default for proxmox
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         });
         // Simulate save by rebuilding content string (same logic as save())
         let content =
@@ -750,7 +763,7 @@ verify_tls=false
 
     #[test]
     fn test_auto_sync_default_all_others_true() {
-        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws", "scaleway"] {
+        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws", "scaleway", "gcp"] {
             let content = format!("[{}]\ntoken=abc\n", provider);
             let config = ProviderConfig::parse(&content);
             assert!(config.sections[0].auto_sync, "auto_sync should default to true for {}", provider);
@@ -787,6 +800,7 @@ verify_tls=false
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         };
         config.set_section(section);
         assert_eq!(config.sections.len(), 1);
@@ -808,6 +822,7 @@ verify_tls=false
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         };
         config.set_section(section);
         assert_eq!(config.sections.len(), 1);
@@ -985,6 +1000,46 @@ verify_tls=false
     }
 
     // =========================================================================
+    // GCP project field
+    // =========================================================================
+
+    #[test]
+    fn test_gcp_project_parsed() {
+        let config = ProviderConfig::parse("[gcp]\ntoken=abc\nproject=my-gcp-project\n");
+        assert_eq!(config.sections[0].project, "my-gcp-project");
+    }
+
+    #[test]
+    fn test_gcp_project_default_empty() {
+        let config = ProviderConfig::parse("[gcp]\ntoken=abc\n");
+        assert!(config.sections[0].project.is_empty());
+    }
+
+    #[test]
+    fn test_gcp_project_roundtrip() {
+        let content = "[gcp]\ntoken=sa.json\nproject=my-project\nregions=us-central1-a\n";
+        let config = ProviderConfig::parse(content);
+        assert_eq!(config.sections[0].project, "my-project");
+        assert_eq!(config.sections[0].regions, "us-central1-a");
+        // Re-serialize and parse
+        let serialized = format!(
+            "[gcp]\ntoken={}\nproject={}\nregions={}\n",
+            config.sections[0].token,
+            config.sections[0].project,
+            config.sections[0].regions,
+        );
+        let reparsed = ProviderConfig::parse(&serialized);
+        assert_eq!(reparsed.sections[0].project, "my-project");
+        assert_eq!(reparsed.sections[0].regions, "us-central1-a");
+    }
+
+    #[test]
+    fn test_default_alias_prefix_gcp() {
+        let config = ProviderConfig::parse("[gcp]\ntoken=abc\n");
+        assert_eq!(config.sections[0].alias_prefix, "gcp");
+    }
+
+    // =========================================================================
     // configured_providers and section methods
     // =========================================================================
 
@@ -1069,6 +1124,7 @@ verify_tls=false
                 auto_sync: true,
                 profile: String::new(),
                 regions: String::new(),
+                project: String::new(),
             });
         }
         assert_eq!(config.sections.len(), 3);

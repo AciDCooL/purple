@@ -166,8 +166,9 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
         let label_style = if is_focused { theme::accent_bold() } else { theme::muted() };
         let is_required = matches!(field, ProviderFormField::Url)
             || (field == ProviderFormField::Token && provider_name != "aws")
+            || (field == ProviderFormField::Project && provider_name == "gcp")
             || (field == ProviderFormField::Regions && matches!(provider_name, "aws" | "scaleway"));
-        let field_label = if field == ProviderFormField::Regions && provider_name == "scaleway" {
+        let field_label = if field == ProviderFormField::Regions && matches!(provider_name, "scaleway" | "gcp") {
             "Zones"
         } else {
             field.label()
@@ -213,10 +214,13 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
         ProviderFormField::Token => match provider_name {
             "proxmox" => "user@pam!token=secret",
             "aws" => "AccessKeyId:Secret (or use Profile)",
+            "gcp" => "/path/to/service-account.json (or access token)",
             _ => "your-api-token",
         },
         ProviderFormField::Profile => "Name from ~/.aws/credentials (or use Token)",
+        ProviderFormField::Project => "my-gcp-project-id",
         ProviderFormField::Regions => match provider_name {
+            "gcp" => "Enter to select zones (empty = all)",
             "scaleway" => "Enter to select zones",
             _ => "Enter to select regions",
         },
@@ -229,10 +233,12 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
             "proxmox" => "pve",
             "aws" => "aws",
             "scaleway" => "scw",
+            "gcp" => "gcp",
             _ => "prefix",
         },
         ProviderFormField::User => match provider_name {
             "aws" => "ec2-user",
+            "gcp" => "ubuntu",
             _ => "root",
         },
         ProviderFormField::IdentityFile => "Enter to pick a key",
@@ -284,6 +290,7 @@ fn render_field_content(
         ProviderFormField::Url => &form.url,
         ProviderFormField::Token => &form.token,
         ProviderFormField::Profile => &form.profile,
+        ProviderFormField::Project => &form.project,
         ProviderFormField::Regions => &form.regions,
         ProviderFormField::AliasPrefix => &form.alias_prefix,
         ProviderFormField::User => &form.user,
@@ -402,7 +409,7 @@ fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Clear, picker_area);
 
     let count = selected.len();
-    let zone_label = if provider_name == "scaleway" { "Zones" } else { "Regions" };
+    let zone_label = if matches!(provider_name, "scaleway" | "gcp") { "Zones" } else { "Regions" };
     let title = format!(" Select {} ({} selected) ", zone_label, count);
     let block_area = Rect::new(picker_area.x, picker_area.y, picker_area.width, block_height);
     let block = Block::bordered()

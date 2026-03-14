@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Stop grepping your SSH config. Start launching from it.</strong><br>
-  A fast, open-source TUI that turns <code>~/.ssh/config</code> into a searchable, taggable host launcher. Sync servers from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE and Scaleway. Your config stays respected.
+  A fast, open-source TUI that turns <code>~/.ssh/config</code> into a searchable, taggable host launcher. Sync servers from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway and Google Cloud (GCP). Your config stays respected.
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 
 ## What is purple?
 
-purple is a free, open-source SSH config manager, editor and host launcher written in Rust. It reads your existing `~/.ssh/config`, lets you search, filter, tag and connect with a single keystroke. It writes changes back without touching your comments or unknown directives. Save command snippets and run them on one or many hosts at once. Sync servers from eight cloud providers directly into your config. Manage SSH passwords with your OS keychain, 1Password, Bitwarden, pass or HashiCorp Vault. Runs on macOS and Linux. No browser, no YAML files, no context switching.
+purple is a free, open-source SSH config manager, editor and host launcher written in Rust. It reads your existing `~/.ssh/config`, lets you search, filter, tag and connect with a single keystroke. It writes changes back without touching your comments or unknown directives. Save command snippets and run them on one or many hosts at once. Sync servers from nine cloud providers directly into your config. Manage SSH passwords with your OS keychain, 1Password, Bitwarden, pass or HashiCorp Vault. Runs on macOS and Linux. No browser, no YAML files, no context switching.
 
 ## Install
 
@@ -70,7 +70,7 @@ Label hosts with `#tags`. Filter with the tag picker (`#` key) or type `tag:web`
 
 ### Cloud provider sync
 
-Pull servers from **AWS EC2**, **DigitalOcean**, **Vultr**, **Linode (Akamai)**, **Hetzner**, **UpCloud**, **Proxmox VE** and **Scaleway** directly into `~/.ssh/config`. Sync adds new hosts, updates changed IPs and optionally removes deleted servers. Tags from your cloud provider are merged with local tags.
+Pull servers from **AWS EC2**, **DigitalOcean**, **Vultr**, **Linode (Akamai)**, **Hetzner**, **UpCloud**, **Proxmox VE**, **Scaleway** and **GCP (Compute Engine)** directly into `~/.ssh/config`. Sync adds new hosts, updates changed IPs and optionally removes deleted servers. Tags from your cloud provider are merged with local tags.
 
 ```bash
 purple provider add digitalocean --token YOUR_TOKEN   # or use PURPLE_TOKEN env var
@@ -78,6 +78,7 @@ purple provider add digitalocean --token-stdin         # pipe from password mana
 purple provider add aws --profile default --regions us-east-1,eu-west-1
 purple provider add aws --token AKID:SECRET --regions us-east-1,eu-west-1
 purple provider add proxmox --url https://pve:8006 --token user@pam!token=secret
+purple provider add gcp --token /path/to/sa-key.json --project my-project --regions us-central1-a
 purple provider add digitalocean --token YOUR_TOKEN --no-auto-sync  # disable startup sync
 purple sync                                            # sync all providers
 purple sync --dry-run                                  # preview changes
@@ -272,7 +273,7 @@ purple --completions zsh            # Shell completions
 
 **It edits your real SSH config.** Most SSH tools only read. purple reads, edits and writes `~/.ssh/config` directly with full round-trip fidelity.
 
-**It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE and Scaleway into your config. Configure once, sync anytime.
+**It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway and Google Cloud (GCP) into your config. Configure once, sync anytime.
 
 **It runs commands across hosts.** Save command snippets and execute them on one host, a selection or all hosts at once. Sequential or parallel. No Ansible, no Fabric, no extra tools.
 
@@ -284,7 +285,7 @@ purple --completions zsh            # Shell completions
 
 ## Cloud providers
 
-purple syncs servers from eight cloud providers into your SSH config. Each provider is configured with an API token (or AWS credentials profile). Synced hosts get an alias prefix (e.g. `do-web-1`) and are tracked via comments in your config. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Run `purple sync` to update all providers at once. Auto-sync runs on startup for providers that have it enabled.
+purple syncs servers from nine cloud providers into your SSH config. Each provider is configured with an API token (or AWS credentials profile). Synced hosts get an alias prefix (e.g. `do-web-1`) and are tracked via comments in your config. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Run `purple sync` to update all providers at once. Auto-sync runs on startup for providers that have it enabled.
 
 ### AWS EC2
 
@@ -350,6 +351,16 @@ Syncs instances across multiple availability zones (Paris, Amsterdam, Warsaw, Mi
 
 ```bash
 purple provider add scaleway --token YOUR_TOKEN --regions fr-par-1,nl-ams-1
+```
+
+### GCP (Compute Engine)
+
+Syncs instances across multiple zones using the aggregatedList API. Authenticate with a service account JSON key file or a raw access token (e.g. from `gcloud auth print-access-token`). Requires a GCP project ID. Instance network tags and labels are synced. IP selection prefers external (natIP), falls back to internal.
+
+```bash
+purple provider add gcp --token /path/to/sa-key.json --project my-project
+purple provider add gcp --token /path/to/sa-key.json --project my-project --regions us-central1-a,europe-west1-b
+purple provider add gcp --token "$(gcloud auth print-access-token)" --project my-project
 ```
 
 ### Shared sync options

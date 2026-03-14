@@ -373,6 +373,7 @@ mod tests {
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         }
     }
 
@@ -903,6 +904,7 @@ Host do-web-1-copy
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         };
 
         // Remote has the included host's server_id with a different prefix
@@ -1720,6 +1722,7 @@ Host do-web-1-copy
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         };
 
         // Sync DO hosts
@@ -1752,6 +1755,7 @@ Host do-web-1-copy
             auto_sync: true,
             profile: String::new(),
             regions: String::new(),
+            project: String::new(),
         };
 
         // Add hosts from both providers

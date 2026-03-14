@@ -3621,6 +3621,7 @@ fn test_section(provider: &str, prefix: &str) -> ProviderSection {
         auto_sync: true,
         profile: String::new(),
         regions: String::new(),
+        project: String::new(),
     }
 }
 
@@ -4067,4 +4068,78 @@ fn sync_adds_metadata_to_config() {
     assert_eq!(entries[0].provider_meta.len(), 2);
     assert_eq!(entries[0].provider_meta[0], ("region".to_string(), "nyc3".to_string()));
     assert_eq!(entries[0].provider_meta[1], ("plan".to_string(), "s-1vcpu-1gb".to_string()));
+}
+
+// =========================================================================
+// GCP provider sync roundtrip
+// =========================================================================
+
+#[test]
+fn sync_gcp_adds_host_with_metadata_and_tags() {
+    let mut config = parse_str("");
+    let section = test_section("gcp", "gcp");
+    let provider = TestProvider { name: "gcp", label: "gcp" };
+    let remote = vec![ProviderHost {
+        server_id: "1234567890123456789".to_string(),
+        name: "web-1".to_string(),
+        ip: "35.192.0.1".to_string(),
+        tags: vec!["http-server".to_string(), "env:prod".to_string()],
+        metadata: vec![
+            ("region".to_string(), "us-central1-a".to_string()),
+            ("plan".to_string(), "e2-micro".to_string()),
+            ("os".to_string(), "debian-11".to_string()),
+            ("status".to_string(), "RUNNING".to_string()),
+        ],
+    }];
+    let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    assert_eq!(result.added, 1);
+
+    let output = config.serialize();
+    assert!(output.contains("Host gcp-web-1"), "alias should be gcp-web-1");
+    assert!(output.contains("HostName 35.192.0.1"), "hostname should be external IP");
+    assert!(output.contains("# purple:provider gcp:1234567890123456789"), "provider marker with uint64 ID");
+    assert!(output.contains("# purple:tags http-server,env:prod"), "tags from network tags and labels");
+    assert!(output.contains("# purple:meta region=us-central1-a,plan=e2-micro,os=debian-11"), "metadata (status excluded as volatile)");
+
+    // Re-parse and verify roundtrip fidelity
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    let gcp_entry = entries.iter().find(|e| e.alias == "gcp-web-1").unwrap();
+    assert_eq!(gcp_entry.provider.as_deref(), Some("gcp"));
+    assert!(gcp_entry.tags.contains(&"http-server".to_string()));
+    assert!(gcp_entry.tags.contains(&"env:prod".to_string()));
+}
+
+#[test]
+fn sync_gcp_updates_ip_preserves_user_tags() {
+    let input = "\
+Host gcp-web-1
+  HostName 35.192.0.1
+  User root
+  # purple:provider gcp:123
+  # purple:tags http-server,my-custom-tag
+  # purple:meta region=us-central1-a,plan=e2-micro
+";
+    let mut config = parse_str(input);
+    let section = test_section("gcp", "gcp");
+    let provider = TestProvider { name: "gcp", label: "gcp" };
+    let remote = vec![ProviderHost {
+        server_id: "123".to_string(),
+        name: "web-1".to_string(),
+        ip: "35.192.0.2".to_string(),
+        tags: vec!["http-server".to_string(), "env:prod".to_string()],
+        metadata: vec![
+            ("region".to_string(), "us-central1-a".to_string()),
+            ("plan".to_string(), "e2-micro".to_string()),
+        ],
+    }];
+    let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    assert_eq!(result.updated, 1);
+
+    let output = config.serialize();
+    assert!(output.contains("HostName 35.192.0.2"), "IP updated");
+    // User tag preserved, provider tags merged
+    assert!(output.contains("my-custom-tag"), "user tag preserved");
+    assert!(output.contains("http-server"), "provider tag preserved");
+    assert!(output.contains("env:prod"), "new provider tag merged");
 }
