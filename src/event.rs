@@ -27,6 +27,16 @@ pub enum AppEvent {
     },
     SyncProgress { provider: String, message: String },
     UpdateAvailable { version: String },
+    FileBrowserListing {
+        alias: String,
+        path: String,
+        entries: Result<Vec<crate::file_browser::FileEntry>, String>,
+    },
+    ScpComplete {
+        alias: String,
+        success: bool,
+        message: String,
+    },
     PollError,
 }
 
@@ -134,7 +144,9 @@ impl EventHandler {
                 | AppEvent::SyncPartial { .. }
                 | AppEvent::SyncError { .. }
                 | AppEvent::SyncProgress { .. }
-                | AppEvent::UpdateAvailable { .. } => preserved.push(event),
+                | AppEvent::UpdateAvailable { .. }
+                | AppEvent::FileBrowserListing { .. }
+                | AppEvent::ScpComplete { .. } => preserved.push(event),
                 _ => {}
             }
         }

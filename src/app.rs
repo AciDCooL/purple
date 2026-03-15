@@ -72,6 +72,7 @@ pub enum Screen {
         known_hosts_path: String,
         askpass: Option<String>,
     },
+    FileBrowser { alias: String },
 }
 
 /// Which form field is focused.
@@ -1065,6 +1066,10 @@ pub struct App {
 
     // Bitwarden session
     pub bw_session: Option<String>,
+
+    // File browser
+    pub file_browser: Option<crate::file_browser::FileBrowserState>,
+    pub file_browser_paths: HashMap<String, (PathBuf, String)>,
 }
 
 impl App {
@@ -1157,6 +1162,8 @@ impl App {
             update_hint: crate::update::update_hint(),
             sync_history: HashMap::new(),
             bw_session: None,
+            file_browser: None,
+            file_browser_paths: HashMap::new(),
         }
     }
 
@@ -1759,6 +1766,7 @@ impl App {
                 | Screen::TunnelList { .. } | Screen::TunnelForm { .. }
                 | Screen::HostDetail { .. }
                 | Screen::SnippetPicker { .. } | Screen::SnippetForm { .. }
+                | Screen::FileBrowser { .. }
         ) || self.tag_input.is_some()
         {
             return;

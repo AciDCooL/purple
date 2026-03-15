@@ -65,6 +65,12 @@ impl Tui {
         self.terminal.draw(|frame| ui::render(frame, app))?;
         Ok(())
     }
+
+    /// Force a full redraw on the next draw() call.
+    /// Use after external processes may have written to the terminal.
+    pub fn force_redraw(&mut self) {
+        self.terminal.clear().ok();
+    }
 }
 
 impl Drop for Tui {

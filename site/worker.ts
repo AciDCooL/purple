@@ -130,21 +130,21 @@ const LANDING_PAGE = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>purple. SSH config manager and host launcher for the terminal</title>
-<meta name="description" content="Free, open-source SSH config manager, editor and host launcher. TUI with search, tags, tunnels, command snippets, password management (keychain, 1Password, Bitwarden, pass, Vault), cloud provider sync (AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway, GCP, Azure) and round-trip fidelity for ~/.ssh/config. Written in Rust. macOS and Linux.">
-<meta name="keywords" content="SSH config manager, SSH launcher, terminal SSH, TUI SSH, SSH host manager, SSH command snippets, run command multiple hosts, cloud SSH sync, AWS EC2 SSH, DigitalOcean SSH, Vultr SSH, Linode SSH, Hetzner SSH, UpCloud SSH, Proxmox SSH, Scaleway SSH, GCP SSH, Google Cloud SSH, Google Cloud Platform SSH, Google Compute Engine SSH, Azure SSH, SSH tunnel manager, SSH config editor, Rust SSH tool, purple-ssh, SSH password manager, SSH askpass, SSH keychain, 1Password SSH, Bitwarden SSH, multi-host SSH execution, SSH automation">
+<title>purple. SSH config manager with file transfer and cloud sync</title>
+<meta name="description" content="Free SSH config manager with remote file explorer, command snippets, cloud sync (AWS, GCP, Azure + 7 more) and password management. Single Rust binary for macOS and Linux.">
+<meta name="keywords" content="SSH config manager, SSH connection manager, SSH file transfer, scp file manager, remote file explorer, SSH command snippets, devops SSH tool, sysadmin SSH manager, cloud SSH sync, AWS EC2 SSH, GCP SSH, Azure SSH, SSH tunnel manager, SSH password manager, purple-ssh">
 <meta name="robots" content="index, follow">
 <meta name="author" content="Eric Kochen">
-<meta property="og:title" content="purple. SSH config manager and host launcher for the terminal">
-<meta property="og:description" content="Free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher. Run command snippets across hosts. Sync servers from 10 cloud providers. Manage SSH passwords. Written in Rust.">
+<meta property="og:title" content="purple. SSH config manager with file transfer and cloud sync">
+<meta property="og:description" content="Free SSH config manager for the terminal. Browse and transfer remote files. Run commands across servers. Sync from AWS, GCP, Azure and 7 more cloud providers. Written in Rust.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://getpurple.sh">
 <meta property="og:image" content="https://raw.githubusercontent.com/erickochen/purple/master/preview.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:site_name" content="purple">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="purple. SSH config manager and host launcher">
-<meta name="twitter:description" content="Free, open-source TUI for managing SSH configs. Search, tag, run command snippets, sync cloud providers, manage passwords. Written in Rust.">
+<meta name="twitter:title" content="purple. SSH config manager with file transfer and cloud sync">
+<meta name="twitter:description" content="Free SSH config manager for the terminal. Browse and transfer remote files. Run commands across servers. Sync from AWS, GCP, Azure and 7 more. Written in Rust.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/erickochen/purple/master/preview.png">
 <link rel="canonical" href="https://getpurple.sh">
 <script type="application/ld+json">
@@ -153,13 +153,13 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "@type": "SoftwareApplication",
   "name": "purple",
   "alternateName": "purple-ssh",
-  "description": "SSH config manager, editor and host launcher for the terminal. TUI with search, tags, tunnels, command snippets, password management and cloud provider sync for ~/.ssh/config.",
+  "description": "SSH config manager, editor and host launcher for the terminal. TUI with search, tags, tunnels, command snippets, remote file explorer with scp transfer, password management and cloud provider sync for ~/.ssh/config.",
   "applicationCategory": "DeveloperApplication",
   "operatingSystem": "macOS, Linux",
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "1.28.2",
+  "softwareVersion": "2.0.0",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
   "codeRepository": "https://github.com/erickochen/purple",
@@ -179,21 +179,62 @@ const LANDING_PAGE = `<!DOCTYPE html>
     "Host tagging and filtering",
     "SSH tunnel management",
     "Command snippets with multi-host and parallel execution",
+    "Remote file explorer with dual-pane local/remote browsing and scp transfer",
     "Cloud provider sync: AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure",
-    "Password management: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault",
-    "Bulk import from known_hosts",
+    "Password management: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault, custom commands",
+    "Bulk import from hosts files and known_hosts",
     "SSH key management",
     "Atomic writes with automatic backups",
     "Split-pane detail panel with connection info, activity sparkline, provider metadata, tunnels and snippets",
     "Shell completions for Bash, zsh, fish"
   ]
 }
-<\/script>
+</script>
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "FAQPage",
   "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is purple SSH?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "purple is a free, open-source SSH config manager for the terminal. It reads your ~/.ssh/config and gives you a TUI to search, connect, transfer files, run commands across hosts, sync servers from 10 cloud providers and manage SSH passwords. Single Rust binary for macOS and Linux."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I transfer files between local and remote servers with purple?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Press f on any host to open the remote file explorer. It shows local files on the left and the remote server on the right. Navigate directories, select files and copy them between machines via scp. Works through ProxyJump chains, password sources and active tunnels."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What cloud providers does purple support?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "purple syncs servers from ten cloud providers: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine) and Azure. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do command snippets work in purple?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Save commands and run them on remote hosts via SSH. Select one host, multiple hosts or all visible hosts from the TUI. The CLI supports tag-based targeting and parallel execution. Snippets are stored locally in ~/.purple/snippets."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How does SSH password management work in purple?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Set a password source per host via the TUI or a global default. When you connect, purple acts as SSH_ASKPASS and retrieves the password automatically. Supported sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault and custom commands."
+      }
+    },
     {
       "@type": "Question",
       "name": "Does purple modify my existing SSH config?",
@@ -228,34 +269,10 @@ const LANDING_PAGE = `<!DOCTYPE html>
     },
     {
       "@type": "Question",
-      "name": "How do command snippets work in purple?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Save commands and run them on remote hosts via SSH. Select one host, multiple hosts or all visible hosts from the TUI. The CLI supports tag-based targeting and parallel execution. Snippets are stored locally in ~/.purple/snippets."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "How does SSH password management work in purple?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "Set a password source per host via the TUI or a global default. When you connect, purple acts as SSH_ASKPASS and retrieves the password automatically. Supported sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault and custom commands."
-      }
-    },
-    {
-      "@type": "Question",
       "name": "Can I use purple with SSH Include files?",
       "acceptedAnswer": {
         "@type": "Answer",
         "text": "Yes. Hosts from Include files are displayed in the TUI but never modified. purple resolves Include directives recursively (up to depth 5) with tilde and glob expansion."
-      }
-    },
-    {
-      "@type": "Question",
-      "name": "What cloud providers does purple support?",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "purple syncs servers from ten cloud providers: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine) and Azure. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync."
       }
     },
     {
@@ -276,7 +293,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
     }
   ]
 }
-<\/script>
+</script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -444,10 +461,10 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
 <body>
 <main>
   <h1>purple<span>.</span></h1>
-  <p class="tagline">SSH config manager and host launcher for the terminal</p>
+  <p class="tagline">SSH config manager with file transfer and cloud sync</p>
 
   <div class="install-box">
-    <code><span class="dim">$</span> curl -fsSL getpurple.sh | sh</code>
+    <code><span class="dim">\$</span> curl -fsSL getpurple.sh | sh</code>
     <button class="copy-btn" onclick="copy(this)">copy</button>
   </div>
 
@@ -458,26 +475,31 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
     cargo install purple-ssh
   </div>
 
+  <section>
+    <p>Manage, connect, transfer and automate across all your SSH servers from one terminal. purple reads your existing <code>~/.ssh/config</code>, gives you a TUI to search and connect, and writes changes back without touching your comments or formatting.</p>
+  </section>
+
   <div class="demo">
     <img src="https://raw.githubusercontent.com/erickochen/purple/master/demo.gif"
-         alt="purple SSH config manager TUI demo: searching hosts, connecting via SSH and syncing cloud providers in the terminal" loading="lazy" width="1300" height="600">
+         alt="purple SSH config manager TUI demo: searching hosts, transferring files, connecting via SSH and syncing cloud providers in the terminal" loading="lazy" width="1300" height="600">
   </div>
 
   <h2>Features</h2>
   <div class="features">
-    <div><strong>Search.</strong> Fuzzy find across aliases, hostnames, users and tags</div>
-    <div><strong>Tags.</strong> Organize hosts with #tags and filter instantly</div>
-    <div><strong>Snippets.</strong> Save commands, run on one or many hosts. Sequential or parallel</div>
-    <div><strong>Tunnels.</strong> Manage SSH port forwards (local, remote, dynamic) per host</div>
-    <div><strong>Round-trip fidelity.</strong> Preserves comments, formatting and unknown directives</div>
-    <div><strong>Bulk import.</strong> From hosts files or ~/.ssh/known_hosts</div>
-    <div><strong>Passwords.</strong> OS Keychain, 1Password, Bitwarden, pass, Vault integration</div>
-    <div><strong>SSH keys.</strong> Browse keys with metadata and linked hosts</div>
-    <div><strong>Cloud sync.</strong> Pull servers from 10 cloud providers into your config</div>
-    <div><strong>Self-update.</strong> Run <code>purple update</code></div>
-    <div><strong>Atomic writes.</strong> Temp file, chmod 600, rename. Automatic backups</div>
-    <div><strong>Ping.</strong> TCP connectivity check per host or all at once</div>
-    <div><strong>Detail panel.</strong> Split-pane view with connection info, activity sparkline, provider metadata, tunnels and snippets</div>
+    <div><strong>Search.</strong> Find any host in under a second. Fuzzy search across aliases, hostnames, users and tags</div>
+    <div><strong>Cloud sync.</strong> Never add a server IP manually again. Sync from 10 cloud providers</div>
+    <div><strong>File explorer.</strong> Transfer files without remembering scp paths. Dual-pane local/remote browsing</div>
+    <div><strong>Snippets.</strong> Run the same command on 50 servers at once. Sequential or parallel</div>
+    <div><strong>Tags.</strong> Organize by environment, team or project. Filter with #tags</div>
+    <div><strong>Tunnels.</strong> Manage port forwards per host. Start and stop from the TUI</div>
+    <div><strong>Passwords.</strong> No plaintext passwords. OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault, custom commands</div>
+    <div><strong>Round-trip fidelity.</strong> Your comments, formatting and unknown directives stay untouched</div>
+    <div><strong>SSH keys.</strong> Browse keys with metadata and see which hosts use each key</div>
+    <div><strong>Bulk import.</strong> Migrate from hosts files or ~/.ssh/known_hosts in one command</div>
+    <div><strong>Atomic writes.</strong> No half-written configs. Temp file, chmod 600, rename with backups</div>
+    <div><strong>Detail panel.</strong> See connection info, activity, provider metadata, tunnels and snippets at a glance</div>
+    <div><strong>Ping.</strong> Check which servers are reachable before you connect</div>
+    <div><strong>Self-update.</strong> Stay current with <code>purple update</code></div>
   </div>
 
   <section>
@@ -505,12 +527,22 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
 
   <section>
     <h2>Built with Rust</h2>
-    <p>Single binary. No runtime, no daemon, no async framework. 2700+ tests. Zero clippy warnings. MIT licensed.</p>
+    <p>Starts instantly. No dependencies to install. No daemon running in the background. Won't corrupt your config (atomic writes, automatic backups, 2900+ tests). Single binary, MIT licensed.</p>
   </section>
 
   <section>
     <h2>FAQ</h2>
     <dl class="faq">
+      <dt>What is purple?</dt>
+      <dd>A free, open-source SSH config manager for the terminal. Manage hundreds of hosts, transfer files visually, run commands across servers, sync from ten cloud providers and handle SSH passwords automatically. Single Rust binary for macOS and Linux.</dd>
+      <dt>Can I transfer files with purple?</dt>
+      <dd>Yes. Press <code>f</code> on any host to open the remote file explorer. It shows local files on the left and the remote server on the right. Navigate directories, select files and copy them between machines with <code>Enter</code>. Works through ProxyJump chains, password sources and active tunnels.</dd>
+      <dt>What cloud providers does purple support?</dt>
+      <dd>AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine) and Azure. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync.</dd>
+      <dt>How do command snippets work?</dt>
+      <dd>Save commands and run them on remote hosts via SSH. Select one host, multiple hosts or all visible hosts from the TUI. The CLI supports tag-based targeting and parallel execution. Snippets are stored locally in ~/.purple/snippets.</dd>
+      <dt>How does password management work?</dt>
+      <dd>Set a password source per host via the TUI or a global default. When you connect, purple acts as SSH_ASKPASS and retrieves the password automatically. Supported sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault and custom commands.</dd>
       <dt>Does purple modify my existing SSH config?</dt>
       <dd>Only when you add, edit, delete or sync. All writes are atomic with automatic backups. Auto-sync runs on startup for providers that have it enabled (configurable per provider).</dd>
       <dt>Will purple break my comments or formatting?</dt>
@@ -518,15 +550,9 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
       <dt>Does purple need a daemon or background process?</dt>
       <dd>No. It is a single Rust binary. Run it, use it, close it.</dd>
       <dt>Does purple send my SSH config anywhere?</dt>
-      <dd>No. Your config never leaves your machine. Provider sync calls cloud APIs to fetch server lists. No config data is transmitted.</dd>
-      <dt>How do command snippets work?</dt>
-      <dd>Save commands in purple and run them on remote hosts via SSH. Select one host, multiple hosts or all visible hosts. The CLI supports parallel execution with --parallel. Snippets are stored locally in ~/.purple/snippets.</dd>
-      <dt>How does password management work?</dt>
-      <dd>Set a password source per host via the TUI or a global default. When you connect, purple acts as SSH_ASKPASS and retrieves the password automatically. Supported sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault and custom commands.</dd>
+      <dd>No. Your config never leaves your machine. Provider sync calls cloud APIs to fetch server lists. The TUI checks GitHub for new releases on startup (cached for 24 hours). No config data is transmitted.</dd>
       <dt>Can I use purple with Include files?</dt>
       <dd>Yes. Hosts from Include files are displayed in the TUI but never modified. purple resolves Include directives recursively (up to depth 5) with tilde and glob expansion.</dd>
-      <dt>What cloud providers does purple support?</dt>
-      <dd>AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine) and Azure. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync.</dd>
       <dt>How do I sync Google Cloud (GCP) instances?</dt>
       <dd>Run <code>purple provider add gcp --token /path/to/sa-key.json --project my-project</code>. Pass a service account JSON key file path as the token. Purple reads the key, creates a JWT and exchanges it for an access token automatically. Alternatively, pass a raw access token from <code>gcloud auth print-access-token</code>. Only <code>compute.readonly</code> scope is required.</dd>
       <dt>How do I sync Azure VMs?</dt>
@@ -534,10 +560,15 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
     </dl>
   </section>
 
+  <div class="install-box">
+    <code><span class="dim">\$</span> curl -fsSL getpurple.sh | sh</code>
+    <button class="copy-btn" onclick="copy(this)">copy</button>
+  </div>
+
 </main>
 
 <footer>
-  <a href="https://github.com/erickochen/purple">GitHub</a> \u00b7 <a href="https://crates.io/crates/purple-ssh">crates.io</a> \u00b7 MIT License
+  <a href="https://github.com/erickochen/purple">GitHub</a> · <a href="https://crates.io/crates/purple-ssh">crates.io</a> · MIT License
 </footer>
 
 <script>
@@ -547,40 +578,41 @@ function copy(btn) {
     setTimeout(function() { btn.textContent = "copy"; }, 2000);
   }).catch(function() {});
 }
-<\/script>
+</script>
 </body>
-</html>`;
+</html>
+`;
 
 const LLMS_TXT = `# purple
 
-> SSH config manager and host launcher for the terminal
+> SSH config manager with file transfer and cloud sync for the terminal
 
-purple is a free, open-source TUI that turns ~/.ssh/config into a searchable, taggable host launcher with full round-trip fidelity. Run command snippets across multiple hosts. Single Rust binary. macOS and Linux. MIT licensed.
+purple is a free, open-source SSH config manager for macOS and Linux that provides a terminal UI for managing, connecting, transferring files and running commands across SSH servers. It edits ~/.ssh/config directly with full round-trip fidelity. Single Rust binary. MIT licensed.
 
 ## What purple does
 
-purple reads your existing ~/.ssh/config and gives you a terminal UI to search, filter, tag and connect to hosts. Changes are written back without touching your comments, formatting or unknown directives. Save command snippets and run them on one or many hosts. Sync servers from ten cloud providers directly into your SSH config. No browser, no YAML files, no context switching.
+Manage, connect, transfer and automate across all your SSH servers from one terminal. purple reads your existing ~/.ssh/config, gives you a TUI to search, filter, tag and connect to hosts, and writes changes back without touching your comments, formatting or unknown directives. Browse remote filesystems side by side with local files and transfer them with scp. Save command snippets and run them on one or many hosts. Sync servers from ten cloud providers directly into your SSH config. No browser, no YAML files, no context switching.
 
 ## Key capabilities
 
 - Reads, edits and writes ~/.ssh/config directly while preserving comments, formatting and unknown directives (round-trip fidelity)
-- Fuzzy search across aliases, hostnames, users, tags and providers
-- Host tagging via SSH config comments (# purple:tags)
-- Cloud provider sync: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure
-- SSH tunnel management: LocalForward, RemoteForward, DynamicForward. Start/stop from TUI or CLI
+- Fuzzy search across aliases, hostnames, users, tags and providers. Frecency-based sorting surfaces most-used hosts
+- Cloud provider sync: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure. Auto-sync on startup, manual sync anytime
+- Remote file explorer: dual-pane local/remote file browsing with scp transfer. Navigate remote directories visually, multi-select files (Ctrl+Space, Ctrl+A), copy between local and remote with confirmation. Works through ProxyJump, password sources and active tunnels. Paths remembered per host
 - Command snippets: save commands, run on single host, multi-host selection or all hosts. Sequential and parallel execution. TUI and CLI
-- Password management: OS Keychain, 1Password (op://), Bitwarden (bw:), pass (pass:), HashiCorp Vault (vault:), custom command
-- SSH key browsing with metadata (type, bits, fingerprint) and host linking
+- Password management: OS Keychain, 1Password (op://), Bitwarden (bw:), pass (pass:), HashiCorp Vault (vault:), custom command. Automatic SSH_ASKPASS integration
+- SSH tunnel management: LocalForward, RemoteForward, DynamicForward. Start/stop from TUI or CLI
+- Host tagging via SSH config comments (# purple:tags). Tag picker, fuzzy and exact tag filtering
 - Bulk import from hosts files or ~/.ssh/known_hosts
-- Frecency-based connection history and sorting
+- SSH key browsing with metadata (type, bits, fingerprint) and host linking
+- Split-pane detail panel showing connection info, activity sparkline, tags, provider metadata, tunnels and snippets
 - TCP ping / connectivity check per host or all at once
 - Atomic writes with automatic backups (last 5). Temp file, chmod 600, rename
 - Include file support (read-only, recursive up to depth 5, tilde + glob expansion)
-- Shell completions (bash, zsh, fish)
-- Self-update mechanism (macOS curl installs). Homebrew and cargo users update via their package manager
-- Auto-reload: detects external config changes every 4 seconds
 - Host key reset: detects changed host keys after server reinstalls and offers to remove the old key and reconnect
-- Split-pane detail panel (toggle with v key) showing connection info, activity sparkline, tags, provider metadata, tunnels and snippets alongside the host list. Auto-fallback to compact view on narrow terminals
+- Auto-reload: detects external config changes every 4 seconds
+- Self-update mechanism (macOS curl installs). Homebrew and cargo users update via their package manager
+- Shell completions (bash, zsh, fish)
 - Minimal UI with monochrome base and subtle color for status. Works in any terminal, respects NO_COLOR
 
 ## Install
@@ -644,7 +676,7 @@ Provider-specific details:
 - Scaleway: multi-zone sync across Paris, Amsterdam, Warsaw and Milan
 - GCP (Compute Engine): multi-zone sync via the aggregatedList API. Authenticate with a service account JSON key file (JWT RS256, scope: compute.readonly) or a raw access token (e.g. from gcloud auth print-access-token). Requires a GCP project ID. Empty zone filter syncs all zones. Network tags and labels are synced as host tags
 - Proxmox VE: self-signed TLS certificates supported. Per-VM detail API calls. Guest agent and LXC interface detection
-- Azure: multi-subscription sync via the Azure Resource Manager API. Authenticate with a service principal JSON file (tenantId, clientId, clientSecret -> OAuth2 client credentials) or a raw access token (e.g. from az account get-access-token). Requires subscription IDs via --regions. Batch IP resolution (3 list calls: VMs, NICs, Public IPs). VM tags synced as host tags
+- Azure: multi-subscription sync via the Azure Resource Manager API. Authenticate with a service principal JSON file (tenantId, clientId, clientSecret -> OAuth2 client credentials) or a raw Bearer token (e.g. from az account get-access-token). Requires subscription IDs via --regions. Batch IP resolution (3 list calls: VMs, NICs, Public IPs). VM tags synced as host tags
 
 Per-provider auto_sync toggle controls startup sync. Default is true for all providers except Proxmox (default false). Manual sync via the TUI (s key) or CLI always works. Preview changes with --dry-run. Remove deleted hosts with --remove. Replace local tags with --reset-tags.
 
@@ -690,13 +722,55 @@ Consecutive blank lines are collapsed to one. Hosts from Include files are displ
 - Language: Rust
 - Platforms: macOS and Linux
 - Binary name: purple (crate name: purple-ssh)
-- Tests: 2700+ (unit + integration)
+- Tests: 2900+ (unit + integration)
 - No async runtime. Single binary, no daemon
 - Atomic writes via temp file + chmod 600 + rename
 - Uses system ssh binary with -F <config_path>
 - License: MIT
 
+## Common use cases
+
+- SRE/DevOps engineer managing 50-500 servers across multiple cloud providers. Search, tag and group by provider
+- Developer transferring config files, logs or database dumps between servers without remembering scp paths
+- Team lead onboarding new members: share SSH config with cloud sync so they get all servers instantly
+- Freelancer managing client infrastructure across AWS, Hetzner and DigitalOcean from one TUI
+- Sysadmin running the same diagnostic command (disk check, uptime, restart) on multiple servers at once
+- Infrastructure engineer syncing cloud servers into SSH config automatically after scaling events
+- Developer managing SSH tunnels for local development (port forwarding to remote databases, APIs, internal services)
+- Security-conscious team storing SSH passwords in OS keychain, 1Password, Bitwarden, pass or Vault instead of plaintext
+
+## How purple compares to alternatives
+
+- vs. manual SSH config editing: purple adds search, tags, cloud sync, snippets, password management and remote file explorer while preserving your existing config
+- vs. Termius/Royal TSX: purple is free, open-source, terminal-native and edits your real SSH config. No proprietary database, no subscription
+- vs. storm/ssh-config-manager: purple adds a TUI, cloud provider sync, tunnels, snippets, password management and visual file transfer
+- vs. Ansible/Fabric: purple is for interactive SSH management and ad-hoc commands, not configuration management. Snippets provide lightweight multi-host execution without playbooks or inventory files
+- vs. scp/rsync: purple wraps scp in a visual dual-pane explorer so you browse directories and pick files instead of typing paths
+
+What makes purple unique:
+- Only terminal-based SSH manager with a visual dual-pane file explorer (scp transfer without leaving the TUI)
+- Only SSH config manager with cloud sync from 10 providers (AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway, GCP, Azure)
+- Only SSH config editor with integrated password management (6 sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault, custom commands)
+- Edits ~/.ssh/config directly with full round-trip fidelity (comments, formatting, unknown directives preserved). No proprietary database
+- Free and open-source (MIT). No subscription, no freemium limits
+
+Feature comparison:
+
+| Feature | purple | Termius | storm |
+|---------|--------|---------|-------|
+| SSH config editing | Read-write with round-trip fidelity | Proprietary database | Read-write, no TUI |
+| Cloud sync | 10 providers | None | None |
+| File transfer | Visual dual-pane scp | Built-in SFTP | None |
+| Password management | 6 sources (1Password, Bitwarden, Vault...) | Built-in vault | None |
+| Multi-host commands | Snippets with parallel execution | None | None |
+| SSH tunnels | TUI + CLI management | GUI | None |
+| Price | Free, MIT licensed | Freemium, paid for teams | Free, MIT |
+| Platform | macOS, Linux (terminal) | macOS, Windows, Linux, iOS, Android | macOS, Linux (terminal) |
+
 ## FAQ
+
+Q: What is purple SSH?
+A: purple is a free, open-source SSH config manager for macOS and Linux. It provides a terminal UI to search, connect, transfer files, run commands across hosts, sync servers from 10 cloud providers and manage SSH passwords. It edits ~/.ssh/config directly with full round-trip fidelity. Single Rust binary, no daemon, no subscription.
 
 Q: Does purple modify my existing SSH config?
 A: Only when you add, edit, delete or sync. All writes are atomic with automatic backups. Auto-sync runs on startup for providers that have it enabled.
@@ -719,11 +793,21 @@ A: Yes. Hosts from Include files are displayed in the TUI but never modified.
 Q: How does provider sync handle name conflicts?
 A: Synced hosts get an alias prefix (e.g. do-web-1 for DigitalOcean). If a name collides, purple appends a numeric suffix (do-web-1-2).
 
+Q: Can I transfer files with purple?
+A: Yes. Press f on any host to open the remote file explorer. It shows your local files on the left and the remote server on the right. Navigate directories with j/k and Enter, select files with Ctrl+Space and press Enter to copy via scp. Works through ProxyJump, password sources and active tunnels. Paths are remembered per host.
+
 Q: How do I sync Google Cloud (GCP) instances with purple?
 A: Run purple provider add gcp --token /path/to/sa-key.json --project my-project. Omit --regions to sync all zones or specify zones like --regions us-central1-a,europe-west1-b. Pass a service account JSON key file path as the token (must end in .json). Purple reads the key, creates a JWT (scope: compute.readonly) and exchanges it for an access token automatically. Alternatively, pass a raw access token (e.g. from gcloud auth print-access-token). No gcloud CLI installation required.
 
-Q: How do I sync Azure VMs with purple?
-A: Run purple provider add azure --token /path/to/sp.json --regions SUBSCRIPTION_ID. Pass a service principal JSON file path as the token (supports both az CLI output format with appId/password/tenant and manual format with clientId/clientSecret/tenantId). Alternatively, pass a raw access token (e.g. from az account get-access-token --query accessToken -o tsv). Use comma-separated subscription IDs for multi-subscription sync.
+## Limitations
+
+- macOS and Linux only. No Windows support (works in WSL)
+- Pre-built binaries are macOS only. Linux users install via cargo
+- File transfer uses scp. No SFTP or rsync integration
+- No GUI. Terminal-only by design
+- Each directory navigation in the file explorer opens a new SSH connection. Configure ControlMaster for faster navigation
+- Cloud sync is pull-only. purple does not provision or modify cloud infrastructure
+- Not a configuration management tool. For playbooks and infrastructure-as-code use Ansible, Terraform etc.
 
 ## Links
 

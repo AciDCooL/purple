@@ -7,10 +7,11 @@ use super::theme;
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let width: u16 = 80;
-    let left_lines = left_column();
-    let right_lines = right_column();
-    let total_lines = left_lines.len().max(right_lines.len()) as u16;
+    let col1 = left_column();
+    let col2 = middle_column();
+    let col3 = right_column();
+    let total_lines = col1.len().max(col2.len()).max(col3.len()) as u16;
+    let width: u16 = 110.min(frame.area().width.saturating_sub(4));
     // 2 border + 1 footer
     let max_body = frame.area().height.saturating_sub(5);
     // 2 border + 1 footer + 1 padding above footer + 1 padding below footer
@@ -52,7 +53,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     .split(inner);
 
     let cols = Layout::horizontal([
-        Constraint::Length(39),
+        Constraint::Length(36),
+        Constraint::Length(36),
         Constraint::Min(0),
     ])
     .split(rows[0]);
@@ -63,10 +65,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         app.ui.help_scroll = max_scroll;
     }
 
-    let left_para = Paragraph::new(left_lines).scroll((app.ui.help_scroll, 0));
-    let right_para = Paragraph::new(right_lines).scroll((app.ui.help_scroll, 0));
-    frame.render_widget(left_para, cols[0]);
-    frame.render_widget(right_para, cols[1]);
+    let para1 = Paragraph::new(col1).scroll((app.ui.help_scroll, 0));
+    let para2 = Paragraph::new(col2).scroll((app.ui.help_scroll, 0));
+    let para3 = Paragraph::new(col3).scroll((app.ui.help_scroll, 0));
+    frame.render_widget(para1, cols[0]);
+    frame.render_widget(para2, cols[1]);
+    frame.render_widget(para3, cols[2]);
 
     let can_scroll = total_lines > max_body;
     let spans = if can_scroll {
@@ -89,56 +93,69 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 fn left_column() -> Vec<Line<'static>> {
     vec![
         Line::from(""),
-        section_header("NAVIGATE"),
-        help_line(" j/k        ", "up / down"),
-        help_line(" PgDn/PgUp  ", "page down / up"),
-        help_line(" /          ", "search hosts"),
-        help_line(" #          ", "filter by tag"),
-        help_line(" s          ", "cycle sort mode"),
-        help_line(" g          ", "group by provider"),
+        section_header("HOST LIST"),
+        help_line(" j/k       ", "up / down"),
+        help_line(" PgDn/PgUp ", "page down / up"),
+        help_line(" Enter     ", "connect to host"),
+        help_line(" /         ", "search hosts"),
+        help_line(" #         ", "filter by tag"),
+        help_line(" s         ", "cycle sort mode"),
+        help_line(" g         ", "group by provider"),
+        help_line(" a         ", "add host"),
+        help_line(" e         ", "edit host"),
+        help_line(" d         ", "delete host"),
+        help_line(" c         ", "clone host"),
+        help_line(" t         ", "tag host (inline)"),
+        help_line(" u         ", "undo delete"),
+        help_line(" i         ", "inspect directives"),
+        help_line(" v         ", "toggle detail panel"),
+    ]
+}
+
+fn middle_column() -> Vec<Line<'static>> {
+    vec![
         Line::from(""),
-        section_header("MANAGE"),
-        help_line(" Enter      ", "connect to host"),
-        help_line(" a          ", "add host"),
-        help_line(" e          ", "edit host"),
-        help_line(" d          ", "delete host"),
-        help_line(" c          ", "clone host"),
-        help_line(" t          ", "tag host (inline)"),
-        help_line(" u          ", "undo delete"),
+        section_header("HOST LIST (continued)"),
+        help_line(" y         ", "copy ssh command"),
+        help_line(" x         ", "copy config block"),
+        help_line(" p / P     ", "ping host / all"),
+        help_line(" ^Space    ", "select / deselect"),
+        help_line(" r         ", "run snippet on host(s)"),
+        help_line(" R         ", "run on all visible"),
+        help_line(" f         ", "remote file explorer"),
+        help_line(" T         ", "tunnels for host"),
+        help_line(" S         ", "cloud providers"),
+        help_line(" K         ", "SSH keys"),
         Line::from(""),
-        section_header("TOOLS"),
-        help_line(" i          ", "inspect all directives"),
-        help_line(" v          ", "toggle detail panel"),
-        help_line(" y          ", "copy ssh command"),
-        help_line(" x          ", "copy config block"),
-        help_line(" p / P      ", "ping host / ping all"),
+        section_header("FORMS"),
+        help_line(" Tab       ", "next field"),
+        help_line(" Shift+Tab ", "previous field"),
+        help_line(" Enter     ", "save / open picker"),
+        help_line(" ^D        ", "set global default"),
+        help_line(" Esc       ", "cancel"),
     ]
 }
 
 fn right_column() -> Vec<Line<'static>> {
     vec![
         Line::from(""),
-        section_header("SNIPPETS"),
-        help_line(" Ctrl+Space ", "select / deselect host"),
-        help_line(" r          ", "run snippet on host(s)"),
-        help_line(" R          ", "run on all visible"),
-        Line::from(""),
-        section_header("OVERLAYS"),
-        help_line(" T          ", "tunnels for host"),
-        help_line(" S          ", "cloud providers"),
-        help_line(" K          ", "SSH keys"),
-        Line::from(""),
-        section_header("FORMS"),
-        help_line(" Tab        ", "next field"),
-        help_line(" Shift+Tab  ", "previous field"),
-        help_line(" Enter      ", "save / open picker"),
-        help_line(" Esc        ", "cancel"),
+        section_header("FILE EXPLORER (f)"),
+        help_line(" Tab       ", "switch pane"),
+        help_line(" j/k       ", "navigate"),
+        help_line(" Enter     ", "open dir / copy"),
+        help_line(" Backspace ", "go up"),
+        help_line(" ^Space    ", "select / deselect"),
+        help_line(" ^A        ", "select all / none"),
+        help_line(" .         ", "toggle hidden files"),
+        help_line(" R         ", "refresh both panes"),
         Line::from(""),
         section_header("SEARCH"),
-        help_line(" tag:name   ", "fuzzy tag filter"),
-        help_line(" tag=name   ", "exact tag filter"),
+        help_line(" tag:name  ", "fuzzy tag filter"),
+        help_line(" tag=name  ", "exact tag filter"),
         Line::from(""),
-        help_line(" q / Esc    ", "quit / close"),
+        Line::from(""),
+        Line::from(""),
+        help_line(" q / Esc   ", "quit / close"),
     ]
 }
 

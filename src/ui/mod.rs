@@ -1,5 +1,6 @@
 mod confirm_dialog;
 mod detail_panel;
+mod file_browser;
 mod help;
 mod host_detail;
 pub mod host_form;
@@ -107,6 +108,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             let hostname = hostname.clone();
             host_list::render(frame, app);
             confirm_dialog::render_host_key_reset(frame, app, &hostname);
+        }
+        Screen::FileBrowser { .. } => {
+            // Hide status from host list footer so it only shows in the overlay
+            let status = app.status.take();
+            host_list::render(frame, app);
+            app.status = status;
+            file_browser::render(frame, app);
         }
     }
 }

@@ -1,8 +1,8 @@
-<h1 align="center">purple.<br>SSH config manager and host launcher<br>for the terminal.</h1>
+<h1 align="center">purple.<br>Stop grepping your SSH config.<br>Start launching from it.</h1>
 
 <p align="center">
-  <strong>Stop grepping your SSH config. Start launching from it.</strong><br>
-  A fast, open-source TUI that turns <code>~/.ssh/config</code> into a searchable, taggable host launcher. Sync servers from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway, Google Cloud (GCP) and Azure. Your config stays respected.
+  SSH config manager with file transfer and cloud sync for the terminal.<br>
+  Manage, connect, transfer files and run commands across all your SSH servers from one TUI. Sync from 10 cloud providers. Edits your <code>~/.ssh/config</code> directly.
 </p>
 
 <p align="center">
@@ -12,11 +12,13 @@
   <a href="https://getpurple.sh"><img src="https://img.shields.io/badge/Website-getpurple.sh-9333ea.svg" alt="purple website"></a>
 </p>
 
-<p align="center"><img src="demo.gif" alt="purple SSH config manager TUI demo: searching hosts, connecting via SSH, syncing cloud providers" width="800"></p>
+<p align="center"><img src="demo.gif" alt="purple SSH config manager TUI demo: searching hosts, transferring files, connecting via SSH and syncing cloud providers" width="800"></p>
 
 ## What is purple?
 
-purple is a free, open-source SSH config manager, editor and host launcher written in Rust. It reads your existing `~/.ssh/config`, lets you search, filter, tag and connect with a single keystroke. It writes changes back without touching your comments or unknown directives. Save command snippets and run them on one or many hosts at once. Sync servers from ten cloud providers directly into your config. Manage SSH passwords with your OS keychain, 1Password, Bitwarden, pass or HashiCorp Vault. Runs on macOS and Linux. No browser, no YAML files, no context switching.
+purple is a free, open-source SSH config manager for the terminal. Manage hundreds of hosts, transfer files visually, run commands across servers, sync from ten cloud providers and handle SSH passwords automatically. All from one TUI that edits your `~/.ssh/config` directly.
+
+It reads your existing config, lets you search, filter, tag and connect with a single keystroke, and writes changes back without touching your comments or unknown directives. Runs on macOS and Linux. No browser, no YAML files, no context switching.
 
 ## Install
 
@@ -62,15 +64,15 @@ Downloads the latest release from GitHub, verifies the checksum and replaces the
 
 ### Search and connect
 
-Instant fuzzy search across aliases, hostnames, users, tags and providers. Navigate with `j`/`k`, connect with `Enter`. Frecency sorting surfaces your most-used and most-recent hosts.
+Find any host in under a second, no matter how large your config. Instant fuzzy search across aliases, hostnames, users, tags and providers. Navigate with `j`/`k`, connect with `Enter`. Frecency sorting surfaces your most-used and most-recent hosts.
 
 ### Tags
 
-Label hosts with `#tags`. Filter with the tag picker (`#` key) or type `tag:web` in search. Tags are stored as SSH config comments and survive round-trips.
+Organize hosts by environment, team or project without external tools. Label hosts with `#tags`. Filter with the tag picker (`#` key) or type `tag:web` in search. Tags are stored as SSH config comments and survive round-trips.
 
 ### Cloud provider sync
 
-Pull servers from **AWS EC2**, **DigitalOcean**, **Vultr**, **Linode (Akamai)**, **Hetzner**, **UpCloud**, **Proxmox VE**, **Scaleway**, **GCP (Compute Engine)** and **Azure** directly into `~/.ssh/config`. Sync adds new hosts, updates changed IPs and optionally removes deleted servers. Tags from your cloud provider are merged with local tags.
+Never manually add a server IP to your SSH config again. Pull servers from **AWS EC2**, **DigitalOcean**, **Vultr**, **Linode (Akamai)**, **Hetzner**, **UpCloud**, **Proxmox VE**, **Scaleway**, **GCP (Compute Engine)** and **Azure** directly into `~/.ssh/config`. Sync adds new hosts, updates changed IPs and optionally removes deleted servers. Tags from your cloud provider are merged with local tags.
 
 ```bash
 purple provider add digitalocean --token YOUR_TOKEN   # or use PURPLE_TOKEN env var
@@ -116,6 +118,12 @@ purple snippet remove check-disk                   # remove a snippet
 
 In the TUI, press `r` to run a snippet on the selected host. Select multiple hosts with `Ctrl+Space` and press `r` to run on all selected. Press `R` to run on all visible hosts.
 
+### Remote file explorer
+
+Press `f` on any host to open a split-screen file explorer. Your local filesystem on the left, the remote server on the right. Navigate directories, select files and copy them between machines with `Enter`. No more constructing scp paths from memory.
+
+The explorer uses your existing SSH config. ProxyJump chains, password sources and active tunnels all work transparently. Select multiple files with `Ctrl+Space` or select all with `Ctrl+A`. Copy entire directories and confirm the transfer direction before anything moves. Toggle hidden files with `.` and refresh both panes with `R`. Paths are remembered per host so you pick up where you left off.
+
 ### Round-trip fidelity
 
 Comments, indentation, unknown directives, CRLF line endings, equals-syntax and inline comments are all preserved through every read-write cycle. Consecutive blank lines are collapsed. Hosts from `Include` files are displayed but never modified.
@@ -157,17 +165,25 @@ Browse your SSH keys with metadata (type, bits, fingerprint, comment) and see wh
 purple                              # Launch the TUI
 purple myserver                     # Connect or search
 purple -c myserver                  # Direct connect
+purple --config ~/other/ssh_config  # Use alternate config file
 purple --list                       # List all hosts
 purple add deploy@10.0.1.5:22      # Quick-add a host
+purple add user@host --alias name   # Quick-add with custom alias
+purple add user@host --key ~/.ssh/id_ed25519  # Quick-add with key
 purple import hosts.txt             # Bulk import from file
 purple import --known-hosts         # Import from known_hosts
 purple provider add digitalocean    # Configure cloud provider
+purple provider list                # List configured providers
+purple provider remove digitalocean # Remove provider
 purple sync                         # Sync all providers
+purple sync digitalocean            # Sync single provider
 purple sync --dry-run               # Preview sync changes
 purple sync --remove                # Remove hosts deleted from provider
 purple sync --reset-tags            # Replace local tags with provider tags
 purple tunnel list                  # List configured tunnels
+purple tunnel list myserver         # List tunnels for a host
 purple tunnel add myserver L:8080:localhost:80  # Add forward
+purple tunnel remove myserver L:8080:localhost:80  # Remove forward
 purple tunnel start myserver        # Start tunnel (Ctrl+C to stop)
 purple snippet list                 # List saved snippets
 purple snippet add NAME "COMMAND"   # Add a snippet
@@ -192,6 +208,7 @@ purple --completions zsh            # Shell completions
 | Key         | Action                           |
 | ----------- | -------------------------------- |
 | `j` / `k`   | Navigate down and up             |
+| `PgDn`/`PgUp`| Page down / up                  |
 | `Enter`     | Connect to selected host         |
 | `a`         | Add new host                     |
 | `e`         | Edit selected host               |
@@ -213,6 +230,7 @@ purple --completions zsh            # Shell completions
 | `Ctrl+Space`| Select / deselect host           |
 | `r`         | Run snippet on host(s)           |
 | `R`         | Run snippet on all visible       |
+| `f`         | Remote file explorer (scp)       |
 | `T`         | Manage host tunnels              |
 | `K`         | SSH key list                     |
 | `?`         | Help                             |
@@ -250,6 +268,20 @@ purple --completions zsh            # Shell completions
 | `d`         | Delete snippet         |
 | `q` / `Esc` | Back                   |
 
+**File Explorer** (press `f` on a host)
+
+| Key         | Action                 |
+| ----------- | ---------------------- |
+| `Tab`       | Switch pane            |
+| `j` / `k`   | Navigate               |
+| `Enter`     | Open directory / copy  |
+| `Backspace` | Go up                  |
+| `Ctrl+Space`| Select / deselect      |
+| `Ctrl+A`   | Select all / none       |
+| `.`         | Toggle hidden files    |
+| `R`         | Refresh both panes     |
+| `Esc`       | Close                  |
+
 **Search**
 
 | Key                 | Action                 |
@@ -258,6 +290,8 @@ purple --completions zsh            # Shell completions
 | `Enter`             | Connect to selected    |
 | `Esc`               | Cancel search          |
 | `Tab` / `Shift+Tab` | Next / previous result |
+| `tag:name`          | Fuzzy tag filter       |
+| `tag=name`          | Exact tag filter       |
 
 **Form**
 
@@ -272,13 +306,17 @@ purple --completions zsh            # Shell completions
 
 ## How purple compares
 
+Most SSH tools read your config but don't write it, sync one cloud but not ten, or require a GUI and a subscription. purple does all of it from the terminal.
+
 **It edits your real SSH config.** Most SSH tools only read. purple reads, edits and writes `~/.ssh/config` directly with full round-trip fidelity.
 
-**It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway, Google Cloud (GCP) and Azure into your config. Configure once, sync anytime.
+**It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from 10 cloud providers into your config. Configure once, sync anytime.
 
 **It runs commands across hosts.** Save command snippets and execute them on one host, a selection or all hosts at once. Sequential or parallel. No Ansible, no Fabric, no extra tools.
 
-**It manages SSH passwords.** Store passwords in your OS keychain or pull them from 1Password, Bitwarden, pass or HashiCorp Vault. Purple handles SSH_ASKPASS automatically.
+**It manages SSH passwords.** Store passwords in your OS keychain or pull them from 1Password, Bitwarden, pass, HashiCorp Vault or a custom command. Purple handles SSH_ASKPASS automatically.
+
+**It transfers files visually.** Open a split-screen file explorer on any host, browse remote directories alongside local ones and copy files with a keystroke. No scp paths to remember, no separate tool to open.
 
 **It imports what you already have.** Bulk import from host files or `~/.ssh/known_hosts`. No manual re-entry.
 
@@ -461,6 +499,12 @@ Source value: my-script %a %h
 
 ## FAQ
 
+**Can I transfer files with purple?**
+Yes. Press `f` on any host to open the remote file explorer. It shows local files on the left and the remote server on the right. Navigate directories, select files and copy them between machines with `Enter`. Works through ProxyJump chains, password sources and active tunnels.
+
+**What cloud providers does purple support?**
+AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine) and Azure. See the [Cloud providers](#cloud-providers) section for setup details per provider.
+
 **Does purple modify my existing SSH config?**
 Only when you add, edit, delete or sync. Auto-sync runs on startup for providers that have it enabled (toggle per provider, on by default except Proxmox). All writes are atomic with automatic backups.
 
@@ -491,7 +535,7 @@ Found a bug or have a feature request? [Open an issue on GitHub](https://github.
 
 ## Built with
 
-Rust. 2700+ tests. Zero clippy warnings. No async runtime. Single binary.
+Rust. 2900+ tests. Zero clippy warnings. No async runtime. Single binary.
 
 <p align="center">
   <a href="LICENSE">MIT License</a>

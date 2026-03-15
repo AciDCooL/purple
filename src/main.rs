@@ -3,6 +3,7 @@ mod askpass;
 mod clipboard;
 mod connection;
 mod event;
+mod file_browser;
 mod handler;
 mod fs_util;
 mod history;
@@ -602,6 +603,95 @@ fn run_tui(mut app: App) -> Result<()> {
             AppEvent::UpdateAvailable { version } => {
                 app.update_available = Some(version);
             }
+            AppEvent::FileBrowserListing { alias, path, entries } => {
+                let mut record_connection = false;
+                if let Some(ref mut fb) = app.file_browser {
+                    if fb.alias == alias {
+                        fb.remote_loading = false;
+                        match entries {
+                            Ok(listing) => {
+                                if !fb.connection_recorded {
+                                    fb.connection_recorded = true;
+                                    record_connection = true;
+                                }
+                                if fb.remote_path.is_empty() || fb.remote_path != path {
+                                    fb.remote_path = path;
+                                }
+                                fb.remote_entries = listing;
+                                fb.remote_error = None;
+                                fb.remote_list_state = ratatui::widgets::ListState::default();
+                                fb.remote_list_state.select(Some(0));
+                            }
+                            Err(msg) => {
+                                if fb.remote_path.is_empty() {
+                                    fb.remote_path = path;
+                                }
+                                fb.remote_error = Some(msg);
+                                fb.remote_entries.clear();
+                            }
+                        }
+                    }
+                }
+                if record_connection {
+                    app.history.record(&alias);
+                    app.apply_sort();
+                }
+                // Force full redraw: ssh may have written to /dev/tty
+                terminal.force_redraw();
+            }
+            AppEvent::ScpComplete { alias, success, message } => {
+                // Track whether we need to spawn a remote refresh (can't do it inside the fb borrow
+                // because spawn_remote_listing needs values from app too)
+                let mut refresh_remote: Option<(String, Option<String>, String, bool)> = None;
+                let matched = if let Some(ref mut fb) = app.file_browser {
+                    if fb.alias == alias {
+                        fb.transferring = None;
+                        if success {
+                            app.history.record(&alias);
+                            fb.local_selected.clear();
+                            fb.remote_selected.clear();
+                            match file_browser::list_local(&fb.local_path, fb.show_hidden) {
+                                Ok(entries) => { fb.local_entries = entries; fb.local_error = None; }
+                                Err(e) => { fb.local_entries = Vec::new(); fb.local_error = Some(e.to_string()); }
+                            }
+                            fb.local_list_state.select(Some(0));
+                            if !fb.remote_path.is_empty() {
+                                fb.remote_loading = true;
+                                fb.remote_entries.clear();
+                                fb.remote_error = None;
+                                fb.remote_list_state = ratatui::widgets::ListState::default();
+                                refresh_remote = Some((
+                                    fb.alias.clone(), fb.askpass.clone(),
+                                    fb.remote_path.clone(), fb.show_hidden,
+                                ));
+                            }
+                        } else {
+                            fb.transfer_error = Some(message.clone());
+                        }
+                        true
+                    } else { false }
+                } else { false };
+                if matched && success {
+                    app.set_status("Transfer complete.", false);
+                    // Rebuild display list so frecency sort and LAST column reflect the transfer
+                    app.apply_sort();
+                }
+                if let Some((fb_alias, askpass_fb, path, show_hidden)) = refresh_remote {
+                    let config_path = app.reload.config_path.clone();
+                    let has_tunnel = app.active_tunnels.contains_key(&fb_alias);
+                    let bw = app.bw_session.clone();
+                    let tx = events_tx.clone();
+                    file_browser::spawn_remote_listing(
+                        fb_alias, config_path, path, show_hidden,
+                        askpass_fb, bw, has_tunnel, move |a, p, e| {
+                            let _ = tx.send(AppEvent::FileBrowserListing { alias: a, path: p, entries: e });
+                        },
+                    );
+                }
+                askpass::cleanup_marker(&alias);
+                // Force full redraw: ssh may have written to /dev/tty
+                terminal.force_redraw();
+            }
             AppEvent::PollError => {
                 app.running = false;
             }
@@ -719,6 +809,7 @@ fn run_tui(mut app: App) -> Result<()> {
             app.reload_hosts();
             app.update_last_modified();
         }
+
     }
 
     // Kill all active tunnels on exit
