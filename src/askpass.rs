@@ -328,8 +328,10 @@ fn retrieve_from_command(cmd: &str, alias: &str, hostname: &str) -> Result<Strin
 }
 
 /// Get the path for the retry marker file.
+/// Sanitizes the alias to prevent path traversal (replaces `/` and `\` with `_`).
 fn marker_path(alias: &str) -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(format!(".purple/.askpass_{}", alias)))
+    let safe = alias.replace(['/', '\\', '.'], "_");
+    dirs::home_dir().map(|h| h.join(format!(".purple/.askpass_{}", safe)))
 }
 
 /// Check if a marker file exists and is recent (< 60 seconds old).

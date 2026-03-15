@@ -130,9 +130,9 @@ const LANDING_PAGE = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>purple. SSH config manager with file transfer and cloud sync</title>
+<title>purple. SSH Config Manager with File Transfer & Cloud Sync | Free & Open Source</title>
 <meta name="description" content="Free SSH config manager with remote file explorer, command snippets, cloud sync (AWS, GCP, Azure + 7 more) and password management. Single Rust binary for macOS and Linux.">
-<meta name="keywords" content="SSH config manager, SSH connection manager, SSH file transfer, scp file manager, remote file explorer, SSH command snippets, devops SSH tool, sysadmin SSH manager, cloud SSH sync, AWS EC2 SSH, GCP SSH, Azure SSH, SSH tunnel manager, SSH password manager, purple-ssh">
+<meta name="keywords" content="SSH config manager, SSH config editor, SSH connection manager, SSH host manager, SSH file transfer, scp file manager, remote file explorer, terminal file transfer, SSH command snippets, SSH automation, devops SSH tool, sysadmin SSH manager, cloud SSH sync, multi-cloud SSH, AWS EC2 SSH, GCP SSH, Azure SSH, DigitalOcean SSH manager, Hetzner SSH, Proxmox SSH, SSH tunnel manager, SSH password manager, open source SSH client, free SSH manager, Rust SSH tool, Rust TUI, purple-ssh">
 <meta name="robots" content="index, follow">
 <meta name="author" content="Eric Kochen">
 <meta property="og:title" content="purple. SSH config manager with file transfer and cloud sync">
@@ -159,7 +159,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "2.0.0",
+  "softwareVersion": "2.0.1",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
   "codeRepository": "https://github.com/erickochen/purple",
@@ -173,6 +173,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
     "name": "Eric Kochen",
     "url": "https://github.com/erickochen"
   },
+  "keywords": "SSH, SSH config manager, SSH config editor, cloud sync, file transfer, TUI, DevOps, sysadmin, multi-cloud, open source",
   "featureList": [
     "SSH config round-trip fidelity",
     "Fuzzy search across hosts",
@@ -396,6 +397,66 @@ h2 {
   color: #e0e0e0;
   font-weight: 600;
 }
+.hero-features {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 56px;
+}
+.hero-features div {
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 20px;
+}
+.hero-features h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e0e0e0;
+  margin-bottom: 8px;
+}
+.hero-features p {
+  font-size: 0.85rem;
+  color: #888;
+  line-height: 1.5;
+}
+.use-cases {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  font-size: 0.85rem;
+  color: #888;
+}
+.use-cases div {
+  background: #161616;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  padding: 12px 16px;
+}
+.comparison {
+  font-size: 0.9rem;
+  color: #888;
+}
+.comparison div {
+  margin-bottom: 12px;
+}
+.comparison strong {
+  color: #e0e0e0;
+}
+.secondary-cta {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 16px;
+  font-size: 0.85rem;
+}
+.secondary-cta a {
+  color: #888;
+  text-decoration: none;
+  border-bottom: 1px solid #333;
+  transition: all 0.15s;
+}
+.secondary-cta a:hover { color: #9333ea; border-color: #9333ea; }
 section {
   margin-bottom: 56px;
 }
@@ -453,7 +514,9 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
   h1 { font-size: 2.2rem; }
   .install-box { padding: 16px; }
   .install-box code { font-size: 0.85rem; }
+  .hero-features { grid-template-columns: 1fr; }
   .features { grid-template-columns: 1fr; }
+  .use-cases { grid-template-columns: 1fr; }
   .providers { grid-template-columns: 1fr 1fr; }
 }
 </style>
@@ -461,7 +524,7 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
 <body>
 <main>
   <h1>purple<span>.</span></h1>
-  <p class="tagline">SSH config manager with file transfer and cloud sync</p>
+  <p class="tagline">One terminal for all your SSH servers</p>
 
   <div class="install-box">
     <code><span class="dim">\$</span> curl -fsSL getpurple.sh | sh</code>
@@ -484,15 +547,27 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
          alt="purple SSH config manager TUI demo: searching hosts, transferring files, connecting via SSH and syncing cloud providers in the terminal" loading="lazy" width="1300" height="600">
   </div>
 
+  <div class="hero-features">
+    <div>
+      <h3>File explorer</h3>
+      <p>Transfer files without remembering scp paths. Dual-pane local/remote browsing. Select files, copy between machines with Enter. Works through ProxyJump and active tunnels.</p>
+    </div>
+    <div>
+      <h3>Cloud sync</h3>
+      <p>Never add a server IP manually again. Sync from 10 cloud providers into your SSH config. Tags, metadata and IPs updated automatically.</p>
+    </div>
+    <div>
+      <h3>Password management</h3>
+      <p>No plaintext passwords. Retrieve passwords automatically from OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault or custom commands.</p>
+    </div>
+  </div>
+
   <h2>Features</h2>
   <div class="features">
     <div><strong>Search.</strong> Find any host in under a second. Fuzzy search across aliases, hostnames, users and tags</div>
-    <div><strong>Cloud sync.</strong> Never add a server IP manually again. Sync from 10 cloud providers</div>
-    <div><strong>File explorer.</strong> Transfer files without remembering scp paths. Dual-pane local/remote browsing</div>
     <div><strong>Snippets.</strong> Run the same command on 50 servers at once. Sequential or parallel</div>
     <div><strong>Tags.</strong> Organize by environment, team or project. Filter with #tags</div>
     <div><strong>Tunnels.</strong> Manage port forwards per host. Start and stop from the TUI</div>
-    <div><strong>Passwords.</strong> No plaintext passwords. OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault, custom commands</div>
     <div><strong>Round-trip fidelity.</strong> Your comments, formatting and unknown directives stay untouched</div>
     <div><strong>SSH keys.</strong> Browse keys with metadata and see which hosts use each key</div>
     <div><strong>Bulk import.</strong> Migrate from hosts files or ~/.ssh/known_hosts in one command</div>
@@ -531,6 +606,26 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
   </section>
 
   <section>
+    <h2>Who uses purple</h2>
+    <div class="use-cases">
+      <div>SRE managing 200 servers across AWS, GCP and Hetzner. Search, tag and connect in seconds.</div>
+      <div>Developer transferring config files and logs between servers without typing scp paths.</div>
+      <div>Freelancer managing client infrastructure across multiple clouds from one TUI.</div>
+      <div>Sysadmin running the same diagnostic command on 50 servers at once with snippets.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Why purple</h2>
+    <div class="comparison">
+      <div><strong>vs. manual SSH config editing.</strong> purple adds search, tags, cloud sync, snippets, password management and a remote file explorer while preserving your existing config.</div>
+      <div><strong>vs. Termius / Royal TSX.</strong> purple is free, open-source, terminal-native and edits your real SSH config. No proprietary database, no subscription.</div>
+      <div><strong>vs. storm / sshs.</strong> purple adds a TUI with config editing, cloud sync from 10 providers, file transfer, snippets and password management.</div>
+      <div><strong>vs. Ansible / Fabric.</strong> purple is for interactive SSH management and ad-hoc commands. Snippets provide lightweight multi-host execution without playbooks.</div>
+    </div>
+  </section>
+
+  <section>
     <h2>FAQ</h2>
     <dl class="faq">
       <dt>What is purple?</dt>
@@ -565,6 +660,12 @@ footer a:hover { color: #9333ea; border-color: #9333ea; }
     <button class="copy-btn" onclick="copy(this)">copy</button>
   </div>
 
+  <div class="secondary-cta">
+    <a href="https://github.com/erickochen/purple">GitHub</a>
+    <a href="https://github.com/erickochen/purple/blob/master/README.md">Documentation</a>
+    <a href="https://crates.io/crates/purple-ssh">crates.io</a>
+  </div>
+
 </main>
 
 <footer>
@@ -586,6 +687,9 @@ function copy(btn) {
 const LLMS_TXT = `# purple
 
 > SSH config manager with file transfer and cloud sync for the terminal
+
+Last updated: 2026-03-15
+Version: 2.0.1
 
 purple is a free, open-source SSH config manager for macOS and Linux that provides a terminal UI for managing, connecting, transferring files and running commands across SSH servers. It edits ~/.ssh/config directly with full round-trip fidelity. Single Rust binary. MIT licensed.
 
@@ -746,6 +850,8 @@ Consecutive blank lines are collapsed to one. Hosts from Include files are displ
 - vs. storm/ssh-config-manager: purple adds a TUI, cloud provider sync, tunnels, snippets, password management and visual file transfer
 - vs. Ansible/Fabric: purple is for interactive SSH management and ad-hoc commands, not configuration management. Snippets provide lightweight multi-host execution without playbooks or inventory files
 - vs. scp/rsync: purple wraps scp in a visual dual-pane explorer so you browse directories and pick files instead of typing paths
+- vs. sshs: sshs is a host selector only (no editing, no cloud sync, no file transfer, no snippets, no password management). purple is a full SSH config manager
+- vs. wishlist (Charm): wishlist is an SSH directory/server menu. purple adds config editing, cloud sync from 10 providers, file transfer, snippets and password management
 
 What makes purple unique:
 - Only terminal-based SSH manager with a visual dual-pane file explorer (scp transfer without leaving the TUI)
@@ -792,6 +898,9 @@ A: Yes. Hosts from Include files are displayed in the TUI but never modified.
 
 Q: How does provider sync handle name conflicts?
 A: Synced hosts get an alias prefix (e.g. do-web-1 for DigitalOcean). If a name collides, purple appends a numeric suffix (do-web-1-2).
+
+Q: How do I install purple?
+A: Three options: \`curl -fsSL getpurple.sh | sh\` (macOS, recommended), \`brew install erickochen/purple/purple\` (Homebrew on macOS), or \`cargo install purple-ssh\` (any platform with Rust). Pre-built binaries are macOS only. Linux users should use cargo install.
 
 Q: Can I transfer files with purple?
 A: Yes. Press f on any host to open the remote file explorer. It shows your local files on the left and the remote server on the right. Navigate directories with j/k and Enter, select files with Ctrl+Space and press Enter to copy via scp. Works through ProxyJump, password sources and active tunnels. Paths are remembered per host.

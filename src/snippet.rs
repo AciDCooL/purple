@@ -81,7 +81,9 @@ impl SnippetStore {
             } else if let Some(ref mut snippet) = current {
                 if let Some((key, value)) = trimmed.split_once('=') {
                     let key = key.trim();
-                    let value = value.trim().to_string();
+                    // Trim whitespace around key but preserve value content
+                    // (only trim leading whitespace after '=', not trailing)
+                    let value = value.trim_start().to_string();
                     match key {
                         "command" => snippet.command = value,
                         "description" => snippet.description = value,

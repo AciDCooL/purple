@@ -11,7 +11,12 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let tmp_path = path.with_extension(format!("purple_tmp.{}", std::process::id()));
+    let mut tmp_name = path
+        .file_name()
+        .unwrap_or_default()
+        .to_os_string();
+    tmp_name.push(format!(".purple_tmp.{}", std::process::id()));
+    let tmp_path = path.with_file_name(tmp_name);
 
     #[cfg(unix)]
     {

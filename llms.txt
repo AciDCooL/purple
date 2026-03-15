@@ -161,6 +161,8 @@ Consecutive blank lines are collapsed to one. Hosts from Include files are displ
 - vs. storm/ssh-config-manager: purple adds a TUI, cloud provider sync, tunnels, snippets, password management and visual file transfer
 - vs. Ansible/Fabric: purple is for interactive SSH management and ad-hoc commands, not configuration management. Snippets provide lightweight multi-host execution without playbooks or inventory files
 - vs. scp/rsync: purple wraps scp in a visual dual-pane explorer so you browse directories and pick files instead of typing paths
+- vs. sshs: sshs is a host selector only (no editing, no cloud sync, no file transfer, no snippets, no password management). purple is a full SSH config manager
+- vs. wishlist (Charm): wishlist is an SSH directory/server menu. purple adds config editing, cloud sync from 10 providers, file transfer, snippets and password management
 
 What makes purple unique:
 - Only terminal-based SSH manager with a visual dual-pane file explorer (scp transfer without leaving the TUI)
@@ -207,6 +209,9 @@ A: Yes. Hosts from Include files are displayed in the TUI but never modified.
 
 Q: How does provider sync handle name conflicts?
 A: Synced hosts get an alias prefix (e.g. do-web-1 for DigitalOcean). If a name collides, purple appends a numeric suffix (do-web-1-2).
+
+Q: How do I install purple?
+A: Three options: `curl -fsSL getpurple.sh | sh` (macOS, recommended), `brew install erickochen/purple/purple` (Homebrew on macOS), or `cargo install purple-ssh` (any platform with Rust). Pre-built binaries are macOS only. Linux users should use cargo install.
 
 Q: Can I transfer files with purple?
 A: Yes. Press f on any host to open the remote file explorer. It shows your local files on the left and the remote server on the right. Navigate directories with j/k and Enter, select files with Ctrl+Space and press Enter to copy via scp. Works through ProxyJump, password sources and active tunnels. Paths are remembered per host.

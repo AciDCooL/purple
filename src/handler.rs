@@ -226,6 +226,7 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
                     return;
                 }
                 let current_tags = host.tags.join(", ");
+                app.tag_input_cursor = current_tags.chars().count();
                 app.tag_input = Some(current_tags);
             }
         }
@@ -914,18 +915,47 @@ fn handle_tag_input(app: &mut App, key: KeyEvent) {
                 }
             }
             app.tag_input = None;
+            app.tag_input_cursor = 0;
         }
         KeyCode::Esc => {
             app.tag_input = None;
+            app.tag_input_cursor = 0;
+        }
+        KeyCode::Left => {
+            if app.tag_input_cursor > 0 {
+                app.tag_input_cursor -= 1;
+            }
+        }
+        KeyCode::Right => {
+            if let Some(ref input) = app.tag_input {
+                if app.tag_input_cursor < input.chars().count() {
+                    app.tag_input_cursor += 1;
+                }
+            }
+        }
+        KeyCode::Home => {
+            app.tag_input_cursor = 0;
+        }
+        KeyCode::End => {
+            if let Some(ref input) = app.tag_input {
+                app.tag_input_cursor = input.chars().count();
+            }
         }
         KeyCode::Char(c) => {
             if let Some(ref mut input) = app.tag_input {
-                input.push(c);
+                let byte_pos = crate::app::char_to_byte_pos(input, app.tag_input_cursor);
+                input.insert(byte_pos, c);
+                app.tag_input_cursor += 1;
             }
         }
         KeyCode::Backspace => {
-            if let Some(ref mut input) = app.tag_input {
-                input.pop();
+            if app.tag_input_cursor > 0 {
+                if let Some(ref mut input) = app.tag_input {
+                    let byte_pos = crate::app::char_to_byte_pos(input, app.tag_input_cursor);
+                    let prev = crate::app::char_to_byte_pos(input, app.tag_input_cursor - 1);
+                    input.drain(prev..byte_pos);
+                    app.tag_input_cursor -= 1;
+                }
             }
         }
         _ => {}

@@ -278,16 +278,17 @@ impl HostForm {
 
     /// Validate the form. Returns an error message if invalid.
     pub fn validate(&self) -> Result<(), String> {
-        if self.alias.trim().is_empty() {
+        let alias = self.alias.trim();
+        if alias.is_empty() {
             return Err("Alias can't be empty. Every host needs a name!".to_string());
         }
-        if self.alias.contains(char::is_whitespace) {
+        if alias.contains(char::is_whitespace) {
             return Err("Alias can't contain whitespace. Keep it simple.".to_string());
         }
-        if self.alias.contains('#') {
+        if alias.contains('#') {
             return Err("Alias can't contain '#'. That's a comment character in SSH config.".to_string());
         }
-        if crate::ssh_config::model::is_host_pattern(&self.alias) {
+        if crate::ssh_config::model::is_host_pattern(alias) {
             return Err(
                 "Alias can't contain pattern characters. That creates a match pattern, not a host."
                     .to_string(),
@@ -544,7 +545,7 @@ impl ProviderFormFields {
     }
 }
 
-fn char_to_byte_pos(s: &str, char_pos: usize) -> usize {
+pub(crate) fn char_to_byte_pos(s: &str, char_pos: usize) -> usize {
     s.char_indices()
         .nth(char_pos)
         .map(|(i, _)| i)
@@ -1019,6 +1020,7 @@ pub struct App {
 
     // Tags
     pub tag_input: Option<String>,
+    pub tag_input_cursor: usize,
     pub tag_list: Vec<String>,
 
     // History + preferences
@@ -1136,6 +1138,7 @@ impl App {
             },
             keys: Vec::new(),
             tag_input: None,
+            tag_input_cursor: 0,
             tag_list: Vec::new(),
             history: ConnectionHistory::load(),
             sort_mode: SortMode::Original,
@@ -1180,8 +1183,8 @@ impl App {
             match element {
                 ConfigElement::GlobalLine(line) => {
                     let trimmed = line.trim();
-                    if trimmed.starts_with('#') {
-                        let text = trimmed.trim_start_matches('#').trim();
+                    if let Some(rest) = trimmed.strip_prefix('#') {
+                        let text = rest.trim();
                         let text = text.strip_prefix("purple:group ").unwrap_or(text);
                         if !text.is_empty() {
                             pending_comment = Some(text.to_string());
@@ -1241,8 +1244,8 @@ impl App {
         if trimmed.is_empty() {
             return None;
         }
-        if trimmed.starts_with('#') {
-            let text = trimmed.trim_start_matches('#').trim();
+        if let Some(rest) = trimmed.strip_prefix('#') {
+            let text = rest.trim();
             // Skip purple metadata comments (purple:provider, purple:tags)
             // Only purple:group should produce a group header
             if text.starts_with("purple:") && !text.starts_with("purple:group ") {
@@ -1285,8 +1288,8 @@ impl App {
             match element {
                 ConfigElement::GlobalLine(line) => {
                     let trimmed = line.trim();
-                    if trimmed.starts_with('#') {
-                        let text = trimmed.trim_start_matches('#').trim();
+                    if let Some(rest) = trimmed.strip_prefix('#') {
+                        let text = rest.trim();
                         let text = text.strip_prefix("purple:group ").unwrap_or(text);
                         if !text.is_empty() {
                             pending_comment = Some(text.to_string());
@@ -1330,6 +1333,12 @@ impl App {
 
     /// Rebuild the display list based on the current sort mode and group_by_provider toggle.
     pub fn apply_sort(&mut self) {
+        // Preserve currently selected host across sort changes
+        let selected_alias = self.selected_host().map(|h| h.alias.clone());
+
+        // Multi-select indices become visually misleading after reorder
+        self.multi_select.clear();
+
         if self.sort_mode == SortMode::Original && !self.group_by_provider {
             self.display_list = Self::build_display_list_from(&self.config, &self.hosts);
         } else if self.sort_mode == SortMode::Original && self.group_by_provider {
@@ -1368,6 +1377,14 @@ impl App {
                     .into_iter()
                     .map(|i| HostListItem::Host { index: i })
                     .collect();
+            }
+        }
+
+        // Restore selection by alias, fall back to first host
+        if let Some(alias) = selected_alias {
+            self.select_host_by_alias(&alias);
+            if self.selected_host().is_some() {
+                return;
             }
         }
         self.select_first_host();
@@ -1767,6 +1784,7 @@ impl App {
                 | Screen::HostDetail { .. }
                 | Screen::SnippetPicker { .. } | Screen::SnippetForm { .. }
                 | Screen::FileBrowser { .. }
+                | Screen::ConfirmDelete { .. } | Screen::ConfirmHostKeyReset { .. }
         ) || self.tag_input.is_some()
         {
             return;
@@ -2056,10 +2074,8 @@ impl App {
             }
         }
         for alias in to_remove {
-            if let Some(mut tunnel) = self.active_tunnels.remove(&alias) {
-                let _ = tunnel.child.kill();
-                let _ = tunnel.child.wait();
-            }
+            // Just remove — try_wait() already reaped the process above
+            self.active_tunnels.remove(&alias);
         }
         exited
     }

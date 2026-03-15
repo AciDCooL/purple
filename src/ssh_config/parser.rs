@@ -142,6 +142,7 @@ impl SshConfigFile {
 
     /// Parse an Include directive line. Returns the pattern if it matches.
     /// Handles space, tab and `=` between keyword and value (SSH allows all three).
+    /// Matches OpenSSH behavior: skip whitespace, optional `=`, more whitespace.
     fn parse_include_line(trimmed: &str) -> Option<&str> {
         let bytes = trimmed.as_bytes();
         // "include" is 7 ASCII bytes; byte 7 must be whitespace or '='
@@ -150,10 +151,12 @@ impl SshConfigFile {
         {
             let sep = bytes[7];
             if sep.is_ascii_whitespace() || sep == b'=' {
-                // byte 8 is safe to slice at: bytes 0-7 are ASCII, so byte 8 is a char boundary
-                let pattern = trimmed[8..].trim();
-                if !pattern.is_empty() {
-                    return Some(pattern);
+                // Skip whitespace, optional '=', and more whitespace after keyword.
+                // All bytes 0..7 are ASCII so byte 7 onward is a valid slice point.
+                let rest = trimmed[7..].trim_start();
+                let rest = rest.strip_prefix('=').unwrap_or(rest).trim_start();
+                if !rest.is_empty() {
+                    return Some(rest);
                 }
             }
         }
@@ -492,6 +495,27 @@ Host myserver
     #[test]
     fn test_include_with_tab_separator() {
         let content = "Include\tconfig.d/*\n\nHost myserver\n  HostName 10.0.0.1\n";
+        let config = parse_str(content);
+        assert!(matches!(&config.elements[0], ConfigElement::Include(inc) if inc.pattern == "config.d/*"));
+    }
+
+    #[test]
+    fn test_include_with_equals_separator() {
+        let content = "Include=config.d/*\n\nHost myserver\n  HostName 10.0.0.1\n";
+        let config = parse_str(content);
+        assert!(matches!(&config.elements[0], ConfigElement::Include(inc) if inc.pattern == "config.d/*"));
+    }
+
+    #[test]
+    fn test_include_with_space_equals_separator() {
+        let content = "Include =config.d/*\n\nHost myserver\n  HostName 10.0.0.1\n";
+        let config = parse_str(content);
+        assert!(matches!(&config.elements[0], ConfigElement::Include(inc) if inc.pattern == "config.d/*"));
+    }
+
+    #[test]
+    fn test_include_with_space_equals_space_separator() {
+        let content = "Include = config.d/*\n\nHost myserver\n  HostName 10.0.0.1\n";
         let config = parse_str(content);
         assert!(matches!(&config.elements[0], ConfigElement::Include(inc) if inc.pattern == "config.d/*"));
     }

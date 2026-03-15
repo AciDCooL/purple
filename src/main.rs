@@ -1713,7 +1713,7 @@ fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, confi
             } else if let Some(ref tag_filter) = tag {
                 let matched: Vec<_> = entries
                     .iter()
-                    .filter(|h| h.tags.iter().any(|t| t == tag_filter))
+                    .filter(|h| h.tags.iter().any(|t| t.eq_ignore_ascii_case(tag_filter)))
                     .collect();
                 if matched.is_empty() {
                     eprintln!("No hosts found with tag '{}'.", tag_filter);

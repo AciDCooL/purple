@@ -43,6 +43,11 @@ pub fn import_from_file(
                     .next()
                     .unwrap_or(&parsed.hostname)
                     .to_string();
+                // Skip entries whose derived alias is an SSH pattern (*, ?, [, !)
+                if crate::ssh_config::model::is_host_pattern(&alias) {
+                    parse_failures += 1;
+                    continue;
+                }
                 entries.push(HostEntry {
                     alias,
                     hostname: parsed.hostname,
