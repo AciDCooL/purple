@@ -217,9 +217,8 @@ A: Run purple provider add gcp --token /path/to/sa-key.json --project my-project
 ## Limitations
 
 - macOS and Linux only. No Windows support (works in WSL)
-- Pre-built binaries are macOS only. Linux users install via cargo
+- Pre-built binaries for macOS. Linux and macOS also supported via cargo install
 - File transfer uses scp. No SFTP or rsync integration
-- No GUI. Terminal-only by design
 - Each directory navigation in the file explorer opens a new SSH connection. Configure ControlMaster for faster navigation
 - Cloud sync is pull-only. purple does not provision or modify cloud infrastructure
 - Not a configuration management tool. For playbooks and infrastructure-as-code use Ansible, Terraform etc.
