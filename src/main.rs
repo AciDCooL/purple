@@ -251,7 +251,7 @@ enum SnippetCommands {
     List,
     /// Add a new snippet
     Add {
-        /// Snippet name (no whitespace)
+        /// Snippet name
         name: String,
 
         /// Command to run on the remote host

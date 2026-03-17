@@ -155,14 +155,14 @@ impl SnippetStore {
     }
 }
 
-/// Validate a snippet name: non-empty, no whitespace, no `#`, no `[`, no `]`,
-/// no control characters.
+/// Validate a snippet name: non-empty, no leading/trailing whitespace,
+/// no `#`, no `[`, no `]`, no control characters.
 pub fn validate_name(name: &str) -> Result<(), String> {
-    if name.is_empty() {
+    if name.trim().is_empty() {
         return Err("Snippet name cannot be empty.".to_string());
     }
-    if name.contains(char::is_whitespace) {
-        return Err("Snippet name cannot contain whitespace.".to_string());
+    if name != name.trim() {
+        return Err("Snippet name cannot have leading or trailing whitespace.".to_string());
     }
     if name.contains('#') || name.contains('[') || name.contains(']') {
         return Err("Snippet name cannot contain #, [ or ].".to_string());
@@ -1040,8 +1040,11 @@ foo=bar
 
     #[test]
     fn test_validate_name_whitespace() {
-        assert!(validate_name("check disk").is_err());
-        assert!(validate_name("check\tdisk").is_err());
+        assert!(validate_name("check disk").is_ok());
+        assert!(validate_name("check\tdisk").is_err()); // tab is a control character
+        assert!(validate_name("  ").is_err()); // only whitespace
+        assert!(validate_name(" leading").is_err()); // leading whitespace
+        assert!(validate_name("trailing ").is_err()); // trailing whitespace
     }
 
     #[test]

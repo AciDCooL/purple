@@ -29,8 +29,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         app.snippet_store.snippets.len().max(1)
     };
+    let has_snippets = if searching {
+        !filtered.is_empty()
+    } else {
+        !app.snippet_store.snippets.is_empty()
+    };
     let search_row = if searching { 1u16 } else { 0 };
-    let height = (item_count as u16 + 5 + search_row).min(frame.area().height.saturating_sub(4));
+    let header_row = if has_snippets { 1u16 } else { 0 };
+    let height = (item_count as u16 + 5 + search_row + header_row).min(frame.area().height.saturating_sub(4));
     let area = {
         let r = super::centered_rect(70, 80, frame.area());
         super::centered_rect_fixed(r.width, height, frame.area())
@@ -51,40 +57,43 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Layout: optional search bar + list + footer
-    let constraints = if searching {
-        vec![
-            Constraint::Length(1),
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ]
-    } else {
-        vec![
-            Constraint::Min(1),
-            Constraint::Length(1),
-        ]
-    };
+    // Layout: optional search bar + optional header + list + footer
+    let mut constraints = Vec::new();
+    if searching {
+        constraints.push(Constraint::Length(1));
+    }
+    if has_snippets {
+        constraints.push(Constraint::Length(1));
+    }
+    constraints.push(Constraint::Min(1));
+    constraints.push(Constraint::Length(1));
     let chunks = Layout::vertical(constraints).split(inner);
 
+    // Resolve chunk indices based on which optional rows are present
+    let search_ci = if searching { Some(0) } else { None };
+    let header_ci = if has_snippets { Some(searching as usize) } else { None };
+    let list_ci = searching as usize + has_snippets as usize;
+    let footer_ci = list_ci + 1;
+
     // Search bar
-    if searching {
+    if let Some(si) = search_ci {
         let query = app.ui.snippet_search.as_deref().unwrap_or("");
         let search_line = Line::from(vec![
             Span::styled(" / ", theme::brand_badge()),
             Span::styled(query, theme::bold()),
             Span::styled("_", theme::accent()),
         ]);
-        frame.render_widget(Paragraph::new(search_line), chunks[0]);
+        frame.render_widget(Paragraph::new(search_line), chunks[si]);
 
         // Cursor position
-        let cursor_x = chunks[0].x + 3 + query.width() as u16;
-        if cursor_x < chunks[0].x + chunks[0].width {
-            frame.set_cursor_position((cursor_x, chunks[0].y));
+        let cursor_x = chunks[si].x + 3 + query.width() as u16;
+        if cursor_x < chunks[si].x + chunks[si].width {
+            frame.set_cursor_position((cursor_x, chunks[si].y));
         }
     }
 
-    let list_area = if searching { chunks[1] } else { chunks[0] };
-    let footer_area = if searching { chunks[2] } else { chunks[1] };
+    let list_area = chunks[list_ci];
+    let footer_area = chunks[footer_ci];
 
     // Build snippet list (filtered when searching)
     let indices = if searching {
@@ -92,6 +101,34 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         (0..app.snippet_store.snippets.len()).collect()
     };
+
+    // Column widths: name gets ~28%, command gets the rest (or split with description)
+    // desc_w includes the 2-char gap prefix so name_w + cmd_w + desc_w = usable
+    let usable = list_area.width.saturating_sub(3) as usize; // 2 highlight + 1 leading space
+    let has_desc = indices.iter().any(|&i| !app.snippet_store.snippets[i].description.is_empty());
+    let (name_w, cmd_w, desc_w) = if has_desc {
+        let nw = (usable * 28 / 100).max(10);
+        let dw = ((usable * 28 / 100) + 2).max(10); // includes 2-char gap
+        let cw = usable.saturating_sub(nw + dw);
+        (nw, cw, dw)
+    } else {
+        let nw = (usable * 30 / 100).max(10);
+        let cw = usable.saturating_sub(nw);
+        (nw, cw, 0)
+    };
+
+    // Column header (3-space prefix = 2 highlight_symbol + 1 leading space in items)
+    if let Some(hi) = header_ci {
+        let style = theme::bold();
+        let mut hdr = vec![
+            Span::styled(format!("   {:<name_w$}", "NAME"), style),
+            Span::styled(format!("{:<cmd_w$}", "COMMAND"), style),
+        ];
+        if has_desc {
+            hdr.push(Span::styled(format!("{:<desc_w$}", "  DESCRIPTION"), style));
+        }
+        frame.render_widget(Paragraph::new(Line::from(hdr)), chunks[hi]);
+    }
 
     if indices.is_empty() {
         let msg = if searching {
@@ -109,13 +146,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .map(|&idx| {
                 let snippet = &app.snippet_store.snippets[idx];
                 let mut spans = vec![
-                    Span::styled(format!(" {:<20}", super::truncate(&snippet.name, 20)), theme::bold()),
-                    Span::styled(super::truncate(&snippet.command, 30), theme::muted()),
+                    Span::styled(format!(" {:<name_w$}", super::truncate(&snippet.name, name_w)), theme::bold()),
+                    Span::styled(format!("{:<cmd_w$}", super::truncate(&snippet.command, cmd_w)), theme::muted()),
                 ];
-                if !snippet.description.is_empty() {
-                    spans.push(Span::raw("  "));
+                if has_desc {
+                    let text_w = desc_w.saturating_sub(2);
                     spans.push(Span::styled(
-                        super::truncate(&snippet.description, 20),
+                        format!("  {:<text_w$}", super::truncate(&snippet.description, text_w)),
                         theme::muted(),
                     ));
                 }
@@ -158,7 +195,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             spans.push(Span::styled(" Enter", theme::primary_action()));
             spans.push(Span::styled(" run ", theme::muted()));
             spans.push(Span::styled("!", theme::accent_bold()));
-            spans.push(Span::styled(" raw ", theme::muted()));
+            spans.push(Span::styled(" terminal ", theme::muted()));
             spans.push(Span::styled("\u{2502} ", theme::muted()));
         }
         spans.push(Span::styled("a", theme::accent_bold()));
