@@ -342,10 +342,9 @@ fn format_short_date(ts: i64) -> String {
     }
 }
 
-/// Shell-escape a path with single quotes: /path -> '/path'
-/// Internal single quotes escaped as '\''
+/// Shell-escape a path with single quotes.
 fn shell_escape(path: &str) -> String {
-    format!("'{}'", path.replace('\'', "'\\''"))
+    crate::snippet::shell_escape(path)
 }
 
 /// Get the remote home directory via `pwd`.

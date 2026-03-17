@@ -712,6 +712,33 @@ fn run_tui(mut app: App) -> Result<()> {
                 // Force full redraw: ssh may have written to /dev/tty
                 terminal.force_redraw();
             }
+            AppEvent::SnippetHostDone { run_id, alias, stdout, stderr, exit_code } => {
+                if let Some(ref mut state) = app.snippet_output {
+                    if state.run_id == run_id {
+                        state.results.push(app::SnippetHostOutput {
+                            alias,
+                            stdout,
+                            stderr,
+                            exit_code,
+                        });
+                    }
+                }
+            }
+            AppEvent::SnippetProgress { run_id, completed, total } => {
+                if let Some(ref mut state) = app.snippet_output {
+                    if state.run_id == run_id {
+                        state.completed = completed;
+                        state.total = total;
+                    }
+                }
+            }
+            AppEvent::SnippetAllDone { run_id } => {
+                if let Some(ref mut state) = app.snippet_output {
+                    if state.run_id == run_id {
+                        state.all_done = true;
+                    }
+                }
+            }
             AppEvent::PollError => {
                 app.running = false;
             }

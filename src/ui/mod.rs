@@ -9,6 +9,8 @@ mod key_detail;
 mod key_list;
 mod provider_list;
 mod snippet_form;
+mod snippet_output;
+mod snippet_param_form;
 mod snippet_picker;
 mod tag_picker;
 pub mod theme;
@@ -121,6 +123,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Screen::FileBrowser { .. } => {
             host_list::render(frame, app);
             render_overlay(app, |app| file_browser::render(frame, app));
+        }
+        Screen::SnippetOutput { .. } => {
+            host_list::render(frame, app);
+            render_overlay(app, |app| snippet_output::render(frame, app));
+        }
+        Screen::SnippetParamForm { .. } => {
+            host_list::render(frame, app);
+            render_overlay(app, |app| {
+                snippet_picker::render(frame, app);
+                snippet_param_form::render(frame, app);
+            });
         }
     }
 }

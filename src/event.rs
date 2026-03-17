@@ -37,6 +37,21 @@ pub enum AppEvent {
         success: bool,
         message: String,
     },
+    SnippetHostDone {
+        run_id: u64,
+        alias: String,
+        stdout: String,
+        stderr: String,
+        exit_code: Option<i32>,
+    },
+    SnippetAllDone {
+        run_id: u64,
+    },
+    SnippetProgress {
+        run_id: u64,
+        completed: usize,
+        total: usize,
+    },
     PollError,
 }
 
@@ -146,7 +161,10 @@ impl EventHandler {
                 | AppEvent::SyncProgress { .. }
                 | AppEvent::UpdateAvailable { .. }
                 | AppEvent::FileBrowserListing { .. }
-                | AppEvent::ScpComplete { .. } => preserved.push(event),
+                | AppEvent::ScpComplete { .. }
+                | AppEvent::SnippetHostDone { .. }
+                | AppEvent::SnippetAllDone { .. }
+                | AppEvent::SnippetProgress { .. } => preserved.push(event),
                 _ => {}
             }
         }

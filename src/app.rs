@@ -102,6 +102,8 @@ pub enum Screen {
     TunnelForm { alias: String, editing: Option<usize> },
     SnippetPicker { target_aliases: Vec<String> },
     SnippetForm { target_aliases: Vec<String>, editing: Option<usize> },
+    SnippetOutput { snippet_name: String, target_aliases: Vec<String> },
+    SnippetParamForm { snippet: crate::snippet::Snippet, target_aliases: Vec<String> },
     ConfirmHostKeyReset {
         alias: String,
         hostname: String,
@@ -889,6 +891,87 @@ impl SnippetForm {
     }
 }
 
+/// Output from snippet execution, per host.
+#[derive(Debug, Clone)]
+pub struct SnippetHostOutput {
+    pub alias: String,
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+}
+
+/// State for the snippet output screen.
+#[derive(Debug, Clone)]
+pub struct SnippetOutputState {
+    pub run_id: u64,
+    pub results: Vec<SnippetHostOutput>,
+    pub scroll_offset: usize,
+    pub completed: usize,
+    pub total: usize,
+    pub all_done: bool,
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Form state for snippet parameter input.
+#[derive(Debug, Clone)]
+pub struct SnippetParamFormState {
+    pub params: Vec<crate::snippet::SnippetParam>,
+    pub values: Vec<String>,
+    pub focused_index: usize,
+    pub cursor_pos: usize,
+    pub scroll_offset: usize,
+    /// How many params actually fit on screen (set by renderer).
+    pub visible_count: usize,
+}
+
+impl SnippetParamFormState {
+    pub fn new(params: &[crate::snippet::SnippetParam]) -> Self {
+        let values: Vec<String> = params.iter()
+            .map(|p| p.default.clone().unwrap_or_default())
+            .collect();
+        let cursor_pos = values.first().map(|v| v.chars().count()).unwrap_or(0);
+        Self {
+            params: params.to_vec(),
+            values,
+            focused_index: 0,
+            cursor_pos,
+            scroll_offset: 0,
+            visible_count: params.len().min(8),
+        }
+    }
+
+    pub fn insert_char(&mut self, c: char) {
+        let idx = self.focused_index;
+        let pos = self.cursor_pos;
+        let val = &mut self.values[idx];
+        let byte_pos = char_to_byte_pos(val, pos);
+        val.insert(byte_pos, c);
+        self.cursor_pos = pos + 1;
+    }
+
+    pub fn delete_char_before_cursor(&mut self) {
+        if self.cursor_pos == 0 {
+            return;
+        }
+        let idx = self.focused_index;
+        let pos = self.cursor_pos;
+        let val = &mut self.values[idx];
+        let byte_pos = char_to_byte_pos(val, pos);
+        let prev = char_to_byte_pos(val, pos - 1);
+        val.drain(prev..byte_pos);
+        self.cursor_pos = pos - 1;
+    }
+
+    /// Build a map of param name to user-entered value for substitution.
+    pub fn values_map(&self) -> HashMap<String, String> {
+        self.params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.name.clone(), self.values[i].clone()))
+            .collect()
+    }
+}
+
 /// Status message displayed at the bottom.
 #[derive(Debug, Clone)]
 pub struct StatusMessage {
@@ -994,6 +1077,7 @@ pub struct UiSelection {
     pub provider_list_state: ListState,
     pub tunnel_list_state: ListState,
     pub snippet_picker_state: ListState,
+    pub snippet_search: Option<String>,
     pub show_region_picker: bool,
     pub region_picker_cursor: usize,
     pub help_scroll: u16,
@@ -1095,6 +1179,10 @@ pub struct App {
     pub pending_snippet: Option<(crate::snippet::Snippet, Vec<String>)>,
     /// Host indices selected for multi-host snippet execution (space to toggle).
     pub multi_select: HashSet<usize>,
+    pub snippet_output: Option<SnippetOutputState>,
+    pub snippet_param_form: Option<SnippetParamFormState>,
+    /// When true, the snippet param form submits to terminal-exit mode (! key).
+    pub pending_snippet_terminal: bool,
 
     // Update
     pub update_available: Option<String>,
@@ -1154,6 +1242,7 @@ impl App {
                 provider_list_state: ListState::default(),
                 tunnel_list_state: ListState::default(),
                 snippet_picker_state: ListState::default(),
+                snippet_search: None,
                 show_region_picker: false,
                 region_picker_cursor: 0,
                 help_scroll: 0,
@@ -1202,6 +1291,9 @@ impl App {
             snippet_form: SnippetForm::new(),
             pending_snippet: None,
             multi_select: HashSet::new(),
+            snippet_output: None,
+            snippet_param_form: None,
+            pending_snippet_terminal: false,
             tunnel_summaries_cache: HashMap::new(),
             update_available: None,
             update_hint: crate::update::update_hint(),
@@ -1790,7 +1882,28 @@ impl App {
         names
     }
 
-    /// Set a status message.
+    /// Return indices of snippets matching the search query.
+    pub fn filtered_snippet_indices(&self) -> Vec<usize> {
+        match &self.ui.snippet_search {
+            None => (0..self.snippet_store.snippets.len()).collect(),
+            Some(query) if query.is_empty() => {
+                (0..self.snippet_store.snippets.len()).collect()
+            }
+            Some(query) => self
+                .snippet_store
+                .snippets
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| {
+                    contains_ci(&s.name, query)
+                        || contains_ci(&s.command, query)
+                        || contains_ci(&s.description, query)
+                })
+                .map(|(i, _)| i)
+                .collect(),
+        }
+    }
+
     pub fn set_status(&mut self, text: impl Into<String>, is_error: bool) {
         self.status = Some(StatusMessage {
             text: text.into(),
@@ -1825,6 +1938,7 @@ impl App {
                 | Screen::TunnelList { .. } | Screen::TunnelForm { .. }
                 | Screen::HostDetail { .. }
                 | Screen::SnippetPicker { .. } | Screen::SnippetForm { .. }
+                | Screen::SnippetOutput { .. } | Screen::SnippetParamForm { .. }
                 | Screen::FileBrowser { .. }
                 | Screen::ConfirmDelete { .. } | Screen::ConfirmHostKeyReset { .. }
         ) || self.tag_input.is_some()

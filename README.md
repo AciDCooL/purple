@@ -103,10 +103,11 @@ purple tunnel start myserver
 
 ### Command snippets
 
-Save frequently used commands and run them on one host, a selection of hosts or all visible hosts at once. Multi-host execution runs sequentially in the TUI and supports parallel mode on the CLI. Snippets are stored in `~/.purple/snippets` and managed from the TUI or CLI.
+Save frequently used commands and run them on one host, a selection of hosts or all visible hosts at once. Output is captured in a scrollable panel inside the TUI. Multi-host runs execute in parallel. Snippets support `{{param}}` placeholders with optional defaults. Snippets are stored in `~/.purple/snippets` and managed from the TUI or CLI.
 
 ```bash
 purple snippet add check-disk "df -h" --description "Check disk usage"
+purple snippet add check-path "df -h {{path:/tmp}}"   # parameterized with default
 purple snippet add uptime "uptime"
 purple snippet run check-disk myserver             # run on single host
 purple snippet run check-disk --tag prod           # run on all hosts with tag
@@ -116,7 +117,14 @@ purple snippet list                                # list all snippets
 purple snippet remove check-disk                   # remove a snippet
 ```
 
-In the TUI, press `r` to run a snippet on the selected host. Select multiple hosts with `Ctrl+Space` and press `r` to run on all selected. Press `R` to run on all visible hosts.
+In the TUI, press `r` to run a snippet on the selected host. Select multiple hosts with `Ctrl+Space` and press `r` to run on all selected. Press `R` to run on all visible hosts. `Enter` runs the snippet with captured output in a scrollable panel. Press `!` for raw terminal mode (useful for interactive commands). Search snippets with `/` in the picker.
+
+**Parameters.** Use `{{name}}` for a required parameter or `{{name:default}}` for one with a default value. When you run a parameterized snippet, a form appears where you fill in the values. A live preview of the resolved command is shown at the bottom. Values are shell-escaped automatically to prevent injection.
+
+```
+grep {{pattern}} {{file:/var/log/syslog}}   # two params, one with default
+docker logs {{container}}                    # required param, no default
+```
 
 ### Remote file explorer
 
@@ -259,14 +267,27 @@ purple --completions zsh            # Shell completions
 
 **Snippet Picker**
 
+| Key         | Action                         |
+| ----------- | ------------------------------ |
+| `j` / `k`   | Navigate down and up           |
+| `Enter`     | Run snippet (captured output)  |
+| `!`         | Run snippet (raw terminal)     |
+| `/`         | Search snippets                |
+| `a`         | Add snippet                    |
+| `e`         | Edit snippet                   |
+| `d`         | Delete snippet                 |
+| `q` / `Esc` | Back                           |
+
+**Snippet Output**
+
 | Key         | Action                 |
 | ----------- | ---------------------- |
-| `j` / `k`   | Navigate down and up   |
-| `Enter`     | Run snippet            |
-| `a`         | Add snippet            |
-| `e`         | Edit snippet           |
-| `d`         | Delete snippet         |
-| `q` / `Esc` | Back                   |
+| `j` / `k`   | Scroll up and down     |
+| `g` / `G`   | Jump to top / bottom   |
+| `n` / `N`   | Next / previous host   |
+| `c`         | Copy output            |
+| `Ctrl+C`    | Cancel execution       |
+| `q` / `Esc` | Close                  |
 
 **File Explorer** (press `f` on a host)
 

@@ -287,7 +287,7 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
 
     let update_title = app.update_available.as_ref().map(|ver| {
         Line::from(Span::styled(
-            format!(" v{} available — run '{}' ", ver, app.update_hint),
+            format!(" v{} available, run '{}' ", ver, app.update_hint),
             theme::update_badge(),
         ))
     });
@@ -437,7 +437,7 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
 
     let update_title = app.update_available.as_ref().map(|ver| {
         Line::from(Span::styled(
-            format!(" v{} available — run '{}' ", ver, app.update_hint),
+            format!(" v{} available, run '{}' ", ver, app.update_hint),
             theme::update_badge(),
         ))
     });
