@@ -8,6 +8,7 @@ mod linode;
 mod proxmox;
 pub mod scaleway;
 pub mod sync;
+mod tailscale;
 mod upcloud;
 mod vultr;
 
@@ -56,6 +57,8 @@ pub enum ProviderError {
     AuthFailed,
     #[error("Rate limited. Try again in a moment.")]
     RateLimited,
+    #[error("{0}")]
+    Execute(String),
     #[error("Cancelled.")]
     Cancelled,
     /// Some hosts were fetched but others failed. The caller should use the
@@ -97,7 +100,7 @@ pub trait Provider {
 }
 
 /// All known provider names.
-pub const PROVIDER_NAMES: &[&str] = &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "proxmox", "aws", "scaleway", "gcp", "azure"];
+pub const PROVIDER_NAMES: &[&str] = &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "proxmox", "aws", "scaleway", "gcp", "azure", "tailscale"];
 
 /// Get a provider implementation by name.
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
@@ -125,6 +128,7 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
         "azure" => Some(Box::new(azure::Azure {
             subscriptions: Vec::new(),
         })),
+        "tailscale" => Some(Box::new(tailscale::Tailscale)),
         _ => None,
     }
 }
@@ -181,6 +185,7 @@ pub fn provider_display_name(name: &str) -> &str {
         "scaleway" => "Scaleway",
         "gcp" => "GCP",
         "azure" => "Azure",
+        "tailscale" => "Tailscale",
         other => other,
     }
 }
@@ -427,6 +432,7 @@ mod tests {
         assert_eq!(provider_display_name("scaleway"), "Scaleway");
         assert_eq!(provider_display_name("gcp"), "GCP");
         assert_eq!(provider_display_name("azure"), "Azure");
+        assert_eq!(provider_display_name("tailscale"), "Tailscale");
     }
 
     #[test]
@@ -441,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_provider_names_count() {
-        assert_eq!(PROVIDER_NAMES.len(), 10);
+        assert_eq!(PROVIDER_NAMES.len(), 11);
     }
 
     #[test]
@@ -456,6 +462,7 @@ mod tests {
         assert!(PROVIDER_NAMES.contains(&"scaleway"));
         assert!(PROVIDER_NAMES.contains(&"gcp"));
         assert!(PROVIDER_NAMES.contains(&"azure"));
+        assert!(PROVIDER_NAMES.contains(&"tailscale"));
     }
 
     // =========================================================================
@@ -672,6 +679,7 @@ mod tests {
         assert_eq!(provider_display_name("scaleway"), "Scaleway");
         assert_eq!(provider_display_name("gcp"), "GCP");
         assert_eq!(provider_display_name("azure"), "Azure");
+        assert_eq!(provider_display_name("tailscale"), "Tailscale");
     }
 
     #[test]
@@ -703,13 +711,14 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_provider_names_has_all_ten() {
-        assert_eq!(PROVIDER_NAMES.len(), 10);
+    fn test_provider_names_has_all_eleven() {
+        assert_eq!(PROVIDER_NAMES.len(), 11);
         assert!(PROVIDER_NAMES.contains(&"digitalocean"));
         assert!(PROVIDER_NAMES.contains(&"proxmox"));
         assert!(PROVIDER_NAMES.contains(&"aws"));
         assert!(PROVIDER_NAMES.contains(&"scaleway"));
         assert!(PROVIDER_NAMES.contains(&"azure"));
+        assert!(PROVIDER_NAMES.contains(&"tailscale"));
     }
 
     // =========================================================================
@@ -729,6 +738,7 @@ mod tests {
             ("scaleway", "scw"),
             ("gcp", "gcp"),
             ("azure", "az"),
+            ("tailscale", "ts"),
         ];
         for (name, expected_label) in &cases {
             let p = get_provider(name).unwrap();

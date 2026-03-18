@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>purple. SSH Server Manager TUI | Search, Connect, Transfer Files | Free & Open Source</title>
-<meta name="description" content="Free SSH server manager TUI. Search hundreds of hosts, connect instantly, transfer files visually, sync from AWS, GCP, Azure and 7 more. Single Rust binary for macOS and Linux.">
-<meta name="keywords" content="SSH config manager, SSH config editor, SSH connection manager, SSH host manager, SSH file transfer, scp file manager, remote file explorer, terminal file transfer, SSH command snippets, SSH automation, devops SSH tool, sysadmin SSH manager, cloud SSH sync, multi-cloud SSH, AWS EC2 SSH, GCP SSH, Azure SSH, DigitalOcean SSH manager, Hetzner SSH, Proxmox SSH, SSH tunnel manager, SSH password manager, open source SSH client, free SSH manager, Rust SSH tool, Rust TUI, purple-ssh">
+<meta name="description" content="Free SSH server manager TUI. Search hundreds of hosts, connect instantly, transfer files visually, sync from AWS, GCP, Azure and 8 more. Single Rust binary for macOS and Linux.">
+<meta name="keywords" content="SSH config manager, SSH config editor, SSH connection manager, SSH host manager, SSH file transfer, scp file manager, remote file explorer, terminal file transfer, SSH command snippets, SSH automation, devops SSH tool, sysadmin SSH manager, cloud SSH sync, multi-cloud SSH, AWS EC2 SSH, GCP SSH, Azure SSH, DigitalOcean SSH manager, Hetzner SSH, Proxmox SSH, Tailscale SSH, SSH tunnel manager, SSH password manager, open source SSH client, free SSH manager, Rust SSH tool, Rust TUI, purple-ssh">
 <meta name="robots" content="index, follow">
 <meta name="author" content="Eric Kochen">
 <meta name="color-scheme" content="dark light">
 <meta property="og:title" content="purple. SSH server manager TUI with file transfer and cloud sync">
-<meta property="og:description" content="Free SSH server manager TUI. Search hundreds of hosts, connect instantly, transfer files visually, sync from AWS, GCP, Azure and 7 more. Written in Rust.">
+<meta property="og:description" content="Free SSH server manager TUI. Search hundreds of hosts, connect instantly, transfer files visually, sync from AWS, GCP, Azure and 8 more. Written in Rust.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://getpurple.sh">
 <meta property="og:image" content="https://raw.githubusercontent.com/erickochen/purple/master/preview.png">
@@ -18,7 +18,7 @@
 <meta property="og:site_name" content="purple">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="purple. SSH server manager TUI with file transfer and cloud sync">
-<meta name="twitter:description" content="Free SSH server manager TUI. Search hundreds of hosts, connect instantly, transfer files visually, sync from AWS, GCP, Azure and 7 more. Written in Rust.">
+<meta name="twitter:description" content="Free SSH server manager TUI. Search hundreds of hosts, connect instantly, transfer files visually, sync from AWS, GCP, Azure and 8 more. Written in Rust.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/erickochen/purple/master/preview.png">
 <link rel="canonical" href="https://getpurple.sh">
 <link rel="alternate" type="text/plain" href="https://getpurple.sh/llms.txt" title="LLM context">
@@ -28,14 +28,14 @@
   "@type": "SoftwareApplication",
   "name": "purple",
   "alternateName": "purple-ssh",
-  "description": "TUI to search, connect to and manage SSH servers. Visual file transfer, cloud sync from 10 providers, password management, command snippets and tunnel management. Edits ~/.ssh/config directly with round-trip fidelity.",
+  "description": "TUI to search, connect to and manage SSH servers. Visual file transfer, cloud sync from 11 providers, password management, command snippets and tunnel management. Edits ~/.ssh/config directly with round-trip fidelity.",
   "applicationCategory": "DeveloperApplication",
   "applicationSubCategory": "Terminal User Interface",
   "operatingSystem": "macOS, Linux",
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "2.3.0",
+  "softwareVersion": "2.4.0",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
   "codeRepository": "https://github.com/erickochen/purple",
@@ -58,7 +58,7 @@
     "SSH tunnel management",
     "Command snippets with multi-host and parallel execution",
     "Remote file explorer with dual-pane local/remote browsing and scp transfer",
-    "Cloud provider sync: AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure",
+    "Cloud provider sync: AWS EC2, DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure, Tailscale",
     "Password management: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault, custom commands",
     "Bulk import from hosts files and known_hosts",
     "SSH key management",
@@ -78,7 +78,7 @@
       "name": "What is purple SSH?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "purple is a free, open-source TUI for managing SSH servers. It reads your ~/.ssh/config and gives you instant search, visual file transfer, command snippets, cloud sync from 10 providers and automatic password management. Single Rust binary for macOS and Linux."
+        "text": "purple is a free, open-source TUI for managing SSH servers. It reads your ~/.ssh/config and gives you instant search, visual file transfer, command snippets, cloud sync from 11 providers and automatic password management. Single Rust binary for macOS and Linux."
       }
     },
     {
@@ -94,7 +94,7 @@
       "name": "What cloud providers does purple support?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "purple syncs servers from ten cloud providers: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine) and Azure. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync."
+        "text": "purple syncs servers from eleven cloud providers: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure and Tailscale. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync."
       }
     },
     {
@@ -726,8 +726,8 @@ footer a:hover { color: var(--accent); }
       <p>Dual-pane explorer. Browse remote files, copy with Enter. No scp paths to remember.</p>
     </div>
     <div class="pillar">
-      <h3>10-provider cloud sync</h3>
-      <p>AWS, GCP, Azure and 7 more. Servers appear in your SSH config automatically.</p>
+      <h3>11-provider cloud sync</h3>
+      <p>AWS, GCP, Azure and 8 more. Servers appear in your SSH config automatically.</p>
     </div>
   </div>
 
@@ -751,7 +751,7 @@ footer a:hover { color: var(--accent); }
 
   <section>
     <h2>Cloud providers</h2>
-    <p>Pull servers from ten cloud providers directly into your <code>~/.ssh/config</code>. Sync adds new hosts, updates changed IPs and merges tags. Provider metadata (region, plan, OS, status) is stored in config comments and displayed in the detail panel.</p>
+    <p>Pull servers from eleven cloud providers directly into your <code>~/.ssh/config</code>. Sync adds new hosts, updates changed IPs and merges tags. Provider metadata (region, plan, OS, status) is stored in config comments and displayed in the detail panel.</p>
     <div class="providers">
       <span>AWS EC2</span>
       <span>Azure</span>
@@ -794,7 +794,7 @@ footer a:hover { color: var(--accent); }
     <div class="vs-list">
       <div><strong>vs. manual SSH config editing.</strong> purple adds search, tags, cloud sync, snippets, password management and a remote file explorer while preserving your existing config.</div>
       <div><strong>vs. Termius / Royal TSX.</strong> Free, open-source, terminal-native. Edits your real SSH config. No proprietary database, no subscription.</div>
-      <div><strong>vs. storm / sshs.</strong> purple adds a TUI with config editing, cloud sync from 10 providers, file transfer, snippets and password management.</div>
+      <div><strong>vs. storm / sshs.</strong> purple adds a TUI with config editing, cloud sync from 11 providers, file transfer, snippets and password management.</div>
       <div><strong>vs. Ansible / Fabric.</strong> For interactive SSH management and ad-hoc commands. Snippets provide lightweight multi-host execution without playbooks.</div>
     </div>
   </section>
@@ -806,7 +806,7 @@ footer a:hover { color: var(--accent); }
     <div class="faq">
       <details>
         <summary>What is purple?</summary>
-        <div class="a-wrap"><div class="answer">A free, open-source TUI for managing SSH servers. Search hundreds of hosts, connect instantly, transfer files visually, run commands across servers, sync from ten cloud providers and handle SSH passwords automatically. Single Rust binary for macOS and Linux.</div></div>
+        <div class="a-wrap"><div class="answer">A free, open-source TUI for managing SSH servers. Search hundreds of hosts, connect instantly, transfer files visually, run commands across servers, sync from eleven cloud providers and handle SSH passwords automatically. Single Rust binary for macOS and Linux.</div></div>
       </details>
       <details>
         <summary>Can I transfer files with purple?</summary>
@@ -814,7 +814,7 @@ footer a:hover { color: var(--accent); }
       </details>
       <details>
         <summary>What cloud providers does purple support?</summary>
-        <div class="a-wrap"><div class="answer">AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine) and Azure. Each provider is configured with an API token or credentials profile.</div></div>
+        <div class="a-wrap"><div class="answer">AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure and Tailscale. Each provider is configured with an API token or credentials profile.</div></div>
       </details>
       <details>
         <summary>How do command snippets work?</summary>

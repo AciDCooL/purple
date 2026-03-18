@@ -165,7 +165,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
         let is_focused = app.provider_form.focused_field == field;
         let label_style = if is_focused { theme::accent_bold() } else { theme::muted() };
         let is_required = matches!(field, ProviderFormField::Url)
-            || (field == ProviderFormField::Token && provider_name != "aws")
+            || (field == ProviderFormField::Token && provider_name != "aws" && provider_name != "tailscale")
             || (field == ProviderFormField::Project && provider_name == "gcp")
             || (field == ProviderFormField::Regions && matches!(provider_name, "aws" | "scaleway" | "azure"));
         let field_label = if field == ProviderFormField::Regions && matches!(provider_name, "scaleway" | "gcp") {
@@ -218,6 +218,7 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
             "aws" => "AccessKeyId:Secret (or use Profile)",
             "gcp" => "/path/to/service-account.json (or access token)",
             "azure" => "/path/to/service-principal.json (or access token)",
+            "tailscale" => "API key (leave empty for local CLI)",
             _ => "your-api-token",
         },
         ProviderFormField::Profile => "Name from ~/.aws/credentials (or use Token)",
@@ -239,6 +240,7 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
             "scaleway" => "scw",
             "gcp" => "gcp",
             "azure" => "az",
+            "tailscale" => "ts",
             _ => "prefix",
         },
         ProviderFormField::User => match provider_name {

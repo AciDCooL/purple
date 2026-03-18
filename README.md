@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>Stop scrolling through your SSH config. Start searching it.</strong><br>
-  Find any server instantly, connect with Enter, transfer files visually and sync from 10 cloud providers. One TUI that edits your <code>~/.ssh/config</code> directly.
+  Find any server instantly, connect with Enter, transfer files visually and sync from 11 cloud providers. One TUI that edits your <code>~/.ssh/config</code> directly.
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 
 ## What is purple?
 
-purple turns your `~/.ssh/config` into a searchable, visual interface. Find any host instantly, connect with Enter, browse remote files side by side and sync servers from ten cloud providers. One TUI. No context switching.
+purple turns your `~/.ssh/config` into a searchable, visual interface. Find any host instantly, connect with Enter, browse remote files side by side and sync servers from eleven cloud providers. One TUI. No context switching.
 
 It reads your existing config, lets you search, filter, tag and connect with a single keystroke, and writes changes back without touching your comments or unknown directives. Transfer files visually, run commands across servers and handle SSH passwords automatically. Free, open-source, runs on macOS and Linux.
 
@@ -72,7 +72,7 @@ Organize hosts by environment, team or project without external tools. Label hos
 
 ### Cloud provider sync
 
-Never manually add a server IP to your SSH config again. Pull servers from **AWS EC2**, **DigitalOcean**, **Vultr**, **Linode (Akamai)**, **Hetzner**, **UpCloud**, **Proxmox VE**, **Scaleway**, **GCP (Compute Engine)** and **Azure** directly into `~/.ssh/config`. Sync adds new hosts, updates changed IPs and optionally removes deleted servers. Tags from your cloud provider are merged with local tags.
+Never manually add a server IP to your SSH config again. Pull servers from **AWS EC2**, **DigitalOcean**, **Vultr**, **Linode (Akamai)**, **Hetzner**, **UpCloud**, **Proxmox VE**, **Scaleway**, **GCP (Compute Engine)**, **Azure** and **Tailscale** directly into `~/.ssh/config`. Sync adds new hosts, updates changed IPs and optionally removes deleted servers. Tags from your cloud provider are merged with local tags.
 
 ```bash
 purple provider add digitalocean --token YOUR_TOKEN   # or use PURPLE_TOKEN env var
@@ -82,6 +82,8 @@ purple provider add aws --token AKID:SECRET --regions us-east-1,eu-west-1
 purple provider add proxmox --url https://pve:8006 --token user@pam!token=secret
 purple provider add gcp --token /path/to/sa-key.json --project my-project --regions us-central1-a
 purple provider add azure --token /path/to/sp.json --regions SUBSCRIPTION_ID
+purple provider add tailscale                               # local CLI, no token needed
+purple provider add tailscale --token tskey-api-YOUR_KEY    # or use API
 purple provider add digitalocean --token YOUR_TOKEN --no-auto-sync  # disable startup sync
 purple sync                                            # sync all providers
 purple sync --dry-run                                  # preview changes
@@ -331,7 +333,7 @@ Most SSH tools read your config but don't write it, sync one cloud but not ten, 
 
 **It edits your real SSH config.** Most SSH tools only read. purple reads, edits and writes `~/.ssh/config` directly with full round-trip fidelity.
 
-**It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from 10 cloud providers into your config. Configure once, sync anytime.
+**It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from 11 cloud providers into your config. Configure once, sync anytime.
 
 **It runs commands across hosts.** Save command snippets and execute them on one host, a selection or all hosts at once. Sequential or parallel. No Ansible, no Fabric, no extra tools.
 
@@ -345,7 +347,7 @@ Most SSH tools read your config but don't write it, sync one cloud but not ten, 
 
 ## Cloud providers
 
-purple syncs servers from ten cloud providers into your SSH config. Each provider is configured with an API token (or AWS credentials profile). Synced hosts get an alias prefix (e.g. `do-web-1`) and are tracked via comments in your config. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Run `purple sync` to update all providers at once. Auto-sync runs on startup for providers that have it enabled.
+purple syncs servers from eleven cloud providers into your SSH config. Each provider is configured with an API token (or AWS credentials profile). Tailscale also works without a token by using the local CLI. Synced hosts get an alias prefix (e.g. `do-web-1`) and are tracked via comments in your config. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel. Run `purple sync` to update all providers at once. Auto-sync runs on startup for providers that have it enabled.
 
 ### AWS EC2
 
@@ -431,6 +433,15 @@ Syncs VMs across multiple subscriptions using the Azure Resource Manager API. Au
 purple provider add azure --token /path/to/sp.json --regions SUBSCRIPTION_ID
 purple provider add azure --token /path/to/sp.json --regions SUB_ID_1,SUB_ID_2
 purple provider add azure --token "$(az account get-access-token --query accessToken -o tsv)" --regions SUBSCRIPTION_ID
+```
+
+### Tailscale
+
+Syncs devices from your Tailscale network. Works in two modes: without a token it uses the local `tailscale` CLI (no API key needed), with a token it uses the Tailscale HTTP API. Tailscale tags are synced (with `tag:` prefix stripped). IPv4 (100.x) is preferred over IPv6.
+
+```bash
+purple provider add tailscale                               # local CLI mode (no token needed)
+purple provider add tailscale --token tskey-api-YOUR_KEY    # API mode
 ```
 
 ### Shared sync options
@@ -524,7 +535,7 @@ Source value: my-script %a %h
 Yes. Press `f` on any host to open the remote file explorer. It shows local files on the left and the remote server on the right. Navigate directories, select files and copy them between machines with `Enter`. Works through ProxyJump chains, password sources and active tunnels.
 
 **What cloud providers does purple support?**
-AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine) and Azure. See the [Cloud providers](#cloud-providers) section for setup details per provider.
+AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure and Tailscale. See the [Cloud providers](#cloud-providers) section for setup details per provider.
 
 **Does purple modify my existing SSH config?**
 Only when you add, edit, delete or sync. Auto-sync runs on startup for providers that have it enabled (toggle per provider, on by default except Proxmox). All writes are atomic with automatic backups.

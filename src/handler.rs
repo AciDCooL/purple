@@ -1486,6 +1486,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
 
     // AWS allows empty token when profile is set (credentials from ~/.aws/credentials)
     if app.provider_form.token.trim().is_empty()
+        && provider_name != "tailscale"
         && (provider_name != "aws" || app.provider_form.profile.trim().is_empty())
     {
         let hint = if provider_name == "gcp" {
@@ -4069,7 +4070,7 @@ mod tests {
 
     #[test]
     fn test_all_cloud_providers_default_auto_sync_true() {
-        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws", "scaleway", "gcp", "azure"] {
+        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws", "scaleway", "gcp", "azure", "tailscale"] {
             let mut app = make_app("Host test\n  HostName test.com\n");
             app.screen = Screen::Providers;
             app.provider_config = test_provider_config();

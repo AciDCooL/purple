@@ -1,8 +1,8 @@
 [package]
 name = "purple-ssh"
-version = "2.3.0"
+version = "2.4.0"
 edition = "2024"
-description = "TUI for managing SSH servers. Search, connect, transfer files and sync from 10 cloud providers. Edits ~/.ssh/config with round-trip fidelity."
+description = "TUI for managing SSH servers. Search, connect, transfer files and sync from 11 cloud providers. Edits ~/.ssh/config with round-trip fidelity."
 license = "MIT"
 repository = "https://github.com/erickochen/purple"
 homepage = "https://getpurple.sh"
