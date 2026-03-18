@@ -897,6 +897,7 @@ footer a:hover { color: var(--accent); }
       <span>Linode</span>
       <span>Proxmox VE</span>
       <span>Scaleway</span>
+      <span>Tailscale</span>
       <span>UpCloud</span>
       <span>Vultr</span>
     </div>
