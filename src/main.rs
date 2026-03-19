@@ -341,7 +341,9 @@ fn main() -> Result<()> {
     }
 
     let config_path = resolve_config_path(&cli.config)?;
-    let config = SshConfigFile::parse(&config_path)?;
+    let mut config = SshConfigFile::parse(&config_path)?;
+    let repaired_groups = config.repair_absorbed_group_comments();
+    let orphaned_headers = config.remove_all_orphaned_group_headers();
 
     // Handle subcommands that need SSH config
     match cli.command {
@@ -434,6 +436,15 @@ fn main() -> Result<()> {
         // No exact match — open TUI with search pre-filled
         let mut app = App::new(config);
         apply_saved_sort(&mut app);
+        if repaired_groups > 0 || orphaned_headers > 0 {
+            app.set_status(
+                format!(
+                    "Repaired SSH config ({} absorbed, {} orphaned group headers).",
+                    repaired_groups, orphaned_headers
+                ),
+                false,
+            );
+        }
         app.start_search_with(alias);
         if app.search.filtered_indices.is_empty() {
             app.set_status(
@@ -447,6 +458,15 @@ fn main() -> Result<()> {
     // Interactive TUI mode
     let mut app = App::new(config);
     apply_saved_sort(&mut app);
+    if repaired_groups > 0 || orphaned_headers > 0 {
+        app.set_status(
+            format!(
+                "Repaired SSH config ({} absorbed, {} orphaned group headers).",
+                repaired_groups, orphaned_headers
+            ),
+            false,
+        );
+    }
     run_tui(app)
 }
 
@@ -477,22 +497,43 @@ fn set_sync_summary(app: &mut App) {
     }
 }
 
+/// First-launch initialization: create ~/.purple/ and back up the original SSH config.
+/// Returns `Some(has_backup)` if this was a first launch, or `None` if already initialized.
+fn first_launch_init(purple_dir: &Path, config_path: &Path) -> Option<bool> {
+    if purple_dir.exists() {
+        return None;
+    }
+    let _ = std::fs::create_dir_all(purple_dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ =
+            std::fs::set_permissions(purple_dir, std::fs::Permissions::from_mode(0o700));
+    }
+    // One-time backup of the original SSH config before purple touches it.
+    // Stored as config.original and never overwritten or pruned.
+    let original_backup = purple_dir.join("config.original");
+    if config_path.exists() {
+        let _ = std::fs::copy(config_path, &original_backup);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                &original_backup,
+                std::fs::Permissions::from_mode(0o600),
+            );
+        }
+    }
+    Some(original_backup.exists())
+}
+
 fn run_tui(mut app: App) -> Result<()> {
     // First-launch welcome hint (one-shot: creates .purple/ so it won't show again)
     if app.status.is_none() && !app.hosts.is_empty() {
         if let Some(home) = dirs::home_dir() {
             let purple_dir = home.join(".purple");
-            if !purple_dir.exists() {
-                let _ = std::fs::create_dir_all(&purple_dir);
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ = std::fs::set_permissions(
-                        &purple_dir,
-                        std::fs::Permissions::from_mode(0o700),
-                    );
-                }
-                app.set_status("Welcome to purple. Press ? for the cheat sheet.", false);
+            if let Some(has_backup) = first_launch_init(&purple_dir, &app.reload.config_path) {
+                app.screen = app::Screen::Welcome { has_backup };
             }
         }
     }
@@ -1921,6 +1962,7 @@ mod tests {
             elements: Vec::new(),
             path: std::path::PathBuf::from("/dev/null"),
             crlf: false,
+            bom: false,
         };
         App::new(config)
     }
@@ -1978,5 +2020,141 @@ mod tests {
         assert!(status.is_error);
         // Error flag should persist while still syncing
         assert!(app.sync_had_errors);
+    }
+
+    // =========================================================================
+    // first_launch_init
+    // =========================================================================
+
+    #[test]
+    fn first_launch_creates_dir_and_backup() {
+        let dir = std::env::temp_dir().join(format!(
+            "purple_test_first_launch_{:?}",
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let purple_dir = dir.join(".purple");
+        let config_path = dir.join("config");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(&config_path, "Host myserver\n  HostName 10.0.0.1\n").unwrap();
+
+        let result = first_launch_init(&purple_dir, &config_path);
+        assert_eq!(result, Some(true), "Should return Some(true) when config exists");
+        assert!(purple_dir.exists(), ".purple dir should be created");
+        let backup = purple_dir.join("config.original");
+        assert!(backup.exists(), "config.original should be created");
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            "Host myserver\n  HostName 10.0.0.1\n"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_launch_returns_none_on_second_call() {
+        let dir = std::env::temp_dir().join(format!(
+            "purple_test_first_launch_twice_{:?}",
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let purple_dir = dir.join(".purple");
+        let config_path = dir.join("config");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(&config_path, "Host a\n").unwrap();
+
+        assert!(first_launch_init(&purple_dir, &config_path).is_some());
+        assert!(first_launch_init(&purple_dir, &config_path).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_launch_no_config_file_skips_backup() {
+        let dir = std::env::temp_dir().join(format!(
+            "purple_test_first_launch_no_cfg_{:?}",
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let purple_dir = dir.join(".purple");
+        let config_path = dir.join("nonexistent_config");
+
+        let result = first_launch_init(&purple_dir, &config_path);
+        assert_eq!(result, Some(false), "Should return Some(false) when no config");
+        assert!(purple_dir.exists(), ".purple dir should be created");
+        assert!(
+            !purple_dir.join("config.original").exists(),
+            "config.original should NOT be created when config does not exist"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_launch_backup_not_overwritten() {
+        let dir = std::env::temp_dir().join(format!(
+            "purple_test_first_launch_no_overwrite_{:?}",
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let purple_dir = dir.join(".purple");
+        let config_path = dir.join("config");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(&config_path, "original content\n").unwrap();
+
+        first_launch_init(&purple_dir, &config_path);
+        let backup = purple_dir.join("config.original");
+        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "original content\n");
+
+        // Modify the config and call again (simulates second launch)
+        std::fs::write(&config_path, "modified content\n").unwrap();
+        first_launch_init(&purple_dir, &config_path);
+
+        // Backup should still have original content
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            "original content\n",
+            "config.original should never be overwritten"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_launch_has_backup_true_when_config_exists() {
+        let dir = std::env::temp_dir().join(format!(
+            "purple_test_first_launch_has_backup_{:?}",
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let purple_dir = dir.join(".purple");
+        let config_path = dir.join("config");
+        let _ = std::fs::create_dir_all(&dir);
+        std::fs::write(&config_path, "Host a\n").unwrap();
+
+        assert_eq!(first_launch_init(&purple_dir, &config_path), Some(true));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn first_launch_has_backup_false_without_config() {
+        let dir = std::env::temp_dir().join(format!(
+            "purple_test_first_launch_no_backup_{:?}",
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let purple_dir = dir.join(".purple");
+        let config_path = dir.join("nonexistent");
+
+        assert_eq!(first_launch_init(&purple_dir, &config_path), Some(false));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

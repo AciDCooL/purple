@@ -46,7 +46,7 @@ struct HetznerServerType {
 #[derive(Deserialize)]
 struct HetznerDatacenter {
     #[serde(default)]
-    name: String,
+    location: Option<HetznerLocation>,
 }
 
 #[derive(Deserialize)]
@@ -158,21 +158,22 @@ impl Provider for Hetzner {
                             server
                                 .datacenter
                                 .as_ref()
-                                .map(|d| &d.name)
+                                .and_then(|d| d.location.as_ref())
+                                .map(|l| &l.name)
                                 .filter(|n| !n.is_empty())
                         });
                     if let Some(name) = region {
-                        metadata.push(("region".to_string(), name.clone()));
+                        metadata.push(("location".to_string(), name.clone()));
                     }
                     if let Some(ref st) = server.server_type {
                         if !st.name.is_empty() {
-                            metadata.push(("plan".to_string(), st.name.clone()));
+                            metadata.push(("type".to_string(), st.name.clone()));
                         }
                     }
                     if let Some(ref image) = server.image {
                         if let Some(ref name) = image.name {
                             if !name.is_empty() {
-                                metadata.push(("os".to_string(), name.clone()));
+                                metadata.push(("image".to_string(), name.clone()));
                             }
                         }
                     }
@@ -743,7 +744,8 @@ mod tests {
                 server
                     .datacenter
                     .as_ref()
-                    .map(|d| &d.name)
+                    .and_then(|d| d.location.as_ref())
+                    .map(|l| &l.name)
                     .filter(|n| !n.is_empty())
             })
             .cloned()
@@ -764,22 +766,33 @@ mod tests {
     fn test_datacenter_fallback_when_no_location() {
         let json = r#"{
             "servers": [{"id": 1, "name": "a", "public_net": {"ipv4": {"ip": "1.2.3.4"}},
+                "labels": {}, "datacenter": {"name": "fsn1-dc14", "location": {"name": "fsn1"}}}],
+            "meta": {"pagination": {"page": 1, "last_page": 1}}
+        }"#;
+        let resp: HetznerResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(select_region(&resp.servers[0]), Some("fsn1".to_string()));
+    }
+
+    #[test]
+    fn test_empty_location_falls_back_to_datacenter_location() {
+        let json = r#"{
+            "servers": [{"id": 1, "name": "a", "public_net": {"ipv4": {"ip": "1.2.3.4"}},
+                "labels": {}, "datacenter": {"name": "fsn1-dc14", "location": {"name": "fsn1"}}, "location": {"name": ""}}],
+            "meta": {"pagination": {"page": 1, "last_page": 1}}
+        }"#;
+        let resp: HetznerResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(select_region(&resp.servers[0]), Some("fsn1".to_string()));
+    }
+
+    #[test]
+    fn test_datacenter_without_nested_location_returns_none() {
+        let json = r#"{
+            "servers": [{"id": 1, "name": "a", "public_net": {"ipv4": {"ip": "1.2.3.4"}},
                 "labels": {}, "datacenter": {"name": "fsn1-dc14"}}],
             "meta": {"pagination": {"page": 1, "last_page": 1}}
         }"#;
         let resp: HetznerResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(select_region(&resp.servers[0]), Some("fsn1-dc14".to_string()));
-    }
-
-    #[test]
-    fn test_empty_location_falls_back_to_datacenter() {
-        let json = r#"{
-            "servers": [{"id": 1, "name": "a", "public_net": {"ipv4": {"ip": "1.2.3.4"}},
-                "labels": {}, "datacenter": {"name": "fsn1-dc14"}, "location": {"name": ""}}],
-            "meta": {"pagination": {"page": 1, "last_page": 1}}
-        }"#;
-        let resp: HetznerResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(select_region(&resp.servers[0]), Some("fsn1-dc14".to_string()));
+        assert_eq!(select_region(&resp.servers[0]), None);
     }
 
     #[test]

@@ -101,6 +101,7 @@ struct NicListResponse {
     #[serde(default)]
     value: Vec<Nic>,
     #[serde(rename = "nextLink")]
+    #[allow(dead_code)]
     next_link: Option<String>,
 }
 
@@ -145,6 +146,7 @@ struct PublicIpListResponse {
     #[serde(default)]
     value: Vec<PublicIp>,
     #[serde(rename = "nextLink")]
+    #[allow(dead_code)]
     next_link: Option<String>,
 }
 
@@ -323,12 +325,12 @@ fn build_metadata(vm: &VirtualMachine) -> Vec<(String, String)> {
     }
     if let Some(ref hw) = vm.properties.hardware_profile {
         if !hw.vm_size.is_empty() {
-            metadata.push(("plan".to_string(), hw.vm_size.clone()));
+            metadata.push(("vm_size".to_string(), hw.vm_size.clone()));
         }
     }
     if let Some(ref sp) = vm.properties.storage_profile {
         if let Some(os) = build_os_string(&sp.image_reference) {
-            metadata.push(("os".to_string(), os));
+            metadata.push(("image".to_string(), os));
         }
     }
     if let Some(state) = extract_power_state(&vm.properties.instance_view) {
@@ -1075,8 +1077,8 @@ mod tests {
             meta,
             vec![
                 ("region".to_string(), "eastus".to_string()),
-                ("plan".to_string(), "Standard_B1s".to_string()),
-                ("os".to_string(), "UbuntuServer-22_04-lts".to_string()),
+                ("vm_size".to_string(), "Standard_B1s".to_string()),
+                ("image".to_string(), "UbuntuServer-22_04-lts".to_string()),
                 ("status".to_string(), "running".to_string()),
             ]
         );

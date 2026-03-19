@@ -226,11 +226,20 @@ fn push_field(lines: &mut Vec<Line<'static>>, label: &str, value: &str, max_valu
 fn meta_label(key: &str) -> String {
     match key {
         "region" => "Region".to_string(),
+        "zone" => "Zone".to_string(),
+        "datacenter" => "Datacenter".to_string(), // legacy, pre-2.6.0
+        "location" => "Location".to_string(),
+        "instance" => "Instance".to_string(),
+        "size" => "Size".to_string(),
+        "machine" => "Machine".to_string(),
+        "vm_size" => "VM Size".to_string(),
         "plan" => "Plan".to_string(),
-        "os" => "OS".to_string(),
-        "node" => "Node".to_string(),
+        "specs" => "Specs".to_string(),
         "type" => "Type".to_string(),
+        "os" => "OS".to_string(),
+        "image" => "Image".to_string(),
         "status" => "State".to_string(),
+        "node" => "Node".to_string(),
         other => {
             // Capitalize first letter
             let mut chars = other.chars();

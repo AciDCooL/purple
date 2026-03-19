@@ -117,7 +117,7 @@ impl Provider for Linode {
                         }
                         if let Some(ref image) = instance.image {
                             if !image.is_empty() {
-                                metadata.push(("os".to_string(), image.clone()));
+                                metadata.push(("image".to_string(), image.clone()));
                             }
                         }
                         if !instance.status.is_empty() {

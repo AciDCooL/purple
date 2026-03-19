@@ -111,6 +111,7 @@ pub enum Screen {
         askpass: Option<String>,
     },
     FileBrowser { alias: String },
+    Welcome { has_backup: bool },
 }
 
 /// Which form field is focused.
@@ -1149,8 +1150,8 @@ pub struct App {
     pub group_by_provider: bool,
     pub view_mode: ViewMode,
 
-    // Undo
-    pub deleted_host: Option<DeletedHost>,
+    // Undo (multi-level, capped at 50)
+    pub undo_stack: Vec<DeletedHost>,
 
     // Providers
     pub provider_config: ProviderConfig,
@@ -1274,7 +1275,7 @@ impl App {
             sort_mode: SortMode::Original,
             group_by_provider: false,
             view_mode: ViewMode::Compact,
-            deleted_host: None,
+            undo_stack: Vec::new(),
             provider_config: ProviderConfig::load(),
             provider_form: ProviderFormFields::new(),
             syncing_providers: HashMap::new(),
@@ -1959,7 +1960,7 @@ impl App {
             if let Ok(new_config) = SshConfigFile::parse(&self.reload.config_path) {
                 self.config = new_config;
                 // Invalidate undo state — config structure may have changed externally
-                self.deleted_host = None;
+                self.undo_stack.clear();
                 // Clear stale ping status — hosts may have changed
                 self.ping_status.clear();
                 self.reload_hosts();
@@ -2357,7 +2358,7 @@ impl App {
                 self.config = config_backup;
                 return (format!("Sync failed to save: {}", e), true, total);
             }
-            self.deleted_host = None;
+            self.undo_stack.clear();
             self.update_last_modified();
             self.reload_hosts();
             // Migrate active tunnel handles for renamed aliases
@@ -2426,6 +2427,7 @@ mod tests {
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
         App::new(config)
     }

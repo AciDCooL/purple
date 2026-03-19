@@ -33,6 +33,8 @@ struct Droplet {
 struct DropletImage {
     #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
+    distribution: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -122,13 +124,19 @@ impl Provider for DigitalOcean {
                         }
                     }
                     if !droplet.size_slug.is_empty() {
-                        metadata.push(("plan".to_string(), droplet.size_slug.clone()));
+                        metadata.push(("size".to_string(), droplet.size_slug.clone()));
                     }
                     if let Some(ref image) = droplet.image {
-                        if let Some(ref name) = image.name {
-                            if !name.is_empty() {
-                                metadata.push(("os".to_string(), name.clone()));
+                        let label = match (&image.distribution, &image.name) {
+                            (Some(dist), Some(name)) if !dist.is_empty() && !name.is_empty() => {
+                                format!("{} {}", dist, name)
                             }
+                            (Some(dist), _) if !dist.is_empty() => dist.clone(),
+                            (_, Some(name)) if !name.is_empty() => name.clone(),
+                            _ => String::new(),
+                        };
+                        if !label.is_empty() {
+                            metadata.push(("image".to_string(), label));
                         }
                     }
                     if !droplet.status.is_empty() {

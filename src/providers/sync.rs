@@ -161,21 +161,23 @@ pub fn sync_provider_with_options(
                 let trimmed_remote: Vec<String> =
                     remote.tags.iter().map(|t| t.trim().to_string()).collect();
                 let tags_changed = if reset_tags {
-                    // Exact comparison (case-insensitive): replace local tags with provider tags
+                    // Exact comparison (case-insensitive, whitespace-normalized):
+                    // replace local tags with provider tags
                     let mut sorted_local: Vec<String> =
-                        entry.tags.iter().map(|t| t.to_lowercase()).collect();
+                        entry.tags.iter().map(|t| t.trim().to_lowercase()).collect();
                     sorted_local.sort();
                     let mut sorted_remote: Vec<String> =
                         trimmed_remote.iter().map(|t| t.to_lowercase()).collect();
                     sorted_remote.sort();
                     sorted_local != sorted_remote
                 } else {
-                    // Subset check (case-insensitive): only trigger when provider tags are missing locally
+                    // Subset check (case-insensitive, whitespace-normalized):
+                    // only trigger when provider tags are missing locally
                     trimmed_remote.iter().any(|rt| {
                         !entry
                             .tags
                             .iter()
-                            .any(|lt| lt.eq_ignore_ascii_case(rt))
+                            .any(|lt| lt.trim().eq_ignore_ascii_case(rt))
                     })
                 };
                 if alias_changed || ip_changed || tags_changed || meta_changed {
@@ -211,10 +213,11 @@ pub fn sync_provider_with_options(
                                 if reset_tags {
                                     config.set_host_tags(tags_alias, &trimmed_remote);
                                 } else {
-                                    // Merge (case-insensitive): keep existing local tags, add missing remote tags
+                                    // Merge (case-insensitive, whitespace-normalized):
+                                    // keep existing local tags, add missing remote tags
                                     let mut merged = entry.tags.clone();
                                     for rt in &trimmed_remote {
-                                        if !merged.iter().any(|t| t.eq_ignore_ascii_case(rt)) {
+                                        if !merged.iter().any(|t| t.trim().eq_ignore_ascii_case(rt)) {
                                             merged.push(rt.clone());
                                         }
                                     }
@@ -283,19 +286,32 @@ pub fn sync_provider_with_options(
                     ..Default::default()
                 };
 
-                // Add blank line separator before host (skip when preceded by group header
-                // so the header stays adjacent to the first host)
-                if !wrote_header
-                    && !config.elements.is_empty()
-                    && !config.last_element_has_trailing_blank()
-                {
-                    config
-                        .elements
-                        .push(ConfigElement::GlobalLine(String::new()));
+                let block = SshConfigFile::entry_to_block(&entry);
+
+                // Insert adjacent to existing provider hosts (keeps groups together).
+                // For the very first host (wrote_header), fall through to push at end.
+                let insert_pos = if !wrote_header {
+                    config.find_provider_insert_position(provider.name())
+                } else {
+                    None
+                };
+
+                if let Some(pos) = insert_pos {
+                    // Insert after last provider host with blank separator
+                    config.elements.insert(pos, ConfigElement::HostBlock(block));
+                } else {
+                    // No existing group or first host: append at end with separator
+                    if !wrote_header
+                        && !config.elements.is_empty()
+                        && !config.last_element_has_trailing_blank()
+                    {
+                        config
+                            .elements
+                            .push(ConfigElement::GlobalLine(String::new()));
+                    }
+                    config.elements.push(ConfigElement::HostBlock(block));
                 }
 
-                let block = SshConfigFile::entry_to_block(&entry);
-                config.elements.push(ConfigElement::HostBlock(block));
                 config.set_host_provider(&alias, provider.name(), &remote.server_id);
                 if !remote.tags.is_empty() {
                     config.set_host_tags(&alias, &remote.tags);
@@ -358,6 +374,7 @@ mod tests {
             elements: Vec::new(),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         }
     }
 
@@ -527,6 +544,7 @@ Host do-web-1-copy
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
         let section = make_section();
 
@@ -696,6 +714,7 @@ Host do-web-1-copy
             })],
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         }
     }
 
@@ -771,6 +790,7 @@ Host do-web-1-copy
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
         let section = make_section();
 
@@ -875,6 +895,7 @@ Host do-web-1-copy
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
         let section = make_section();
 
@@ -1961,6 +1982,7 @@ Host do-web
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
         let section = make_section();
         let remote = vec![ProviderHost::new("123".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
@@ -2094,6 +2116,7 @@ Host do-web
             })],
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         let hosts = config.find_hosts_by_provider("digitalocean");
@@ -2128,6 +2151,7 @@ Host do-web
             elements,
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         let hosts = config.find_hosts_by_provider("digitalocean");
@@ -2149,6 +2173,7 @@ Host do-web
             })],
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         let hosts = config.find_hosts_by_provider("digitalocean");
@@ -2162,6 +2187,7 @@ Host do-web
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         let hosts = config.find_hosts_by_provider("vultr");
@@ -2180,6 +2206,7 @@ Host do-web
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         let alias = config.deduplicate_alias_excluding("do-web", Some("do-web"));
@@ -2194,6 +2221,7 @@ Host do-web
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         let alias = config.deduplicate_alias_excluding("do-web", Some("do-db"));
@@ -2208,6 +2236,7 @@ Host do-web
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         let alias = config.deduplicate_alias_excluding("do-web", Some("do-web"));
@@ -2222,6 +2251,7 @@ Host do-web
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         // None exclude means normal deduplication
@@ -2240,6 +2270,7 @@ Host do-web
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         config.set_host_tags("do-web", &[]);
@@ -2254,6 +2285,7 @@ Host do-web
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         config.set_host_provider("do-web", "digitalocean", "new-id");
@@ -2284,6 +2316,7 @@ Host do-web
             })],
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         let section = make_section();
@@ -2383,6 +2416,7 @@ Host do-web
             })],
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
 
         // Add a non-included host

@@ -74,6 +74,9 @@ struct StorageDevices {
 struct StorageDevice {
     #[serde(default)]
     storage_title: String,
+    /// "1" for boot disk, "0" otherwise.
+    #[serde(default)]
+    boot_disk: String,
 }
 
 #[derive(Deserialize, Default)]
@@ -252,15 +255,21 @@ impl Provider for UpCloud {
 
             let mut metadata = Vec::new();
             if !server.zone.is_empty() {
-                metadata.push(("region".to_string(), server.zone.clone()));
+                metadata.push(("zone".to_string(), server.zone.clone()));
             }
             if !server.plan.is_empty() {
                 metadata.push(("plan".to_string(), server.plan.clone()));
             }
             if let Some(ref sd) = detail.server.storage_devices {
-                if let Some(first) = sd.storage_device.first() {
-                    if !first.storage_title.is_empty() {
-                        metadata.push(("os".to_string(), first.storage_title.clone()));
+                // Prefer boot disk, fall back to first device
+                let boot = sd
+                    .storage_device
+                    .iter()
+                    .find(|d| d.boot_disk == "1")
+                    .or_else(|| sd.storage_device.first());
+                if let Some(disk) = boot {
+                    if !disk.storage_title.is_empty() {
+                        metadata.push(("image".to_string(), disk.storage_title.clone()));
                     }
                 }
             }
@@ -1026,6 +1035,39 @@ mod tests {
         let sd = resp.server.storage_devices.unwrap();
         let title = &sd.storage_device[0].storage_title;
         assert_eq!(title, "Debian GNU/Linux 12");
+    }
+
+    #[test]
+    fn test_boot_disk_preferred_over_first_device() {
+        let json = r#"{"server": {"networking": {"interfaces": {"interface": []}},
+            "storage_devices": {"storage_device": [
+                {"storage_title": "Data disk", "boot_disk": "0"},
+                {"storage_title": "Ubuntu Server 24.04 LTS", "boot_disk": "1"}
+            ]}}}"#;
+        let resp: ServerDetailResponse = serde_json::from_str(json).unwrap();
+        let sd = resp.server.storage_devices.unwrap();
+        let boot = sd
+            .storage_device
+            .iter()
+            .find(|d| d.boot_disk == "1")
+            .or_else(|| sd.storage_device.first());
+        assert_eq!(boot.unwrap().storage_title, "Ubuntu Server 24.04 LTS");
+    }
+
+    #[test]
+    fn test_boot_disk_falls_back_to_first() {
+        let json = r#"{"server": {"networking": {"interfaces": {"interface": []}},
+            "storage_devices": {"storage_device": [
+                {"storage_title": "Debian GNU/Linux 12"}
+            ]}}}"#;
+        let resp: ServerDetailResponse = serde_json::from_str(json).unwrap();
+        let sd = resp.server.storage_devices.unwrap();
+        let boot = sd
+            .storage_device
+            .iter()
+            .find(|d| d.boot_disk == "1")
+            .or_else(|| sd.storage_device.first());
+        assert_eq!(boot.unwrap().storage_title, "Debian GNU/Linux 12");
     }
 
     #[test]

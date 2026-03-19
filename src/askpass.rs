@@ -800,6 +800,7 @@ mod tests {
             elements: SshConfigFile::parse_content(content),
             path: std::path::PathBuf::from("/tmp/test_askpass_config"),
             crlf: false,
+            bom: false,
         }
     }
 

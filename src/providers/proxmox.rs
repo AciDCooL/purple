@@ -153,18 +153,17 @@ enum ResolveOutcome {
 // --- Helper functions ---
 
 /// Map QEMU ostype codes to human-readable names.
+/// Values and descriptions from qm.conf(5): l24, l26, other, solaris,
+/// w2k, w2k3, w2k8, win7, win8, win10, win11, wvista, wxp.
 fn map_qemu_ostype(ostype: &str) -> &str {
     match ostype {
-        "l26" | "l24" => "Linux",
-        "win11" => "Windows 11",
-        "win10" => "Windows 10",
-        "win8" => "Windows 8",
+        "l26" => "Linux 2.6-6.x",
+        "l24" => "Linux 2.4",
+        "win11" => "Windows 11/2022/2025",
+        "win10" => "Windows 10/2016/2019",
+        "win8" => "Windows 8/2012/2012r2",
         "win7" => "Windows 7",
         "wvista" => "Windows Vista",
-        "w2k22" => "Windows Server 2022",
-        "w2k19" => "Windows Server 2019",
-        "w2k16" => "Windows Server 2016",
-        "w2k12" => "Windows Server 2012",
         "w2k8" => "Windows Server 2008",
         "w2k3" => "Windows Server 2003",
         "wxp" => "Windows XP",
@@ -569,7 +568,7 @@ impl Provider for Proxmox {
                 metadata.push(("type".to_string(), resource.resource_type.clone()));
             }
             if let Some(plan) = format_plan(resource.maxcpu, resource.maxmem) {
-                metadata.push(("plan".to_string(), plan));
+                metadata.push(("specs".to_string(), plan));
             }
             if let Some(os) = ostype {
                 let label = if resource.resource_type == "qemu" {
@@ -2995,21 +2994,18 @@ mod tests {
 
     #[test]
     fn test_map_qemu_ostype_linux() {
-        assert_eq!(map_qemu_ostype("l26"), "Linux");
-        assert_eq!(map_qemu_ostype("l24"), "Linux");
+        assert_eq!(map_qemu_ostype("l26"), "Linux 2.6-6.x");
+        assert_eq!(map_qemu_ostype("l24"), "Linux 2.4");
     }
 
     #[test]
     fn test_map_qemu_ostype_windows() {
-        assert_eq!(map_qemu_ostype("win11"), "Windows 11");
-        assert_eq!(map_qemu_ostype("win10"), "Windows 10");
-        assert_eq!(map_qemu_ostype("win8"), "Windows 8");
+        // Values per qm.conf(5) manpage
+        assert_eq!(map_qemu_ostype("win11"), "Windows 11/2022/2025");
+        assert_eq!(map_qemu_ostype("win10"), "Windows 10/2016/2019");
+        assert_eq!(map_qemu_ostype("win8"), "Windows 8/2012/2012r2");
         assert_eq!(map_qemu_ostype("win7"), "Windows 7");
         assert_eq!(map_qemu_ostype("wvista"), "Windows Vista");
-        assert_eq!(map_qemu_ostype("w2k22"), "Windows Server 2022");
-        assert_eq!(map_qemu_ostype("w2k19"), "Windows Server 2019");
-        assert_eq!(map_qemu_ostype("w2k16"), "Windows Server 2016");
-        assert_eq!(map_qemu_ostype("w2k12"), "Windows Server 2012");
         assert_eq!(map_qemu_ostype("w2k8"), "Windows Server 2008");
         assert_eq!(map_qemu_ostype("w2k3"), "Windows Server 2003");
         assert_eq!(map_qemu_ostype("wxp"), "Windows XP");

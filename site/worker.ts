@@ -171,7 +171,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "2.6.0",
+  "softwareVersion": "2.7.0",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
   "codeRepository": "https://github.com/erickochen/purple",
@@ -230,7 +230,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
       "name": "What cloud providers does purple support?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "purple syncs servers from eleven cloud providers: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure and Tailscale. Each provider is configured with an API token or credentials profile. Tailscale also works without a token using the local CLI. Synced hosts are tracked in your SSH config and updated on each sync."
+        "text": "purple syncs servers from eleven cloud providers: AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure and Tailscale. Each provider is configured with an API token or credentials profile. Synced hosts are tracked in your SSH config and updated on each sync."
       }
     },
     {
@@ -911,7 +911,7 @@ footer a:hover { color: var(--accent); }
 
   <section>
     <h2>Built with Rust</h2>
-    <p>Starts instantly. No dependencies to install. No daemon running in the background. Won't corrupt your config. Single binary. MIT licensed. 3000+ tests.</p>
+    <p>Starts instantly. No dependencies to install. No daemon running in the background. Won't corrupt your config. Single binary. MIT licensed. 3500+ tests.</p>
   </section>
 
   <hr class="divider">
@@ -951,7 +951,7 @@ footer a:hover { color: var(--accent); }
       </details>
       <details>
         <summary>What cloud providers does purple support?</summary>
-        <div class="a-wrap"><div class="answer">AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure and Tailscale. Each provider is configured with an API token or credentials profile. Tailscale also works without a token using the local CLI.</div></div>
+        <div class="a-wrap"><div class="answer">AWS EC2, DigitalOcean, Vultr, Linode (Akamai), Hetzner, UpCloud, Proxmox VE, Scaleway, GCP (Compute Engine), Azure and Tailscale. Each provider is configured with an API token or credentials profile.</div></div>
       </details>
       <details>
         <summary>How do command snippets work?</summary>
@@ -1181,7 +1181,7 @@ Consecutive blank lines are collapsed to one. Hosts from Include files are displ
 - Language: Rust
 - Platforms: macOS and Linux
 - Binary name: purple (crate name: purple-ssh)
-- Tests: 3000+ (unit + integration)
+- Tests: 3500+ (unit + integration)
 - No async runtime. Single binary, no daemon
 - Atomic writes via temp file + chmod 600 + rename
 - Uses system ssh binary with -F <config_path>

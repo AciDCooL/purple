@@ -107,6 +107,13 @@ pub fn handle_key_event(
         Screen::SnippetParamForm { .. } => handle_snippet_param_form(app, key, events_tx),
         Screen::ConfirmHostKeyReset { .. } => handle_confirm_host_key_reset(app, key),
         Screen::FileBrowser { .. } => handle_file_browser(app, key, events_tx),
+        Screen::Welcome { .. } => {
+            if key.code == KeyCode::Char('?') {
+                app.screen = Screen::Help;
+            } else {
+                app.screen = Screen::HostList;
+            }
+        }
     }
     Ok(())
 }
@@ -333,7 +340,7 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             app.ui.detail_scroll = app.ui.detail_scroll.saturating_sub(1);
         }
         KeyCode::Char('u') => {
-            if let Some(deleted) = app.deleted_host.take() {
+            if let Some(deleted) = app.undo_stack.pop() {
                 let alias = match &deleted.element {
                     ConfigElement::HostBlock(block) => block.host_pattern.clone(),
                     _ => "host".to_string(),
@@ -342,7 +349,7 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
                 if let Err(e) = app.config.write() {
                     // Rollback: remove re-inserted host and restore undo buffer
                     if let Some((element, position)) = app.config.delete_host_undoable(&alias) {
-                        app.deleted_host = Some(crate::app::DeletedHost { element, position });
+                        app.undo_stack.push(crate::app::DeletedHost { element, position });
                     }
                     app.set_status(format!("Failed to save: {}", e), true);
                 } else {
@@ -713,7 +720,7 @@ fn submit_form(app: &mut App) {
     match result {
         Ok(msg) => {
             // Clear undo buffer after successful write
-            app.deleted_host = None;
+            app.undo_stack.clear();
             // Handle keychain changes on edit
             let mut final_msg = msg;
             if old_askpass.as_deref() == Some("keychain") {
@@ -764,10 +771,13 @@ fn handle_confirm_delete(app: &mut App, key: KeyEvent) {
                             let _ = tunnel.child.kill();
                             let _ = tunnel.child.wait();
                         }
-                        app.deleted_host = Some(crate::app::DeletedHost {
+                        app.undo_stack.push(crate::app::DeletedHost {
                             element,
                             position,
                         });
+                        if app.undo_stack.len() > 50 {
+                            app.undo_stack.remove(0);
+                        }
                         app.update_last_modified();
                         app.reload_hosts();
                         app.set_status(
@@ -1787,7 +1797,7 @@ fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
                         app.config = config_backup;
                         app.set_status(format!("Failed to save: {}", e), true);
                     } else {
-                        app.deleted_host = None;
+                        app.undo_stack.clear();
                         app.update_last_modified();
                         app.refresh_tunnel_list(&alias);
                         app.reload_hosts();
@@ -2008,7 +2018,7 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
         return;
     }
 
-    app.deleted_host = None; // Clear undo buffer — positions may have shifted
+    app.undo_stack.clear(); // Clear undo buffer — positions may have shifted
     app.update_last_modified();
     app.refresh_tunnel_list(alias);
     app.reload_hosts();
@@ -3196,6 +3206,7 @@ mod tests {
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         };
         let mut app = App::new(config);
         // Never write to the real ~/.purple during tests

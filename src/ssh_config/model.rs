@@ -1,5 +1,24 @@
 use std::path::PathBuf;
 
+/// Display name for a provider used in `# purple:group` headers.
+/// Mirrors `providers::provider_display_name()` without a cross-module dependency.
+fn provider_group_display_name(name: &str) -> &str {
+    match name {
+        "digitalocean" => "DigitalOcean",
+        "vultr" => "Vultr",
+        "linode" => "Linode",
+        "hetzner" => "Hetzner",
+        "upcloud" => "UpCloud",
+        "proxmox" => "Proxmox VE",
+        "aws" => "AWS EC2",
+        "scaleway" => "Scaleway",
+        "gcp" => "GCP",
+        "azure" => "Azure",
+        "tailscale" => "Tailscale",
+        other => other,
+    }
+}
+
 /// Represents the entire SSH config file as a sequence of elements.
 /// Preserves the original structure for round-trip fidelity.
 #[derive(Debug, Clone)]
@@ -8,6 +27,8 @@ pub struct SshConfigFile {
     pub path: PathBuf,
     /// Whether the original file used CRLF line endings.
     pub crlf: bool,
+    /// Whether the original file started with a UTF-8 BOM.
+    pub bom: bool,
 }
 
 /// An Include directive that references other config files.
@@ -457,10 +478,9 @@ impl SshConfigFile {
     ) {
         for e in elements {
             if let ConfigElement::Include(include) = e {
-                // Split on whitespace to handle multi-pattern Includes
-                // (same as resolve_include does)
-                for single in include.pattern.split_whitespace() {
-                    let expanded = Self::expand_tilde(single);
+                // Split respecting quoted paths (same as resolve_include does)
+                for single in Self::split_include_patterns(&include.pattern) {
+                    let expanded = Self::expand_env_vars(&Self::expand_tilde(single));
                     let resolved = if expanded.starts_with('/') {
                         PathBuf::from(&expanded)
                     } else if let Some(dir) = config_dir {
@@ -488,6 +508,111 @@ impl SshConfigFile {
         }
     }
 
+    /// Remove `# purple:group <Name>` headers that have no corresponding
+    /// provider hosts. Returns the number of headers removed.
+    pub fn remove_all_orphaned_group_headers(&mut self) -> usize {
+        // Collect all provider display names that have at least one host.
+        let active_providers: std::collections::HashSet<String> = self
+            .elements
+            .iter()
+            .filter_map(|e| {
+                if let ConfigElement::HostBlock(block) = e {
+                    block
+                        .provider()
+                        .map(|(name, _)| provider_group_display_name(&name).to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut removed = 0;
+        self.elements.retain(|e| {
+            if let ConfigElement::GlobalLine(line) = e {
+                if let Some(rest) = line.trim().strip_prefix("# purple:group ") {
+                    if !active_providers.contains(rest.trim()) {
+                        removed += 1;
+                        return false;
+                    }
+                }
+            }
+            true
+        });
+        removed
+    }
+
+    /// Repair configs where `# purple:group` comments were absorbed into the
+    /// preceding host block's directives instead of being stored as GlobalLines.
+    /// Returns the number of blocks that were repaired.
+    pub fn repair_absorbed_group_comments(&mut self) -> usize {
+        let mut repaired = 0;
+        let mut idx = 0;
+        while idx < self.elements.len() {
+            let needs_repair = if let ConfigElement::HostBlock(block) = &self.elements[idx] {
+                block.directives.iter().any(|d| {
+                    d.is_non_directive
+                        && d.raw_line.trim().starts_with("# purple:group ")
+                })
+            } else {
+                false
+            };
+
+            if !needs_repair {
+                idx += 1;
+                continue;
+            }
+
+            // Find the index of the first absorbed group comment in this block's directives.
+            let block = if let ConfigElement::HostBlock(block) = &mut self.elements[idx] {
+                block
+            } else {
+                unreachable!()
+            };
+
+            let group_idx = block
+                .directives
+                .iter()
+                .position(|d| {
+                    d.is_non_directive
+                        && d.raw_line.trim().starts_with("# purple:group ")
+                })
+                .unwrap();
+
+            // Find where trailing blanks before the group comment start.
+            let mut keep_end = group_idx;
+            while keep_end > 0
+                && block.directives[keep_end - 1].is_non_directive
+                && block.directives[keep_end - 1].raw_line.trim().is_empty()
+            {
+                keep_end -= 1;
+            }
+
+            // Collect everything from keep_end onward as GlobalLines.
+            let extracted: Vec<ConfigElement> = block
+                .directives
+                .drain(keep_end..)
+                .map(|d| ConfigElement::GlobalLine(d.raw_line))
+                .collect();
+
+            // Insert extracted GlobalLines right after this HostBlock.
+            let insert_at = idx + 1;
+            for (i, elem) in extracted.into_iter().enumerate() {
+                self.elements.insert(insert_at + i, elem);
+            }
+
+            repaired += 1;
+            // Advance past the inserted elements.
+            idx = insert_at;
+            // Skip the inserted elements to continue scanning.
+            while idx < self.elements.len() {
+                if let ConfigElement::HostBlock(_) = &self.elements[idx] {
+                    break;
+                }
+                idx += 1;
+            }
+        }
+        repaired
+    }
 
     /// Recursively collect host entries from a list of elements.
     fn collect_host_entries(elements: &[ConfigElement], entries: &mut Vec<HostEntry>) {
@@ -567,14 +692,75 @@ impl SshConfigFile {
     }
 
     /// Add a new host entry to the config.
+    /// Inserts before any trailing wildcard/pattern Host blocks (e.g. `Host *`)
+    /// so that SSH "first match wins" semantics are preserved. If wildcards are
+    /// only at the top of the file (acting as global defaults), appends at end.
     pub fn add_host(&mut self, entry: &HostEntry) {
         let block = Self::entry_to_block(entry);
-        // Add a blank line separator if the file isn't empty and doesn't already end with one
-        if !self.elements.is_empty() && !self.last_element_has_trailing_blank() {
-            self.elements
-                .push(ConfigElement::GlobalLine(String::new()));
+        let insert_pos = self.find_trailing_pattern_start();
+
+        if let Some(pos) = insert_pos {
+            // Insert before the trailing pattern group, with blank separators
+            let needs_blank_before = pos > 0
+                && !matches!(
+                    self.elements.get(pos - 1),
+                    Some(ConfigElement::GlobalLine(line)) if line.trim().is_empty()
+                );
+            let mut idx = pos;
+            if needs_blank_before {
+                self.elements
+                    .insert(idx, ConfigElement::GlobalLine(String::new()));
+                idx += 1;
+            }
+            self.elements.insert(idx, ConfigElement::HostBlock(block));
+            // Ensure a blank separator after the new block (before the wildcard group)
+            let after = idx + 1;
+            if after < self.elements.len()
+                && !matches!(
+                    self.elements.get(after),
+                    Some(ConfigElement::GlobalLine(line)) if line.trim().is_empty()
+                )
+            {
+                self.elements
+                    .insert(after, ConfigElement::GlobalLine(String::new()));
+            }
+        } else {
+            // No trailing patterns: append at end
+            if !self.elements.is_empty() && !self.last_element_has_trailing_blank() {
+                self.elements
+                    .push(ConfigElement::GlobalLine(String::new()));
+            }
+            self.elements.push(ConfigElement::HostBlock(block));
         }
-        self.elements.push(ConfigElement::HostBlock(block));
+    }
+
+    /// Find the start of a trailing group of wildcard/pattern Host blocks.
+    /// Scans backwards from the end, skipping GlobalLines (blanks/comments/Match).
+    /// Returns `None` if no trailing patterns exist (or if ALL hosts are patterns,
+    /// i.e. patterns start at position 0 — in that case we append at end).
+    fn find_trailing_pattern_start(&self) -> Option<usize> {
+        let mut first_pattern_pos = None;
+        for i in (0..self.elements.len()).rev() {
+            match &self.elements[i] {
+                ConfigElement::HostBlock(block) => {
+                    if is_host_pattern(&block.host_pattern) {
+                        first_pattern_pos = Some(i);
+                    } else {
+                        // Found a concrete host: the trailing group starts after this
+                        break;
+                    }
+                }
+                ConfigElement::GlobalLine(_) => {
+                    // Blank lines, comments, Match blocks between patterns: keep scanning
+                    if first_pattern_pos.is_some() {
+                        first_pattern_pos = Some(i);
+                    }
+                }
+                ConfigElement::Include(_) => break,
+            }
+        }
+        // Don't return position 0 — that means everything is patterns (or patterns at top)
+        first_pattern_pos.filter(|&pos| pos > 0)
     }
 
     /// Check if the last element already ends with a blank line.
@@ -649,7 +835,10 @@ impl SshConfigFile {
                     } else {
                         " ".to_string()
                     };
-                    d.raw_line = format!("{}{}{}{}", indent, d.key, sep, value);
+                    // Preserve inline comment from original raw_line (e.g. "# production")
+                    let comment_suffix = Self::extract_inline_comment(&d.raw_line, &d.key);
+                    d.raw_line =
+                        format!("{}{}{}{}{}", indent, d.key, sep, value, comment_suffix);
                 }
                 return;
             }
@@ -665,6 +854,37 @@ impl SshConfigFile {
                 is_non_directive: false,
             },
         );
+    }
+
+    /// Extract the inline comment suffix from a directive's raw line.
+    /// Returns the trailing portion (e.g. " # production") or empty string.
+    /// Respects double-quoted strings so that `#` inside quotes is not a comment.
+    fn extract_inline_comment(raw_line: &str, key: &str) -> String {
+        let trimmed = raw_line.trim_start();
+        if trimmed.len() <= key.len() {
+            return String::new();
+        }
+        // Skip past key and separator to reach the value portion
+        let after_key = &trimmed[key.len()..];
+        let rest = after_key.trim_start();
+        let rest = rest.strip_prefix('=').unwrap_or(rest).trim_start();
+        // Scan for inline comment (# preceded by whitespace, outside quotes)
+        let bytes = rest.as_bytes();
+        let mut in_quote = false;
+        for i in 0..bytes.len() {
+            if bytes[i] == b'"' {
+                in_quote = !in_quote;
+            } else if !in_quote
+                && bytes[i] == b'#'
+                && i > 0
+                && (bytes[i - 1] == b' ' || bytes[i - 1] == b'\t')
+            {
+                // Found comment start. The clean value ends before the whitespace preceding #.
+                let clean_end = rest[..i].trim_end().len();
+                return rest[clean_end..].to_string();
+            }
+        }
+        String::new()
     }
 
     /// Set provider on a host block by alias.
@@ -880,10 +1100,27 @@ impl SshConfigFile {
     /// Delete a host entry by alias.
     #[allow(dead_code)]
     pub fn delete_host(&mut self, alias: &str) {
+        // Before deletion, check if this host belongs to a provider so we can
+        // clean up an orphaned group header afterwards.
+        let provider_name = self.elements.iter().find_map(|e| {
+            if let ConfigElement::HostBlock(b) = e {
+                if b.host_pattern == alias {
+                    return b.provider().map(|(name, _)| name);
+                }
+            }
+            None
+        });
+
         self.elements.retain(|e| match e {
             ConfigElement::HostBlock(block) => block.host_pattern != alias,
             _ => true,
         });
+
+        // Remove orphaned group header if no hosts remain for the provider.
+        if let Some(name) = provider_name {
+            self.remove_orphaned_group_header(&name);
+        }
+
         // Collapse consecutive blank lines left by deletion
         self.elements.dedup_by(|a, b| {
             matches!(
@@ -895,7 +1132,9 @@ impl SshConfigFile {
     }
 
     /// Delete a host and return the removed element and its position for undo.
-    /// Does NOT collapse blank lines so the position stays valid for re-insertion.
+    /// Does NOT collapse blank lines or remove group headers so the position
+    /// stays valid for re-insertion via `insert_host_at()`.
+    /// Orphaned group headers (if any) are cleaned up at next startup.
     pub fn delete_host_undoable(&mut self, alias: &str) -> Option<(ConfigElement, usize)> {
         let pos = self.elements.iter().position(|e| {
             matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == alias)
@@ -904,10 +1143,49 @@ impl SshConfigFile {
         Some((element, pos))
     }
 
+    /// Find the position of the `# purple:group <DisplayName>` GlobalLine for a provider.
+    #[allow(dead_code)]
+    fn find_group_header_position(&self, provider_name: &str) -> Option<usize> {
+        let display = provider_group_display_name(provider_name);
+        let header = format!("# purple:group {}", display);
+        self.elements
+            .iter()
+            .position(|e| matches!(e, ConfigElement::GlobalLine(line) if *line == header))
+    }
+
+    /// Remove the `# purple:group <DisplayName>` GlobalLine for a provider
+    /// if no remaining HostBlock has a `# purple:provider <name>:` directive.
+    fn remove_orphaned_group_header(&mut self, provider_name: &str) {
+        if self.find_hosts_by_provider(provider_name).is_empty() {
+            let display = provider_group_display_name(provider_name);
+            let header = format!("# purple:group {}", display);
+            self.elements
+                .retain(|e| !matches!(e, ConfigElement::GlobalLine(line) if *line == header));
+        }
+    }
+
     /// Insert a host block at a specific position (for undo).
     pub fn insert_host_at(&mut self, element: ConfigElement, position: usize) {
         let pos = position.min(self.elements.len());
         self.elements.insert(pos, element);
+    }
+
+    /// Find the position after the last HostBlock that belongs to a provider.
+    /// Returns `None` if no hosts for this provider exist in the config.
+    /// Used by the sync engine to insert new hosts adjacent to existing provider hosts.
+    pub fn find_provider_insert_position(&self, provider_name: &str) -> Option<usize> {
+        let mut last_pos = None;
+        for (i, element) in self.elements.iter().enumerate() {
+            if let ConfigElement::HostBlock(block) = element {
+                if let Some((name, _)) = block.provider() {
+                    if name == provider_name {
+                        last_pos = Some(i);
+                    }
+                }
+            }
+        }
+        // Return position after the last provider host
+        last_pos.map(|p| p + 1)
     }
 
     /// Swap two host blocks in the config by alias. Returns true if swap was performed.
@@ -1015,6 +1293,7 @@ mod tests {
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: false,
+            bom: false,
         }
     }
 
@@ -1907,4 +2186,454 @@ Host myhost
         assert_eq!(entry.provider_meta[0].0, "region");
         assert_eq!(entry.provider_meta[1].0, "plan");
     }
+
+    #[test]
+    fn repair_absorbed_group_comment() {
+        // Simulate the bug: group comment absorbed into preceding block's directives.
+        let mut config = SshConfigFile {
+            elements: vec![ConfigElement::HostBlock(HostBlock {
+                host_pattern: "myserver".to_string(),
+                raw_host_line: "Host myserver".to_string(),
+                directives: vec![
+                    Directive {
+                        key: "HostName".to_string(),
+                        value: "10.0.0.1".to_string(),
+                        raw_line: "  HostName 10.0.0.1".to_string(),
+                        is_non_directive: false,
+                    },
+                    Directive {
+                        key: String::new(),
+                        value: String::new(),
+                        raw_line: "# purple:group Production".to_string(),
+                        is_non_directive: true,
+                    },
+                ],
+            })],
+            path: PathBuf::from("/tmp/test_config"),
+            crlf: false,
+            bom: false,
+        };
+        let count = config.repair_absorbed_group_comments();
+        assert_eq!(count, 1);
+        assert_eq!(config.elements.len(), 2);
+        // Block should only have the HostName directive.
+        if let ConfigElement::HostBlock(block) = &config.elements[0] {
+            assert_eq!(block.directives.len(), 1);
+            assert_eq!(block.directives[0].key, "HostName");
+        } else {
+            panic!("Expected HostBlock");
+        }
+        // Group comment should be a GlobalLine.
+        if let ConfigElement::GlobalLine(line) = &config.elements[1] {
+            assert_eq!(line, "# purple:group Production");
+        } else {
+            panic!("Expected GlobalLine for group comment");
+        }
+    }
+
+    #[test]
+    fn repair_strips_trailing_blanks_before_group() {
+        let mut config = SshConfigFile {
+            elements: vec![ConfigElement::HostBlock(HostBlock {
+                host_pattern: "myserver".to_string(),
+                raw_host_line: "Host myserver".to_string(),
+                directives: vec![
+                    Directive {
+                        key: "HostName".to_string(),
+                        value: "10.0.0.1".to_string(),
+                        raw_line: "  HostName 10.0.0.1".to_string(),
+                        is_non_directive: false,
+                    },
+                    Directive {
+                        key: String::new(),
+                        value: String::new(),
+                        raw_line: "".to_string(),
+                        is_non_directive: true,
+                    },
+                    Directive {
+                        key: String::new(),
+                        value: String::new(),
+                        raw_line: "# purple:group Staging".to_string(),
+                        is_non_directive: true,
+                    },
+                ],
+            })],
+            path: PathBuf::from("/tmp/test_config"),
+            crlf: false,
+            bom: false,
+        };
+        let count = config.repair_absorbed_group_comments();
+        assert_eq!(count, 1);
+        // Block keeps only HostName.
+        if let ConfigElement::HostBlock(block) = &config.elements[0] {
+            assert_eq!(block.directives.len(), 1);
+        } else {
+            panic!("Expected HostBlock");
+        }
+        // Blank line and group comment are now GlobalLines.
+        assert_eq!(config.elements.len(), 3);
+        if let ConfigElement::GlobalLine(line) = &config.elements[1] {
+            assert!(line.trim().is_empty());
+        } else {
+            panic!("Expected blank GlobalLine");
+        }
+        if let ConfigElement::GlobalLine(line) = &config.elements[2] {
+            assert!(line.starts_with("# purple:group"));
+        } else {
+            panic!("Expected group GlobalLine");
+        }
+    }
+
+    #[test]
+    fn repair_clean_config_returns_zero() {
+        let mut config = parse_str(
+            "# purple:group Production\nHost myserver\n  HostName 10.0.0.1\n",
+        );
+        let count = config.repair_absorbed_group_comments();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn repair_roundtrip_serializes_correctly() {
+        // Build a corrupted config manually.
+        let mut config = SshConfigFile {
+            elements: vec![
+                ConfigElement::HostBlock(HostBlock {
+                    host_pattern: "server1".to_string(),
+                    raw_host_line: "Host server1".to_string(),
+                    directives: vec![
+                        Directive {
+                            key: "HostName".to_string(),
+                            value: "10.0.0.1".to_string(),
+                            raw_line: "  HostName 10.0.0.1".to_string(),
+                            is_non_directive: false,
+                        },
+                        Directive {
+                            key: String::new(),
+                            value: String::new(),
+                            raw_line: "".to_string(),
+                            is_non_directive: true,
+                        },
+                        Directive {
+                            key: String::new(),
+                            value: String::new(),
+                            raw_line: "# purple:group Staging".to_string(),
+                            is_non_directive: true,
+                        },
+                    ],
+                }),
+                ConfigElement::HostBlock(HostBlock {
+                    host_pattern: "server2".to_string(),
+                    raw_host_line: "Host server2".to_string(),
+                    directives: vec![Directive {
+                        key: "HostName".to_string(),
+                        value: "10.0.0.2".to_string(),
+                        raw_line: "  HostName 10.0.0.2".to_string(),
+                        is_non_directive: false,
+                    }],
+                }),
+            ],
+            path: PathBuf::from("/tmp/test_config"),
+            crlf: false,
+            bom: false,
+        };
+        let count = config.repair_absorbed_group_comments();
+        assert_eq!(count, 1);
+        let output = config.serialize();
+        // The group comment should appear between the two host blocks.
+        let expected = "\
+Host server1
+  HostName 10.0.0.1
+
+# purple:group Staging
+Host server2
+  HostName 10.0.0.2
+";
+        assert_eq!(output, expected);
+    }
+
+    // =========================================================================
+    // delete_host: orphaned group header cleanup
+    // =========================================================================
+
+    #[test]
+    fn delete_last_provider_host_removes_group_header() {
+        let config_str = "\
+# purple:group DigitalOcean
+Host do-web
+  HostName 1.2.3.4
+  # purple:provider digitalocean:123
+";
+        let mut config = parse_str(config_str);
+        config.delete_host("do-web");
+        let has_header = config.elements.iter().any(|e| {
+            matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group"))
+        });
+        assert!(!has_header, "Group header should be removed when last provider host is deleted");
+    }
+
+    #[test]
+    fn delete_one_of_multiple_provider_hosts_preserves_group_header() {
+        let config_str = "\
+# purple:group DigitalOcean
+Host do-web
+  HostName 1.2.3.4
+  # purple:provider digitalocean:123
+
+Host do-db
+  HostName 5.6.7.8
+  # purple:provider digitalocean:456
+";
+        let mut config = parse_str(config_str);
+        config.delete_host("do-web");
+        let has_header = config.elements.iter().any(|e| {
+            matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group DigitalOcean"))
+        });
+        assert!(has_header, "Group header should be preserved when other provider hosts remain");
+        assert_eq!(config.host_entries().len(), 1);
+    }
+
+    #[test]
+    fn delete_non_provider_host_leaves_group_headers() {
+        let config_str = "\
+Host personal
+  HostName 10.0.0.1
+
+# purple:group DigitalOcean
+Host do-web
+  HostName 1.2.3.4
+  # purple:provider digitalocean:123
+";
+        let mut config = parse_str(config_str);
+        config.delete_host("personal");
+        let has_header = config.elements.iter().any(|e| {
+            matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group DigitalOcean"))
+        });
+        assert!(has_header, "Group header should not be affected by deleting a non-provider host");
+        assert_eq!(config.host_entries().len(), 1);
+    }
+
+    #[test]
+    fn delete_host_undoable_keeps_group_header_for_undo() {
+        // delete_host_undoable does NOT remove orphaned group headers so that
+        // undo (insert_host_at) can restore the config to its original state.
+        // Orphaned headers are cleaned up at startup instead.
+        let config_str = "\
+# purple:group Vultr
+Host vultr-web
+  HostName 2.3.4.5
+  # purple:provider vultr:789
+";
+        let mut config = parse_str(config_str);
+        let result = config.delete_host_undoable("vultr-web");
+        assert!(result.is_some());
+        let has_header = config.elements.iter().any(|e| {
+            matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group"))
+        });
+        assert!(has_header, "Group header should be kept for undo");
+    }
+
+    #[test]
+    fn delete_host_undoable_preserves_header_when_others_remain() {
+        let config_str = "\
+# purple:group AWS EC2
+Host aws-web
+  HostName 3.4.5.6
+  # purple:provider aws:i-111
+
+Host aws-db
+  HostName 7.8.9.0
+  # purple:provider aws:i-222
+";
+        let mut config = parse_str(config_str);
+        let result = config.delete_host_undoable("aws-web");
+        assert!(result.is_some());
+        let has_header = config.elements.iter().any(|e| {
+            matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group AWS EC2"))
+        });
+        assert!(has_header, "Group header preserved when other provider hosts remain (undoable)");
+    }
+
+    #[test]
+    fn delete_host_undoable_returns_original_position_for_undo() {
+        // Group header at index 0, host at index 1. Undo re-inserts at index 1
+        // which correctly restores the host after the group header.
+        let config_str = "\
+# purple:group Vultr
+Host vultr-web
+  HostName 2.3.4.5
+  # purple:provider vultr:789
+
+Host manual
+  HostName 10.0.0.1
+";
+        let mut config = parse_str(config_str);
+        let (element, pos) = config.delete_host_undoable("vultr-web").unwrap();
+        // Position is the original index (1), not adjusted, since no header was removed
+        assert_eq!(pos, 1, "Position should be the original host index");
+        // Undo: re-insert at the original position
+        config.insert_host_at(element, pos);
+        // The host should be back, group header intact, manual host accessible
+        let output = config.serialize();
+        assert!(output.contains("# purple:group Vultr"), "Group header should be present");
+        assert!(output.contains("Host vultr-web"), "Host should be restored");
+        assert!(output.contains("Host manual"), "Manual host should survive");
+        assert_eq!(config_str, output);
+    }
+
+    // =========================================================================
+    // add_host: wildcard ordering
+    // =========================================================================
+
+    #[test]
+    fn add_host_inserts_before_trailing_wildcard() {
+        let config_str = "\
+Host existing
+  HostName 10.0.0.1
+
+Host *
+  ServerAliveInterval 60
+";
+        let mut config = parse_str(config_str);
+        let entry = HostEntry {
+            alias: "newhost".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            port: 22,
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        let new_pos = output.find("Host newhost").unwrap();
+        let wildcard_pos = output.find("Host *").unwrap();
+        assert!(
+            new_pos < wildcard_pos,
+            "New host should appear before Host *: {}",
+            output
+        );
+        let existing_pos = output.find("Host existing").unwrap();
+        assert!(existing_pos < new_pos);
+    }
+
+    #[test]
+    fn add_host_appends_when_no_wildcards() {
+        let config_str = "\
+Host existing
+  HostName 10.0.0.1
+";
+        let mut config = parse_str(config_str);
+        let entry = HostEntry {
+            alias: "newhost".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            port: 22,
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        let existing_pos = output.find("Host existing").unwrap();
+        let new_pos = output.find("Host newhost").unwrap();
+        assert!(existing_pos < new_pos, "New host should be appended at end");
+    }
+
+    #[test]
+    fn add_host_appends_when_wildcard_at_beginning() {
+        // Host * at the top acts as global defaults. New hosts go after it.
+        let config_str = "\
+Host *
+  ServerAliveInterval 60
+
+Host existing
+  HostName 10.0.0.1
+";
+        let mut config = parse_str(config_str);
+        let entry = HostEntry {
+            alias: "newhost".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            port: 22,
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        let existing_pos = output.find("Host existing").unwrap();
+        let new_pos = output.find("Host newhost").unwrap();
+        assert!(
+            existing_pos < new_pos,
+            "New host should be appended at end when wildcard is at top: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn add_host_inserts_before_trailing_pattern_host() {
+        let config_str = "\
+Host existing
+  HostName 10.0.0.1
+
+Host *.example.com
+  ProxyJump bastion
+";
+        let mut config = parse_str(config_str);
+        let entry = HostEntry {
+            alias: "newhost".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            port: 22,
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        let new_pos = output.find("Host newhost").unwrap();
+        let pattern_pos = output.find("Host *.example.com").unwrap();
+        assert!(
+            new_pos < pattern_pos,
+            "New host should appear before pattern host: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn add_host_no_triple_blank_lines() {
+        let config_str = "\
+Host existing
+  HostName 10.0.0.1
+
+Host *
+  ServerAliveInterval 60
+";
+        let mut config = parse_str(config_str);
+        let entry = HostEntry {
+            alias: "newhost".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            port: 22,
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        assert!(
+            !output.contains("\n\n\n"),
+            "Should not have triple blank lines: {}",
+            output
+        );
+    }
+
+    #[test]
+    fn provider_group_display_name_matches_providers_mod() {
+        // Ensure the duplicated display name function in model.rs stays in sync
+        // with providers::provider_display_name(). If these diverge, group header
+        // cleanup (remove_orphaned_group_header) will fail to match headers
+        // written by the sync engine.
+        let providers = [
+            "digitalocean", "vultr", "linode", "hetzner", "upcloud",
+            "proxmox", "aws", "scaleway", "gcp", "azure", "tailscale",
+        ];
+        for name in &providers {
+            assert_eq!(
+                provider_group_display_name(name),
+                crate::providers::provider_display_name(name),
+                "Display name mismatch for provider '{}': model.rs has '{}' but providers/mod.rs has '{}'",
+                name,
+                provider_group_display_name(name),
+                crate::providers::provider_display_name(name),
+            );
+        }
+    }
+
 }

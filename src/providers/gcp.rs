@@ -285,13 +285,13 @@ fn build_metadata(instance: &GcpInstance) -> Vec<(String, String)> {
     let mut metadata = Vec::new();
     let zone = last_url_segment(&instance.zone);
     if !zone.is_empty() {
-        metadata.push(("region".to_string(), zone.to_string()));
+        metadata.push(("zone".to_string(), zone.to_string()));
     }
     let machine = last_url_segment(&instance.machine_type);
     if !machine.is_empty() {
-        metadata.push(("plan".to_string(), machine.to_string()));
+        metadata.push(("machine".to_string(), machine.to_string()));
     }
-    // OS from first disk's first license
+    // OS from first disk's first license (e.g. "debian-11" from license URL)
     if let Some(disk) = instance.disks.first() {
         if let Some(license) = disk.licenses.first() {
             let os = last_url_segment(license);
@@ -909,8 +909,8 @@ mod tests {
         };
         let meta = build_metadata(&inst);
         assert_eq!(meta, vec![
-            ("region".to_string(), "us-central1-a".to_string()),
-            ("plan".to_string(), "e2-micro".to_string()),
+            ("zone".to_string(), "us-central1-a".to_string()),
+            ("machine".to_string(), "e2-micro".to_string()),
             ("os".to_string(), "debian-11".to_string()),
             ("status".to_string(), "RUNNING".to_string()),
         ]);
@@ -947,7 +947,7 @@ mod tests {
             zone: "projects/p/zones/us-east1-b".to_string(),
         };
         let meta = build_metadata(&inst);
-        assert_eq!(meta.len(), 3); // region, plan, status (no os)
+        assert_eq!(meta.len(), 3); // zone, machine, status (no os)
         assert!(!meta.iter().any(|(k, _)| k == "os"));
     }
 

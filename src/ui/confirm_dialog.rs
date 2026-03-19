@@ -1,4 +1,5 @@
 use ratatui::Frame;
+use ratatui::layout::Alignment;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Clear, Paragraph};
 
@@ -69,6 +70,54 @@ pub fn render_host_key_reset(frame: &mut Frame, _app: &App, hostname: &str) {
             Span::styled(" no", theme::muted()),
         ]),
     ];
+
+    let paragraph = Paragraph::new(text).block(block);
+    frame.render_widget(paragraph, area);
+}
+
+pub fn render_welcome(frame: &mut Frame, _app: &App, has_backup: bool) {
+    let height = if has_backup { 10 } else { 6 };
+    let area = super::centered_rect_fixed(60, height, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(" Welcome ", theme::brand()))
+        .border_style(theme::accent());
+
+    let mut text = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("Welcome to ", theme::bold()),
+            Span::styled("purple", theme::border_search()),
+            Span::styled(".", theme::bold()),
+        ]).alignment(Alignment::Center),
+    ];
+    if has_backup {
+        text.push(Line::from(""));
+        text.push(
+            Line::from(Span::styled(
+                "Your original SSH config has been backed up",
+                theme::muted(),
+            )).alignment(Alignment::Center),
+        );
+        text.push(
+            Line::from(Span::styled(
+                "to ~/.purple/config.original",
+                theme::muted(),
+            )).alignment(Alignment::Center),
+        );
+    }
+    text.push(Line::from(""));
+    text.push(
+        Line::from(vec![
+            Span::styled("?", theme::accent_bold()),
+            Span::styled(" cheat sheet   ", theme::muted()),
+            Span::styled("Enter", theme::accent_bold()),
+            Span::styled(" continue", theme::muted()),
+        ]).alignment(Alignment::Center),
+    );
 
     let paragraph = Paragraph::new(text).block(block);
     frame.render_widget(paragraph, area);

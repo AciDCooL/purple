@@ -11,6 +11,36 @@ use crate::ssh_config::model::ConfigElement;
 
 /// Minimum terminal width to show the detail panel in detailed view mode.
 const DETAIL_MIN_WIDTH: u16 = 90;
+
+/// Build the update badge label, truncating the headline with ellipsis if needed.
+/// `max_width` is the border area width (including border chars).
+fn build_update_label(ver: &str, headline: Option<&str>, hint: &str, max_width: u16) -> String {
+    // Budget: area width minus 2 border chars and 1 char padding on each side
+    let budget = (max_width as usize).saturating_sub(4);
+    match headline {
+        Some(hl) => {
+            let full = format!(" v{}: {} (run {}) ", ver, hl, hint);
+            if full.width() <= budget {
+                return full;
+            }
+            // Truncate headline to fit
+            let prefix = format!(" v{}: ", ver);
+            let suffix = format!(" (run {}) ", hint);
+            let hl_budget = budget
+                .saturating_sub(prefix.width())
+                .saturating_sub(suffix.width());
+            if hl_budget >= 4 {
+                let hl_trunc = super::truncate(hl, hl_budget);
+                format!("{}{}{}", prefix, hl_trunc, suffix)
+            } else {
+                // Not enough room for headline: fall back to version-only
+                format!(" v{} available, run {} ", ver, hint)
+            }
+        }
+        None => format!(" v{} available, run {} ", ver, hint),
+    }
+}
+
 const HOST_MIN: usize = 12;
 
 /// Column layout computed from the visible host list.
@@ -286,10 +316,7 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     };
 
     let update_title = app.update_available.as_ref().map(|ver| {
-        let label = match app.update_headline.as_deref() {
-            Some(hl) => format!(" v{}: {} ({}) ", ver, hl, app.update_hint),
-            None => format!(" v{} available, run '{}' ", ver, app.update_hint),
-        };
+        let label = build_update_label(ver, app.update_headline.as_deref(), app.update_hint, area.width);
         Line::from(Span::styled(label, theme::update_badge()))
     });
 
@@ -437,10 +464,7 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
     ]);
 
     let update_title = app.update_available.as_ref().map(|ver| {
-        let label = match app.update_headline.as_deref() {
-            Some(hl) => format!(" v{}: {} ({}) ", ver, hl, app.update_hint),
-            None => format!(" v{} available, run '{}' ", ver, app.update_hint),
-        };
+        let label = build_update_label(ver, app.update_headline.as_deref(), app.update_hint, area.width);
         Line::from(Span::styled(label, theme::update_badge()))
     });
 
@@ -905,4 +929,75 @@ fn tag_footer_spans<'a>() -> Vec<Span<'a>> {
         Span::styled("\u{2502} ", theme::muted()),
         Span::styled("comma-separated", theme::muted()),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_update_label;
+
+    #[test]
+    fn label_fits_fully() {
+        let label = build_update_label("2.7.0", Some("New feature"), "purple update", 80);
+        assert_eq!(label, " v2.7.0: New feature (run purple update) ");
+    }
+
+    #[test]
+    fn label_no_headline() {
+        let label = build_update_label("2.7.0", None, "purple update", 80);
+        assert_eq!(label, " v2.7.0 available, run purple update ");
+    }
+
+    #[test]
+    fn label_truncates_at_various_widths() {
+        use unicode_width::UnicodeWidthStr;
+
+        let hl = "Provider metadata uses provider-specific terminology (instance, vm_size, zone, location, image, specs)";
+        let hint = "purple update";
+        let full = " v2.7.0: Provider metadata uses provider-specific terminology (instance, vm_size, zone, location, image, specs) (run purple update) ";
+
+        // Full label is 132 display columns; budget = width - 4
+        assert_eq!(full.width(), 132);
+
+        // 136+ cols: fits fully (budget >= 132)
+        assert_eq!(build_update_label("2.7.0", Some(hl), hint, 136), full);
+
+        // 80 cols: budget 76, headline truncated with ellipsis
+        let label_80 = build_update_label("2.7.0", Some(hl), hint, 80);
+        assert!(label_80.contains('\u{2026}'), "Should contain ellipsis: {}", label_80);
+        assert!(label_80.contains("(run purple update)"));
+        assert!(label_80.width() <= 76, "Should fit in budget: width={}", label_80.width());
+
+        // 60 cols: budget 56, headline truncated further
+        let label_60 = build_update_label("2.7.0", Some(hl), hint, 60);
+        assert!(label_60.contains('\u{2026}'));
+        assert!(label_60.contains("(run purple update)"));
+        assert!(label_60.width() <= 56, "Should fit in budget: width={}", label_60.width());
+
+        // Verify progressive truncation
+        assert!(label_60.width() < label_80.width());
+
+        // 30 cols: not enough room for headline, falls back to version-only
+        assert_eq!(
+            build_update_label("2.7.0", Some(hl), hint, 30),
+            " v2.7.0 available, run purple update "
+        );
+    }
+
+    #[test]
+    fn label_falls_back_when_very_narrow() {
+        let label = build_update_label("2.7.0", Some("Headline"), "purple update", 30);
+        assert_eq!(label, " v2.7.0 available, run purple update ");
+    }
+
+    #[test]
+    fn label_brew_hint() {
+        let label = build_update_label("2.7.0", Some("Fix"), "brew upgrade erickochen/purple/purple", 80);
+        assert_eq!(label, " v2.7.0: Fix (run brew upgrade erickochen/purple/purple) ");
+    }
+
+    #[test]
+    fn label_zero_width() {
+        let label = build_update_label("2.7.0", Some("Headline"), "purple update", 0);
+        assert_eq!(label, " v2.7.0 available, run purple update ");
+    }
 }

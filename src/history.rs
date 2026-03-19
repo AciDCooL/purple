@@ -207,8 +207,8 @@ mod tests {
             .as_secs();
         let tsv = format!("myhost\t{}\t5\t{},{},{}", now, now - 100, now - 200, now - 300);
         let dir = std::env::temp_dir().join(format!(
-            "purple_test_history_{}",
-            format!("{:?}", std::thread::current().id())
+            "purple_test_history_{:?}",
+            std::thread::current().id()
         ));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("history.tsv");
@@ -265,8 +265,8 @@ mod tests {
         let recent = now - 10 * 86400; // 10 days ago — within retention
 
         let dir = std::env::temp_dir().join(format!(
-            "purple_test_retention_{}",
-            format!("{:?}", std::thread::current().id())
+            "purple_test_retention_{:?}",
+            std::thread::current().id()
         ));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("history.tsv");

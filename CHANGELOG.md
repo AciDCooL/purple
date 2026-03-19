@@ -1,3 +1,19 @@
+## 2.7.0
+
+- Provider metadata uses provider-specific terminology (instance, vm_size, zone, location, image, specs)
+- Improved SSH config compatibility: UTF-8 BOM, Host= syntax, ${VAR} in includes, quoted paths, depth 16
+- Automatic repair of absorbed group comments and orphaned group headers
+- Synced hosts insert adjacent to existing provider group for consistent grouping
+- Multi-level undo for host deletion (up to 50 levels)
+- Welcome screen with one-time backup of original SSH config to ~/.purple/config.original
+- Advisory file locking prevents concurrent write corruption
+- New hosts insert before trailing Host * blocks to preserve SSH first-match-wins ordering
+- Inline comments preserved when updating directives
+- UpCloud boot disk preferred over first storage device for image metadata
+- Scaleway pagination via response body instead of X-Total-Count header
+- Proxmox QEMU OS type labels match qm.conf(5) manpage
+- Atomic writes call fsync before rename and clean up temp files on failure
+
 ## 2.6.0
 
 - Added release notes to update flow and GitHub releases

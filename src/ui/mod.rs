@@ -135,6 +135,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 snippet_param_form::render(frame, app);
             });
         }
+        Screen::Welcome { has_backup } => {
+            let has_backup = *has_backup;
+            host_list::render(frame, app);
+            render_overlay(app, |app| confirm_dialog::render_welcome(frame, app, has_backup));
+        }
     }
 }
 

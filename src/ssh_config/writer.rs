@@ -10,9 +10,15 @@ impl SshConfigFile {
     /// Write the config back to disk.
     /// Creates a backup before writing and uses atomic write (temp file + rename).
     /// Resolves symlinks so the rename targets the real file, not the link.
+    /// Acquires an advisory lock to prevent concurrent writes from multiple
+    /// purple processes or background sync threads.
     pub fn write(&self) -> Result<()> {
         // Resolve symlinks so we write through to the real file
         let target_path = fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
+
+        // Acquire advisory lock (blocks until available)
+        let _lock = fs_util::FileLock::acquire(&target_path)
+            .context("Failed to acquire config lock")?;
 
         // Create backup if the file exists, keep only last 5
         if self.path.exists() {
@@ -26,6 +32,7 @@ impl SshConfigFile {
         fs_util::atomic_write(&target_path, content.as_bytes())
             .with_context(|| format!("Failed to write SSH config to {}", target_path.display()))?;
 
+        // Lock released on drop
         Ok(())
     }
 
@@ -65,12 +72,17 @@ impl SshConfigFile {
 
         let line_ending = if self.crlf { "\r\n" } else { "\n" };
         let mut result = String::new();
+        // Restore UTF-8 BOM if the original file had one
+        if self.bom {
+            result.push('\u{FEFF}');
+        }
         for line in &collapsed {
             result.push_str(line);
             result.push_str(line_ending);
         }
-        // Ensure non-empty files end with exactly one newline
-        if result.is_empty() {
+        // Ensure files always end with exactly one newline
+        // (check collapsed instead of result, since BOM makes result non-empty)
+        if collapsed.is_empty() {
             result.push_str(line_ending);
         }
         result
@@ -139,6 +151,7 @@ mod tests {
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: content.contains("\r\n"),
+            bom: false,
         }
     }
 

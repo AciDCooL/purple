@@ -42,6 +42,8 @@ pub const SCW_ZONE_GROUPS: &[(&str, usize, usize)] = &[
 struct ListServersResponse {
     #[serde(default)]
     servers: Vec<ScalewayServer>,
+    #[serde(default)]
+    total_count: u64,
 }
 
 #[derive(Deserialize)]
@@ -91,15 +93,15 @@ struct ScalewayImage {
 fn build_metadata(server: &ScalewayServer, zone: &str) -> Vec<(String, String)> {
     let mut metadata = Vec::new();
     if !zone.is_empty() {
-        metadata.push(("region".to_string(), zone.to_string()));
+        metadata.push(("zone".to_string(), zone.to_string()));
     }
     if !server.commercial_type.is_empty() {
-        metadata.push(("plan".to_string(), server.commercial_type.clone()));
+        metadata.push(("type".to_string(), server.commercial_type.clone()));
     }
     if let Some(ref image) = server.image {
         if let Some(ref name) = image.name {
             if !name.is_empty() {
-                metadata.push(("os".to_string(), name.clone()));
+                metadata.push(("image".to_string(), name.clone()));
             }
         }
     }
@@ -259,18 +261,11 @@ fn fetch_zone(
             "https://api.scaleway.com/instance/v1/zones/{}/servers?page={}&per_page={}",
             zone, page, per_page
         );
-        let response = agent
+        let resp: ListServersResponse = agent
             .get(&url)
             .set("X-Auth-Token", token)
             .call()
-            .map_err(map_ureq_error)?;
-
-        let total: u64 = response
-            .header("X-Total-Count")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-
-        let resp: ListServersResponse = response
+            .map_err(map_ureq_error)?
             .into_json()
             .map_err(|e| ProviderError::Parse(format!("{}: {}", zone, e)))?;
 
@@ -292,6 +287,7 @@ fn fetch_zone(
             }
         }
 
+        let total = resp.total_count;
         if (count as u64) < per_page || (total > 0 && page * per_page >= total) {
             break;
         }
@@ -585,9 +581,9 @@ mod tests {
         assert_eq!(
             metadata,
             vec![
-                ("region".to_string(), "fr-par-1".to_string()),
-                ("plan".to_string(), "DEV1-S".to_string()),
-                ("os".to_string(), "Ubuntu 22.04 Jammy Jellyfish".to_string()),
+                ("zone".to_string(), "fr-par-1".to_string()),
+                ("type".to_string(), "DEV1-S".to_string()),
+                ("image".to_string(), "Ubuntu 22.04 Jammy Jellyfish".to_string()),
                 ("status".to_string(), "running".to_string()),
             ]
         );
@@ -608,7 +604,7 @@ mod tests {
             zone: "nl-ams-2".to_string(),
         };
         let metadata = build_metadata(&server, "fr-par-1");
-        assert_eq!(metadata[0], ("region".to_string(), "fr-par-1".to_string()));
+        assert_eq!(metadata[0], ("zone".to_string(), "fr-par-1".to_string()));
     }
 
     #[test]

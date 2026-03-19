@@ -6,7 +6,7 @@ use super::model::{
     ConfigElement, Directive, HostBlock, IncludeDirective, IncludedFile, SshConfigFile,
 };
 
-const MAX_INCLUDE_DEPTH: usize = 5;
+const MAX_INCLUDE_DEPTH: usize = 16;
 
 impl SshConfigFile {
     /// Parse an SSH config file from the given path.
@@ -23,14 +23,21 @@ impl SshConfigFile {
             String::new()
         };
 
+        // Strip UTF-8 BOM if present (Windows editors like Notepad add this).
+        let (bom, content) = match content.strip_prefix('\u{FEFF}') {
+            Some(stripped) => (true, stripped),
+            None => (false, content.as_str()),
+        };
+
         let crlf = content.contains("\r\n");
         let config_dir = path.parent().map(|p| p.to_path_buf());
-        let elements = Self::parse_content_with_includes(&content, config_dir.as_deref(), depth);
+        let elements = Self::parse_content_with_includes(content, config_dir.as_deref(), depth);
 
         Ok(SshConfigFile {
             elements,
             path: path.to_path_buf(),
             crlf,
+            bom,
         })
     }
 
@@ -79,6 +86,16 @@ impl SshConfigFile {
             // Non-indented Match line = block boundary (flush current Host block).
             // Match blocks are stored as GlobalLines (inert, never edited/deleted).
             if !is_indented && Self::is_match_line(trimmed) {
+                if let Some(block) = current_block.take() {
+                    elements.push(ConfigElement::HostBlock(block));
+                }
+                elements.push(ConfigElement::GlobalLine(line.to_string()));
+                continue;
+            }
+
+            // Non-indented purple:group comment = block boundary (visual separator
+            // between provider groups, written as GlobalLine by the sync engine).
+            if !is_indented && trimmed.starts_with("# purple:group ") {
                 if let Some(block) = current_block.take() {
                     elements.push(ConfigElement::HostBlock(block));
                 }
@@ -163,8 +180,48 @@ impl SshConfigFile {
         None
     }
 
+    /// Split Include patterns respecting double-quoted paths.
+    /// OpenSSH supports `Include "path with spaces" other_path`.
+    pub(crate) fn split_include_patterns(pattern: &str) -> Vec<&str> {
+        let mut result = Vec::new();
+        let mut chars = pattern.char_indices().peekable();
+        while let Some(&(i, c)) = chars.peek() {
+            if c.is_whitespace() {
+                chars.next();
+                continue;
+            }
+            if c == '"' {
+                chars.next(); // skip opening quote
+                let start = i + 1;
+                let mut end = pattern.len();
+                for (j, ch) in chars.by_ref() {
+                    if ch == '"' {
+                        end = j;
+                        break;
+                    }
+                }
+                let token = &pattern[start..end];
+                if !token.is_empty() {
+                    result.push(token);
+                }
+            } else {
+                let start = i;
+                let mut end = pattern.len();
+                for (j, ch) in chars.by_ref() {
+                    if ch.is_whitespace() {
+                        end = j;
+                        break;
+                    }
+                }
+                result.push(&pattern[start..end]);
+            }
+        }
+        result
+    }
+
     /// Resolve an Include pattern to a list of included files.
     /// Supports multiple space-separated patterns on one line (SSH spec).
+    /// Handles quoted paths for paths containing spaces.
     fn resolve_include(
         pattern: &str,
         config_dir: Option<&Path>,
@@ -173,8 +230,8 @@ impl SshConfigFile {
         let mut files = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
-        for single in pattern.split_whitespace() {
-            let expanded = Self::expand_tilde(single);
+        for single in Self::split_include_patterns(pattern) {
+            let expanded = Self::expand_env_vars(&Self::expand_tilde(single));
 
             // If relative path, resolve against config dir
             let glob_pattern = if expanded.starts_with('/') {
@@ -192,8 +249,12 @@ impl SshConfigFile {
                     if path.is_file() && seen.insert(path.clone()) {
                         match std::fs::read_to_string(&path) {
                             Ok(content) => {
+                                // Strip UTF-8 BOM if present (same as main config)
+                                let content = content
+                                    .strip_prefix('\u{FEFF}')
+                                    .unwrap_or(&content);
                                 let elements = Self::parse_content_with_includes(
-                                    &content,
+                                    content,
                                     path.parent(),
                                     depth + 1,
                                 );
@@ -227,22 +288,65 @@ impl SshConfigFile {
         pattern.to_string()
     }
 
+    /// Expand `${VAR}` environment variable references (matches OpenSSH behavior).
+    /// Unknown variables are preserved as-is so that SSH itself can report the error.
+    pub(crate) fn expand_env_vars(s: &str) -> String {
+        let mut result = String::with_capacity(s.len());
+        let mut chars = s.char_indices().peekable();
+        while let Some((i, c)) = chars.next() {
+            if c == '$' {
+                if let Some(&(_, '{')) = chars.peek() {
+                    chars.next(); // consume '{'
+                    if let Some(close) = s[i + 2..].find('}') {
+                        let var_name = &s[i + 2..i + 2 + close];
+                        if let Ok(val) = std::env::var(var_name) {
+                            result.push_str(&val);
+                        } else {
+                            // Preserve unknown vars as-is
+                            result.push_str(&s[i..i + 2 + close + 1]);
+                        }
+                        // Advance past the closing '}'
+                        while let Some(&(j, _)) = chars.peek() {
+                            if j <= i + 2 + close {
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                    // No closing '}' — preserve literally
+                    result.push('$');
+                    result.push('{');
+                    continue;
+                }
+            }
+            result.push(c);
+        }
+        result
+    }
+
     /// Check if a line is a "Host <pattern>" line.
     /// Returns the pattern if it is.
-    /// Handles both space and tab between keyword and value (SSH allows either).
+    /// Handles space, tab and `=` between keyword and value (SSH allows all three).
+    /// Matches OpenSSH behavior: skip whitespace, optional `=`, more whitespace.
     /// Strips inline comments (`# ...` preceded by whitespace) from the pattern.
     fn parse_host_line(trimmed: &str) -> Option<String> {
-        // Split on first space or tab to isolate the keyword
-        let mut parts = trimmed.splitn(2, [' ', '\t']);
-        let keyword = parts.next()?;
-        if !keyword.eq_ignore_ascii_case("host") {
-            return None;
-        }
-        // "hostname" splits as keyword="hostname" which fails the check above
-        let raw_pattern = parts.next()?.trim();
-        let pattern = strip_inline_comment(raw_pattern).to_string();
-        if !pattern.is_empty() {
-            return Some(pattern);
+        let bytes = trimmed.as_bytes();
+        // "host" is 4 ASCII bytes; byte 4 must be whitespace or '='
+        if bytes.len() > 4 && bytes[..4].eq_ignore_ascii_case(b"host") {
+            let sep = bytes[4];
+            if sep.is_ascii_whitespace() || sep == b'=' {
+                // Reject "hostname", "hostkey" etc: after "host" + separator,
+                // the keyword must end. If sep is alphanumeric, it's a different keyword.
+                // Skip whitespace, optional '=', and more whitespace after keyword.
+                let rest = trimmed[4..].trim_start();
+                let rest = rest.strip_prefix('=').unwrap_or(rest).trim_start();
+                let pattern = strip_inline_comment(rest).to_string();
+                if !pattern.is_empty() {
+                    return Some(pattern);
+                }
+            }
         }
         None
     }
@@ -308,6 +412,7 @@ mod tests {
             elements: SshConfigFile::parse_content(content),
             path: PathBuf::from("/tmp/test_config"),
             crlf: content.contains("\r\n"),
+            bom: false,
         }
     }
 
@@ -659,6 +764,56 @@ Host myserver
     }
 
     #[test]
+    fn test_host_equals_syntax() {
+        let config = parse_str("Host=foo\n  HostName 10.0.0.1\n");
+        let entries = config.host_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "foo");
+    }
+
+    #[test]
+    fn test_host_space_equals_syntax() {
+        let config = parse_str("Host =foo\n  HostName 10.0.0.1\n");
+        let entries = config.host_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "foo");
+    }
+
+    #[test]
+    fn test_host_equals_space_syntax() {
+        let config = parse_str("Host= foo\n  HostName 10.0.0.1\n");
+        let entries = config.host_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "foo");
+    }
+
+    #[test]
+    fn test_host_space_equals_space_syntax() {
+        let config = parse_str("Host = foo\n  HostName 10.0.0.1\n");
+        let entries = config.host_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "foo");
+    }
+
+    #[test]
+    fn test_host_equals_case_insensitive() {
+        let config = parse_str("HOST=foo\n  HostName 10.0.0.1\n");
+        let entries = config.host_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "foo");
+    }
+
+    #[test]
+    fn test_hostname_equals_not_parsed_as_host() {
+        // "HostName=example.com" must NOT be parsed as a Host line
+        let config = parse_str("Host myserver\n  HostName=example.com\n");
+        let entries = config.host_entries();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].alias, "myserver");
+        assert_eq!(entries[0].hostname, "example.com");
+    }
+
+    #[test]
     fn test_host_multi_pattern_with_inline_comment() {
         // Multi-pattern host with inline comment: "prod staging # servers"
         // The comment should be stripped, but "prod staging" is still multi-pattern
@@ -672,5 +827,89 @@ Host myserver
         }
         // Multi-pattern hosts are filtered out of host_entries
         assert_eq!(config.host_entries().len(), 0);
+    }
+
+    #[test]
+    fn test_expand_env_vars_basic() {
+        // SAFETY: test-only, single-threaded context
+        unsafe { std::env::set_var("_PURPLE_TEST_VAR", "/custom/path") };
+        let result = SshConfigFile::expand_env_vars("${_PURPLE_TEST_VAR}/.ssh/config");
+        assert_eq!(result, "/custom/path/.ssh/config");
+        unsafe { std::env::remove_var("_PURPLE_TEST_VAR") };
+    }
+
+    #[test]
+    fn test_expand_env_vars_multiple() {
+        // SAFETY: test-only, single-threaded context
+        unsafe { std::env::set_var("_PURPLE_TEST_A", "hello") };
+        unsafe { std::env::set_var("_PURPLE_TEST_B", "world") };
+        let result = SshConfigFile::expand_env_vars("${_PURPLE_TEST_A}/${_PURPLE_TEST_B}");
+        assert_eq!(result, "hello/world");
+        unsafe { std::env::remove_var("_PURPLE_TEST_A") };
+        unsafe { std::env::remove_var("_PURPLE_TEST_B") };
+    }
+
+    #[test]
+    fn test_expand_env_vars_unknown_preserved() {
+        let result = SshConfigFile::expand_env_vars("${_PURPLE_NONEXISTENT_VAR}/path");
+        assert_eq!(result, "${_PURPLE_NONEXISTENT_VAR}/path");
+    }
+
+    #[test]
+    fn test_expand_env_vars_no_vars() {
+        let result = SshConfigFile::expand_env_vars("~/.ssh/config.d/*");
+        assert_eq!(result, "~/.ssh/config.d/*");
+    }
+
+    #[test]
+    fn test_expand_env_vars_unclosed_brace() {
+        let result = SshConfigFile::expand_env_vars("${UNCLOSED/path");
+        assert_eq!(result, "${UNCLOSED/path");
+    }
+
+    #[test]
+    fn test_expand_env_vars_dollar_without_brace() {
+        let result = SshConfigFile::expand_env_vars("$HOME/.ssh/config");
+        // Only ${VAR} syntax should be expanded, not bare $VAR
+        assert_eq!(result, "$HOME/.ssh/config");
+    }
+
+    #[test]
+    fn test_max_include_depth_matches_openssh() {
+        assert_eq!(MAX_INCLUDE_DEPTH, 16);
+    }
+
+    #[test]
+    fn test_split_include_patterns_single_unquoted() {
+        let result = SshConfigFile::split_include_patterns("config.d/*");
+        assert_eq!(result, vec!["config.d/*"]);
+    }
+
+    #[test]
+    fn test_split_include_patterns_quoted_with_spaces() {
+        let result = SshConfigFile::split_include_patterns("\"/path/with spaces/config\"");
+        assert_eq!(result, vec!["/path/with spaces/config"]);
+    }
+
+    #[test]
+    fn test_split_include_patterns_mixed() {
+        let result =
+            SshConfigFile::split_include_patterns("\"/path/with spaces/*\" ~/.ssh/config.d/*");
+        assert_eq!(result, vec!["/path/with spaces/*", "~/.ssh/config.d/*"]);
+    }
+
+    #[test]
+    fn test_split_include_patterns_quoted_no_spaces() {
+        let result = SshConfigFile::split_include_patterns("\"config.d/*\"");
+        assert_eq!(result, vec!["config.d/*"]);
+    }
+
+    #[test]
+    fn test_split_include_patterns_multiple_unquoted() {
+        let result = SshConfigFile::split_include_patterns("~/.ssh/conf.d/* /etc/ssh/config.d/*");
+        assert_eq!(
+            result,
+            vec!["~/.ssh/conf.d/*", "/etc/ssh/config.d/*"]
+        );
     }
 }

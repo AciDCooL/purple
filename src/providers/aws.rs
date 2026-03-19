@@ -594,7 +594,7 @@ impl Provider for Aws {
                 let mut metadata = Vec::new();
                 metadata.push(("region".to_string(), region.clone()));
                 if !instance.instance_type.is_empty() {
-                    metadata.push(("plan".to_string(), instance.instance_type.clone()));
+                    metadata.push(("instance".to_string(), instance.instance_type.clone()));
                 }
                 if let Some(os_name) = ami_names.get(&instance.image_id) {
                     metadata.push(("os".to_string(), os_name.clone()));
@@ -1225,8 +1225,7 @@ mod tests {
 
     #[test]
     fn test_ami_batch_size_is_reasonable() {
-        assert!(AMI_BATCH_SIZE > 0);
-        assert!(AMI_BATCH_SIZE <= 200);
+        assert_eq!(AMI_BATCH_SIZE, 100, "AMI batch size should be 100 (AWS limit per DescribeImages call)");
     }
 
     // =========================================================================
