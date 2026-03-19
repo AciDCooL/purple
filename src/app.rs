@@ -1186,6 +1186,7 @@ pub struct App {
 
     // Update
     pub update_available: Option<String>,
+    pub update_headline: Option<String>,
     pub update_hint: &'static str,
 
     // Cached tunnel summaries (invalidated on config reload)
@@ -1296,6 +1297,7 @@ impl App {
             pending_snippet_terminal: false,
             tunnel_summaries_cache: HashMap::new(),
             update_available: None,
+            update_headline: None,
             update_hint: crate::update::update_hint(),
             sync_history: SyncRecord::load_all(),
             bw_session: None,

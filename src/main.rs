@@ -620,8 +620,9 @@ fn run_tui(mut app: App) -> Result<()> {
                 app.sync_done.push(display_name.to_string());
                 set_sync_summary(&mut app);
             }
-            AppEvent::UpdateAvailable { version } => {
+            AppEvent::UpdateAvailable { version, headline } => {
                 app.update_available = Some(version);
+                app.update_headline = headline;
             }
             AppEvent::FileBrowserListing { alias, path, entries } => {
                 let mut record_connection = false;

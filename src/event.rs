@@ -26,7 +26,7 @@ pub enum AppEvent {
         message: String,
     },
     SyncProgress { provider: String, message: String },
-    UpdateAvailable { version: String },
+    UpdateAvailable { version: String, headline: Option<String> },
     FileBrowserListing {
         alias: String,
         path: String,

@@ -286,10 +286,11 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
     };
 
     let update_title = app.update_available.as_ref().map(|ver| {
-        Line::from(Span::styled(
-            format!(" v{} available, run '{}' ", ver, app.update_hint),
-            theme::update_badge(),
-        ))
+        let label = match app.update_headline.as_deref() {
+            Some(hl) => format!(" v{}: {} ({}) ", ver, hl, app.update_hint),
+            None => format!(" v{} available, run '{}' ", ver, app.update_hint),
+        };
+        Line::from(Span::styled(label, theme::update_badge()))
     });
 
     let url_label = Line::from(Span::styled(" getpurple.sh ", theme::muted()));
@@ -436,10 +437,11 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
     ]);
 
     let update_title = app.update_available.as_ref().map(|ver| {
-        Line::from(Span::styled(
-            format!(" v{} available, run '{}' ", ver, app.update_hint),
-            theme::update_badge(),
-        ))
+        let label = match app.update_headline.as_deref() {
+            Some(hl) => format!(" v{}: {} ({}) ", ver, hl, app.update_hint),
+            None => format!(" v{} available, run '{}' ", ver, app.update_hint),
+        };
+        Line::from(Span::styled(label, theme::update_badge()))
     });
 
     let url_label = Line::from(Span::styled(" getpurple.sh ", theme::muted()));

@@ -11,6 +11,16 @@ pub fn current_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Extract a one-line headline from release notes for the TUI update badge.
+/// Takes the first non-empty content line, strips leading `- ` bullet marker.
+fn extract_headline(notes: &str) -> Option<String> {
+    notes
+        .lines()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.strip_prefix("- ").unwrap_or(l).to_string())
+}
+
 /// Parse a semver string "X.Y.Z" into a tuple.
 fn parse_version(v: &str) -> Option<(u32, u32, u32)> {
     let mut parts = v.splitn(3, '.');
@@ -28,8 +38,15 @@ fn is_newer(current: &str, latest: &str) -> bool {
     }
 }
 
-/// Extract version string from GitHub release JSON.
-fn extract_version(json: &serde_json::Value) -> Result<String> {
+/// Release info extracted from GitHub API response.
+struct ReleaseInfo {
+    version: String,
+    /// Release notes body (markdown). May be empty.
+    notes: String,
+}
+
+/// Extract version string and release notes from GitHub release JSON.
+fn extract_release_info(json: &serde_json::Value) -> Result<ReleaseInfo> {
     let tag = json["tag_name"]
         .as_str()
         .context("Missing tag_name in release")?;
@@ -40,11 +57,16 @@ fn extract_version(json: &serde_json::Value) -> Result<String> {
         anyhow::bail!("Invalid version format: {}", version);
     }
 
-    Ok(version.to_string())
+    let notes = json["body"].as_str().unwrap_or("").to_string();
+
+    Ok(ReleaseInfo {
+        version: version.to_string(),
+        notes,
+    })
 }
 
-/// Fetch the latest release version from GitHub.
-fn check_latest_version(agent: &ureq::Agent) -> Result<String> {
+/// Fetch the latest release info from GitHub.
+fn check_latest_release(agent: &ureq::Agent) -> Result<ReleaseInfo> {
     let resp = agent
         .get("https://api.github.com/repos/erickochen/purple/releases/latest")
         .set("Accept", "application/vnd.github+json")
@@ -61,20 +83,29 @@ fn check_latest_version(agent: &ureq::Agent) -> Result<String> {
     let json: serde_json::Value =
         serde_json::from_slice(&body).context("Failed to parse release JSON")?;
 
-    extract_version(&json)
+    extract_release_info(&json)
 }
 
 /// TTL for version check cache (24 hours).
 const VERSION_CHECK_TTL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
+/// Cached version info: version string and optional headline.
+#[derive(Debug, PartialEq)]
+struct CachedVersion {
+    version: String,
+    headline: Option<String>,
+}
+
 /// Parse cache file content and determine if a newer version is available.
-/// Returns `Some(Some(version))` if cache is fresh and a newer version exists,
+/// Cache format: `timestamp\nversion\nheadline\n` (headline may be empty).
+/// Returns `Some(Some(cached))` if cache is fresh and a newer version exists,
 /// `Some(None)` if cache is fresh and we are up-to-date,
 /// `None` if cache content is corrupt, expired or unparseable.
-fn parse_version_cache(content: &str, now_secs: u64, current: &str) -> Option<Option<String>> {
+fn parse_version_cache(content: &str, now_secs: u64, current: &str) -> Option<Option<CachedVersion>> {
     let mut lines = content.lines();
     let timestamp: u64 = lines.next()?.parse().ok()?;
     let version = lines.next()?.to_string();
+    let headline = lines.next().map(|s| s.to_string()).filter(|s| !s.is_empty());
 
     if version.is_empty() || parse_version(&version).is_none() {
         return None; // Corrupt version string
@@ -85,17 +116,17 @@ fn parse_version_cache(content: &str, now_secs: u64, current: &str) -> Option<Op
     }
 
     if is_newer(current, &version) {
-        Some(Some(version))
+        Some(Some(CachedVersion { version, headline }))
     } else {
         Some(None) // Up-to-date, no API call needed
     }
 }
 
 /// Read cached version check result from ~/.purple/last_version_check.
-/// Returns `Some(Some(version))` if cache is fresh and a newer version exists,
+/// Returns `Some(Some(cached))` if cache is fresh and a newer version exists,
 /// `Some(None)` if cache is fresh and we are up-to-date,
 /// `None` if cache is missing, corrupt or expired.
-fn read_cached_version() -> Option<Option<String>> {
+fn read_cached_version() -> Option<Option<CachedVersion>> {
     let path = dirs::home_dir()?.join(".purple").join("last_version_check");
     let content = std::fs::read_to_string(&path).ok()?;
     let now = std::time::SystemTime::now()
@@ -106,7 +137,7 @@ fn read_cached_version() -> Option<Option<String>> {
 }
 
 /// Write version check result to ~/.purple/last_version_check.
-fn write_version_cache(version: &str) {
+fn write_version_cache(version: &str, headline: Option<&str>) {
     let Some(dir) = dirs::home_dir().map(|h| h.join(".purple")) else {
         return;
     };
@@ -115,7 +146,11 @@ fn write_version_cache(version: &str) {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let _ = std::fs::write(dir.join("last_version_check"), format!("{}\n{}\n", now, version));
+    let hl = headline.unwrap_or("");
+    let _ = std::fs::write(
+        dir.join("last_version_check"),
+        format!("{}\n{}\n{}\n", now, version, hl),
+    );
 }
 
 /// Spawn a background thread to check for updates. Sends an event if a newer version exists.
@@ -127,8 +162,11 @@ pub fn spawn_version_check(tx: mpsc::Sender<AppEvent>) {
         .spawn(move || {
             // Check cache first — skip API call if fresh result exists
             match read_cached_version() {
-                Some(Some(version)) => {
-                    let _ = tx.send(AppEvent::UpdateAvailable { version });
+                Some(Some(cached)) => {
+                    let _ = tx.send(AppEvent::UpdateAvailable {
+                        version: cached.version,
+                        headline: cached.headline,
+                    });
                     return;
                 }
                 Some(None) => return, // Up-to-date, cache still fresh
@@ -141,10 +179,14 @@ pub fn spawn_version_check(tx: mpsc::Sender<AppEvent>) {
                 .timeout(std::time::Duration::from_secs(5))
                 .build();
 
-            if let Ok(latest) = check_latest_version(&agent) {
-                write_version_cache(&latest);
-                if is_newer(current_version(), &latest) {
-                    let _ = tx.send(AppEvent::UpdateAvailable { version: latest });
+            if let Ok(info) = check_latest_release(&agent) {
+                let headline = extract_headline(&info.notes);
+                write_version_cache(&info.version, headline.as_deref());
+                if is_newer(current_version(), &info.version) {
+                    let _ = tx.send(AppEvent::UpdateAvailable {
+                        version: info.version,
+                        headline,
+                    });
                 }
             }
         });
@@ -267,6 +309,47 @@ pub fn update_hint() -> &'static str {
     "purple update"
 }
 
+/// Strip light markdown formatting for terminal display.
+/// Removes `#` headers, `**bold**`, `__bold__` and `[text](url)` links.
+/// Also strips control characters (except newline) to prevent terminal escape injection.
+fn strip_markdown(line: &str) -> String {
+    let mut s = line.to_string();
+    // Strip heading markers (longest prefix first)
+    if let Some(rest) = s.strip_prefix("### ") {
+        s = rest.to_string();
+    } else if let Some(rest) = s.strip_prefix("## ") {
+        s = rest.to_string();
+    } else if let Some(rest) = s.strip_prefix("# ") {
+        s = rest.to_string();
+    }
+    // Strip bold markers
+    s = s.replace("**", "");
+    s = s.replace("__", "");
+    // Strip markdown links [text](url) -> text
+    // Search forward from `pos` to guarantee progress and avoid infinite loops
+    let mut pos = 0;
+    while pos < s.len() {
+        if let Some(rel) = s[pos..].find('[') {
+            let start = pos + rel;
+            if let Some(mid) = s[start..].find("](") {
+                if let Some(end) = s[start + mid..].find(')') {
+                    let text = s[start + 1..start + mid].to_string();
+                    s = format!("{}{}{}", &s[..start], text, &s[start + mid + end + 1..]);
+                    pos = start + text.len();
+                    continue;
+                }
+            }
+            // No valid link from this `[`, skip past it
+            pos = start + 1;
+        } else {
+            break;
+        }
+    }
+    // Strip control characters to prevent terminal escape injection
+    s.retain(|c| c == '\n' || !c.is_control());
+    s
+}
+
 /// Self-update the purple binary to the latest release.
 pub fn self_update() -> Result<()> {
     // macOS and Linux only
@@ -306,7 +389,9 @@ pub fn self_update() -> Result<()> {
     let agent = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(30))
         .build();
-    let latest = check_latest_version(&agent)?;
+    let info = check_latest_release(&agent)?;
+    let latest = info.version;
+    let release_notes = info.notes;
     let current = current_version();
 
     if !is_newer(current, &latest) {
@@ -447,10 +532,20 @@ pub fn self_update() -> Result<()> {
 
     println!("done.");
     println!(
-        "\n  {} installed at {}.\n",
+        "\n  {} installed at {}.",
         bold_purple(&format!("purple v{}", latest)),
         exe_path.display()
     );
+
+    // Show release notes if available from GitHub
+    if !release_notes.is_empty() {
+        println!("\n  {}", bold("What's new:"));
+        for line in release_notes.lines() {
+            println!("  {}", strip_markdown(line));
+        }
+    }
+
+    println!();
 
     Ok(())
 }
@@ -584,25 +679,159 @@ mod tests {
     #[test]
     fn test_extract_version_with_v_prefix() {
         let json = serde_json::json!({"tag_name": "v1.6.0"});
-        assert_eq!(extract_version(&json).unwrap(), "1.6.0");
+        let info = extract_release_info(&json).unwrap();
+        assert_eq!(info.version, "1.6.0");
     }
 
     #[test]
     fn test_extract_version_without_prefix() {
         let json = serde_json::json!({"tag_name": "1.6.0"});
-        assert_eq!(extract_version(&json).unwrap(), "1.6.0");
+        let info = extract_release_info(&json).unwrap();
+        assert_eq!(info.version, "1.6.0");
     }
 
     #[test]
     fn test_extract_version_missing_tag() {
         let json = serde_json::json!({"name": "Release"});
-        assert!(extract_version(&json).is_err());
+        assert!(extract_release_info(&json).is_err());
     }
 
     #[test]
     fn test_extract_version_invalid_format() {
         let json = serde_json::json!({"tag_name": "v1.2.3-rc1"});
-        assert!(extract_version(&json).is_err());
+        assert!(extract_release_info(&json).is_err());
+    }
+
+    #[test]
+    fn test_extract_release_notes() {
+        let json = serde_json::json!({"tag_name": "v1.6.0", "body": "Bug fixes and improvements"});
+        let info = extract_release_info(&json).unwrap();
+        assert_eq!(info.version, "1.6.0");
+        assert_eq!(info.notes, "Bug fixes and improvements");
+    }
+
+    #[test]
+    fn test_extract_release_notes_missing_body() {
+        let json = serde_json::json!({"tag_name": "v1.6.0"});
+        let info = extract_release_info(&json).unwrap();
+        assert_eq!(info.notes, "");
+    }
+
+    #[test]
+    fn test_extract_headline_bullet() {
+        assert_eq!(
+            extract_headline("- Added new feature\n- Fixed bug"),
+            Some("Added new feature".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_headline_no_bullet() {
+        assert_eq!(
+            extract_headline("Some plain text"),
+            Some("Some plain text".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_headline_skips_heading() {
+        assert_eq!(
+            extract_headline("## What's new\n- The actual headline"),
+            Some("The actual headline".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_headline_skips_blank_lines() {
+        assert_eq!(
+            extract_headline("\n\n- First item"),
+            Some("First item".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_headline_empty() {
+        assert_eq!(extract_headline(""), None);
+    }
+
+    #[test]
+    fn test_extract_headline_only_blanks() {
+        assert_eq!(extract_headline("\n\n\n"), None);
+    }
+
+    // --- strip_markdown tests ---
+
+    #[test]
+    fn test_strip_markdown_plain_text() {
+        assert_eq!(strip_markdown("hello world"), "hello world");
+    }
+
+    #[test]
+    fn test_strip_markdown_bullet() {
+        assert_eq!(strip_markdown("- Added feature X"), "- Added feature X");
+    }
+
+    #[test]
+    fn test_strip_markdown_bold() {
+        assert_eq!(strip_markdown("This is **bold** text"), "This is bold text");
+    }
+
+    #[test]
+    fn test_strip_markdown_underscore_bold() {
+        assert_eq!(strip_markdown("This is __bold__ text"), "This is bold text");
+    }
+
+    #[test]
+    fn test_strip_markdown_heading() {
+        assert_eq!(strip_markdown("## What's new"), "What's new");
+    }
+
+    #[test]
+    fn test_strip_markdown_heading_h3() {
+        assert_eq!(strip_markdown("### Details"), "Details");
+    }
+
+    #[test]
+    fn test_strip_markdown_link() {
+        assert_eq!(
+            strip_markdown("See [the docs](https://example.com) for details"),
+            "See the docs for details"
+        );
+    }
+
+    #[test]
+    fn test_strip_markdown_multiple_links() {
+        assert_eq!(
+            strip_markdown("[a](http://a.com) and [b](http://b.com)"),
+            "a and b"
+        );
+    }
+
+    #[test]
+    fn test_strip_markdown_bare_brackets() {
+        assert_eq!(strip_markdown("array[0] = 1"), "array[0] = 1");
+    }
+
+    #[test]
+    fn test_strip_markdown_nested_brackets_in_link() {
+        // Link text contains a bracket — must not infinite loop
+        assert_eq!(
+            strip_markdown("See [[x]](http://example.com) here"),
+            "See [x] here"
+        );
+    }
+
+    #[test]
+    fn test_strip_markdown_escape_sequences() {
+        assert_eq!(
+            strip_markdown("hello \x1b[31mred\x1b[0m world"),
+            "hello [31mred[0m world"
+        );
+    }
+
+    #[test]
+    fn test_strip_markdown_control_chars() {
+        assert_eq!(strip_markdown("a\x07b\x08c"), "abc");
     }
 
     #[test]
@@ -758,10 +987,19 @@ mod tests {
         let now = now_secs();
         let content = format!("{}\n99.0.0\n", now);
         // 99.0.0 is newer than any current version
-        assert_eq!(
-            parse_version_cache(&content, now, "1.5.0"),
-            Some(Some("99.0.0".to_string()))
-        );
+        let result = parse_version_cache(&content, now, "1.5.0");
+        let cached = result.unwrap().unwrap();
+        assert_eq!(cached.version, "99.0.0");
+        assert_eq!(cached.headline, None);
+    }
+
+    #[test]
+    fn test_cache_fresh_newer_with_headline() {
+        let now = now_secs();
+        let content = format!("{}\n99.0.0\nNew feature added\n", now);
+        let cached = parse_version_cache(&content, now, "1.5.0").unwrap().unwrap();
+        assert_eq!(cached.version, "99.0.0");
+        assert_eq!(cached.headline, Some("New feature added".to_string()));
     }
 
     #[test]
@@ -794,10 +1032,8 @@ mod tests {
         let at_ttl = now - VERSION_CHECK_TTL.as_secs();
         let content = format!("{}\n99.0.0\n", at_ttl);
         // At exactly TTL boundary: still valid (saturating_sub > TTL, not >=)
-        assert_eq!(
-            parse_version_cache(&content, now, "1.5.0"),
-            Some(Some("99.0.0".to_string()))
-        );
+        let cached = parse_version_cache(&content, now, "1.5.0").unwrap().unwrap();
+        assert_eq!(cached.version, "99.0.0");
     }
 
     #[test]
@@ -843,5 +1079,15 @@ mod tests {
     #[test]
     fn test_cache_garbage() {
         assert_eq!(parse_version_cache("garbage", now_secs(), "1.5.0"), None);
+    }
+
+    #[test]
+    fn test_cache_backwards_compat_no_headline() {
+        // Old cache format without headline line should still work
+        let now = now_secs();
+        let content = format!("{}\n99.0.0", now);
+        let cached = parse_version_cache(&content, now, "1.5.0").unwrap().unwrap();
+        assert_eq!(cached.version, "99.0.0");
+        assert_eq!(cached.headline, None);
     }
 }

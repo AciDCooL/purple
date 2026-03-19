@@ -96,11 +96,33 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
       - name: Derive tag
         id: version
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Extract the section for this version from CHANGELOG.md
+          # Matches from "## X.Y.Z" until the next "## " or end of file
+          # Uses awk -v to avoid regex injection (dots in semver escaped)
+          NOTES=$(awk -v ver="$VERSION" 'BEGIN{gsub(/\./,"\\.",ver)} $0 ~ "^## "ver"$",/^## /' CHANGELOG.md | sed '1d;/^## /d')
+          # Check for missing or whitespace-only entries
+          if [ -z "$(printf '%s' "$NOTES" | tr -d '[:space:]')" ]; then
+            echo "::error::No changelog entry found for ${VERSION}. Add a '## ${VERSION}' section to CHANGELOG.md."
+            exit 1
+          fi
+          # Write to file to preserve newlines (trailing newline trimmed)
+          printf '%s' "$NOTES" > /tmp/release_notes.md
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -109,7 +131,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          generate_release_notes: true
+          body_path: /tmp/release_notes.md
           files: |
             purple-*/*.tar.gz
             purple-*/*.sha256
