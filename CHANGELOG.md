@@ -1,3 +1,8 @@
+## 2.7.1
+
+- Detail panel tags wrap across multiple lines to fit panel width
+- Update badge headline truncates with ellipsis instead of being clipped
+
 ## 2.7.0
 
 - Provider metadata uses provider-specific terminology (instance, vm_size, zone, location, image, specs)

@@ -4,6 +4,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Padding, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use super::theme;
 use crate::app::{App, PingStatus};
@@ -11,6 +12,35 @@ use crate::history::ConnectionHistory;
 use crate::ssh_config::model::ConfigElement;
 
 const LABEL_WIDTH: usize = 14;
+
+/// Wrap tags into rows that fit within `max_width` display columns.
+/// Each row is a Vec of references into the input slice.
+fn wrap_tags<'a>(tags: &'a [String], max_width: usize) -> Vec<Vec<&'a str>> {
+    let mut rows: Vec<Vec<&'a str>> = Vec::new();
+    let mut current_row: Vec<&'a str> = Vec::new();
+    let mut current_width: usize = 0;
+    for tag in tags {
+        let tag_width = UnicodeWidthStr::width(tag.as_str());
+        let needed = if current_width == 0 {
+            tag_width
+        } else {
+            tag_width + 1 // space separator
+        };
+        if current_width > 0 && current_width + needed > max_width {
+            rows.push(std::mem::take(&mut current_row));
+            current_width = 0;
+        }
+        if current_width > 0 {
+            current_width += 1; // space
+        }
+        current_row.push(tag);
+        current_width += tag_width;
+    }
+    if !current_row.is_empty() {
+        rows.push(current_row);
+    }
+    rows
+}
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let host = match app.selected_host() {
@@ -122,15 +152,26 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(""));
         lines.push(section_header("Tags"));
 
-        let mut tag_spans = Vec::new();
-        for tag in &host.tags {
-            tag_spans.push(Span::styled(format!("#{}", tag), theme::accent()));
-            tag_spans.push(Span::raw("  "));
-        }
+        let mut all_tags: Vec<String> = host
+            .tags
+            .iter()
+            .map(|t| format!("#{}", t))
+            .collect();
         if let Some(ref provider) = host.provider {
-            tag_spans.push(Span::styled(format!("#{}", provider), theme::accent()));
+            all_tags.push(format!("#{}", provider));
         }
-        lines.push(Line::from(tag_spans));
+        // Inner width = area width - 2 (borders) - 2 (1-char padding each side).
+        let max_width = (area.width as usize).saturating_sub(4);
+        for row in wrap_tags(&all_tags, max_width) {
+            let mut spans = Vec::new();
+            for (i, tag) in row.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::raw(" "));
+                }
+                spans.push(Span::styled(tag.to_string(), theme::accent()));
+            }
+            lines.push(Line::from(spans));
+        }
     }
 
     // Provider metadata section
@@ -454,5 +495,62 @@ mod tests {
         let lines = activity_sparkline(&timestamps, 20);
         // Should have top row + bottom row + axis = 3 lines
         assert_eq!(lines.len(), 3);
+    }
+
+    // =========================================================================
+    // wrap_tags
+    // =========================================================================
+
+    fn tags(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| format!("#{}", n)).collect()
+    }
+
+    #[test]
+    fn wrap_tags_single_row() {
+        let t = tags(&["prod", "web"]);
+        let rows = wrap_tags(&t, 32);
+        assert_eq!(rows, vec![vec!["#prod", "#web"]]);
+    }
+
+    #[test]
+    fn wrap_tags_wraps_to_second_row() {
+        let t = tags(&["production", "web", "europe", "api"]);
+        // "#production #web" = 16 cols, "#europe" would make 24 > 20
+        let rows = wrap_tags(&t, 20);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], vec!["#production", "#web"]);
+        assert_eq!(rows[1], vec!["#europe", "#api"]);
+    }
+
+    #[test]
+    fn wrap_tags_one_per_row_when_narrow() {
+        let t = tags(&["production", "staging"]);
+        // Each tag is 11 chars, panel only 12 wide — no room for two
+        let rows = wrap_tags(&t, 12);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0], vec!["#production"]);
+        assert_eq!(rows[1], vec!["#staging"]);
+    }
+
+    #[test]
+    fn wrap_tags_empty() {
+        let rows = wrap_tags(&[], 32);
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn wrap_tags_exact_fit() {
+        let t = tags(&["ab", "cd"]);
+        // "#ab #cd" = 7 cols
+        let rows = wrap_tags(&t, 7);
+        assert_eq!(rows, vec![vec!["#ab", "#cd"]]);
+    }
+
+    #[test]
+    fn wrap_tags_exact_overflow() {
+        let t = tags(&["ab", "cd"]);
+        // "#ab #cd" = 7 cols, max 6 → wraps
+        let rows = wrap_tags(&t, 6);
+        assert_eq!(rows.len(), 2);
     }
 }
