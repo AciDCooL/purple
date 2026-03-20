@@ -9,17 +9,23 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
+      - name: Install musl C compiler
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
 
-      - name: Install Cross (The cross-compiler tool)
-        run: cargo install cross
+      - name: Force OpenSSL to Compile from Source
+        # This safely injects OpenSSL at the top level and forces vendoring for the whole tree
+        run: cargo add openssl@0.10 --features vendored
 
       - name: Compile Static Binary
-        # cross will automatically pull a container with OpenSSL configured for musl
-        run: cross build --release --target x86_64-unknown-linux-musl
+        env:
+          # Tells the C-compiler to strictly use the static musl builder
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --target x86_64-unknown-linux-musl
         
       - name: Upload Finished Binary
         uses: actions/upload-artifact@v4
