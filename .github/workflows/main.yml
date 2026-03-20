@@ -8,27 +8,23 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
-
-      - name: Install musl C compiler
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-
-      - name: Install Rust Stable
-        uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl
+          # This guarantees we get the v2.6.0 version you requested
+          repository: erickochen/purple
+          ref: v2.6.0
 
-      - name: Force OpenSSL to Compile from Source
-        # This safely injects OpenSSL at the top level and forces vendoring for the whole tree
-        run: cargo add openssl@0.10 --features vendored
+      - name: Compile Natively inside Alpine Linux Container
+        # Alpine uses musl by default. We install the static OpenSSL headers,
+        # build the binary, and tell it to output a completely static file.
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/workspace -w /workspace rust:alpine sh -c "
+            apk add --no-cache musl-dev gcc openssl-dev openssl-libs-static pkgconfig &&
+            OPENSSL_STATIC=1 RUSTFLAGS='-C target-feature=+crt-static' cargo build --release &&
+            chmod -R 777 target
+          "
 
-      - name: Compile Static Binary
-        env:
-          # Tells the C-compiler to strictly use the static musl builder
-          CC_x86_64_unknown_linux_musl: musl-gcc
-        run: cargo build --release --target x86_64-unknown-linux-musl
-        
       - name: Upload Finished Binary
         uses: actions/upload-artifact@v4
         with:
           name: purple-rhel8-offline
-          path: target/x86_64-unknown-linux-musl/release/purple
+          path: target/release/purple
