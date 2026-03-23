@@ -9,7 +9,7 @@ homepage = "https://getpurple.sh"
 readme = "README.md"
 keywords = ["ssh", "tui", "ssh-config", "ssh-manager", "cloud-sync"]
 categories = ["command-line-utilities", "network-programming", "development-tools"]
-rust-version = "1.85"
+rust-version = "1.86"
 exclude = [".github/", ".gitignore"]
 
 [lib]
