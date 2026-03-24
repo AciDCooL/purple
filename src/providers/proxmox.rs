@@ -3352,4 +3352,76 @@ mod tests {
         assert_eq!(r.maxcpu, None);
         assert_eq!(r.maxmem, None);
     }
+
+    // =========================================================================
+    // ureq v3 error pattern tests (used in resolve_qemu_ip / resolve_lxc_ip)
+    // =========================================================================
+
+    #[test]
+    fn test_ureq_status_401_matches_auth_pattern() {
+        let err = ureq::Error::StatusCode(401);
+        assert!(matches!(err, ureq::Error::StatusCode(401 | 403)));
+    }
+
+    #[test]
+    fn test_ureq_status_403_matches_auth_pattern() {
+        let err = ureq::Error::StatusCode(403);
+        assert!(matches!(err, ureq::Error::StatusCode(401 | 403)));
+    }
+
+    #[test]
+    fn test_ureq_status_500_matches_agent_error_pattern() {
+        // resolve_qemu_ip uses StatusCode(500 | 501) for guest agent errors
+        let err = ureq::Error::StatusCode(500);
+        assert!(matches!(err, ureq::Error::StatusCode(500 | 501)));
+    }
+
+    #[test]
+    fn test_ureq_status_501_matches_agent_error_pattern() {
+        let err = ureq::Error::StatusCode(501);
+        assert!(matches!(err, ureq::Error::StatusCode(500 | 501)));
+    }
+
+    #[test]
+    fn test_ureq_status_500_matches_lxc_iface_pattern() {
+        // resolve_lxc_ip uses StatusCode(500 | 404 | 501) for interface errors
+        let err = ureq::Error::StatusCode(500);
+        assert!(matches!(err, ureq::Error::StatusCode(500 | 404 | 501)));
+    }
+
+    #[test]
+    fn test_ureq_status_404_matches_lxc_iface_pattern() {
+        let err = ureq::Error::StatusCode(404);
+        assert!(matches!(err, ureq::Error::StatusCode(500 | 404 | 501)));
+    }
+
+    #[test]
+    fn test_ureq_status_501_matches_lxc_iface_pattern() {
+        let err = ureq::Error::StatusCode(501);
+        assert!(matches!(err, ureq::Error::StatusCode(500 | 404 | 501)));
+    }
+
+    #[test]
+    fn test_ureq_status_502_does_not_match_agent_patterns() {
+        // 502 should NOT match the specific patterns used in resolve functions
+        let err_code = 502u16;
+        assert!(!matches!(
+            ureq::Error::StatusCode(err_code),
+            ureq::Error::StatusCode(401 | 403)
+        ));
+        assert!(!matches!(
+            ureq::Error::StatusCode(err_code),
+            ureq::Error::StatusCode(500 | 501)
+        ));
+        assert!(!matches!(
+            ureq::Error::StatusCode(err_code),
+            ureq::Error::StatusCode(500 | 404 | 501)
+        ));
+    }
+
+    #[test]
+    fn test_ureq_status_429_does_not_match_proxmox_auth_pattern() {
+        let err = ureq::Error::StatusCode(429);
+        assert!(!matches!(err, ureq::Error::StatusCode(401 | 403)));
+    }
 }

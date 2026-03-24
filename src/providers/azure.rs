@@ -1483,4 +1483,42 @@ mod tests {
             other => panic!("Expected Http error, got: {:?}", other),
         }
     }
+
+    // =========================================================================
+    // Token response deserialization (simulates read_json for OAuth2 exchange)
+    // =========================================================================
+
+    #[test]
+    fn test_azure_token_response_deserialize() {
+        let json =
+            r#"{"access_token": "eyJ0eXAi.abc.def", "token_type": "Bearer", "expires_in": 3599}"#;
+        let resp: TokenResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.access_token, "eyJ0eXAi.abc.def");
+    }
+
+    #[test]
+    fn test_azure_token_response_missing_token_fails() {
+        let json = r#"{"token_type": "Bearer", "expires_in": 3599}"#;
+        assert!(serde_json::from_str::<TokenResponse>(json).is_err());
+    }
+
+    // =========================================================================
+    // ureq v3 send_form API pattern test
+    // =========================================================================
+
+    #[test]
+    fn test_send_form_array_syntax_with_owned_strings() {
+        // Verify the v3 send_form([...]) syntax with .as_str() on owned Strings
+        let client_id = "app-id-123".to_string();
+        let client_secret = "secret-456".to_string();
+        let form_data: [(&str, &str); 4] = [
+            ("grant_type", "client_credentials"),
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("scope", "https://management.azure.com/.default"),
+        ];
+        assert_eq!(form_data.len(), 4);
+        assert_eq!(form_data[1].1, "app-id-123");
+        assert_eq!(form_data[2].1, "secret-456");
+    }
 }

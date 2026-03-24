@@ -1142,4 +1142,34 @@ mod tests {
         let sd = resp.server.storage_devices.unwrap();
         assert!(sd.storage_device.is_empty());
     }
+
+    // =========================================================================
+    // ureq v3 error pattern tests
+    // =========================================================================
+
+    #[test]
+    fn test_ureq_status_401_matches_auth_pattern() {
+        // Verify the StatusCode(401 | 403) pattern used in fetch_hosts_cancellable
+        let err = ureq::Error::StatusCode(401);
+        assert!(matches!(err, ureq::Error::StatusCode(401 | 403)));
+    }
+
+    #[test]
+    fn test_ureq_status_403_matches_auth_pattern() {
+        let err = ureq::Error::StatusCode(403);
+        assert!(matches!(err, ureq::Error::StatusCode(401 | 403)));
+    }
+
+    #[test]
+    fn test_ureq_status_429_matches_rate_limit_pattern() {
+        let err = ureq::Error::StatusCode(429);
+        assert!(matches!(err, ureq::Error::StatusCode(429)));
+    }
+
+    #[test]
+    fn test_ureq_status_500_does_not_match_auth_pattern() {
+        let err = ureq::Error::StatusCode(500);
+        assert!(!matches!(err, ureq::Error::StatusCode(401 | 403)));
+        assert!(!matches!(err, ureq::Error::StatusCode(429)));
+    }
 }

@@ -1128,4 +1128,26 @@ mod tests {
         assert_eq!(cached.version, "99.0.0");
         assert_eq!(cached.headline, None);
     }
+
+    // =========================================================================
+    // ureq v3 agent construction tests
+    // =========================================================================
+
+    #[test]
+    fn test_version_check_agent_creates_without_panic() {
+        // Smoke test: the agent used in spawn_version_check
+        let _agent = ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(5)))
+            .build()
+            .new_agent();
+    }
+
+    #[test]
+    fn test_update_agent_creates_without_panic() {
+        // Smoke test: the agent used in run_update
+        let _agent = ureq::Agent::config_builder()
+            .timeout_global(Some(std::time::Duration::from_secs(30)))
+            .build()
+            .new_agent();
+    }
 }

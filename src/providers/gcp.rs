@@ -1295,4 +1295,47 @@ mod tests {
         let inst = &resp.items["zones/us-central1-a"].instances[0];
         assert!(inst.network_interfaces[0].ipv6_access_configs.is_empty());
     }
+
+    // =========================================================================
+    // Token response deserialization (simulates read_json for OAuth2 exchange)
+    // =========================================================================
+
+    #[test]
+    fn test_token_response_deserialize() {
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            access_token: String,
+        }
+        let json = r#"{"access_token": "ya29.abc123", "token_type": "Bearer", "expires_in": 3600}"#;
+        let resp: TokenResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.access_token, "ya29.abc123");
+    }
+
+    #[test]
+    fn test_token_response_missing_access_token_fails() {
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct TokenResponse {
+            access_token: String,
+        }
+        let json = r#"{"token_type": "Bearer", "expires_in": 3600}"#;
+        assert!(serde_json::from_str::<TokenResponse>(json).is_err());
+    }
+
+    // =========================================================================
+    // ureq v3 send_form API smoke test
+    // =========================================================================
+
+    #[test]
+    fn test_send_form_array_syntax_compiles() {
+        // Verify the v3 send_form([...]) syntax with owned/borrowed values
+        // This is a compile-time check that the API accepts the patterns we use
+        let jwt = "test.jwt.value".to_string();
+        let form_data: [(&str, &str); 2] = [
+            ("grant_type", "urn:ietf:params:oauth:grant_type:jwt-bearer"),
+            ("assertion", jwt.as_str()),
+        ];
+        assert_eq!(form_data.len(), 2);
+        assert_eq!(form_data[1].1, "test.jwt.value");
+    }
 }

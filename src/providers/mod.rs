@@ -797,4 +797,724 @@ mod tests {
             assert_eq!(p.short_label(), *expected_label, "short_label for {}", name);
         }
     }
+
+    // =========================================================================
+    // http_agent construction tests
+    // =========================================================================
+
+    #[test]
+    fn test_http_agent_creates_agent() {
+        // Smoke test: agent construction should not panic
+        let _agent = http_agent();
+    }
+
+    #[test]
+    fn test_http_agent_insecure_creates_agent() {
+        // Smoke test: insecure agent construction should succeed
+        let agent = http_agent_insecure();
+        assert!(agent.is_ok());
+    }
+
+    // =========================================================================
+    // map_ureq_error tests
+    // =========================================================================
+
+    #[test]
+    fn test_map_ureq_error_401_is_auth_failed() {
+        let err = map_ureq_error(ureq::Error::StatusCode(401));
+        assert!(matches!(err, ProviderError::AuthFailed));
+    }
+
+    #[test]
+    fn test_map_ureq_error_403_is_auth_failed() {
+        let err = map_ureq_error(ureq::Error::StatusCode(403));
+        assert!(matches!(err, ProviderError::AuthFailed));
+    }
+
+    #[test]
+    fn test_map_ureq_error_429_is_rate_limited() {
+        let err = map_ureq_error(ureq::Error::StatusCode(429));
+        assert!(matches!(err, ProviderError::RateLimited));
+    }
+
+    #[test]
+    fn test_map_ureq_error_500_is_http() {
+        let err = map_ureq_error(ureq::Error::StatusCode(500));
+        match err {
+            ProviderError::Http(msg) => assert_eq!(msg, "HTTP 500"),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_404_is_http() {
+        let err = map_ureq_error(ureq::Error::StatusCode(404));
+        match err {
+            ProviderError::Http(msg) => assert_eq!(msg, "HTTP 404"),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_502_is_http() {
+        let err = map_ureq_error(ureq::Error::StatusCode(502));
+        match err {
+            ProviderError::Http(msg) => assert_eq!(msg, "HTTP 502"),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_503_is_http() {
+        let err = map_ureq_error(ureq::Error::StatusCode(503));
+        match err {
+            ProviderError::Http(msg) => assert_eq!(msg, "HTTP 503"),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_200_is_http() {
+        // Edge case: 200 should still map (even though it shouldn't occur in practice)
+        let err = map_ureq_error(ureq::Error::StatusCode(200));
+        match err {
+            ProviderError::Http(msg) => assert_eq!(msg, "HTTP 200"),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_non_status_is_http() {
+        // Transport/other errors should map to Http with a message
+        let err = map_ureq_error(ureq::Error::HostNotFound);
+        match err {
+            ProviderError::Http(msg) => assert!(!msg.is_empty()),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_all_auth_codes_covered() {
+        // Verify only 401 and 403 produce AuthFailed (not 400, 402, etc.)
+        for code in [400, 402, 405, 406, 407, 408, 409, 410] {
+            let err = map_ureq_error(ureq::Error::StatusCode(code));
+            assert!(
+                matches!(err, ProviderError::Http(_)),
+                "status {} should be Http, not AuthFailed",
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_only_429_is_rate_limited() {
+        // Verify only 429 produces RateLimited
+        for code in [428, 430, 431] {
+            let err = map_ureq_error(ureq::Error::StatusCode(code));
+            assert!(
+                !matches!(err, ProviderError::RateLimited),
+                "status {} should not be RateLimited",
+                code
+            );
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+        let err = map_ureq_error(ureq::Error::Io(io_err));
+        match err {
+            ProviderError::Http(msg) => assert!(msg.contains("refused"), "got: {}", msg),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_timeout() {
+        let err = map_ureq_error(ureq::Error::Timeout(ureq::Timeout::Global));
+        match err {
+            ProviderError::Http(msg) => assert!(!msg.is_empty()),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_connection_failed() {
+        let err = map_ureq_error(ureq::Error::ConnectionFailed);
+        match err {
+            ProviderError::Http(msg) => assert!(!msg.is_empty()),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_bad_uri() {
+        let err = map_ureq_error(ureq::Error::BadUri("no scheme".to_string()));
+        match err {
+            ProviderError::Http(msg) => assert!(msg.contains("no scheme"), "got: {}", msg),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_too_many_redirects() {
+        let err = map_ureq_error(ureq::Error::TooManyRedirects);
+        match err {
+            ProviderError::Http(msg) => assert!(!msg.is_empty()),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_redirect_failed() {
+        let err = map_ureq_error(ureq::Error::RedirectFailed);
+        match err {
+            ProviderError::Http(msg) => assert!(!msg.is_empty()),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_map_ureq_error_all_status_codes_1xx_to_5xx() {
+        // Exhaustive check: every status code maps to some ProviderError
+        for code in [
+            100, 200, 201, 301, 302, 400, 401, 403, 404, 429, 500, 502, 503, 504,
+        ] {
+            let err = map_ureq_error(ureq::Error::StatusCode(code));
+            match code {
+                401 | 403 => assert!(
+                    matches!(err, ProviderError::AuthFailed),
+                    "status {} should be AuthFailed",
+                    code
+                ),
+                429 => assert!(
+                    matches!(err, ProviderError::RateLimited),
+                    "status {} should be RateLimited",
+                    code
+                ),
+                _ => assert!(
+                    matches!(err, ProviderError::Http(_)),
+                    "status {} should be Http",
+                    code
+                ),
+            }
+        }
+    }
+
+    // =========================================================================
+    // HTTP integration tests (mockito)
+    // Verifies end-to-end: agent -> request -> response -> deserialization
+    // =========================================================================
+
+    #[test]
+    fn test_http_get_json_response() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/test")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"name": "test-server", "id": 42}"#)
+            .create();
+
+        let agent = http_agent();
+        let mut resp = agent
+            .get(&format!("{}/api/test", server.url()))
+            .call()
+            .unwrap();
+
+        #[derive(serde::Deserialize)]
+        struct TestResp {
+            name: String,
+            id: u32,
+        }
+
+        let body: TestResp = resp.body_mut().read_json().unwrap();
+        assert_eq!(body.name, "test-server");
+        assert_eq!(body.id, 42);
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_get_with_bearer_header() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/hosts")
+            .match_header("Authorization", "Bearer my-secret-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"hosts": []}"#)
+            .create();
+
+        let agent = http_agent();
+        let resp = agent
+            .get(&format!("{}/api/hosts", server.url()))
+            .header("Authorization", "Bearer my-secret-token")
+            .call();
+
+        assert!(resp.is_ok());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_get_with_custom_header() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/servers")
+            .match_header("X-Auth-Token", "scw-token-123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"servers": []}"#)
+            .create();
+
+        let agent = http_agent();
+        let resp = agent
+            .get(&format!("{}/api/servers", server.url()))
+            .header("X-Auth-Token", "scw-token-123")
+            .call();
+
+        assert!(resp.is_ok());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_401_maps_to_auth_failed() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/test")
+            .with_status(401)
+            .with_body("Unauthorized")
+            .create();
+
+        let agent = http_agent();
+        let err = agent
+            .get(&format!("{}/api/test", server.url()))
+            .call()
+            .unwrap_err();
+
+        let provider_err = map_ureq_error(err);
+        assert!(matches!(provider_err, ProviderError::AuthFailed));
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_403_maps_to_auth_failed() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/test")
+            .with_status(403)
+            .with_body("Forbidden")
+            .create();
+
+        let agent = http_agent();
+        let err = agent
+            .get(&format!("{}/api/test", server.url()))
+            .call()
+            .unwrap_err();
+
+        let provider_err = map_ureq_error(err);
+        assert!(matches!(provider_err, ProviderError::AuthFailed));
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_429_maps_to_rate_limited() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/test")
+            .with_status(429)
+            .with_body("Too Many Requests")
+            .create();
+
+        let agent = http_agent();
+        let err = agent
+            .get(&format!("{}/api/test", server.url()))
+            .call()
+            .unwrap_err();
+
+        let provider_err = map_ureq_error(err);
+        assert!(matches!(provider_err, ProviderError::RateLimited));
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_500_maps_to_http_error() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/test")
+            .with_status(500)
+            .with_body("Internal Server Error")
+            .create();
+
+        let agent = http_agent();
+        let err = agent
+            .get(&format!("{}/api/test", server.url()))
+            .call()
+            .unwrap_err();
+
+        let provider_err = map_ureq_error(err);
+        match provider_err {
+            ProviderError::Http(msg) => assert_eq!(msg, "HTTP 500"),
+            other => panic!("expected Http, got {:?}", other),
+        }
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_post_form_encoding() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/oauth/token")
+            .match_header("content-type", "application/x-www-form-urlencoded")
+            .match_body(
+                "grant_type=client_credentials&client_id=my-app&client_secret=secret123&scope=api",
+            )
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"access_token": "eyJ.abc.def"}"#)
+            .create();
+
+        let agent = http_agent();
+        let client_id = "my-app".to_string();
+        let client_secret = "secret123".to_string();
+        let mut resp = agent
+            .post(&format!("{}/oauth/token", server.url()))
+            .send_form([
+                ("grant_type", "client_credentials"),
+                ("client_id", client_id.as_str()),
+                ("client_secret", client_secret.as_str()),
+                ("scope", "api"),
+            ])
+            .unwrap();
+
+        #[derive(serde::Deserialize)]
+        struct TokenResp {
+            access_token: String,
+        }
+
+        let body: TokenResp = resp.body_mut().read_json().unwrap();
+        assert_eq!(body.access_token, "eyJ.abc.def");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_read_to_string() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/xml")
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body("<root><item>hello</item></root>")
+            .create();
+
+        let agent = http_agent();
+        let mut resp = agent
+            .get(&format!("{}/api/xml", server.url()))
+            .call()
+            .unwrap();
+
+        let body = resp.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "<root><item>hello</item></root>");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_body_reader_with_take() {
+        // Simulates the update.rs pattern: body_mut().as_reader().take(N)
+        use std::io::Read;
+
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/download")
+            .with_status(200)
+            .with_body("binary-content-here-12345")
+            .create();
+
+        let agent = http_agent();
+        let mut resp = agent
+            .get(&format!("{}/download", server.url()))
+            .call()
+            .unwrap();
+
+        let mut bytes = Vec::new();
+        resp.body_mut()
+            .as_reader()
+            .take(1_048_576)
+            .read_to_end(&mut bytes)
+            .unwrap();
+
+        assert_eq!(bytes, b"binary-content-here-12345");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_body_reader_take_truncates() {
+        // Verify .take() actually limits the read
+        use std::io::Read;
+
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/large")
+            .with_status(200)
+            .with_body("abcdefghijklmnopqrstuvwxyz")
+            .create();
+
+        let agent = http_agent();
+        let mut resp = agent
+            .get(&format!("{}/large", server.url()))
+            .call()
+            .unwrap();
+
+        let mut bytes = Vec::new();
+        resp.body_mut()
+            .as_reader()
+            .take(10) // Only read 10 bytes
+            .read_to_end(&mut bytes)
+            .unwrap();
+
+        assert_eq!(bytes, b"abcdefghij");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_no_redirects() {
+        // Verify that our agent does NOT follow redirects (max_redirects=0).
+        // In ureq v3, 3xx responses are returned as Ok (not errors) when redirects are disabled.
+        // The target endpoint is never hit, proving no redirect was followed.
+        let mut server = mockito::Server::new();
+        let redirect_mock = server
+            .mock("GET", "/redirect")
+            .with_status(302)
+            .with_header("Location", "/target")
+            .create();
+        let target_mock = server.mock("GET", "/target").with_status(200).create();
+
+        let agent = http_agent();
+        let resp = agent
+            .get(&format!("{}/redirect", server.url()))
+            .call()
+            .unwrap();
+
+        assert_eq!(resp.status(), 302);
+        redirect_mock.assert();
+        target_mock.expect(0); // Target must NOT have been hit
+    }
+
+    #[test]
+    fn test_http_invalid_json_returns_parse_error() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/bad")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("this is not json")
+            .create();
+
+        let agent = http_agent();
+        let mut resp = agent
+            .get(&format!("{}/api/bad", server.url()))
+            .call()
+            .unwrap();
+
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct Expected {
+            name: String,
+        }
+
+        let result: Result<Expected, _> = resp.body_mut().read_json();
+        assert!(result.is_err());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_empty_json_body_returns_parse_error() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/empty")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("")
+            .create();
+
+        let agent = http_agent();
+        let mut resp = agent
+            .get(&format!("{}/api/empty", server.url()))
+            .call()
+            .unwrap();
+
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct Expected {
+            name: String,
+        }
+
+        let result: Result<Expected, _> = resp.body_mut().read_json();
+        assert!(result.is_err());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_multiple_headers() {
+        // Simulates AWS pattern: multiple headers on same request
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/aws")
+            .match_header("Authorization", "AWS4-HMAC-SHA256 cred=test")
+            .match_header("x-amz-date", "20260324T120000Z")
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body("<result/>")
+            .create();
+
+        let agent = http_agent();
+        let mut resp = agent
+            .get(&format!("{}/api/aws", server.url()))
+            .header("Authorization", "AWS4-HMAC-SHA256 cred=test")
+            .header("x-amz-date", "20260324T120000Z")
+            .call()
+            .unwrap();
+
+        let body = resp.body_mut().read_to_string().unwrap();
+        assert_eq!(body, "<result/>");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_connection_refused_maps_to_http_error() {
+        // Connect to a port that's not listening
+        let agent = http_agent();
+        let err = agent.get("http://127.0.0.1:1").call().unwrap_err();
+
+        let provider_err = map_ureq_error(err);
+        match provider_err {
+            ProviderError::Http(msg) => assert!(!msg.is_empty()),
+            other => panic!("expected Http, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_http_nested_json_deserialization() {
+        // Simulates the real provider response pattern with nested structures
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/droplets")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                "data": [
+                    {"id": "1", "name": "web-01", "ip": "1.2.3.4"},
+                    {"id": "2", "name": "web-02", "ip": "5.6.7.8"}
+                ],
+                "meta": {"total": 2}
+            }"#,
+            )
+            .create();
+
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct Host {
+            id: String,
+            name: String,
+            ip: String,
+        }
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct Meta {
+            total: u32,
+        }
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct Resp {
+            data: Vec<Host>,
+            meta: Meta,
+        }
+
+        let agent = http_agent();
+        let mut resp = agent
+            .get(&format!("{}/api/droplets", server.url()))
+            .call()
+            .unwrap();
+
+        let body: Resp = resp.body_mut().read_json().unwrap();
+        assert_eq!(body.data.len(), 2);
+        assert_eq!(body.data[0].name, "web-01");
+        assert_eq!(body.data[1].ip, "5.6.7.8");
+        assert_eq!(body.meta.total, 2);
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_xml_deserialization_with_quick_xml() {
+        // Simulates the AWS EC2 pattern: XML response parsed with quick-xml
+        let mut server = mockito::Server::new();
+        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
+            <DescribeInstancesResponse>
+                <reservationSet>
+                    <item>
+                        <instancesSet>
+                            <item>
+                                <instanceId>i-abc123</instanceId>
+                                <instanceState><name>running</name></instanceState>
+                            </item>
+                        </instancesSet>
+                    </item>
+                </reservationSet>
+            </DescribeInstancesResponse>"#;
+
+        let mock = server
+            .mock("GET", "/ec2")
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(xml)
+            .create();
+
+        let agent = http_agent();
+        let mut resp = agent.get(&format!("{}/ec2", server.url())).call().unwrap();
+
+        let body = resp.body_mut().read_to_string().unwrap();
+        // Verify we can parse the XML with quick-xml after reading via ureq v3
+        #[derive(serde::Deserialize)]
+        struct InstanceState {
+            name: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct Instance {
+            #[serde(rename = "instanceId")]
+            instance_id: String,
+            #[serde(rename = "instanceState")]
+            instance_state: InstanceState,
+        }
+        #[derive(serde::Deserialize)]
+        struct InstanceSet {
+            item: Vec<Instance>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Reservation {
+            #[serde(rename = "instancesSet")]
+            instances_set: InstanceSet,
+        }
+        #[derive(serde::Deserialize)]
+        struct ReservationSet {
+            item: Vec<Reservation>,
+        }
+        #[derive(serde::Deserialize)]
+        struct DescribeResp {
+            #[serde(rename = "reservationSet")]
+            reservation_set: ReservationSet,
+        }
+
+        let parsed: DescribeResp = quick_xml::de::from_str(&body).unwrap();
+        assert_eq!(
+            parsed.reservation_set.item[0].instances_set.item[0].instance_id,
+            "i-abc123"
+        );
+        assert_eq!(
+            parsed.reservation_set.item[0].instances_set.item[0]
+                .instance_state
+                .name,
+            "running"
+        );
+        mock.assert();
+    }
 }
