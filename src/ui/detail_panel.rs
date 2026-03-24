@@ -442,8 +442,8 @@ fn section_header(label: &str) -> Line<'static> {
 }
 
 // Block sparkline using lower block elements (▁▂▃▄▅▆▇█).
-// 2 rows tall = 16 height levels. Each character = ~2 days over 12 weeks.
-// History retains 90 days of timestamps; chart shows 84 (12 clean weeks).
+// 2 rows tall = 16 height levels. Auto-scales from 5 days to 1 year.
+// History retains 365 days of timestamps; chart range adapts to data age.
 const BLOCKS: [char; 9] = [
     ' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
     '\u{2588}',
@@ -814,6 +814,24 @@ mod tests {
             !axis.contains("~"),
             "midpoint label should be hidden at 10 cols, got: {:?}",
             axis
+        );
+    }
+
+    #[test]
+    fn sparkline_365_day_boundary_selects_1y() {
+        // Timestamp at exactly 364 days old → 1y range
+        let lines_364 = activity_sparkline(&[now() - 364 * 86400], 30);
+        assert!(!lines_364.is_empty(), "364-day-old data should render");
+        let axis: String = lines_364
+            .last()
+            .unwrap()
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(
+            axis.contains("1y"),
+            "364 days should use 1y range, got: {axis:?}"
         );
     }
 

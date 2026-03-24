@@ -1,3 +1,8 @@
+## 2.10.1
+
+- Sparkline now shows your full connection history
+- Fix timestamp retention to match sparkline range. History now keeps 365 days instead of 90 so the auto-scaling sparkline can show up to 1 year of connection activity
+
 ## 2.10.0
 
 - Smarter forms, visual routes and a sparkline that fits your data

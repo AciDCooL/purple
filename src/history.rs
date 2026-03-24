@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::fs_util;
 
 /// Timestamps older than this are pruned on load and after each record().
-const RETENTION_SECS: u64 = 90 * 86400;
+const RETENTION_SECS: u64 = 365 * 86400;
 
 /// Hard cap on stored timestamps per host to bound memory and serialisation cost.
 const MAX_TIMESTAMPS: usize = 10_000;
@@ -17,7 +17,7 @@ pub struct HistoryEntry {
     pub alias: String,
     pub last_connected: u64,
     pub count: u32,
-    /// Individual connection timestamps (last 90 days) for activity charts.
+    /// Individual connection timestamps (last 365 days) for activity charts.
     pub timestamps: Vec<u64>,
 }
 
@@ -269,7 +269,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let old = now - 100 * 86400; // 100 days ago — beyond 90-day retention
+        let old = now - 400 * 86400; // 400 days ago — beyond 365-day retention
         let recent = now - 10 * 86400; // 10 days ago — within retention
 
         let dir = std::env::temp_dir().join(format!(
@@ -325,6 +325,45 @@ mod tests {
         assert!(timestamps.len() <= MAX_TIMESTAMPS);
         // Should keep the most recent timestamps
         assert_eq!(*timestamps.last().unwrap(), now);
+    }
+
+    #[test]
+    fn test_retention_keeps_nine_months() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let nine_months = now - 270 * 86400;
+        let six_months = now - 180 * 86400;
+        let recent = now - 86400;
+
+        let cutoff = now.saturating_sub(RETENTION_SECS);
+        let mut timestamps = vec![nine_months, six_months, recent];
+        timestamps.retain(|&t| t >= cutoff);
+
+        assert_eq!(
+            timestamps.len(),
+            3,
+            "9-month-old timestamps must be retained"
+        );
+        assert_eq!(timestamps[0], nine_months);
+    }
+
+    #[test]
+    fn test_retention_prunes_beyond_one_year() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let thirteen_months = now - 400 * 86400;
+        let recent = now - 86400;
+
+        let cutoff = now.saturating_sub(RETENTION_SECS);
+        let mut timestamps = vec![thirteen_months, recent];
+        timestamps.retain(|&t| t >= cutoff);
+
+        assert_eq!(timestamps.len(), 1, "13-month-old timestamp must be pruned");
+        assert_eq!(timestamps[0], recent);
     }
 
     #[test]
