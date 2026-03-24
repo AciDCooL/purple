@@ -37,6 +37,7 @@ fuzz/target/
 
 # Proptest
 proptest-regressions/
+*.proptest-regressions
 
 # Environment
 .env

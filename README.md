@@ -565,7 +565,7 @@ Found a bug or have a feature request? [Open an issue on GitHub](https://github.
 
 ## Built with
 
-Rust. 3500+ tests. Zero clippy warnings. No async runtime. Single binary.
+Rust. 3900+ tests. Zero clippy warnings. No async runtime. Single binary.
 
 <p align="center">
   <a href="LICENSE">MIT License</a>
