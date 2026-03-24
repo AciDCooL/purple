@@ -107,10 +107,11 @@ impl Provider for Hetzner {
             );
             let resp: HetznerResponse = agent
                 .get(&url)
-                .set("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &format!("Bearer {}", token))
                 .call()
                 .map_err(map_ureq_error)?
-                .into_json()
+                .body_mut()
+                .read_json()
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
             if resp.servers.is_empty() {

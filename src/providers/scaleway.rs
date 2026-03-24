@@ -256,10 +256,11 @@ fn fetch_zone(
         );
         let resp: ListServersResponse = agent
             .get(&url)
-            .set("X-Auth-Token", token)
+            .header("X-Auth-Token", token)
             .call()
             .map_err(map_ureq_error)?
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| ProviderError::Parse(format!("{}: {}", zone, e)))?;
 
         if resp.servers.is_empty() {

@@ -213,24 +213,26 @@ pub fn provider_display_name(name: &str) -> &str {
 
 /// Create an HTTP agent with explicit timeouts.
 pub(crate) fn http_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(30))
-        .redirects(0)
+    ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(30)))
+        .max_redirects(0)
         .build()
+        .new_agent()
 }
 
 /// Create an HTTP agent that accepts invalid/self-signed TLS certificates.
 pub(crate) fn http_agent_insecure() -> Result<ureq::Agent, ProviderError> {
-    let tls = ureq::native_tls::TlsConnector::builder()
-        .danger_accept_invalid_certs(true)
-        .danger_accept_invalid_hostnames(true)
+    Ok(ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(30)))
+        .max_redirects(0)
+        .tls_config(
+            ureq::tls::TlsConfig::builder()
+                .provider(ureq::tls::TlsProvider::NativeTls)
+                .disable_verification(true)
+                .build(),
+        )
         .build()
-        .map_err(|e| ProviderError::Http(format!("TLS setup failed: {}", e)))?;
-    Ok(ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(30))
-        .redirects(0)
-        .tls_connector(std::sync::Arc::new(tls))
-        .build())
+        .new_agent())
 }
 
 /// Strip CIDR suffix (/64, /128, etc.) from an IP address.
@@ -249,10 +251,12 @@ pub(crate) fn strip_cidr(ip: &str) -> &str {
 /// Map a ureq error to a ProviderError.
 fn map_ureq_error(err: ureq::Error) -> ProviderError {
     match err {
-        ureq::Error::Status(401, _) | ureq::Error::Status(403, _) => ProviderError::AuthFailed,
-        ureq::Error::Status(429, _) => ProviderError::RateLimited,
-        ureq::Error::Status(code, _) => ProviderError::Http(format!("HTTP {}", code)),
-        ureq::Error::Transport(t) => ProviderError::Http(t.to_string()),
+        ureq::Error::StatusCode(code) => match code {
+            401 | 403 => ProviderError::AuthFailed,
+            429 => ProviderError::RateLimited,
+            _ => ProviderError::Http(format!("HTTP {}", code)),
+        },
+        other => ProviderError::Http(other.to_string()),
     }
 }
 

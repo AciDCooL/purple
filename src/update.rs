@@ -67,15 +67,16 @@ fn extract_release_info(json: &serde_json::Value) -> Result<ReleaseInfo> {
 
 /// Fetch the latest release info from GitHub.
 fn check_latest_release(agent: &ureq::Agent) -> Result<ReleaseInfo> {
-    let resp = agent
+    let mut resp = agent
         .get("https://api.github.com/repos/erickochen/purple/releases/latest")
-        .set("Accept", "application/vnd.github+json")
-        .set("User-Agent", &format!("purple-ssh/{}", current_version()))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", &format!("purple-ssh/{}", current_version()))
         .call()
         .context("Failed to fetch latest release. GitHub may be rate-limited.")?;
 
     let mut body = Vec::new();
-    resp.into_reader()
+    resp.body_mut()
+        .as_reader()
         .take(1_048_576) // 1 MB limit for API response
         .read_to_end(&mut body)
         .context("Failed to read release JSON")?;
@@ -182,9 +183,10 @@ pub fn spawn_version_check(tx: mpsc::Sender<AppEvent>) {
 
             // Short timeout: fire-and-forget background check,
             // don't tie up thread resources for 30s like the provider agent
-            let agent = ureq::AgentBuilder::new()
-                .timeout(std::time::Duration::from_secs(5))
-                .build();
+            let agent = ureq::Agent::config_builder()
+                .timeout_global(Some(std::time::Duration::from_secs(5)))
+                .build()
+                .new_agent();
 
             if let Ok(info) = check_latest_release(&agent) {
                 let headline = extract_headline(&info.notes);
@@ -393,9 +395,10 @@ pub fn self_update() -> Result<()> {
 
     // Fetch latest version (needs redirects for GitHub release asset downloads)
     print!("  Checking for updates... ");
-    let agent = ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(30))
-        .build();
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(30)))
+        .build()
+        .new_agent();
     let info = check_latest_release(&agent)?;
     let latest = info.version;
     let release_notes = info.notes;
@@ -559,13 +562,14 @@ pub fn self_update() -> Result<()> {
 
 /// Download a file from a URL.
 fn download_file(agent: &ureq::Agent, url: &str, dest: &Path) -> Result<()> {
-    let resp = agent
+    let mut resp = agent
         .get(url)
         .call()
         .with_context(|| format!("Failed to download {}", url))?;
 
     let mut bytes = Vec::new();
-    resp.into_reader()
+    resp.body_mut()
+        .as_reader()
         .take(100 * 1024 * 1024) // 100 MB limit
         .read_to_end(&mut bytes)
         .context("Failed to read download")?;

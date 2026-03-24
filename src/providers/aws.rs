@@ -383,14 +383,15 @@ fn ec2_get(
     let auth = sign_request(creds, region, &host, &query_string, &timestamp, &datestamp);
     let url = format!("https://{}/?{}", host, query_string);
 
-    let resp = agent
+    let mut resp = agent
         .get(&url)
-        .set("Authorization", &auth)
-        .set("x-amz-date", &timestamp)
+        .header("Authorization", &auth)
+        .header("x-amz-date", &timestamp)
         .call()
         .map_err(super::map_ureq_error)?;
 
-    resp.into_string()
+    resp.body_mut()
+        .read_to_string()
         .map_err(|e| ProviderError::Parse(e.to_string()))
 }
 

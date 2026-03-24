@@ -506,10 +506,11 @@ impl Provider for Proxmox {
         let url = format!("{}/api2/json/cluster/resources?type=vm", base);
         let resp: PveResponse<Vec<ClusterResource>> = agent
             .get(&url)
-            .set("Authorization", &auth)
+            .header("Authorization", &auth)
             .call()
             .map_err(map_ureq_error)?
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
         if cancel.load(Ordering::Relaxed) {
@@ -682,12 +683,12 @@ impl Proxmox {
             "{}/api2/json/nodes/{}/qemu/{}/config",
             base, resource.node, resource.vmid
         );
-        let config: VmConfig = match agent.get(&config_url).set("Authorization", auth).call() {
-            Ok(resp) => match resp.into_json::<PveResponse<VmConfig>>() {
+        let config: VmConfig = match agent.get(&config_url).header("Authorization", auth).call() {
+            Ok(mut resp) => match resp.body_mut().read_json::<PveResponse<VmConfig>>() {
                 Ok(r) => r.data,
                 Err(_) => return ResolveOutcome::Failed,
             },
-            Err(ureq::Error::Status(401, _) | ureq::Error::Status(403, _)) => {
+            Err(ureq::Error::StatusCode(401 | 403)) => {
                 return ResolveOutcome::AuthFailed;
             }
             Err(_) => return ResolveOutcome::Failed,
@@ -715,21 +716,19 @@ impl Proxmox {
             "{}/api2/json/nodes/{}/qemu/{}/agent/network-get-interfaces",
             base, resource.node, resource.vmid
         );
-        match agent.get(&agent_url).set("Authorization", auth).call() {
-            Ok(resp) => match resp.into_json::<GuestAgentNetworkResponse>() {
+        match agent.get(&agent_url).header("Authorization", auth).call() {
+            Ok(mut resp) => match resp.body_mut().read_json::<GuestAgentNetworkResponse>() {
                 Ok(ga) => match select_guest_agent_ip(&ga.data.result) {
                     Some(ip) => ResolveOutcome::Resolved(ip, ostype),
                     None => ResolveOutcome::NoIp,
                 },
                 Err(_) => ResolveOutcome::Failed,
             },
-            Err(ureq::Error::Status(500, _)) | Err(ureq::Error::Status(501, _)) => {
+            Err(ureq::Error::StatusCode(500 | 501)) => {
                 // Agent not responding or not supported
                 ResolveOutcome::NoIp
             }
-            Err(ureq::Error::Status(401, _) | ureq::Error::Status(403, _)) => {
-                ResolveOutcome::AuthFailed
-            }
+            Err(ureq::Error::StatusCode(401 | 403)) => ResolveOutcome::AuthFailed,
             Err(_) => {
                 // Network errors, timeouts, etc.
                 ResolveOutcome::Failed
@@ -749,12 +748,12 @@ impl Proxmox {
             "{}/api2/json/nodes/{}/lxc/{}/config",
             base, resource.node, resource.vmid
         );
-        let config: VmConfig = match agent.get(&config_url).set("Authorization", auth).call() {
-            Ok(resp) => match resp.into_json::<PveResponse<VmConfig>>() {
+        let config: VmConfig = match agent.get(&config_url).header("Authorization", auth).call() {
+            Ok(mut resp) => match resp.body_mut().read_json::<PveResponse<VmConfig>>() {
                 Ok(r) => r.data,
                 Err(_) => return ResolveOutcome::Failed,
             },
-            Err(ureq::Error::Status(401, _) | ureq::Error::Status(403, _)) => {
+            Err(ureq::Error::StatusCode(401 | 403)) => {
                 return ResolveOutcome::AuthFailed;
             }
             Err(_) => return ResolveOutcome::Failed,
@@ -778,20 +777,19 @@ impl Proxmox {
             "{}/api2/json/nodes/{}/lxc/{}/interfaces",
             base, resource.node, resource.vmid
         );
-        match agent.get(&iface_url).set("Authorization", auth).call() {
-            Ok(resp) => match resp.into_json::<PveResponse<Vec<LxcInterface>>>() {
+        match agent.get(&iface_url).header("Authorization", auth).call() {
+            Ok(mut resp) => match resp
+                .body_mut()
+                .read_json::<PveResponse<Vec<LxcInterface>>>()
+            {
                 Ok(r) => match select_lxc_interface_ip(&r.data) {
                     Some(ip) => ResolveOutcome::Resolved(ip, ostype),
                     None => ResolveOutcome::NoIp,
                 },
                 Err(_) => ResolveOutcome::Failed,
             },
-            Err(ureq::Error::Status(401, _) | ureq::Error::Status(403, _)) => {
-                ResolveOutcome::AuthFailed
-            }
-            Err(ureq::Error::Status(500, _))
-            | Err(ureq::Error::Status(404, _))
-            | Err(ureq::Error::Status(501, _)) => {
+            Err(ureq::Error::StatusCode(401 | 403)) => ResolveOutcome::AuthFailed,
+            Err(ureq::Error::StatusCode(500 | 404 | 501)) => {
                 // 500: container restarting or PVE hiccup
                 // 404/501: endpoint may not exist on older PVE
                 ResolveOutcome::NoIp

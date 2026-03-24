@@ -375,11 +375,11 @@ fn resolve_service_account_token(path: &str) -> Result<String, ProviderError> {
 
     // Exchange JWT for access token
     let agent = super::http_agent();
-    let resp = agent
+    let mut resp = agent
         .post("https://oauth2.googleapis.com/token")
-        .send_form(&[
+        .send_form([
             ("grant_type", "urn:ietf:params:oauth:grant_type:jwt-bearer"),
-            ("assertion", &jwt),
+            ("assertion", jwt.as_str()),
         ])
         .map_err(map_ureq_error)?;
 
@@ -389,7 +389,8 @@ fn resolve_service_account_token(path: &str) -> Result<String, ProviderError> {
     }
 
     let token_resp: TokenResponse = resp
-        .into_json()
+        .body_mut()
+        .read_json()
         .map_err(|e| ProviderError::Parse(format!("Token response: {}", e)))?;
 
     Ok(token_resp.access_token)
@@ -499,9 +500,9 @@ impl Provider for Gcp {
                 all_hosts.len()
             ));
 
-            let response = match agent
+            let mut response = match agent
                 .get(&url)
-                .set("Authorization", &format!("Bearer {}", access_token))
+                .header("Authorization", &format!("Bearer {}", access_token))
                 .call()
             {
                 Ok(r) => r,
@@ -521,7 +522,7 @@ impl Provider for Gcp {
                 }
             };
 
-            let resp: AggregatedListResponse = match response.into_json() {
+            let resp: AggregatedListResponse = match response.body_mut().read_json() {
                 Ok(r) => r,
                 Err(e) => {
                     if !all_hosts.is_empty() {

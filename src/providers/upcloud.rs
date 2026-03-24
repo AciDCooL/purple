@@ -171,10 +171,11 @@ impl Provider for UpCloud {
             );
             let resp: ServerListResponse = agent
                 .get(&url)
-                .set("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &format!("Bearer {}", token))
                 .call()
                 .map_err(map_ureq_error)?
-                .into_json()
+                .body_mut()
+                .read_json()
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
             let count = resp.servers.server.len();
@@ -203,20 +204,20 @@ impl Provider for UpCloud {
             let url = format!("https://api.upcloud.com/1.3/server/{}", server.uuid);
             let detail: ServerDetailResponse = match agent
                 .get(&url)
-                .set("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &format!("Bearer {}", token))
                 .call()
             {
-                Ok(resp) => match resp.into_json() {
+                Ok(mut resp) => match resp.body_mut().read_json() {
                     Ok(d) => d,
                     Err(_) => {
                         fetch_failures += 1;
                         continue;
                     }
                 },
-                Err(ureq::Error::Status(401, _) | ureq::Error::Status(403, _)) => {
+                Err(ureq::Error::StatusCode(401 | 403)) => {
                     return Err(ProviderError::AuthFailed);
                 }
-                Err(ureq::Error::Status(429, _)) => {
+                Err(ureq::Error::StatusCode(429)) => {
                     return Err(ProviderError::RateLimited);
                 }
                 Err(_) => {

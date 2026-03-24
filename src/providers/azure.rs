@@ -215,18 +215,19 @@ fn resolve_sp_token(path: &str) -> Result<String, ProviderError> {
         "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
         sp.tenant_id
     );
-    let resp = agent
+    let mut resp = agent
         .post(&url)
-        .send_form(&[
+        .send_form([
             ("grant_type", "client_credentials"),
-            ("client_id", &sp.client_id),
-            ("client_secret", &sp.client_secret),
+            ("client_id", sp.client_id.as_str()),
+            ("client_secret", sp.client_secret.as_str()),
             ("scope", "https://management.azure.com/.default"),
         ])
         .map_err(map_ureq_error)?;
 
     let token_resp: TokenResponse = resp
-        .into_json()
+        .body_mut()
+        .read_json()
         .map_err(|e| ProviderError::Parse(format!("Token response: {}", e)))?;
 
     Ok(token_resp.access_token)
@@ -393,9 +394,9 @@ fn fetch_paginated<T: serde::de::DeserializeOwned>(
             all_items.len()
         ));
 
-        let response = match agent
+        let mut response = match agent
             .get(&url)
-            .set("Authorization", &format!("Bearer {}", access_token))
+            .header("Authorization", &format!("Bearer {}", access_token))
             .call()
         {
             Ok(r) => r,
@@ -413,7 +414,7 @@ fn fetch_paginated<T: serde::de::DeserializeOwned>(
             }
         };
 
-        let body: serde_json::Value = match response.into_json() {
+        let body: serde_json::Value = match response.body_mut().read_json() {
             Ok(v) => v,
             Err(e) => {
                 if !all_items.is_empty() {

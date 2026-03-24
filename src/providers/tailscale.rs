@@ -326,10 +326,11 @@ impl Tailscale {
 
         let resp: ApiResponse = agent
             .get("https://api.tailscale.com/api/v2/tailnet/-/devices?fields=all")
-            .set("Authorization", &auth_header)
+            .header("Authorization", &auth_header)
             .call()
             .map_err(map_ureq_error)?
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
         Self::hosts_from_api(resp)
