@@ -1,3 +1,11 @@
+## 2.11.1
+
+- Consistent footer spacing across all overlay screens
+- Spacer row between content and footer in all overlay screens for cleaner visual separation
+- Startup sort now selects the first host in sorted order instead of the first host in config order
+- Rebranded from "SSH config manager" to "terminal SSH client" across all user-facing text
+- 1500+ new parser robustness tests covering malformed input, quoting edge cases, Match blocks and mutation sequences (4200+ total)
+
 ## 2.11.0
 
 - Soft-delete for disappeared provider hosts

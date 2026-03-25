@@ -10826,3 +10826,1520 @@ fn sync_stale_roundtrip() {
     let output4 = config4.serialize();
     assert_eq_visible(&output3, &output4);
 }
+
+// ---------------------------------------------------------------------------
+// Malformed input edge cases (Iteration 1 of SSH config parser audit)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn roundtrip_null_byte_in_alias() {
+    // Null byte embedded in a host alias — parser must not panic and
+    // round-trip must be idempotent (whatever it produces).
+    let content = "Host my\x00server\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_null_byte_in_directive_value() {
+    let content = "Host myserver\n  HostName 10.0\x00.0.1\n  User ad\x00min\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_control_chars_in_comment() {
+    // Control characters (bell, backspace, form feed) inside a comment
+    let content = "Host myserver\n  # note: \x07bell \x08bs \x0Cff\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_control_chars_in_directive_value() {
+    // Tab is legitimate whitespace, but other control chars are not.
+    // Parser should preserve them verbatim for round-trip fidelity.
+    let content = "Host myserver\n  ProxyCommand /usr/bin/cmd \x01\x02\x03\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_lone_cr_line_endings() {
+    // Old Mac-style \r line endings (not \r\n). Rust's str::lines()
+    // does NOT split on bare \r so the whole thing is one long line.
+    // Parser should not panic and round-trip should be stable.
+    let content = "Host myserver\r  HostName 10.0.0.1\r  User admin\r";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_mixed_cr_lf_crlf() {
+    // Mix of all three line ending styles in one file
+    let content =
+        "Host server1\n  HostName 10.0.0.1\r\n  User admin\rHost server2\r\n  HostName 10.0.0.2\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_truncated_no_newline_at_eof() {
+    // File truncated mid-directive, no trailing newline
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin";
+    let config = parse_str(content);
+    let output = config.serialize();
+    // Serializer always adds trailing newline
+    assert!(output.ends_with('\n'));
+    // But round-trip of the output must be idempotent
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_truncated_mid_host_keyword() {
+    // File is just "Hos" — truncated Host keyword
+    let content = "Hos";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+    assert!(config.host_entries().is_empty());
+}
+
+#[test]
+fn roundtrip_utf8_bom_mid_file() {
+    // BOM only valid at start; mid-file BOM should be preserved verbatim
+    let content = "Host server1\n  HostName 10.0.0.1\n\u{FEFF}Host server2\n  HostName 10.0.0.2\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    // BOM mid-file is just a zero-width no-break space, preserved as-is
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_all_ascii_control_chars_in_value() {
+    // Every ASCII control char (0x01-0x1F except \t \n \r) in a directive value
+    let mut value = String::new();
+    for c in 1u8..=31 {
+        if c != b'\t' && c != b'\n' && c != b'\r' {
+            value.push(c as char);
+        }
+    }
+    let content = format!("Host myserver\n  ProxyCommand {}\n", value);
+    let config = parse_str(&content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_del_char_in_value() {
+    // DEL (0x7F) is a control character that's sometimes forgotten
+    let content = "Host myserver\n  HostName 10.0.0\x7F.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_empty_host_pattern_with_trailing_spaces() {
+    // "Host   " — all spaces after Host keyword
+    let content = "Host   \n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_only_whitespace_lines() {
+    // File with only spaces/tabs on some lines (not empty, not blank)
+    let content = "Host myserver\n  HostName 10.0.0.1\n   \t  \n  User admin\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_directive_key_only_no_space() {
+    // A directive line that is just a keyword with no separator or value
+    let content = "Host myserver\n  HostName\n  User\n  Port\n  IdentityFile\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_extremely_long_alias() {
+    let alias = "x".repeat(10_000);
+    let content = format!("Host {}\n  HostName 10.0.0.1\n", alias);
+    let config = parse_str(&content);
+    let output = config.serialize();
+    assert_eq_visible(&content, &output);
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].alias, alias);
+}
+
+#[test]
+fn roundtrip_many_hosts_1000() {
+    let mut content = String::new();
+    for i in 0..1000 {
+        content.push_str(&format!(
+            "Host server{}\n  HostName 10.0.{}.{}\n\n",
+            i,
+            i / 256,
+            i % 256
+        ));
+    }
+    let config = parse_str(&content);
+    let output = config.serialize();
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1000);
+    // Round-trip idempotency
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn mutation_after_malformed_input_stays_stable() {
+    // Parse config with null bytes, then mutate it and verify stability
+    let content = "Host clean\n  HostName 10.0.0.1\n\nHost dir\x00ty\n  HostName 10.0.0.2\n";
+    let mut config = parse_str(content);
+    // Add a host after the malformed one
+    config.add_host(&HostEntry {
+        alias: "newhost".to_string(),
+        hostname: "10.0.0.3".to_string(),
+        ..Default::default()
+    });
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+    // Delete the malformed host
+    let alias_with_null = "dir\x00ty";
+    config.delete_host(alias_with_null);
+    let output3 = config.serialize();
+    let config3 = parse_str(&output3);
+    let output4 = config3.serialize();
+    assert_eq_visible(&output3, &output4);
+}
+
+#[test]
+fn update_host_with_control_chars_in_existing_value_preserves_others() {
+    // Config has a directive with control chars; updating hostname should
+    // not corrupt the control-char directive
+    let content =
+        "Host myserver\n  HostName 10.0.0.1\n  ProxyCommand /bin/cmd\x01\x02\n  User admin\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("ProxyCommand /bin/cmd\x01\x02"),
+        "Control char directive must be preserved after update"
+    );
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_backslash_in_values() {
+    // Backslashes can appear in paths and ProxyCommand
+    let content = "Host myserver\n  IdentityFile C:\\Users\\admin\\.ssh\\id_rsa\n  ProxyCommand C:\\tools\\ssh.exe -W %h:%p bastion\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_semicolons_in_values() {
+    // Semicolons appear in some complex SSH configs
+    let content = "Host myserver\n  ProxyCommand bash -c 'echo hello; ssh bastion'\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_tilde_and_env_vars_in_values() {
+    // These should be preserved verbatim (not expanded by the parser)
+    let content =
+        "Host myserver\n  IdentityFile ~/keys/${HOST}_rsa\n  ControlPath ~/.ssh/ctrl-%r@%h:%p\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+// ---------------------------------------------------------------------------
+// Quoting edge cases (Iteration 2 of SSH config parser audit)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn roundtrip_unmatched_opening_quote_in_value() {
+    // Unmatched opening quote — parser should preserve verbatim
+    let content = "Host myserver\n  ProxyCommand ssh -W \"%h:22 gateway\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_unmatched_closing_quote_in_value() {
+    // Quote only at the end of the value
+    let content = "Host myserver\n  ProxyCommand ssh -W %h:22\" gateway\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_empty_quoted_string_in_value() {
+    // Empty quotes in a value
+    let content = "Host myserver\n  ProxyCommand \"\" --flag\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_multiple_quoted_segments() {
+    // Multiple separate quoted segments in one value
+    let content =
+        "Host myserver\n  ProxyCommand \"path with spaces\" -W \"%h:%p\" \"another path\"\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_hash_after_unmatched_quote_is_not_comment() {
+    // If a quote is unmatched, any # after it should be treated as inside
+    // a quoted string (OpenSSH behavior: quote toggles state)
+    let content = "Host myserver\n  ProxyCommand \"path # with hash\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Verify the parsed value includes the hash (not stripped as comment)
+    if let ConfigElement::HostBlock(block) = &config.elements[0] {
+        let cmd = block
+            .directives
+            .iter()
+            .find(|d| d.key == "ProxyCommand")
+            .unwrap();
+        assert!(
+            cmd.value.contains("# with hash"),
+            "Hash inside unmatched quotes should NOT be stripped: got '{}'",
+            cmd.value
+        );
+    }
+}
+
+#[test]
+fn roundtrip_single_quotes_are_literal() {
+    // OpenSSH does NOT support single-quoted strings — they are literal
+    let content = "Host myserver\n  ProxyCommand 'echo hello # world'\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // The # is outside double-quotes, so it MAY be stripped as inline comment
+    // depending on whether there's preceding whitespace. Let's verify raw_line
+    // is preserved regardless.
+    if let ConfigElement::HostBlock(block) = &config.elements[0] {
+        assert_eq!(
+            block.directives[0].raw_line,
+            "  ProxyCommand 'echo hello # world'"
+        );
+    }
+}
+
+#[test]
+fn roundtrip_quoted_host_pattern() {
+    // Host pattern can be quoted in OpenSSH
+    let content = "Host \"my server\"\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_equals_syntax_with_quoted_value() {
+    // Key=Value where Value is quoted
+    let content = "Host myserver\n  IdentityFile=\"~/.ssh/my key\"\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_quotes_in_include_pattern() {
+    // Include with quoted path
+    let content = "Include \"~/.ssh/config.d/my configs/*\"\nHost myserver\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn inline_comment_stripping_with_quotes_consistency() {
+    // Verify the parsed value after inline comment stripping is consistent
+    // across parse-serialize-reparse cycles
+    let cases = vec![
+        // (input, expected_value_contains)
+        ("Host s\n  HostName 10.0.0.1 # comment\n", "10.0.0.1"),
+        (
+            "Host s\n  ProxyCommand \"cmd # hash\" arg\n",
+            "\"cmd # hash\" arg",
+        ),
+        (
+            "Host s\n  ProxyCommand cmd \"arg # hash\"\n",
+            "cmd \"arg # hash\"",
+        ),
+        ("Host s\n  ProxyCommand cmd # hash\n", "cmd"),
+        ("Host s\n  ProxyCommand cmd#nospace\n", "cmd#nospace"),
+    ];
+    for (content, expected_substr) in &cases {
+        let config = parse_str(content);
+        let output = config.serialize();
+        assert_eq_visible(content, &output);
+        if let ConfigElement::HostBlock(block) = &config.elements[0] {
+            let directive = block
+                .directives
+                .iter()
+                .find(|d| !d.is_non_directive)
+                .unwrap();
+            assert!(
+                directive.value.contains(expected_substr),
+                "For input {:?}, expected value to contain {:?}, got {:?}",
+                content,
+                expected_substr,
+                directive.value
+            );
+        }
+    }
+}
+
+#[test]
+fn roundtrip_adjacent_quotes_in_value() {
+    // Quotes right next to each other: ""
+    let content = "Host myserver\n  ProxyCommand cmd \"\"arg\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_backslash_before_quote_in_value() {
+    // Backslash-quote — OpenSSH does NOT support escape sequences in quotes,
+    // so \" is just a literal backslash followed by a quote
+    let content = "Host myserver\n  ProxyCommand cmd \\\"arg\\\"\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn update_host_preserves_quoted_proxy_command() {
+    // Updating hostname should NOT touch the ProxyCommand with quotes
+    let content = "Host myserver\n  HostName 10.0.0.1\n  ProxyCommand ssh -W \"%h:%p\" \"my bastion\"\n  User admin\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("ProxyCommand ssh -W \"%h:%p\" \"my bastion\""),
+        "Quoted ProxyCommand must survive update: {}",
+        visible(&output)
+    );
+    // Round-trip
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_value_is_only_a_hash() {
+    // Edge case: value is literally just "#" — should it be treated as
+    // a comment or a value? Since there's no preceding whitespace before #
+    // at the value start, strip_inline_comment won't touch it.
+    let content = "Host myserver\n  ProxyCommand #\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_value_starts_with_hash_no_space() {
+    let content = "Host myserver\n  ProxyCommand #/usr/bin/cmd\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_multiple_hashes_in_value() {
+    let content = "Host myserver\n  ProxyCommand cmd arg1 # first # second # third\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Only the first inline comment (preceded by space) should be stripped
+    if let ConfigElement::HostBlock(block) = &config.elements[0] {
+        let d = &block.directives[0];
+        assert_eq!(d.value, "cmd arg1");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Match blocks and Host pattern edge cases (Iteration 3)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn roundtrip_consecutive_match_blocks() {
+    // Two Match blocks back-to-back, no Host blocks between them
+    let content = "\
+Match host *.example.com
+  ForwardAgent yes
+
+Match user admin
+  ForwardX11 no
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Both should be global lines (Match = inert)
+    assert!(config.host_entries().is_empty());
+}
+
+#[test]
+fn roundtrip_match_then_host_then_match() {
+    let content = "\
+Match host *.example.com
+  ForwardAgent yes
+
+Host myserver
+  HostName 10.0.0.1
+
+Match user admin
+  ForwardX11 no
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    assert_eq!(config.host_entries().len(), 1);
+}
+
+#[test]
+fn roundtrip_match_with_complex_criteria() {
+    // Match with multiple criteria on one line
+    let content = "\
+Match host *.example.com user admin exec \"/usr/bin/test -f /tmp/flag\"
+  ForwardAgent yes
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_match_all() {
+    // "Match all" is a valid OpenSSH construct
+    let content = "\
+Host myserver
+  HostName 10.0.0.1
+
+Match all
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_match_case_insensitive() {
+    // "MATCH", "match", "Match" should all be recognized
+    let content = "\
+MATCH host *.example.com
+  ForwardAgent yes
+
+match user admin
+  ForwardX11 no
+
+Match all
+  ServerAliveInterval 60
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    assert!(config.host_entries().is_empty());
+}
+
+#[test]
+fn roundtrip_indented_match_inside_host_block() {
+    // An indented "Match" inside a Host block should be treated as a directive,
+    // not a block boundary
+    let content = "\
+Host myserver
+  HostName 10.0.0.1
+  Match exec \"/usr/bin/check\"
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Should still be 1 host with the indented Match as a directive
+    assert_eq!(config.host_entries().len(), 1);
+}
+
+#[test]
+fn match_block_with_host_add_delete_preserves_structure() {
+    let content = "\
+Match host *.example.com
+  ForwardAgent yes
+
+Host server1
+  HostName 10.0.0.1
+
+Match all
+  ServerAliveInterval 60
+";
+    let mut config = parse_str(content);
+    // Add a host
+    config.add_host(&HostEntry {
+        alias: "server2".to_string(),
+        hostname: "10.0.0.2".to_string(),
+        ..Default::default()
+    });
+    let output = config.serialize();
+    // Both Match blocks should survive
+    assert!(output.contains("Match host *.example.com"));
+    assert!(output.contains("Match all"));
+    // Delete the original host
+    config.delete_host("server1");
+    let output2 = config.serialize();
+    assert!(output2.contains("Match host *.example.com"));
+    assert!(output2.contains("Match all"));
+    // Round-trip
+    let config2 = parse_str(&output2);
+    let output3 = config2.serialize();
+    assert_eq_visible(&output2, &output3);
+}
+
+#[test]
+fn roundtrip_host_alias_named_match() {
+    // What if a host alias is literally "match"? The Host line parser runs
+    // first, so "Host match" should create a HostBlock, not a Match block.
+    let content = "Host match\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].alias, "match");
+}
+
+#[test]
+fn roundtrip_host_alias_named_include() {
+    // Host alias named "include"
+    let content = "Host include\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].alias, "include");
+}
+
+#[test]
+fn roundtrip_host_pattern_with_asterisk_and_question_mark() {
+    let content = "Host web-??-*.prod\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_host_pattern_with_negation_first() {
+    // Negation pattern as the first (and only) pattern
+    let content = "Host !*.internal\n  ProxyJump bastion\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_host_pattern_many_patterns() {
+    // Many patterns on one Host line
+    let content =
+        "Host alpha bravo charlie delta echo foxtrot golf hotel india\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Multi-pattern hosts are treated as patterns (contain spaces) and
+    // filtered out by host_entries() — this is by design
+    assert!(
+        config.host_entries().is_empty(),
+        "Multi-pattern hosts are pattern entries, not visible hosts"
+    );
+    // But the raw host_pattern is preserved
+    if let ConfigElement::HostBlock(block) = &config.elements[0] {
+        assert_eq!(
+            block.host_pattern,
+            "alpha bravo charlie delta echo foxtrot golf hotel india"
+        );
+    }
+}
+
+#[test]
+fn roundtrip_host_case_insensitive_keyword() {
+    // "host", "HOST", "hOsT" should all be recognized
+    let cases = vec![
+        "host myserver\n  HostName 10.0.0.1\n",
+        "HOST myserver\n  HostName 10.0.0.1\n",
+        "hOsT myserver\n  HostName 10.0.0.1\n",
+    ];
+    for content in cases {
+        let config = parse_str(content);
+        let output = config.serialize();
+        assert_eq_visible(content, &output);
+        assert_eq!(config.host_entries().len(), 1, "Failed for: {:?}", content);
+    }
+}
+
+#[test]
+fn roundtrip_match_at_eof_no_directives() {
+    // Match block at EOF with no directives following it
+    let content = "Host myserver\n  HostName 10.0.0.1\n\nMatch all\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_match_with_equals_syntax() {
+    // Match=host *.example.com — unusual but potentially parseable
+    // The is_match_line splits on whitespace, so "Match=host" would be the keyword.
+    // This should NOT match as a Match block (it's "match=host", not "match").
+    let content = "Match=host *.example.com\n  ForwardAgent yes\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn delete_host_between_match_blocks_no_corruption() {
+    let content = "\
+Match host *.a.com
+  ForwardAgent yes
+
+Host target
+  HostName 10.0.0.1
+
+Match host *.b.com
+  ForwardX11 no
+
+Host keeper
+  HostName 10.0.0.2
+";
+    let mut config = parse_str(content);
+    config.delete_host("target");
+    let output = config.serialize();
+    // Match blocks intact
+    assert!(output.contains("Match host *.a.com"));
+    assert!(output.contains("Match host *.b.com"));
+    // keeper still there
+    assert!(output.contains("Host keeper"));
+    assert!(!output.contains("Host target"));
+    // Round-trip
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn host_pattern_with_ipv6_address() {
+    let content = "Host 2001:db8::1\n  User admin\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    let entries = config.host_entries();
+    assert_eq!(entries[0].alias, "2001:db8::1");
+}
+
+#[test]
+fn host_pattern_with_brackets_for_ipv6() {
+    let content = "Host [2001:db8::1]\n  User admin\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+// ---------------------------------------------------------------------------
+// Directive edge cases and mutation sequences (Iteration 4)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn interleaved_add_update_delete_swap_with_tags_and_provider() {
+    // Complex realistic workflow: multiple operations with annotations
+    let mut config = parse_str("");
+
+    // Add 5 hosts
+    for i in 1..=5 {
+        config.add_host(&HostEntry {
+            alias: format!("host{}", i),
+            hostname: format!("10.0.0.{}", i),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        });
+    }
+    assert_eq!(config.host_entries().len(), 5);
+
+    // Add tags to host2 and host4
+    config.set_host_tags("host2", &["prod".to_string(), "us-east".to_string()]);
+    config.set_host_tags("host4", &["staging".to_string()]);
+
+    // Update host3's hostname
+    config.update_host(
+        "host3",
+        &HostEntry {
+            alias: "host3".to_string(),
+            hostname: "10.0.1.3".to_string(),
+            user: "deploy".to_string(),
+            port: 2222,
+            ..Default::default()
+        },
+    );
+
+    // Swap host1 and host5
+    config.swap_hosts("host1", "host5");
+
+    // Delete host2
+    config.delete_host("host2");
+
+    // Verify state
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    assert_eq!(entries.len(), 4, "Should have 4 hosts after delete");
+
+    // Verify host3 was updated
+    let h3 = entries.iter().find(|e| e.alias == "host3").unwrap();
+    assert_eq!(h3.hostname, "10.0.1.3");
+    assert_eq!(h3.user, "deploy");
+    assert_eq!(h3.port, 2222);
+
+    // Verify host4's tags survived
+    let h4 = entries.iter().find(|e| e.alias == "host4").unwrap();
+    assert!(h4.tags.contains(&"staging".to_string()));
+
+    // Verify host2 is gone
+    assert!(entries.iter().all(|e| e.alias != "host2"));
+
+    // Round-trip idempotency
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn delete_undoable_then_update_then_undo_sequence() {
+    let content = "\
+Host server1
+  HostName 10.0.0.1
+  User admin
+
+Host server2
+  HostName 10.0.0.2
+  User deploy
+";
+    let mut config = parse_str(content);
+
+    // Delete server1 undoably
+    let undo = config.delete_host_undoable("server1");
+    assert!(undo.is_some());
+
+    // Update server2 while server1 is deleted
+    config.update_host(
+        "server2",
+        &HostEntry {
+            alias: "server2".to_string(),
+            hostname: "10.0.0.22".to_string(),
+            user: "deploy".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+
+    // Undo the delete of server1
+    let (block, pos) = undo.unwrap();
+    config.insert_host_at(block, pos);
+
+    // Verify both hosts exist and server2 has the updated hostname
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    assert_eq!(entries.len(), 2);
+
+    let s1 = entries.iter().find(|e| e.alias == "server1").unwrap();
+    assert_eq!(s1.hostname, "10.0.0.1");
+    let s2 = entries.iter().find(|e| e.alias == "server2").unwrap();
+    assert_eq!(s2.hostname, "10.0.0.22");
+
+    // Round-trip
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn rapid_tag_changes_no_duplicate_tag_lines() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(content);
+
+    // Set tags multiple times rapidly
+    for i in 0..20 {
+        let tags: Vec<String> = (0..=i).map(|j| format!("tag{}", j)).collect();
+        config.set_host_tags("myserver", &tags);
+    }
+
+    let output = config.serialize();
+    // Should have exactly ONE purple:tags line
+    let tag_line_count = output.matches("# purple:tags").count();
+    assert_eq!(
+        tag_line_count,
+        1,
+        "Expected 1 tag line, got {}: {}",
+        tag_line_count,
+        visible(&output)
+    );
+
+    // Round-trip
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn rapid_askpass_changes_no_duplicate_askpass_lines() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(content);
+
+    let sources = vec![
+        "keychain",
+        "op://vault/item",
+        "bw:item-id",
+        "pass:entry",
+        "vault:secret/ssh",
+    ];
+    for source in &sources {
+        config.set_host_askpass("myserver", source);
+    }
+
+    let output = config.serialize();
+    let askpass_count = output.matches("# purple:askpass").count();
+    assert_eq!(
+        askpass_count,
+        1,
+        "Expected 1 askpass line, got {}: {}",
+        askpass_count,
+        visible(&output)
+    );
+
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn set_tags_then_set_provider_then_set_meta_then_set_askpass_all_coexist() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin\n";
+    let mut config = parse_str(content);
+
+    config.set_host_tags("myserver", &["prod".to_string(), "us-east".to_string()]);
+    config.set_host_provider("myserver", "aws", "i-123abc");
+    config.set_host_meta(
+        "myserver",
+        &[("region".to_string(), "us-east-1".to_string())],
+    );
+    config.set_host_askpass("myserver", "keychain");
+
+    let output = config.serialize();
+    assert!(output.contains("# purple:tags prod,us-east"));
+    assert!(output.contains("# purple:provider aws:i-123abc"));
+    assert!(output.contains("# purple:meta region=us-east-1"));
+    assert!(output.contains("# purple:askpass keychain"));
+
+    // All four annotation types must survive a round-trip
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    let e = &entries[0];
+    assert_eq!(e.tags, vec!["prod", "us-east"]);
+    assert_eq!(e.provider.as_deref(), Some("aws"));
+    assert_eq!(e.askpass.as_deref(), Some("keychain"));
+    assert!(
+        e.provider_meta
+            .iter()
+            .any(|(k, v)| k == "region" && v == "us-east-1")
+    );
+
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn update_host_rename_preserves_all_annotations() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin\n";
+    let mut config = parse_str(content);
+
+    // Add all annotation types
+    config.set_host_tags("myserver", &["prod".to_string()]);
+    config.set_host_provider("myserver", "aws", "i-123");
+    config.set_host_meta(
+        "myserver",
+        &[("region".to_string(), "us-east-1".to_string())],
+    );
+    config.set_host_askpass("myserver", "keychain");
+    config.set_host_stale("myserver", 1700000000);
+
+    // Rename the host
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "renamed".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    let e = &entries[0];
+    assert_eq!(e.alias, "renamed");
+    assert_eq!(e.tags, vec!["prod"]);
+    assert_eq!(e.provider.as_deref(), Some("aws"));
+    assert_eq!(e.askpass.as_deref(), Some("keychain"));
+    assert_eq!(e.stale, Some(1700000000));
+
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn delete_all_then_readd_produces_clean_config() {
+    let mut config = parse_str("");
+
+    // Add 3 hosts
+    for i in 1..=3 {
+        config.add_host(&HostEntry {
+            alias: format!("host{}", i),
+            hostname: format!("10.0.0.{}", i),
+            ..Default::default()
+        });
+    }
+
+    // Delete all hosts
+    config.delete_host("host1");
+    config.delete_host("host2");
+    config.delete_host("host3");
+    assert!(config.host_entries().is_empty());
+
+    // Re-add 2 hosts
+    config.add_host(&HostEntry {
+        alias: "newhost1".to_string(),
+        hostname: "10.0.1.1".to_string(),
+        ..Default::default()
+    });
+    config.add_host(&HostEntry {
+        alias: "newhost2".to_string(),
+        hostname: "10.0.1.2".to_string(),
+        ..Default::default()
+    });
+
+    let output = config.serialize();
+    // No triple blank lines
+    assert!(
+        !output.contains("\n\n\n"),
+        "Should have no triple blanks: {}",
+        visible(&output)
+    );
+    let config2 = parse_str(&output);
+    assert_eq!(config2.host_entries().len(), 2);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn swap_all_pairs_in_5_host_config() {
+    // Exhaustive swap test: swap every pair and verify stability
+    let mut content = String::new();
+    for i in 1..=5 {
+        content.push_str(&format!("Host host{}\n  HostName 10.0.0.{}\n\n", i, i));
+    }
+
+    for i in 1..=5 {
+        for j in (i + 1)..=5 {
+            let mut config = parse_str(&content);
+            config.swap_hosts(&format!("host{}", i), &format!("host{}", j));
+            let output = config.serialize();
+            // Should still have 5 hosts
+            let config2 = parse_str(&output);
+            assert_eq!(
+                config2.host_entries().len(),
+                5,
+                "Swap({}, {}) lost hosts",
+                i,
+                j
+            );
+            // Swap back should restore the same host order and values
+            let mut config3 = config2;
+            config3.swap_hosts(&format!("host{}", i), &format!("host{}", j));
+            let output3 = config3.serialize();
+            let entries3 = parse_str(&output3).host_entries();
+            // Verify host order is restored
+            for (k, entry) in entries3.iter().enumerate().take(5) {
+                assert_eq!(
+                    entry.alias,
+                    format!("host{}", k + 1),
+                    "Swap({},{}) then swap back: host order wrong at index {}",
+                    i,
+                    j,
+                    k
+                );
+            }
+            // Swap-swap round-trip must be idempotent (swap twice more)
+            let mut config4 = parse_str(&output3);
+            config4.swap_hosts(&format!("host{}", i), &format!("host{}", j));
+            config4.swap_hosts(&format!("host{}", i), &format!("host{}", j));
+            let output4 = config4.serialize();
+            assert_eq_visible(&output3, &output4);
+        }
+    }
+}
+
+#[test]
+fn update_host_with_duplicate_directive_keys_preserves_all() {
+    // Config with multiple IdentityFile directives (valid in OpenSSH)
+    let content = "\
+Host myserver
+  HostName 10.0.0.1
+  IdentityFile ~/.ssh/id_rsa
+  IdentityFile ~/.ssh/id_ed25519
+  IdentityFile ~/.ssh/id_ecdsa
+  User admin
+";
+    let mut config = parse_str(content);
+    // Update just the hostname — all IdentityFile lines should survive
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            identity_file: "~/.ssh/id_rsa".to_string(), // first one
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    let id_count = output.matches("IdentityFile").count();
+    assert_eq!(
+        id_count,
+        3,
+        "All 3 IdentityFile lines should survive: {}",
+        visible(&output)
+    );
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn add_forward_then_update_then_delete_forward_roundtrip() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin\n";
+    let mut config = parse_str(content);
+
+    // Add a tunnel
+    config.add_forward("myserver", "LocalForward", "8080 localhost:80");
+    let output1 = config.serialize();
+    assert!(output1.contains("LocalForward 8080 localhost:80"));
+
+    // Update hostname — tunnel should survive
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output2 = config.serialize();
+    assert!(
+        output2.contains("LocalForward 8080 localhost:80"),
+        "Tunnel should survive update: {}",
+        visible(&output2)
+    );
+
+    // Remove the tunnel
+    config.remove_forward("myserver", "LocalForward", "8080 localhost:80");
+    let output3 = config.serialize();
+    assert!(!output3.contains("LocalForward"));
+
+    // Final round-trip
+    let config3 = parse_str(&output3);
+    let output4 = config3.serialize();
+    assert_eq_visible(&output3, &output4);
+}
+
+#[test]
+fn stale_host_edit_clears_stale_then_reannotate() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(content);
+
+    // Mark stale
+    config.set_host_stale("myserver", 1700000000);
+    assert_eq!(config.host_entries()[0].stale, Some(1700000000));
+
+    // Edit (update) should clear stale
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            ..Default::default()
+        },
+    );
+    // Stale comment is preserved through update (clearing is done by app.rs)
+    // So let's manually clear it
+    config.clear_host_stale("myserver");
+    assert_eq!(config.host_entries()[0].stale, None);
+
+    // Re-mark stale
+    config.set_host_stale("myserver", 1700001000);
+    assert_eq!(config.host_entries()[0].stale, Some(1700001000));
+
+    let output = config.serialize();
+    assert!(output.contains("# purple:stale 1700001000"));
+    assert!(!output.contains("1700000000"));
+
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+// ---------------------------------------------------------------------------
+// Writer/serialization edge cases and Include parsing (Iteration 5)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn serialize_bom_plus_crlf_plus_hosts_roundtrip() {
+    let content = "\u{FEFF}Host server1\r\n  HostName 10.0.0.1\r\n\r\nHost server2\r\n  HostName 10.0.0.2\r\n";
+    let config = SshConfigFile {
+        elements: SshConfigFile::parse_content(content.strip_prefix('\u{FEFF}').unwrap()),
+        path: PathBuf::from("/tmp/test"),
+        crlf: true,
+        bom: true,
+    };
+    let output = config.serialize();
+    assert!(output.starts_with('\u{FEFF}'), "BOM must be at start");
+    assert!(output.contains("\r\n"), "CRLF must be used");
+    let stripped = output.strip_prefix('\u{FEFF}').unwrap_or(&output);
+    let config2 = SshConfigFile {
+        elements: SshConfigFile::parse_content(stripped),
+        path: PathBuf::from("/tmp/test"),
+        crlf: true,
+        bom: true,
+    };
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn serialize_collapse_many_blank_elements() {
+    // Start with two hosts separated by many blank lines
+    let mut content = String::from("Host server1\n  HostName 10.0.0.1\n");
+    for _ in 0..10 {
+        content.push('\n');
+    }
+    content.push_str("Host server2\n  HostName 10.0.0.2\n");
+    let config = parse_str(&content);
+    let output = config.serialize();
+    // Should not have triple blank lines
+    assert!(
+        !output.contains("\n\n\n"),
+        "Blank lines should be collapsed: {}",
+        visible(&output)
+    );
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn serialize_empty_config_variants() {
+    let cases: Vec<(bool, bool)> = vec![(false, false), (true, false), (false, true), (true, true)];
+    for (bom, crlf) in cases {
+        let config = SshConfigFile {
+            elements: Vec::new(),
+            path: PathBuf::from("/tmp/test"),
+            crlf,
+            bom,
+        };
+        let output = config.serialize();
+        if bom {
+            assert!(
+                output.starts_with('\u{FEFF}'),
+                "BOM expected for bom={}",
+                bom
+            );
+        }
+        if crlf {
+            assert!(output.contains("\r\n"), "CRLF expected for crlf={}", crlf);
+        }
+        assert!(
+            output.ends_with('\n'),
+            "Must end with newline for bom={}, crlf={}",
+            bom,
+            crlf
+        );
+    }
+}
+
+#[test]
+fn upsert_preserves_equals_separator_on_value_change() {
+    let content = "Host myserver\n  HostName=10.0.0.1\n  User=admin\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "deploy".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("HostName=10.0.0.2"),
+        "Equals separator should be preserved: {}",
+        visible(&output)
+    );
+    assert!(
+        output.contains("User=deploy"),
+        "Equals separator should be preserved: {}",
+        visible(&output)
+    );
+}
+
+#[test]
+fn upsert_preserves_spaced_equals_separator() {
+    let content = "Host myserver\n  HostName = 10.0.0.1\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("HostName = 10.0.0.2"),
+        "Spaced equals should be preserved: {}",
+        visible(&output)
+    );
+}
+
+#[test]
+fn upsert_preserves_tab_indent_on_value_change() {
+    let content = "Host myserver\n\tHostName 10.0.0.1\n\tUser admin\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("\tHostName 10.0.0.2"),
+        "Tab indent should be preserved: {}",
+        visible(&output)
+    );
+}
+
+#[test]
+fn upsert_removes_directive_when_value_empty() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin\n  Port 2222\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            user: String::new(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(!output.contains("User"), "Empty user should be removed");
+    assert!(!output.contains("Port"), "Port 22 should be removed");
+    assert!(output.contains("HostName 10.0.0.1"));
+}
+
+#[test]
+fn include_split_patterns_edge_cases() {
+    let test_cases = vec![
+        "Include config.d/*\n",
+        "Include config.d/* other.d/*\n",
+        "Include \"config dir/my configs/*\"\n",
+        "Include \"path with spaces\" simple_path\n",
+        "Include \"path one\" \"path two\"\n",
+    ];
+    for include_line in test_cases {
+        let full = format!("{}Host myserver\n  HostName 10.0.0.1\n", include_line);
+        let config = parse_str(&full);
+        let output = config.serialize();
+        assert_eq_visible(&full, &output);
+    }
+}
+
+#[test]
+fn include_between_many_hosts_preserved() {
+    let content = "\
+Host server1
+  HostName 10.0.0.1
+
+Include ~/.ssh/config.d/*
+
+Host server2
+  HostName 10.0.0.2
+
+Include ~/.ssh/extra/*
+
+Host server3
+  HostName 10.0.0.3
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+
+    let mut config = config;
+    config.add_host(&HostEntry {
+        alias: "server4".to_string(),
+        hostname: "10.0.0.4".to_string(),
+        ..Default::default()
+    });
+    let output = config.serialize();
+    assert!(output.contains("Include ~/.ssh/config.d/*"));
+    assert!(output.contains("Include ~/.ssh/extra/*"));
+    assert!(output.contains("Host server4"));
+
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn include_with_equals_syntax_roundtrip() {
+    let content = "Include=~/.ssh/config.d/*\nHost myserver\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn include_case_insensitive_roundtrip() {
+    let cases = vec![
+        "include ~/.ssh/config.d/*\nHost s\n  HostName 10.0.0.1\n",
+        "INCLUDE ~/.ssh/config.d/*\nHost s\n  HostName 10.0.0.1\n",
+        "Include ~/.ssh/config.d/*\nHost s\n  HostName 10.0.0.1\n",
+    ];
+    for content in cases {
+        let config = parse_str(content);
+        let output = config.serialize();
+        assert_eq_visible(content, &output);
+    }
+}
+
+#[test]
+fn update_host_when_value_has_equals_in_it() {
+    let content = "Host myserver\n  IdentityFile ~/.ssh/id=prod\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            identity_file: "~/.ssh/id=prod".to_string(),
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("IdentityFile ~/.ssh/id=prod"),
+        "Identity file with = in value should be preserved: {}",
+        visible(&output)
+    );
+    assert!(output.contains("HostName 10.0.0.2"));
+}

@@ -15,7 +15,7 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
 
     // Overlay: percentage-based width, height fits content
     let item_count = sorted_names.len();
-    let height = (item_count as u16 + 4).min(frame.area().height.saturating_sub(4));
+    let height = (item_count as u16 + 5).min(frame.area().height.saturating_sub(4));
     let pct_width: u16 = 70;
     let area = {
         let r = super::centered_rect(pct_width, 80, frame.area());
@@ -120,7 +120,12 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         })
         .collect();
 
-    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let chunks = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
 
     let list = List::new(items)
         .highlight_style(theme::selected_row())
@@ -134,7 +139,7 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         let display = crate::providers::provider_display_name(name);
         super::render_footer_with_status(
             frame,
-            chunks[1],
+            chunks[2],
             vec![
                 Span::styled(format!(" Remove {}? ", display), theme::bold()),
                 Span::styled("y", theme::accent_bold()),
@@ -182,7 +187,7 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         footer.push(Span::styled("Esc", theme::accent_bold()));
         footer.push(Span::styled(" back", theme::muted()));
 
-        super::render_footer_with_status(frame, chunks[1], footer, app);
+        super::render_footer_with_status(frame, chunks[2], footer, app);
     }
 }
 
@@ -654,5 +659,20 @@ mod tests {
         // "🚀🔥" = 2+2 = 4 columns (each emoji is 2 cols wide).
         // max 3: target = 2, "🚀" fits (2 cols)
         assert_eq!(truncate("🚀🔥", 3), "🚀…");
+    }
+
+    #[test]
+    fn provider_list_layout_has_spacer() {
+        use ratatui::layout::{Constraint, Layout, Rect};
+        let area = Rect::new(0, 0, 60, 20);
+        let chunks = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        assert_eq!(chunks[1].height, 1);
+        assert_eq!(chunks[2].height, 1);
+        assert!(chunks[2].y > chunks[0].y + chunks[0].height);
     }
 }

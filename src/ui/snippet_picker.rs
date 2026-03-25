@@ -39,7 +39,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
     let search_row = if searching { 1u16 } else { 0 };
     let header_row = if has_snippets { 1u16 } else { 0 };
-    let height = (item_count as u16 + 5 + search_row + header_row)
+    let height = (item_count as u16 + 6 + search_row + header_row)
         .min(frame.area().height.saturating_sub(4));
     let area = {
         let r = super::centered_rect(70, 80, frame.area());
@@ -69,8 +69,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if has_snippets {
         constraints.push(Constraint::Length(1));
     }
-    constraints.push(Constraint::Min(1));
-    constraints.push(Constraint::Length(1));
+    constraints.push(Constraint::Min(0));
+    constraints.push(Constraint::Length(1)); // spacer
+    constraints.push(Constraint::Length(1)); // footer
     let chunks = Layout::vertical(constraints).split(inner);
 
     // Resolve chunk indices based on which optional rows are present
@@ -81,7 +82,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         None
     };
     let list_ci = searching as usize + has_snippets as usize;
-    let footer_ci = list_ci + 1;
+    let footer_ci = list_ci + 2;
 
     // Search bar
     if let Some(si) = search_ci {
@@ -244,5 +245,42 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let [k, l] = super::footer_action("Esc", " back");
         spans.extend([k, l]);
         super::render_footer_with_status(frame, footer_area, spans, app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn layout_has_spacer_between_content_and_footer() {
+        // Simplest case: no search, no header — just list + spacer + footer
+        let area = Rect::new(0, 0, 60, 20);
+        let chunks = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        assert_eq!(chunks[1].height, 1);
+        assert_eq!(chunks[2].height, 1);
+        assert!(chunks[2].y > chunks[0].y + chunks[0].height);
+    }
+
+    #[test]
+    fn layout_with_search_and_header_has_spacer() {
+        // search bar + header + list + spacer + footer
+        let area = Rect::new(0, 0, 60, 20);
+        let chunks = Layout::vertical([
+            Constraint::Length(1), // search
+            Constraint::Length(1), // header
+            Constraint::Min(0),
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+        let list_ci = 2;
+        let footer_ci = 4;
+        assert!(chunks[footer_ci].y > chunks[list_ci].y + chunks[list_ci].height);
     }
 }

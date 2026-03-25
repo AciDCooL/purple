@@ -277,7 +277,7 @@ fn render_proxyjump_picker_overlay(frame: &mut Frame, app: &mut App) {
 
 fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
     let sources = crate::askpass::PASSWORD_SOURCES;
-    let height = sources.len() as u16 + 4; // items + borders + footer
+    let height = sources.len() as u16 + 5; // items + borders + spacer + footer
     let area = super::centered_rect_fixed(54, height, frame.area());
     frame.render_widget(Clear, area);
 
@@ -308,9 +308,10 @@ fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Split into list area and footer
+    // Split into list area + spacer + footer
     let chunks = ratatui::layout::Layout::vertical([
-        ratatui::layout::Constraint::Min(1),
+        ratatui::layout::Constraint::Min(0),
+        ratatui::layout::Constraint::Length(1),
         ratatui::layout::Constraint::Length(1),
     ])
     .split(inner);
@@ -331,7 +332,7 @@ fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
         Span::styled("Esc", theme::accent_bold()),
         Span::styled(" cancel", theme::muted()),
     ];
-    super::render_footer_with_status(frame, chunks[1], spans, app);
+    super::render_footer_with_status(frame, chunks[2], spans, app);
 }
 
 /// Get the placeholder text for a field (public for tests).
@@ -413,5 +414,27 @@ fn render_field_content(
         if area.width > 0 && cursor_x < area.x.saturating_add(area.width) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn password_picker_layout_has_spacer() {
+        let area = Rect::new(0, 0, 54, 15);
+        let chunks = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        assert_eq!(chunks[1].height, 1, "spacer row should be 1 tall");
+        assert_eq!(chunks[2].height, 1, "footer row should be 1 tall");
+        assert!(
+            chunks[2].y > chunks[0].y + chunks[0].height,
+            "footer should be below content end"
+        );
     }
 }

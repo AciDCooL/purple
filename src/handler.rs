@@ -7199,7 +7199,23 @@ Host gamma
 
     #[test]
     fn test_host_form_baseline_cleared_after_submit() {
-        let mut app = make_app("Host test\n  HostName test.com\n");
+        // Use a unique temp file to avoid race conditions with parallel tests
+        // that share /tmp/test_config.
+        let unique = format!(
+            "/tmp/purple_test_baseline_{:?}",
+            std::thread::current().id()
+        );
+        let config_path = PathBuf::from(&unique);
+        std::fs::write(&config_path, "Host test\n  HostName test.com\n").unwrap();
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content("Host test\n  HostName test.com\n"),
+            path: config_path.clone(),
+            crlf: false,
+            bom: false,
+        };
+        let mut app = App::new(config);
+        app.provider_config = test_provider_config();
+        crate::preferences::set_path_override(PathBuf::from(format!("{}_prefs", unique)));
         app.form = crate::app::HostForm::new();
         app.form.alias = "newhost".to_string();
         app.form.hostname = "new.example.com".to_string();
@@ -7209,6 +7225,9 @@ Host gamma
         let (tx, _rx) = mpsc::channel();
         let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
         assert!(app.form_baseline.is_none());
+        // Cleanup
+        let _ = std::fs::remove_file(&unique);
+        let _ = std::fs::remove_file(format!("{}_prefs", unique));
     }
 
     // --- Edge case: uppercase Y in discard confirms ---

@@ -1,13 +1,13 @@
 [package]
 name = "purple-ssh"
-version = "2.11.0"
+version = "2.11.1"
 edition = "2024"
-description = "TUI for managing SSH servers. Search, connect, transfer files and sync from 11 cloud providers. Edits ~/.ssh/config with round-trip fidelity."
+description = "Terminal SSH client and host manager. Search, connect, transfer files and sync from 11 cloud providers. Edits ~/.ssh/config with round-trip fidelity."
 license = "MIT"
 repository = "https://github.com/erickochen/purple"
 homepage = "https://getpurple.sh"
 readme = "README.md"
-keywords = ["ssh", "tui", "ssh-config", "ssh-manager", "cloud-sync"]
+keywords = ["ssh", "ssh-client", "tui", "ssh-manager", "cloud-sync"]
 categories = ["command-line-utilities", "network-programming", "development-tools"]
 rust-version = "1.86"
 exclude = [".github/", ".gitignore"]

@@ -43,9 +43,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_widget(block, area);
 
     let rows = Layout::vertical([
-        Constraint::Min(1),
+        Constraint::Min(0),
+        Constraint::Length(1), // spacer above footer
         Constraint::Length(1), // footer
-        Constraint::Length(1), // padding before bottom border
     ])
     .split(inner);
 
@@ -84,7 +84,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Span::styled(" close", theme::muted()),
         ]
     };
-    frame.render_widget(Paragraph::new(Line::from(spans)), rows[1]);
+    frame.render_widget(Paragraph::new(Line::from(spans)), rows[2]);
 }
 
 fn left_column() -> Vec<Line<'static>> {
@@ -181,4 +181,26 @@ fn help_line<'a>(key: &'a str, desc: &'a str) -> Line<'a> {
         Span::styled(key, theme::accent_bold()),
         Span::raw(desc),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn layout_has_spacer_above_footer() {
+        let area = Rect::new(0, 0, 80, 30);
+        let rows = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+        assert_eq!(rows[1].height, 1, "spacer row should be 1 tall");
+        assert_eq!(rows[2].height, 1, "footer row should be 1 tall");
+        assert!(
+            rows[2].y > rows[0].y + rows[0].height,
+            "footer should be below content end"
+        );
+    }
 }

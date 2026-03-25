@@ -295,17 +295,19 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let is_searching = app.search.query.is_some();
     let is_tagging = app.tag_input.is_some();
 
-    // Layout: host list + optional input bar + footer/status
+    // Layout: host list + optional input bar + spacer + footer/status
     let chunks = if is_searching || is_tagging {
         Layout::vertical([
             Constraint::Min(5),    // Host list (maximized)
             Constraint::Length(1), // Search/tag bar
+            Constraint::Length(1), // Spacer
             Constraint::Length(1), // Footer or status message
         ])
         .split(area)
     } else {
         Layout::vertical([
             Constraint::Min(5),    // Host list (maximized)
+            Constraint::Length(1), // Spacer
             Constraint::Length(1), // Footer or status message
         ])
         .split(area)
@@ -327,16 +329,16 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if is_searching {
         render_search_list(frame, app, list_area);
         render_search_bar(frame, app, chunks[1]);
-        super::render_footer_with_status(frame, chunks[2], search_footer_spans(), app);
+        super::render_footer_with_status(frame, chunks[3], search_footer_spans(), app);
     } else if is_tagging {
         render_display_list(frame, app, list_area);
         render_tag_bar(frame, app, chunks[1]);
-        super::render_footer_with_status(frame, chunks[2], tag_footer_spans(), app);
+        super::render_footer_with_status(frame, chunks[3], tag_footer_spans(), app);
     } else {
         render_display_list(frame, app, list_area);
         super::render_footer_with_status(
             frame,
-            chunks[1],
+            chunks[2],
             footer_spans(
                 use_detail,
                 app.multi_select.len(),
@@ -1432,5 +1434,36 @@ mod tests {
         let spans = footer_spans(false, 0, false, 1);
         let text: String = spans.iter().map(|s| s.content.to_string()).collect();
         assert!(text.contains("purge 1 stale"));
+    }
+
+    #[test]
+    fn layout_has_spacer_between_list_and_footer() {
+        use ratatui::layout::{Constraint, Layout, Rect};
+        let area = Rect::new(0, 0, 120, 40);
+        let chunks = Layout::vertical([
+            Constraint::Min(5),
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+        assert_eq!(chunks[1].height, 1);
+        assert_eq!(chunks[2].height, 1);
+        assert!(chunks[2].y > chunks[0].y + chunks[0].height);
+    }
+
+    #[test]
+    fn layout_with_search_has_spacer() {
+        use ratatui::layout::{Constraint, Layout, Rect};
+        let area = Rect::new(0, 0, 120, 40);
+        let chunks = Layout::vertical([
+            Constraint::Min(5),
+            Constraint::Length(1), // search bar
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+        assert_eq!(chunks[2].height, 1);
+        assert_eq!(chunks[3].height, 1);
+        assert!(chunks[3].y > chunks[0].y + chunks[0].height);
     }
 }

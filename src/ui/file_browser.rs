@@ -38,11 +38,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(overlay);
     frame.render_widget(block, overlay);
 
-    // Layout: path headers + divider + file lists + footer
+    // Layout: path headers + divider + file lists + spacer + footer
     let rows = Layout::vertical([
         Constraint::Length(1), // path headers
         Constraint::Length(1), // divider
-        Constraint::Min(1),    // file lists
+        Constraint::Min(0),    // file lists
+        Constraint::Length(1), // spacer
         Constraint::Length(1), // footer
     ])
     .split(inner);
@@ -185,7 +186,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ));
     }
 
-    super::render_footer_with_status(frame, rows[3], footer_spans, app);
+    super::render_footer_with_status(frame, rows[4], footer_spans, app);
 }
 
 fn render_local_pane(frame: &mut Frame, fb: &mut FileBrowserState, area: Rect) {
@@ -411,7 +412,12 @@ fn render_confirm_dialog(
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
-    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let rows = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
 
     frame.render_widget(Paragraph::new(lines), rows[0]);
 
@@ -422,7 +428,7 @@ fn render_confirm_dialog(
         Span::styled("Esc", theme::accent_bold()),
         Span::styled(" cancel", theme::muted()),
     ];
-    frame.render_widget(Paragraph::new(Line::from(footer)), rows[1]);
+    frame.render_widget(Paragraph::new(Line::from(footer)), rows[2]);
 }
 
 fn render_transfer_dialog(frame: &mut Frame, label: &str, area: Rect) {
@@ -487,7 +493,12 @@ fn render_error_dialog(frame: &mut Frame, message: &str, area: Rect) {
     let inner = block.inner(dialog_area);
     frame.render_widget(block, dialog_area);
 
-    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let rows = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
 
     frame.render_widget(Paragraph::new(lines), rows[0]);
 
@@ -495,7 +506,7 @@ fn render_error_dialog(frame: &mut Frame, message: &str, area: Rect) {
         Span::styled(" Esc", theme::accent_bold()),
         Span::styled(" dismiss", theme::muted()),
     ];
-    frame.render_widget(Paragraph::new(Line::from(footer)), rows[1]);
+    frame.render_widget(Paragraph::new(Line::from(footer)), rows[2]);
 }
 
 /// Truncate a string from the LEFT, prefixing with `\u{2026}` if truncated.
@@ -523,4 +534,52 @@ pub(crate) fn truncate_left(s: &str, max_cols: usize) -> String {
     }
     let suffix: String = chars[start_idx..].iter().collect();
     format!("\u{2026}{}", suffix)
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn main_layout_has_spacer_between_filelist_and_footer() {
+        let area = Rect::new(0, 0, 80, 30);
+        let rows = Layout::vertical([
+            Constraint::Length(1), // path headers
+            Constraint::Length(1), // divider
+            Constraint::Min(0),    // file lists
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+        assert_eq!(rows[3].height, 1);
+        assert_eq!(rows[4].height, 1);
+        assert!(
+            rows[4].y > rows[2].y + rows[2].height,
+            "footer should be below file list end"
+        );
+    }
+
+    #[test]
+    fn confirm_dialog_layout_has_spacer() {
+        let area = Rect::new(0, 0, 50, 10);
+        let rows = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        assert!(rows[2].y > rows[0].y + rows[0].height);
+    }
+
+    #[test]
+    fn error_dialog_layout_has_spacer() {
+        let area = Rect::new(0, 0, 40, 10);
+        let rows = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        assert!(rows[2].y > rows[0].y + rows[0].height);
+    }
 }

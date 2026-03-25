@@ -19,7 +19,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Overlay: percentage-based width, height fits content
     let item_count = app.keys.len().max(1);
-    let height = (item_count as u16 + 6).min(frame.area().height.saturating_sub(4));
+    let height = (item_count as u16 + 7).min(frame.area().height.saturating_sub(4));
     let area = {
         let r = super::centered_rect(70, 80, frame.area());
         super::centered_rect_fixed(r.width, height, frame.area())
@@ -77,7 +77,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let inner_chunks = Layout::vertical([
         Constraint::Length(1), // Column header
-        Constraint::Min(1),    // List
+        Constraint::Min(0),    // List
+        Constraint::Length(1), // Spacer
         Constraint::Length(1), // Footer
     ])
     .split(inner);
@@ -105,5 +106,28 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Span::styled("Esc", theme::accent_bold()),
         Span::styled(" back", theme::muted()),
     ];
-    super::render_footer_with_status(frame, inner_chunks[2], spans, app);
+    super::render_footer_with_status(frame, inner_chunks[3], spans, app);
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn layout_has_spacer_between_list_and_footer() {
+        let area = Rect::new(0, 0, 60, 20);
+        let chunks = Layout::vertical([
+            Constraint::Length(1), // header
+            Constraint::Min(0),    // list
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+        assert_eq!(chunks[2].height, 1, "spacer row should be 1 tall");
+        assert_eq!(chunks[3].height, 1, "footer row should be 1 tall");
+        assert!(
+            chunks[3].y > chunks[1].y + chunks[1].height,
+            "footer should be below list end"
+        );
+    }
 }

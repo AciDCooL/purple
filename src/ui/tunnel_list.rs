@@ -25,7 +25,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
 
     // Overlay: percentage-based width, height fits content
     let item_count = app.tunnel_list.len().max(1);
-    let height = (item_count as u16 + 5).min(frame.area().height.saturating_sub(4));
+    let height = (item_count as u16 + 6).min(frame.area().height.saturating_sub(4));
     let area = {
         let r = super::centered_rect(70, 80, frame.area());
         super::centered_rect_fixed(r.width, height, frame.area())
@@ -40,7 +40,12 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let chunks = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
 
     if app.tunnel_list.is_empty() {
         let msg = if is_readonly {
@@ -93,7 +98,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     if app.pending_tunnel_delete.is_some() {
         super::render_footer_with_status(
             frame,
-            chunks[1],
+            chunks[2],
             vec![
                 Span::styled(" Remove tunnel? ", theme::bold()),
                 Span::styled("y", theme::accent_bold()),
@@ -135,6 +140,31 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
             let [k, l] = super::footer_action("Esc", " back");
             spans.extend([k, l]);
         }
-        super::render_footer_with_status(frame, chunks[1], spans, app);
+        super::render_footer_with_status(frame, chunks[2], spans, app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn layout_has_spacer_between_content_and_footer() {
+        let area = Rect::new(0, 0, 60, 20);
+        let chunks = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        // chunks[0] = content, chunks[1] = spacer, chunks[2] = footer
+        assert_eq!(chunks[1].height, 1, "spacer row should be 1 tall");
+        assert_eq!(chunks[2].height, 1, "footer row should be 1 tall");
+        assert!(
+            chunks[2].y > chunks[0].y + chunks[0].height,
+            "footer (y={}) should be below content end (y={})",
+            chunks[2].y,
+            chunks[0].y + chunks[0].height
+        );
     }
 }

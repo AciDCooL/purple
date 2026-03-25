@@ -34,7 +34,7 @@ use ssh_config::model::{HostEntry, SshConfigFile};
 #[command(
     name = "purple",
     about = "Your SSH config is a mess. Purple fixes that.",
-    long_about = "Purple is a fast, friendly TUI for managing your SSH hosts.\n\
+    long_about = "Purple is a terminal SSH client for managing your hosts.\n\
                   Add, edit, delete and connect without opening a text editor.\n\n\
                   Life's too short for nano ~/.ssh/config.",
     version
@@ -491,6 +491,9 @@ fn apply_saved_sort(app: &mut App) {
     app.view_mode = preferences::load_view_mode();
     if saved != app::SortMode::Original || group {
         app.apply_sort();
+        // After startup sort, select the first host in the sorted order
+        // rather than preserving the arbitrary first-in-config selection.
+        app.select_first_host();
     }
 }
 

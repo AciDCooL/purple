@@ -1,4 +1,4 @@
-<h1 align="center">purple.<br>SSH config manager with file transfer<br>and cloud sync.</h1>
+<h1 align="center">purple.<br>Terminal SSH client with file transfer<br>and cloud sync.</h1>
 
 <p align="center">
   <strong>Stop scrolling through your SSH config. Start searching it.</strong><br>
@@ -13,11 +13,12 @@
   <a href="https://getpurple.sh"><img src="https://img.shields.io/badge/Website-getpurple.sh-9333ea.svg" alt="purple website"></a>
 </p>
 
-<p align="center"><img src="demo.gif" alt="purple SSH config manager TUI demo: searching hosts, transferring files, connecting via SSH and syncing cloud providers" width="800"></p>
+<p align="center"><img src="demo.gif" alt="purple terminal SSH client demo: searching hosts, transferring files, connecting via SSH and syncing cloud providers" width="800"></p>
+<p align="center"><em>Searching hosts, connecting via SSH, browsing remote files and syncing cloud providers. All from the terminal.</em></p>
 
 ## What is purple?
 
-purple turns your `~/.ssh/config` into a searchable, visual interface. Find any host instantly, connect with Enter, browse remote files side by side and sync servers from eleven cloud providers. One TUI. No context switching.
+purple is a free, open-source terminal SSH client and SSH config manager that turns your `~/.ssh/config` into a searchable, visual interface. Find any host instantly, connect with Enter, browse remote files side by side and sync servers from eleven cloud providers. One TUI. No context switching.
 
 It reads your existing config, lets you search, filter, tag and connect with a single keystroke, and writes changes back without touching your comments or unknown directives. Transfer files visually, run commands across servers and handle SSH passwords automatically. Free, open-source, runs on macOS and Linux.
 
@@ -107,7 +108,7 @@ purple tunnel start myserver
 
 ### Command snippets
 
-Save frequently used commands and run them on one host, a selection of hosts or all visible hosts at once. Output is captured in a scrollable panel inside the TUI. Multi-host runs execute in parallel. Snippets support `{{param}}` placeholders with optional defaults. Snippets are stored in `~/.purple/snippets` and managed from the TUI or CLI.
+Save frequently used commands and run them on one host, a selection of hosts or all visible hosts at once. Output is captured in a scrollable panel inside the TUI. Multi-host runs execute sequentially by default or in parallel with `--parallel`. Snippets support `{{param}}` placeholders with optional defaults. Snippets are stored in `~/.purple/snippets` and managed from the TUI or CLI.
 
 ```bash
 purple snippet add check-disk "df -h" --description "Check disk usage"
@@ -336,7 +337,7 @@ Most SSH tools read your config but don't write it, sync one cloud but not ten, 
 
 **It edits your real SSH config.** Most SSH tools only read. purple reads, edits and writes `~/.ssh/config` directly with full round-trip fidelity.
 
-**It syncs cloud servers.** purple is the only SSH config manager that pulls hosts from 11 cloud providers into your config. Configure once, sync anytime.
+**It syncs cloud servers.** purple is the only terminal SSH client that pulls hosts from 11 cloud providers into your config. Configure once, sync anytime.
 
 **It runs commands across hosts.** Save command snippets and execute them on one host, a selection or all hosts at once. Sequential or parallel. No Ansible, no Fabric, no extra tools.
 
@@ -346,7 +347,7 @@ Most SSH tools read your config but don't write it, sync one cloud but not ten, 
 
 **It imports what you already have.** Bulk import from host files or `~/.ssh/known_hosts`. No manual re-entry.
 
-**Single Rust binary.** No runtime, no daemon, no async framework, no Node.js, no Python. Install and run. Works on macOS and Linux.
+**Single Rust binary.** No runtime, no daemon, no async framework, no Electron, no Node.js, no Python. Install and run. Works on macOS and Linux.
 
 ## Cloud providers
 
@@ -569,7 +570,7 @@ Found a bug or have a feature request? [Open an issue on GitHub](https://github.
 
 ## Built with
 
-Rust. 4100+ tests. Zero clippy warnings. No async runtime. Single binary.
+Written in Rust. 4200+ tests (unit, integration, property-based and HTTP mocking). Zero clippy warnings. No async runtime. Single binary. Works in any terminal emulator that supports ANSI escape codes including iTerm2, Terminal.app, Alacritty, kitty, WezTerm, Warp and Windows Terminal (via WSL).
 
 <p align="center">
   <a href="LICENSE">MIT License</a>

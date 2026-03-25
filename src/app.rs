@@ -1692,7 +1692,7 @@ impl App {
     }
 
     /// Select the first host item in the display list.
-    fn select_first_host(&mut self) {
+    pub fn select_first_host(&mut self) {
         if let Some(pos) = self
             .display_list
             .iter()
@@ -4853,6 +4853,75 @@ Host gamma
         } else {
             panic!("Expected Host item at position 2");
         }
+    }
+
+    #[test]
+    fn test_apply_sort_selects_first_in_sorted_order() {
+        // Config order: charlie, alpha, beta
+        let mut app = make_app(
+            "Host charlie\n  HostName c.com\n\nHost alpha\n  HostName a.com\n\nHost beta\n  HostName b.com\n",
+        );
+        // Initial selection should be charlie (first in config)
+        assert_eq!(app.selected_host().unwrap().alias, "charlie");
+
+        // Sort alphabetically and reset selection to first sorted
+        app.sort_mode = SortMode::AlphaAlias;
+        app.apply_sort();
+        app.select_first_host();
+
+        // After sort + select_first_host, alpha should be selected (first alphabetically)
+        assert_eq!(app.selected_host().unwrap().alias, "alpha");
+    }
+
+    #[test]
+    fn test_apply_sort_preserves_selection_without_reset() {
+        // Verify apply_sort alone preserves the current selection (for interactive use)
+        let mut app = make_app(
+            "Host charlie\n  HostName c.com\n\nHost alpha\n  HostName a.com\n\nHost beta\n  HostName b.com\n",
+        );
+        assert_eq!(app.selected_host().unwrap().alias, "charlie");
+
+        app.sort_mode = SortMode::AlphaAlias;
+        app.apply_sort();
+
+        // apply_sort preserves the previously selected host (charlie)
+        assert_eq!(app.selected_host().unwrap().alias, "charlie");
+    }
+
+    #[test]
+    fn test_select_first_host_skips_group_header() {
+        let content = "\
+Host do-beta
+  HostName 2.2.2.2
+  # purple:provider digitalocean:2
+
+Host do-alpha
+  HostName 1.1.1.1
+  # purple:provider digitalocean:1
+";
+        let mut app = make_app(content);
+        app.group_by_provider = true;
+        app.sort_mode = SortMode::AlphaAlias;
+        app.apply_sort();
+        app.select_first_host();
+
+        // First item is the group header, selection should skip to first host
+        assert!(matches!(&app.display_list[0], HostListItem::GroupHeader(_)));
+        assert_eq!(app.selected_host().unwrap().alias, "do-alpha");
+    }
+
+    #[test]
+    fn test_select_first_host_with_hostname_sort() {
+        // Config order: srv-a (z.com), srv-b (a.com), srv-c (m.com)
+        let mut app = make_app(
+            "Host srv-a\n  HostName z.com\n\nHost srv-b\n  HostName a.com\n\nHost srv-c\n  HostName m.com\n",
+        );
+        app.sort_mode = SortMode::AlphaHostname;
+        app.apply_sort();
+        app.select_first_host();
+
+        // srv-b has hostname a.com, should be first alphabetically by hostname
+        assert_eq!(app.selected_host().unwrap().alias, "srv-b");
     }
 
     #[test]

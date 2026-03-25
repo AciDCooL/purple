@@ -46,7 +46,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         counts
     };
 
-    let height = (app.tag_list.len() as u16 + 5).min(frame.area().height.saturating_sub(4));
+    let height = (app.tag_list.len() as u16 + 6).min(frame.area().height.saturating_sub(4));
     let area = super::centered_rect_fixed(50, height, frame.area());
     frame.render_widget(Clear, area);
 
@@ -71,7 +71,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
+    let chunks = Layout::vertical([
+        Constraint::Min(0),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .split(inner);
 
     let list = List::new(items)
         .highlight_style(theme::selected_row())
@@ -86,5 +91,24 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Span::styled("Esc", theme::accent_bold()),
         Span::styled(" back", theme::muted()),
     ];
-    super::render_footer_with_status(frame, chunks[1], spans, app);
+    super::render_footer_with_status(frame, chunks[2], spans, app);
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn layout_has_spacer_between_content_and_footer() {
+        let area = Rect::new(0, 0, 50, 15);
+        let chunks = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        assert_eq!(chunks[1].height, 1);
+        assert_eq!(chunks[2].height, 1);
+        assert!(chunks[2].y > chunks[0].y + chunks[0].height);
+    }
 }
