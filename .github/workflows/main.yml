@@ -9,23 +9,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust musl target
-        run: rustup target add x86_64-unknown-linux-musl
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
-      # Added pkg-config and libssl-dev which are sometimes needed even for musl builds
-      - name: Install musl C-compiler & dependencies
-        run: sudo apt-get update && sudo apt-get install -y musl-tools pkg-config libssl-dev
-
-      # Added the OPENSSL_STATIC and PKG_CONFIG_ALLOW_CROSS variables
-      - name: Build static binary
-        run: cargo build --release --target x86_64-unknown-linux-musl
-        env:
-          OPENSSL_STATIC: 1
-          PKG_CONFIG_ALLOW_CROSS: 1
-          # The openssl-sys crate has a "vendored" feature. We can force it via Cargo.
-          # We can also explicitly tell it to vendor OpenSSL for the musl target.
-          CC_x86_64_unknown_linux_musl: musl-gcc
-          CXX_x86_64_unknown_linux_musl: g++
+      - name: Build static binary using cross
+        run: cross build --release --target x86_64-unknown-linux-musl
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
