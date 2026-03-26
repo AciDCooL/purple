@@ -1069,7 +1069,7 @@ footer a:hover { color: var(--accent); }
 </div>
 
 <footer>
-  <a href="https://github.com/erickochen/purple" rel="noopener">GitHub</a> · <a href="https://crates.io/crates/purple-ssh" rel="noopener">crates.io</a> · MIT License · v2.12.0
+  <a href="https://github.com/erickochen/purple" rel="noopener">GitHub</a> · <a href="https://crates.io/crates/purple-ssh" rel="noopener">crates.io</a> · MIT License · v2.13.0
 </footer>
 
 <script>
@@ -1382,7 +1382,7 @@ A: Run purple provider add gcp --token /path/to/sa-key.json --project my-project
 
 ## Status
 
-- Current version: 2.12.0 (March 2026)
+- Current version: 2.13.0 (March 2026)
 - Release cadence: approximately bi-weekly
 - Test suite: 4400+ tests (unit, integration, property-based and HTTP mocking)
 - CI: fmt, clippy, test on macOS and Linux, cargo-deny, MSRV 1.86 check
