@@ -469,6 +469,7 @@ pub enum ProviderFormField {
     Token,
     Profile,
     Project,
+    Compartment,
     Regions,
     AliasPrefix,
     User,
@@ -534,6 +535,16 @@ impl ProviderFormField {
         ProviderFormField::AutoSync,
     ];
 
+    const ORACLE_FIELDS: &[ProviderFormField] = &[
+        ProviderFormField::Token,
+        ProviderFormField::Compartment,
+        ProviderFormField::Regions,
+        ProviderFormField::AliasPrefix,
+        ProviderFormField::User,
+        ProviderFormField::IdentityFile,
+        ProviderFormField::AutoSync,
+    ];
+
     pub fn fields_for(provider: &str) -> &'static [ProviderFormField] {
         match provider {
             "proxmox" => Self::PROXMOX_FIELDS,
@@ -541,6 +552,7 @@ impl ProviderFormField {
             "scaleway" => Self::SCALEWAY_FIELDS,
             "gcp" => Self::GCP_FIELDS,
             "azure" => Self::AZURE_FIELDS,
+            "oracle" => Self::ORACLE_FIELDS,
             _ => Self::CLOUD_FIELDS,
         }
     }
@@ -561,6 +573,7 @@ impl ProviderFormField {
             ProviderFormField::Token => "Token",
             ProviderFormField::Profile => "Profile",
             ProviderFormField::Project => "Project ID",
+            ProviderFormField::Compartment => "Compartment",
             ProviderFormField::Regions => "Regions",
             ProviderFormField::AliasPrefix => "Alias Prefix",
             ProviderFormField::User => "User",
@@ -578,6 +591,7 @@ pub struct ProviderFormFields {
     pub token: String,
     pub profile: String,
     pub project: String,
+    pub compartment: String,
     pub regions: String,
     pub alias_prefix: String,
     pub user: String,
@@ -595,6 +609,7 @@ impl ProviderFormFields {
             token: String::new(),
             profile: String::new(),
             project: String::new(),
+            compartment: String::new(),
             regions: String::new(),
             alias_prefix: String::new(),
             user: "root".to_string(),
@@ -612,6 +627,7 @@ impl ProviderFormFields {
             ProviderFormField::Token => &self.token,
             ProviderFormField::Profile => &self.profile,
             ProviderFormField::Project => &self.project,
+            ProviderFormField::Compartment => &self.compartment,
             ProviderFormField::Regions => &self.regions,
             ProviderFormField::AliasPrefix => &self.alias_prefix,
             ProviderFormField::User => &self.user,
@@ -626,6 +642,7 @@ impl ProviderFormFields {
             ProviderFormField::Token => Some(&mut self.token),
             ProviderFormField::Profile => Some(&mut self.profile),
             ProviderFormField::Project => Some(&mut self.project),
+            ProviderFormField::Compartment => Some(&mut self.compartment),
             ProviderFormField::Regions => Some(&mut self.regions),
             ProviderFormField::AliasPrefix => Some(&mut self.alias_prefix),
             ProviderFormField::User => Some(&mut self.user),
@@ -1248,6 +1265,7 @@ pub struct ProviderFormBaseline {
     pub token: String,
     pub profile: String,
     pub project: String,
+    pub compartment: String,
     pub regions: String,
     pub alias_prefix: String,
     pub user: String,
@@ -2324,6 +2342,7 @@ impl App {
             token: self.provider_form.token.clone(),
             profile: self.provider_form.profile.clone(),
             project: self.provider_form.project.clone(),
+            compartment: self.provider_form.compartment.clone(),
             regions: self.provider_form.regions.clone(),
             alias_prefix: self.provider_form.alias_prefix.clone(),
             user: self.provider_form.user.clone(),
@@ -2341,6 +2360,7 @@ impl App {
                     || self.provider_form.token != b.token
                     || self.provider_form.profile != b.profile
                     || self.provider_form.project != b.project
+                    || self.provider_form.compartment != b.compartment
                     || self.provider_form.regions != b.regions
                     || self.provider_form.alias_prefix != b.alias_prefix
                     || self.provider_form.user != b.user
@@ -3692,6 +3712,7 @@ Host vultr-app
                 profile: String::new(),
                 regions: String::new(),
                 project: String::new(),
+                compartment: String::new(),
             });
         app
     }
@@ -3783,6 +3804,7 @@ Host vultr-app
                 profile: String::new(),
                 regions: String::new(),
                 project: String::new(),
+                compartment: String::new(),
             });
         let (msg, is_err, total) = app.apply_sync_result("nonexistent", vec![], false);
         assert!(is_err);
@@ -3998,6 +4020,7 @@ Host vultr-app
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         }
     }
 
@@ -5037,6 +5060,7 @@ Host do-db
                 profile: String::new(),
                 regions: String::new(),
                 project: String::new(),
+                compartment: String::new(),
             });
 
         // First sync adds both hosts

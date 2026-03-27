@@ -502,6 +502,7 @@ fn meta_label(key: &str) -> String {
         "plan" => "Plan".to_string(),
         "specs" => "Specs".to_string(),
         "type" => "Type".to_string(),
+        "shape" => "Shape".to_string(),
         "os" => "OS".to_string(),
         "image" => "Image".to_string(),
         "status" => "State".to_string(),

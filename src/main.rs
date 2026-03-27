@@ -93,7 +93,7 @@ enum Commands {
         #[arg(short, long)]
         group: Option<String>,
     },
-    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, AWS EC2, Scaleway, GCP, Azure, Tailscale)
+    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, AWS EC2, Scaleway, GCP, Azure, Tailscale, Oracle Cloud)
     Sync {
         /// Sync a specific provider (default: all configured)
         provider: Option<String>,
@@ -131,10 +131,11 @@ enum Commands {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum ProviderCommands {
     /// Add or update a provider configuration
     Add {
-        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale)
+        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle)
         provider: String,
 
         /// API token (or set PURPLE_TOKEN env var, or use --token-stdin)
@@ -172,6 +173,10 @@ enum ProviderCommands {
         /// GCP project ID
         #[arg(long)]
         project: Option<String>,
+
+        /// OCI compartment OCID (Oracle)
+        #[arg(long)]
+        compartment: Option<String>,
 
         /// Skip TLS certificate verification (for self-signed certs)
         #[arg(long, conflicts_with = "verify_tls")]
@@ -1263,7 +1268,7 @@ fn handle_sync(
     let sections: Vec<&providers::config::ProviderSection> = if let Some(name) = provider_name {
         if providers::get_provider(name).is_none() {
             eprintln!(
-                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale.",
+                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle.",
                 name
             );
             std::process::exit(1);
@@ -1296,7 +1301,7 @@ fn handle_sync(
             Some(p) => p,
             None => {
                 eprintln!(
-                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale.",
+                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle.",
                     section.provider
                 );
                 any_failures = true;
@@ -1422,6 +1427,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             mut profile,
             mut regions,
             mut project,
+            mut compartment,
             no_verify_tls,
             verify_tls,
             auto_sync,
@@ -1431,7 +1437,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 Some(p) => p,
                 None => {
                     eprintln!(
-                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale.",
+                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle.",
                         provider
                     );
                     std::process::exit(1);
@@ -1466,17 +1472,23 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 eprintln!("Warning: --profile is only used by the AWS provider. Ignoring.");
                 profile = None;
             }
-            if !matches!(provider.as_str(), "aws" | "scaleway" | "gcp" | "azure")
-                && regions.is_some()
+            if !matches!(
+                provider.as_str(),
+                "aws" | "scaleway" | "gcp" | "azure" | "oracle"
+            ) && regions.is_some()
             {
                 eprintln!(
-                    "Warning: --regions is only used by the AWS, Scaleway, GCP and Azure providers. Ignoring."
+                    "Warning: --regions is only used by the AWS, Scaleway, GCP, Azure and Oracle providers. Ignoring."
                 );
                 regions = None;
             }
             if provider != "gcp" && project.is_some() {
                 eprintln!("Warning: --project is only used by the GCP provider. Ignoring.");
                 project = None;
+            }
+            if provider != "oracle" && compartment.is_some() {
+                eprintln!("Warning: --compartment is only used by the Oracle provider. Ignoring.");
+                compartment = None;
             }
 
             // When updating an existing section, fall back to stored values for fields not supplied
@@ -1514,8 +1526,10 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     profile = Some(existing.profile.clone());
                 }
                 // AWS/Scaleway/GCP/Azure: fall back to stored regions
-                if matches!(provider.as_str(), "aws" | "scaleway" | "gcp" | "azure")
-                    && regions.is_none()
+                if matches!(
+                    provider.as_str(),
+                    "aws" | "scaleway" | "gcp" | "azure" | "oracle"
+                ) && regions.is_none()
                     && !existing.regions.is_empty()
                 {
                     regions = Some(existing.regions.clone());
@@ -1523,6 +1537,11 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 // GCP: fall back to stored project
                 if provider == "gcp" && project.is_none() && !existing.project.is_empty() {
                     project = Some(existing.project.clone());
+                }
+                // Oracle: fall back to stored compartment
+                if provider == "oracle" && compartment.is_none() && !existing.compartment.is_empty()
+                {
+                    compartment = Some(existing.compartment.clone());
                 }
             }
 
@@ -1565,6 +1584,10 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     eprintln!(
                         "Token can't be empty. Provide a service account JSON key file path or access token."
                     );
+                } else if provider == "oracle" {
+                    eprintln!(
+                        "Token can't be empty. Provide the path to your OCI config file (e.g. ~/.oci/config)."
+                    );
                 } else {
                     eprintln!(
                         "Token can't be empty. Grab one from your {} dashboard.",
@@ -1588,6 +1611,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             let profile_value = profile.clone().unwrap_or_default();
             let regions_value = regions.clone().unwrap_or_default();
             let project_value = project.clone().unwrap_or_default();
+            let compartment_value = compartment.clone().unwrap_or_default();
             for (value, name) in [
                 (&url_value, "URL"),
                 (&token, "Token"),
@@ -1597,6 +1621,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 (&profile_value, "Profile"),
                 (&project_value, "Project"),
                 (&regions_value, "Regions"),
+                (&compartment_value, "Compartment"),
             ] {
                 if value.chars().any(|c| c.is_control()) {
                     eprintln!("{} contains control characters.", name);
@@ -1622,6 +1647,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             let resolved_profile = profile.unwrap_or_default();
             let resolved_regions = regions.unwrap_or_default();
             let resolved_project = project.unwrap_or_default();
+            let resolved_compartment = compartment.unwrap_or_default();
 
             // AWS/Scaleway/Azure requires at least one region/zone/subscription
             if provider == "aws" && resolved_regions.trim().is_empty() {
@@ -1658,6 +1684,13 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 eprintln!("GCP requires --project (e.g. --project my-gcp-project-id).");
                 std::process::exit(1);
             }
+            // Oracle requires --compartment
+            if provider == "oracle" && resolved_compartment.trim().is_empty() {
+                eprintln!(
+                    "Oracle requires --compartment (e.g. --compartment ocid1.compartment.oc1..aaa...)."
+                );
+                std::process::exit(1);
+            }
 
             let section = providers::config::ProviderSection {
                 provider: provider.clone(),
@@ -1671,6 +1704,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 profile: resolved_profile,
                 regions: resolved_regions,
                 project: resolved_project,
+                compartment: resolved_compartment,
             };
 
             let mut config = providers::config::ProviderConfig::load();

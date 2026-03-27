@@ -1,3 +1,13 @@
+## 2.14.0
+
+- Oracle Cloud Infrastructure (OCI) provider. Sync Compute instances via OCI REST API with RSA-SHA256 request signing
+- Multi-region support with TUI region picker (38 regions across Americas, EMEA and Asia Pacific)
+- Recursive compartment sync. Point at a tenancy or compartment OCID and all sub-compartments are included
+- Authenticate with your existing OCI config file (~/.oci/config). No extra credentials to manage
+- Metadata: region, shape, os and status shown in detail panel. Freeform tags synced as provider tags
+- Help overlay layout refined. Narrower width, rebalanced columns and tighter key alignment
+- Region picker spacing fix in provider form
+
 ## 2.13.0
 
 - Context-sensitive help. Press `?` on any screen to see its shortcuts

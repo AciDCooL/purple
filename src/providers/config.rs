@@ -17,6 +17,7 @@ pub struct ProviderSection {
     pub profile: String,
     pub regions: String,
     pub project: String,
+    pub compartment: String,
 }
 
 /// Default for auto_sync: false for proxmox (N+1 API calls), true for all others.
@@ -97,6 +98,7 @@ impl ProviderConfig {
                     profile: String::new(),
                     regions: String::new(),
                     project: String::new(),
+                    compartment: String::new(),
                 });
             } else if let Some(ref mut section) = current {
                 if let Some((key, value)) = trimmed.split_once('=') {
@@ -119,6 +121,7 @@ impl ProviderConfig {
                         "profile" => section.profile = value,
                         "regions" => section.regions = value,
                         "project" => section.project = value,
+                        "compartment" => section.compartment = value,
                         _ => {}
                     }
                 }
@@ -177,6 +180,9 @@ impl ProviderConfig {
             }
             if !section.project.is_empty() {
                 content.push_str(&format!("project={}\n", section.project));
+            }
+            if !section.compartment.is_empty() {
+                content.push_str(&format!("compartment={}\n", section.compartment));
             }
             if section.auto_sync != default_auto_sync(&section.provider) {
                 content.push_str(if section.auto_sync {
@@ -294,6 +300,7 @@ token=mytoken
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         assert_eq!(config.sections.len(), 1);
     }
@@ -313,6 +320,7 @@ token=mytoken
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         assert_eq!(config.sections.len(), 1);
         assert_eq!(config.sections[0].token, "new");
@@ -463,6 +471,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
         let mut config = ProviderConfig::default();
         config.set_section(section);
@@ -497,6 +506,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         assert_eq!(config.sections[0].token, "new");
         assert_eq!(config.sections[0].url, "https://pve.local:8006");
@@ -543,6 +553,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         // Re-parse: auto_sync should still be true (default)
         assert!(config.sections[0].auto_sync);
@@ -561,6 +572,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         assert!(!config2.sections[0].auto_sync);
     }
@@ -619,6 +631,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         // Simulate save by rebuilding content string (same logic as save())
         let content =
@@ -862,6 +875,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
         config.set_section(section);
         assert_eq!(config.sections.len(), 1);
@@ -884,6 +898,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
         config.set_section(section);
         assert_eq!(config.sections.len(), 1);
@@ -1198,6 +1213,7 @@ verify_tls=false
                 profile: String::new(),
                 regions: String::new(),
                 project: String::new(),
+                compartment: String::new(),
             });
         }
         assert_eq!(config.sections.len(), 3);
@@ -1210,5 +1226,39 @@ verify_tls=false
         config.remove_section("digitalocean");
         config.remove_section("vultr");
         assert!(config.sections.is_empty());
+    }
+
+    // =========================================================================
+    // Oracle / compartment field
+    // =========================================================================
+
+    #[test]
+    fn test_compartment_field_round_trip() {
+        use std::path::PathBuf;
+        let content = "[oracle]\ntoken=~/.oci/config\ncompartment=ocid1.compartment.oc1..example\n";
+        let config = ProviderConfig::parse(content);
+        assert_eq!(
+            config.sections[0].compartment,
+            "ocid1.compartment.oc1..example"
+        );
+
+        // Save to a temp file and re-parse
+        let tmp = std::env::temp_dir().join("purple_test_compartment_round_trip");
+        let mut cfg = config;
+        cfg.path_override = Some(PathBuf::from(&tmp));
+        cfg.save().expect("save failed");
+        let saved = std::fs::read_to_string(&tmp).expect("read failed");
+        let _ = std::fs::remove_file(&tmp);
+        let reparsed = ProviderConfig::parse(&saved);
+        assert_eq!(
+            reparsed.sections[0].compartment,
+            "ocid1.compartment.oc1..example"
+        );
+    }
+
+    #[test]
+    fn test_auto_sync_default_true_for_oracle() {
+        let config = ProviderConfig::parse("[oracle]\ntoken=~/.oci/config\n");
+        assert!(config.sections[0].auto_sync);
     }
 }

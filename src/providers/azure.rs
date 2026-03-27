@@ -1521,4 +1521,351 @@ mod tests {
         assert_eq!(form_data[1].1, "app-id-123");
         assert_eq!(form_data[2].1, "secret-456");
     }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_oauth2_token_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/test-tenant/oauth2/v2.0/token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"access_token": "test-token-abc", "token_type": "Bearer", "expires_in": 3600}"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/test-tenant/oauth2/v2.0/token", server.url());
+        let mut resp = agent
+            .post(&url)
+            .send_form([
+                ("grant_type", "client_credentials"),
+                ("client_id", "app-id"),
+                ("client_secret", "secret"),
+                ("scope", "https://management.azure.com/.default"),
+            ])
+            .unwrap();
+        let token_resp: TokenResponse = resp.body_mut().read_json().unwrap();
+
+        assert_eq!(token_resp.access_token, "test-token-abc");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_oauth2_token_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/test-tenant/oauth2/v2.0/token")
+            .with_status(401)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"error": "invalid_client"}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/test-tenant/oauth2/v2.0/token", server.url());
+        let result = agent.post(&url).send_form([
+            ("grant_type", "client_credentials"),
+            ("client_id", "bad-id"),
+            ("client_secret", "bad-secret"),
+            ("scope", "https://management.azure.com/.default"),
+        ]);
+
+        assert!(result.is_err());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_vms_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines",
+            )
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api-version".into(), "2024-07-01".into()),
+                mockito::Matcher::UrlEncoded("$expand".into(), "instanceView".into()),
+            ]))
+            .match_header("Authorization", "Bearer test-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [
+                        {
+                            "name": "web-01",
+                            "location": "eastus",
+                            "tags": {"env": "prod"},
+                            "properties": {
+                                "vmId": "abc-123",
+                                "hardwareProfile": {"vmSize": "Standard_B1s"},
+                                "storageProfile": {
+                                    "imageReference": {
+                                        "offer": "UbuntuServer",
+                                        "sku": "22_04-lts"
+                                    }
+                                },
+                                "networkProfile": {
+                                    "networkInterfaces": [
+                                        {"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic1"}
+                                    ]
+                                },
+                                "instanceView": {
+                                    "statuses": [
+                                        {"code": "ProvisioningState/succeeded"},
+                                        {"code": "PowerState/running"}
+                                    ]
+                                }
+                            }
+                        }
+                    ],
+                    "nextLink": null
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01&$expand=instanceView",
+            server.url()
+        );
+        let resp: VmListResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.value.len(), 1);
+        let vm = &resp.value[0];
+        assert_eq!(vm.name, "web-01");
+        assert_eq!(vm.location, "eastus");
+        assert_eq!(vm.properties.vm_id, "abc-123");
+        assert_eq!(
+            vm.properties.hardware_profile.as_ref().unwrap().vm_size,
+            "Standard_B1s"
+        );
+        assert_eq!(
+            vm.properties
+                .storage_profile
+                .as_ref()
+                .unwrap()
+                .image_reference
+                .as_ref()
+                .unwrap()
+                .offer
+                .as_deref(),
+            Some("UbuntuServer")
+        );
+        assert!(resp.next_link.is_none());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_vms_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines",
+            )
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api-version".into(), "2024-07-01".into()),
+                mockito::Matcher::UrlEncoded("$expand".into(), "instanceView".into()),
+            ]))
+            .match_header("Authorization", "Bearer tk")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [{"name": "vm-a", "properties": {"vmId": "id-a"}}],
+                    "nextLink": "NEXT_URL_PLACEHOLDER"
+                }"#,
+            )
+            .create();
+
+        let page2 = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines",
+            )
+            .match_query(mockito::Matcher::AllOf(vec![mockito::Matcher::UrlEncoded(
+                "page".into(),
+                "2".into(),
+            )]))
+            .match_header("Authorization", "Bearer tk")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [{"name": "vm-b", "properties": {"vmId": "id-b"}}]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        // Page 1
+        let r1: VmListResponse = agent
+            .get(&format!(
+                "{}/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01&$expand=instanceView",
+                server.url()
+            ))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.value.len(), 1);
+        assert_eq!(r1.value[0].name, "vm-a");
+        assert!(r1.next_link.is_some());
+
+        // Page 2
+        let r2: VmListResponse = agent
+            .get(&format!(
+                "{}/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines?page=2",
+                server.url()
+            ))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r2.value.len(), 1);
+        assert_eq!(r2.value[0].name, "vm-b");
+        assert!(r2.next_link.is_none());
+
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_list_nics_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Network/networkInterfaces",
+            )
+            .match_query(mockito::Matcher::UrlEncoded(
+                "api-version".into(),
+                "2024-05-01".into(),
+            ))
+            .match_header("Authorization", "Bearer test-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [
+                        {
+                            "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic1",
+                            "properties": {
+                                "ipConfigurations": [
+                                    {
+                                        "properties": {
+                                            "privateIPAddress": "10.0.0.4",
+                                            "publicIPAddress": {
+                                                "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip1"
+                                            },
+                                            "primary": true
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/subscriptions/sub-123/providers/Microsoft.Network/networkInterfaces?api-version=2024-05-01",
+            server.url()
+        );
+        let resp: NicListResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.value.len(), 1);
+        let nic = &resp.value[0];
+        assert!(nic.id.contains("nic1"));
+        let ip_config = &nic.properties.ip_configurations[0];
+        assert_eq!(
+            ip_config.properties.private_ip_address,
+            Some("10.0.0.4".to_string())
+        );
+        assert!(ip_config.properties.public_ip_address.is_some());
+        assert_eq!(ip_config.properties.primary, Some(true));
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_public_ips_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Network/publicIPAddresses",
+            )
+            .match_query(mockito::Matcher::UrlEncoded(
+                "api-version".into(),
+                "2024-05-01".into(),
+            ))
+            .match_header("Authorization", "Bearer test-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [
+                        {
+                            "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip1",
+                            "properties": {"ipAddress": "52.168.1.1"}
+                        },
+                        {
+                            "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip2",
+                            "properties": {"ipAddress": "52.168.1.2"}
+                        }
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/subscriptions/sub-123/providers/Microsoft.Network/publicIPAddresses?api-version=2024-05-01",
+            server.url()
+        );
+        let resp: PublicIpListResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.value.len(), 2);
+        assert_eq!(
+            resp.value[0].properties.ip_address,
+            Some("52.168.1.1".to_string())
+        );
+        assert_eq!(
+            resp.value[1].properties.ip_address,
+            Some("52.168.1.2".to_string())
+        );
+        mock.assert();
+    }
 }

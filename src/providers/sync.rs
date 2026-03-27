@@ -475,6 +475,7 @@ mod tests {
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         }
     }
 
@@ -1469,6 +1470,7 @@ Host do-web-1-copy
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
 
         // Remote has the included host's server_id with a different prefix
@@ -3185,6 +3187,7 @@ Host do-web-1-copy
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
 
         // Sync DO hosts
@@ -3244,6 +3247,7 @@ Host do-web-1-copy
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
 
         // Add hosts from both providers

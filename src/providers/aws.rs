@@ -1348,4 +1348,170 @@ mod tests {
         assert!(inst.ip_address.is_none());
         assert!(inst.private_ip_address.is_none());
     }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_describe_instances_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("Action".into(), "DescribeInstances".into()),
+                mockito::Matcher::UrlEncoded("Version".into(), "2016-11-15".into()),
+            ]))
+            .match_header("Authorization", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(
+                r#"<DescribeInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+  <reservationSet>
+    <item>
+      <instancesSet>
+        <item>
+          <instanceId>i-1234567890</instanceId>
+          <instanceState><name>running</name></instanceState>
+          <privateIpAddress>10.0.0.1</privateIpAddress>
+          <ipAddress>54.1.2.3</ipAddress>
+          <imageId>ami-12345678</imageId>
+          <instanceType>t3.micro</instanceType>
+          <tagSet><item><key>Name</key><value>web-1</value></item></tagSet>
+        </item>
+      </instancesSet>
+    </item>
+  </reservationSet>
+</DescribeInstancesResponse>"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/?Action=DescribeInstances&Version=2016-11-15",
+            server.url()
+        );
+        let body = agent
+            .get(&url)
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=fake")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_to_string()
+            .unwrap();
+        let resp: DescribeInstancesResponse = quick_xml::de::from_str(&body).unwrap();
+
+        assert_eq!(resp.reservation_set.item.len(), 1);
+        let inst = &resp.reservation_set.item[0].instances_set.item[0];
+        assert_eq!(inst.instance_id, "i-1234567890");
+        assert_eq!(inst.instance_state.name, "running");
+        assert_eq!(inst.ip_address.as_deref(), Some("54.1.2.3"));
+        assert_eq!(inst.private_ip_address.as_deref(), Some("10.0.0.1"));
+        assert_eq!(inst.image_id, "ami-12345678");
+        assert_eq!(inst.instance_type, "t3.micro");
+        assert_eq!(inst.tag_set.item.len(), 1);
+        assert_eq!(inst.tag_set.item[0].key, "Name");
+        assert_eq!(inst.tag_set.item[0].value, "web-1");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_describe_instances_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_header("content-type", "text/xml")
+            .with_body("<Error><Code>AuthFailure</Code></Error>")
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/?Action=DescribeInstances&Version=2016-11-15",
+                server.url()
+            ))
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=bad")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_describe_images_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("Action".into(), "DescribeImages".into()),
+                mockito::Matcher::UrlEncoded("Version".into(), "2016-11-15".into()),
+                mockito::Matcher::UrlEncoded("ImageId.1".into(), "ami-12345678".into()),
+            ]))
+            .match_header("Authorization", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(
+                r#"<DescribeImagesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+  <imagesSet>
+    <item>
+      <imageId>ami-12345678</imageId>
+      <name>amzn2-ami-hvm-2.0</name>
+    </item>
+  </imagesSet>
+</DescribeImagesResponse>"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/?Action=DescribeImages&Version=2016-11-15&ImageId.1=ami-12345678",
+            server.url()
+        );
+        let body = agent
+            .get(&url)
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=fake")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_to_string()
+            .unwrap();
+        let resp: DescribeImagesResponse = quick_xml::de::from_str(&body).unwrap();
+
+        assert_eq!(resp.images_set.item.len(), 1);
+        assert_eq!(resp.images_set.item[0].image_id, "ami-12345678");
+        assert_eq!(resp.images_set.item[0].name, "amzn2-ami-hvm-2.0");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_describe_images_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_header("content-type", "text/xml")
+            .with_body("<Error><Code>AuthFailure</Code></Error>")
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/?Action=DescribeImages&Version=2016-11-15&ImageId.1=ami-abc",
+                server.url()
+            ))
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=bad")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
 }

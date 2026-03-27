@@ -667,4 +667,166 @@ mod tests {
     fn test_is_private_ip_172_nonnumeric() {
         assert!(!is_private_ip("172.abc.0.1"));
     }
+
+    // ── HTTP roundtrip tests (mockito) ──────────────────────────────
+
+    #[test]
+    fn test_http_instances_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v4/linode/instances")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("page_size".into(), "500".into()),
+            ]))
+            .match_header("Authorization", "Bearer test-linode-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "data": [
+                        {
+                            "id": 12345678,
+                            "label": "web-prod-1",
+                            "ipv4": ["45.33.100.10", "192.168.200.1"],
+                            "ipv6": "2600:3c00::f03c:92ff:fe12:3456/128",
+                            "tags": ["prod", "web"],
+                            "region": "us-east",
+                            "type": "g6-standard-2",
+                            "status": "running",
+                            "image": "linode/ubuntu22.04"
+                        }
+                    ],
+                    "page": 1,
+                    "pages": 1
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/v4/linode/instances?page=1&page_size=500", server.url());
+        let resp: LinodeResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-linode-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.data.len(), 1);
+        let i = &resp.data[0];
+        assert_eq!(i.id, 12345678);
+        assert_eq!(i.label, "web-prod-1");
+        assert_eq!(i.ipv4, vec!["45.33.100.10", "192.168.200.1"]);
+        assert_eq!(
+            i.ipv6.as_deref(),
+            Some("2600:3c00::f03c:92ff:fe12:3456/128")
+        );
+        assert_eq!(i.tags, vec!["prod", "web"]);
+        assert_eq!(i.region, "us-east");
+        assert_eq!(i.instance_type, "g6-standard-2");
+        assert_eq!(i.status, "running");
+        assert_eq!(i.image.as_deref(), Some("linode/ubuntu22.04"));
+        assert_eq!(resp.page, 1);
+        assert_eq!(resp.pages, 1);
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_instances_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/v4/linode/instances")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("page_size".into(), "500".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "data": [{"id": 1, "label": "a", "ipv4": ["1.1.1.1"], "tags": []}],
+                    "page": 1,
+                    "pages": 2
+                }"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/v4/linode/instances")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "2".into()),
+                mockito::Matcher::UrlEncoded("page_size".into(), "500".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "data": [{"id": 2, "label": "b", "ipv4": ["2.2.2.2"], "tags": []}],
+                    "page": 2,
+                    "pages": 2
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        // Page 1
+        let r1: LinodeResponse = agent
+            .get(&format!(
+                "{}/v4/linode/instances?page=1&page_size=500",
+                server.url()
+            ))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.data.len(), 1);
+        assert_eq!(r1.page, 1);
+        assert_eq!(r1.pages, 2);
+        // Page 2
+        let r2: LinodeResponse = agent
+            .get(&format!(
+                "{}/v4/linode/instances?page=2&page_size=500",
+                server.url()
+            ))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r2.data.len(), 1);
+        assert_eq!(r2.page, 2);
+        assert_eq!(r2.pages, 2);
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_instances_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v4/linode/instances")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"errors": [{"reason": "Invalid Token"}]}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/v4/linode/instances?page=1&page_size=500",
+                server.url()
+            ))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
 }

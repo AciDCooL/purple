@@ -1172,4 +1172,247 @@ mod tests {
         assert!(!matches!(err, ureq::Error::StatusCode(401 | 403)));
         assert!(!matches!(err, ureq::Error::StatusCode(429)));
     }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_list_servers_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/1.3/server")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("limit".into(), "100".into()),
+                mockito::Matcher::UrlEncoded("offset".into(), "0".into()),
+            ]))
+            .match_header("Authorization", "Bearer uc-test-token-123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": {
+                        "server": [
+                            {
+                                "uuid": "00c148cb-ef71-46cb-a76f-1bb53e791e8a",
+                                "title": "Web Frontend",
+                                "hostname": "web-frontend.example.com",
+                                "tags": {"tag": ["PRODUCTION", "WEB"]},
+                                "labels": {"label": [{"key": "env", "value": "prod"}]},
+                                "zone": "fi-hel1",
+                                "plan": "2xCPU-4GB",
+                                "state": "started"
+                            }
+                        ]
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/1.3/server?limit=100&offset=0", server.url());
+        let resp: ServerListResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer uc-test-token-123")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.servers.server.len(), 1);
+        let s = &resp.servers.server[0];
+        assert_eq!(s.uuid, "00c148cb-ef71-46cb-a76f-1bb53e791e8a");
+        assert_eq!(s.title, "Web Frontend");
+        assert_eq!(s.hostname, "web-frontend.example.com");
+        assert_eq!(s.tags.tag, vec!["PRODUCTION", "WEB"]);
+        assert_eq!(s.zone, "fi-hel1");
+        assert_eq!(s.plan, "2xCPU-4GB");
+        assert_eq!(s.state, "started");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_server_detail_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/1.3/server/00c148cb-ef71-46cb-a76f-1bb53e791e8a")
+            .match_header("Authorization", "Bearer uc-test-token-123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "server": {
+                        "networking": {
+                            "interfaces": {
+                                "interface": [
+                                    {
+                                        "type": "public",
+                                        "ip_addresses": {
+                                            "ip_address": [
+                                                {"address": "94.237.42.10", "family": "IPv4"},
+                                                {"address": "2a04:3540:1000::1", "family": "IPv6"}
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "type": "utility",
+                                        "ip_addresses": {
+                                            "ip_address": [
+                                                {"address": "10.3.0.5", "family": "IPv4"}
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        "storage_devices": {
+                            "storage_device": [
+                                {"storage_title": "Ubuntu Server 24.04 LTS", "boot_disk": "1"},
+                                {"storage_title": "Data volume", "boot_disk": "0"}
+                            ]
+                        }
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/1.3/server/00c148cb-ef71-46cb-a76f-1bb53e791e8a",
+            server.url()
+        );
+        let resp: ServerDetailResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer uc-test-token-123")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        let interfaces = &resp.server.networking.interfaces.interface;
+        assert_eq!(interfaces.len(), 2);
+        assert_eq!(select_ip(interfaces), Some("94.237.42.10".to_string()));
+
+        let sd = resp.server.storage_devices.unwrap();
+        let boot = sd
+            .storage_device
+            .iter()
+            .find(|d| d.boot_disk == "1")
+            .unwrap();
+        assert_eq!(boot.storage_title, "Ubuntu Server 24.04 LTS");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_servers_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/1.3/server")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("limit".into(), "100".into()),
+                mockito::Matcher::UrlEncoded("offset".into(), "0".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": {
+                        "server": [{"uuid": "u1", "title": "a", "hostname": "a.example.com"}]
+                    }
+                }"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/1.3/server")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("limit".into(), "100".into()),
+                mockito::Matcher::UrlEncoded("offset".into(), "100".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": {
+                        "server": [{"uuid": "u2", "title": "b", "hostname": "b.example.com"}]
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let r1: ServerListResponse = agent
+            .get(&format!("{}/1.3/server?limit=100&offset=0", server.url()))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.servers.server.len(), 1);
+        assert_eq!(r1.servers.server[0].uuid, "u1");
+
+        let r2: ServerListResponse = agent
+            .get(&format!("{}/1.3/server?limit=100&offset=100", server.url()))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r2.servers.server.len(), 1);
+        assert_eq!(r2.servers.server[0].uuid, "u2");
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_list_servers_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/1.3/server")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(
+                r#"{"error": {"error_code": "AUTHENTICATION_FAILED", "error_message": "Authentication failed."}}"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!("{}/1.3/server?limit=100&offset=0", server.url()))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_server_detail_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/1.3/server/some-uuid")
+            .with_status(401)
+            .with_body(
+                r#"{"error": {"error_code": "AUTHENTICATION_FAILED", "error_message": "Authentication failed."}}"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!("{}/1.3/server/some-uuid", server.url()))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
 }

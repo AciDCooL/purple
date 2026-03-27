@@ -790,4 +790,164 @@ mod tests {
         let resp: ListServersResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.servers[0].private_ip.as_deref(), Some("10.1.2.3"));
     }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_list_servers_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/instance/v1/zones/fr-par-1/servers")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "100".into()),
+            ]))
+            .match_header("X-Auth-Token", "scw-secret-token-123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": [
+                        {
+                            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                            "name": "web-prod-1",
+                            "state": "running",
+                            "commercial_type": "DEV1-S",
+                            "tags": ["production", "web"],
+                            "public_ips": [
+                                {"address": "51.15.42.10", "family": "inet"},
+                                {"address": "2001:bc8:1200::1", "family": "inet6"}
+                            ],
+                            "private_ip": "10.68.0.5",
+                            "image": {"id": "img-1", "name": "Ubuntu 22.04 Jammy Jellyfish"},
+                            "zone": "fr-par-1"
+                        }
+                    ],
+                    "total_count": 1
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/instance/v1/zones/fr-par-1/servers?page=1&per_page=100",
+            server.url()
+        );
+        let resp: ListServersResponse = agent
+            .get(&url)
+            .header("X-Auth-Token", "scw-secret-token-123")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.servers.len(), 1);
+        let s = &resp.servers[0];
+        assert_eq!(s.id, "a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        assert_eq!(s.name, "web-prod-1");
+        assert_eq!(s.state, "running");
+        assert_eq!(s.commercial_type, "DEV1-S");
+        assert_eq!(s.tags, vec!["production", "web"]);
+        assert_eq!(s.public_ips.len(), 2);
+        assert_eq!(s.public_ips[0].address, "51.15.42.10");
+        assert_eq!(s.public_ips[0].family, "inet");
+        assert_eq!(select_ip(s), Some("51.15.42.10".to_string()));
+        assert_eq!(resp.total_count, 1);
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_servers_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/instance/v1/zones/nl-ams-1/servers")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "100".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": [{"id": "s1", "name": "a", "public_ips": [{"address": "1.1.1.1", "family": "inet"}], "tags": []}],
+                    "total_count": 2
+                }"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/instance/v1/zones/nl-ams-1/servers")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "2".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "100".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": [{"id": "s2", "name": "b", "public_ips": [{"address": "2.2.2.2", "family": "inet"}], "tags": []}],
+                    "total_count": 2
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        // Page 1
+        let r1: ListServersResponse = agent
+            .get(&format!(
+                "{}/instance/v1/zones/nl-ams-1/servers?page=1&per_page=100",
+                server.url()
+            ))
+            .header("X-Auth-Token", "tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.servers.len(), 1);
+        assert_eq!(r1.total_count, 2);
+        // Page 2
+        let r2: ListServersResponse = agent
+            .get(&format!(
+                "{}/instance/v1/zones/nl-ams-1/servers?page=2&per_page=100",
+                server.url()
+            ))
+            .header("X-Auth-Token", "tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r2.servers.len(), 1);
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_list_servers_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/instance/v1/zones/fr-par-1/servers")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"message": "Invalid authentication token"}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/instance/v1/zones/fr-par-1/servers?page=1&per_page=100",
+                server.url()
+            ))
+            .header("X-Auth-Token", "bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
 }

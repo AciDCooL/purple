@@ -1599,6 +1599,7 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                             token: section.token.clone(),
                             profile: section.profile.clone(),
                             project: section.project.clone(),
+                            compartment: section.compartment.clone(),
                             regions: section.regions.clone(),
                             alias_prefix: section.alias_prefix.clone(),
                             user: section.user.clone(),
@@ -1614,6 +1615,7 @@ fn handle_provider_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                             token: String::new(),
                             profile: String::new(),
                             project: String::new(),
+                            compartment: String::new(),
                             regions: String::new(),
                             alias_prefix: short_label,
                             user: "root".to_string(),
@@ -1819,7 +1821,10 @@ fn handle_provider_form(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<A
                     app.ui.key_picker_state.select(Some(0));
                 }
             } else if f == crate::app::ProviderFormField::Regions
-                && matches!(provider_name.as_str(), "aws" | "scaleway" | "gcp")
+                && matches!(
+                    provider_name.as_str(),
+                    "aws" | "scaleway" | "gcp" | "oracle"
+                )
             {
                 app.ui.show_region_picker = true;
                 app.ui.region_picker_cursor = 0;
@@ -1894,6 +1899,10 @@ pub(crate) fn zone_data_for(provider: &str) -> (ZoneList, ZoneGroups) {
         "gcp" => (
             crate::providers::gcp::GCP_ZONES,
             crate::providers::gcp::GCP_ZONE_GROUPS,
+        ),
+        "oracle" => (
+            crate::providers::oracle::OCI_REGIONS,
+            crate::providers::oracle::OCI_REGION_GROUPS,
         ),
         _ => unreachable!(
             "zone_data_for called for unsupported provider: {}",
@@ -2041,6 +2050,9 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         let hint = if provider_name == "gcp" {
             "Token can't be empty. Provide a service account JSON key file path or access token."
                 .to_string()
+        } else if provider_name == "oracle" {
+            "Token can't be empty. Provide the path to your OCI config file (e.g. ~/.oci/config)."
+                .to_string()
         } else {
             let display_name = crate::providers::provider_display_name(provider_name.as_str());
             format!(
@@ -2055,6 +2067,15 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     // GCP requires a project ID
     if provider_name == "gcp" && app.provider_form.project.trim().is_empty() {
         app.set_status("Project ID can't be empty. Set your GCP project ID.", true);
+        return;
+    }
+
+    // Oracle requires a compartment OCID
+    if provider_name == "oracle" && app.provider_form.compartment.trim().is_empty() {
+        app.set_status(
+            "Compartment can't be empty. Set your OCI compartment OCID.",
+            true,
+        );
         return;
     }
 
@@ -2119,6 +2140,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         profile: app.provider_form.profile.trim().to_string(),
         regions: app.provider_form.regions.trim().to_string(),
         project: app.provider_form.project.trim().to_string(),
+        compartment: app.provider_form.compartment.trim().to_string(),
     };
 
     let old_section = app.provider_config.section(&provider_name).cloned();
@@ -4206,6 +4228,7 @@ mod tests {
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         app
     }
@@ -4226,6 +4249,7 @@ mod tests {
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         app
     }
@@ -4279,6 +4303,7 @@ mod tests {
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         open_provider_form(&mut app, "digitalocean");
         assert!(
@@ -4324,6 +4349,7 @@ mod tests {
             token: "tok".to_string(),
             profile: String::new(),
             project: String::new(),
+            compartment: String::new(),
             regions: String::new(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
@@ -4438,6 +4464,7 @@ mod tests {
             token: "tok".to_string(),
             profile: String::new(),
             project: String::new(),
+            compartment: String::new(),
             regions: String::new(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
@@ -4476,6 +4503,7 @@ mod tests {
             token: "tok".to_string(),
             profile: String::new(),
             project: String::new(),
+            compartment: String::new(),
             regions: String::new(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
@@ -4655,6 +4683,7 @@ mod tests {
             token: "/path/to/sa.json".to_string(),
             profile: String::new(),
             project: "my-project".to_string(),
+            compartment: String::new(),
             regions: String::new(),
             alias_prefix: "gcp".to_string(),
             user: "root".to_string(),
@@ -4744,6 +4773,7 @@ mod tests {
             token: "fake-token".to_string(),
             profile: String::new(),
             project: String::new(),
+            compartment: String::new(),
             regions: "12345678-1234-1234-1234-123456789012".to_string(),
             alias_prefix: "az".to_string(),
             user: "azureuser".to_string(),
@@ -7860,6 +7890,7 @@ Host gamma
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         // Select the DigitalOcean provider in the list
         let sorted = app.sorted_provider_names();

@@ -5,6 +5,7 @@ mod digitalocean;
 pub mod gcp;
 mod hetzner;
 mod linode;
+pub mod oracle;
 mod proxmox;
 pub mod scaleway;
 pub mod sync;
@@ -112,6 +113,7 @@ pub const PROVIDER_NAMES: &[&str] = &[
     "gcp",
     "azure",
     "tailscale",
+    "oracle",
 ];
 
 /// Get a provider implementation by name.
@@ -139,6 +141,10 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
             subscriptions: Vec::new(),
         })),
         "tailscale" => Some(Box::new(tailscale::Tailscale)),
+        "oracle" => Some(Box::new(oracle::Oracle {
+            regions: Vec::new(),
+            compartment: String::new(),
+        })),
         _ => None,
     }
 }
@@ -189,6 +195,15 @@ pub fn get_provider_with_config(
                 .filter(|s| !s.is_empty())
                 .collect(),
         })),
+        "oracle" => Some(Box::new(oracle::Oracle {
+            regions: section
+                .regions
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            compartment: section.compartment.clone(),
+        })),
         _ => get_provider(name),
     }
 }
@@ -207,6 +222,7 @@ pub fn provider_display_name(name: &str) -> &str {
         "gcp" => "GCP",
         "azure" => "Azure",
         "tailscale" => "Tailscale",
+        "oracle" => "Oracle Cloud",
         other => other,
     }
 }
@@ -350,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_get_provider_unknown_returns_none() {
-        assert!(get_provider("oracle").is_none());
+        assert!(get_provider("unknown_provider").is_none());
         assert!(get_provider("").is_none());
         assert!(get_provider("DigitalOcean").is_none()); // case-sensitive
     }
@@ -384,6 +400,7 @@ mod tests {
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
         let p = get_provider_with_config("proxmox", &section).unwrap();
         assert_eq!(p.name(), "proxmox");
@@ -403,6 +420,7 @@ mod tests {
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
         let p = get_provider_with_config("digitalocean", &section).unwrap();
         assert_eq!(p.name(), "digitalocean");
@@ -422,6 +440,7 @@ mod tests {
             profile: String::new(),
             regions: "us-central1-a, europe-west1-b".to_string(),
             project: "my-project".to_string(),
+            compartment: String::new(),
         };
         let p = get_provider_with_config("gcp", &section).unwrap();
         assert_eq!(p.name(), "gcp");
@@ -430,7 +449,7 @@ mod tests {
     #[test]
     fn test_get_provider_with_config_unknown_returns_none() {
         let section = config::ProviderSection {
-            provider: "oracle".to_string(),
+            provider: "unknown_provider".to_string(),
             token: String::new(),
             alias_prefix: String::new(),
             user: String::new(),
@@ -441,8 +460,9 @@ mod tests {
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
-        assert!(get_provider_with_config("oracle", &section).is_none());
+        assert!(get_provider_with_config("unknown_provider", &section).is_none());
     }
 
     // =========================================================================
@@ -462,11 +482,15 @@ mod tests {
         assert_eq!(provider_display_name("gcp"), "GCP");
         assert_eq!(provider_display_name("azure"), "Azure");
         assert_eq!(provider_display_name("tailscale"), "Tailscale");
+        assert_eq!(provider_display_name("oracle"), "Oracle Cloud");
     }
 
     #[test]
     fn test_display_name_unknown_returns_input() {
-        assert_eq!(provider_display_name("oracle"), "oracle");
+        assert_eq!(
+            provider_display_name("unknown_provider"),
+            "unknown_provider"
+        );
         assert_eq!(provider_display_name(""), "");
     }
 
@@ -476,7 +500,7 @@ mod tests {
 
     #[test]
     fn test_provider_names_count() {
-        assert_eq!(PROVIDER_NAMES.len(), 11);
+        assert_eq!(PROVIDER_NAMES.len(), 12);
     }
 
     #[test]
@@ -492,6 +516,7 @@ mod tests {
         assert!(PROVIDER_NAMES.contains(&"gcp"));
         assert!(PROVIDER_NAMES.contains(&"azure"));
         assert!(PROVIDER_NAMES.contains(&"tailscale"));
+        assert!(PROVIDER_NAMES.contains(&"oracle"));
     }
 
     // =========================================================================
@@ -677,6 +702,7 @@ mod tests {
                 profile: String::new(),
                 regions: String::new(),
                 project: String::new(),
+                compartment: String::new(),
             };
             let p = get_provider_with_config(name, &section);
             assert!(
@@ -728,11 +754,15 @@ mod tests {
         assert_eq!(provider_display_name("gcp"), "GCP");
         assert_eq!(provider_display_name("azure"), "Azure");
         assert_eq!(provider_display_name("tailscale"), "Tailscale");
+        assert_eq!(provider_display_name("oracle"), "Oracle Cloud");
     }
 
     #[test]
     fn test_provider_display_name_unknown() {
-        assert_eq!(provider_display_name("oracle"), "oracle");
+        assert_eq!(
+            provider_display_name("unknown_provider"),
+            "unknown_provider"
+        );
     }
 
     // =========================================================================
@@ -752,7 +782,7 @@ mod tests {
 
     #[test]
     fn test_get_provider_case_sensitive_and_unknown() {
-        assert!(get_provider("oracle").is_none());
+        assert!(get_provider("unknown_provider").is_none());
         assert!(get_provider("DigitalOcean").is_none()); // Case-sensitive
         assert!(get_provider("VULTR").is_none());
         assert!(get_provider("").is_none());
@@ -763,14 +793,15 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_provider_names_has_all_eleven() {
-        assert_eq!(PROVIDER_NAMES.len(), 11);
+    fn test_provider_names_has_all_twelve() {
+        assert_eq!(PROVIDER_NAMES.len(), 12);
         assert!(PROVIDER_NAMES.contains(&"digitalocean"));
         assert!(PROVIDER_NAMES.contains(&"proxmox"));
         assert!(PROVIDER_NAMES.contains(&"aws"));
         assert!(PROVIDER_NAMES.contains(&"scaleway"));
         assert!(PROVIDER_NAMES.contains(&"azure"));
         assert!(PROVIDER_NAMES.contains(&"tailscale"));
+        assert!(PROVIDER_NAMES.contains(&"oracle"));
     }
 
     // =========================================================================

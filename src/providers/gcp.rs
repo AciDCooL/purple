@@ -1338,4 +1338,239 @@ mod tests {
         assert_eq!(form_data.len(), 2);
         assert_eq!(form_data[1].1, "test.jwt.value");
     }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_token_exchange_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/token")
+            .match_header("content-type", mockito::Matcher::Regex("application/x-www-form-urlencoded".into()))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"access_token": "ya29.test-access-token-xyz", "token_type": "Bearer", "expires_in": 3600}"#,
+            )
+            .create();
+
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            access_token: String,
+        }
+
+        let agent = super::super::http_agent();
+        let resp: TokenResponse = agent
+            .post(&format!("{}/token", server.url()))
+            .send_form([
+                ("grant_type", "urn:ietf:params:oauth:grant_type:jwt-bearer"),
+                ("assertion", "test.jwt.value"),
+            ])
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.access_token, "ya29.test-access-token-xyz");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_token_exchange_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/token")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"error": "invalid_grant", "error_description": "Invalid JWT"}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent.post(&format!("{}/token", server.url())).send_form([
+            ("grant_type", "urn:ietf:params:oauth:grant_type:jwt-bearer"),
+            ("assertion", "bad.jwt"),
+        ]);
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_aggregated_instances_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/compute/v1/projects/my-project/aggregated/instances")
+            .match_header("Authorization", "Bearer ya29.test-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "items": {
+                        "zones/us-central1-a": {
+                            "instances": [
+                                {
+                                    "id": "1234567890",
+                                    "name": "vm-prod-1",
+                                    "status": "RUNNING",
+                                    "machineType": "projects/my-project/zones/us-central1-a/machineTypes/e2-micro",
+                                    "zone": "projects/my-project/zones/us-central1-a",
+                                    "networkInterfaces": [
+                                        {
+                                            "networkIP": "10.128.0.2",
+                                            "accessConfigs": [{"natIP": "35.192.0.1"}],
+                                            "ipv6AccessConfigs": []
+                                        }
+                                    ],
+                                    "disks": [{"licenses": ["projects/debian-cloud/global/licenses/debian-11"]}],
+                                    "tags": {"items": ["http-server", "https-server"]},
+                                    "labels": {"env": "prod", "team": "infra"}
+                                }
+                            ]
+                        }
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/compute/v1/projects/my-project/aggregated/instances",
+            server.url()
+        );
+        let resp: AggregatedListResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer ya29.test-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert!(resp.next_page_token.is_none());
+        let zone = resp.items.get("zones/us-central1-a").unwrap();
+        assert_eq!(zone.instances.len(), 1);
+        let inst = &zone.instances[0];
+        assert_eq!(inst.id, "1234567890");
+        assert_eq!(inst.name, "vm-prod-1");
+        assert_eq!(inst.status, "RUNNING");
+        assert!(inst.machine_type.ends_with("e2-micro"));
+        assert_eq!(inst.network_interfaces[0].network_ip, "10.128.0.2");
+        assert_eq!(
+            inst.network_interfaces[0].access_configs[0].nat_ip,
+            "35.192.0.1"
+        );
+        assert_eq!(
+            inst.tags.as_ref().unwrap().items,
+            vec!["http-server", "https-server"]
+        );
+        let labels = inst.labels.as_ref().unwrap();
+        assert_eq!(labels.get("env").unwrap(), "prod");
+        assert_eq!(labels.get("team").unwrap(), "infra");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_aggregated_instances_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/compute/v1/projects/my-project/aggregated/instances")
+            .match_query(mockito::Matcher::Missing)
+            .match_header("Authorization", "Bearer tk")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "items": {
+                        "zones/us-east1-b": {
+                            "instances": [{"id": "1", "name": "a", "status": "RUNNING", "zone": "zones/us-east1-b"}]
+                        }
+                    },
+                    "nextPageToken": "token-page-2"
+                }"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/compute/v1/projects/my-project/aggregated/instances")
+            .match_query(mockito::Matcher::UrlEncoded("pageToken".into(), "token-page-2".into()))
+            .match_header("Authorization", "Bearer tk")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "items": {
+                        "zones/eu-west1-b": {
+                            "instances": [{"id": "2", "name": "b", "status": "TERMINATED", "zone": "zones/eu-west1-b"}]
+                        }
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let base = format!(
+            "{}/compute/v1/projects/my-project/aggregated/instances",
+            server.url()
+        );
+
+        // Page 1
+        let r1: AggregatedListResponse = agent
+            .get(&base)
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.next_page_token.as_deref(), Some("token-page-2"));
+        assert_eq!(r1.items.get("zones/us-east1-b").unwrap().instances.len(), 1);
+
+        // Page 2
+        let r2: AggregatedListResponse = agent
+            .get(&format!("{}?pageToken=token-page-2", base))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert!(r2.next_page_token.is_none());
+        assert_eq!(
+            r2.items.get("zones/eu-west1-b").unwrap().instances[0].name,
+            "b"
+        );
+
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_aggregated_instances_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/compute/v1/projects/my-project/aggregated/instances")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"error": {"code": 401, "message": "Request had invalid authentication credentials."}}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/compute/v1/projects/my-project/aggregated/instances",
+                server.url()
+            ))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
 }

@@ -233,6 +233,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
                 && provider_name != "aws"
                 && provider_name != "tailscale")
             || (field == ProviderFormField::Project && provider_name == "gcp")
+            || (field == ProviderFormField::Compartment && provider_name == "oracle")
             || (field == ProviderFormField::Regions
                 && matches!(provider_name, "aws" | "scaleway" | "azure"));
         let field_label =
@@ -312,10 +313,12 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
             "gcp" => "/path/to/service-account.json (or access token)",
             "azure" => "/path/to/service-principal.json (or access token)",
             "tailscale" => "API key (leave empty for local CLI)",
+            "oracle" => "~/.oci/config",
             _ => "your-api-token",
         },
         ProviderFormField::Profile => "Name from ~/.aws/credentials (or use Token)",
         ProviderFormField::Project => "my-gcp-project-id",
+        ProviderFormField::Compartment => "ocid1.compartment.oc1..aaaa...",
         ProviderFormField::Regions => match provider_name {
             "gcp" => "Enter to select zones (empty = all)",
             "scaleway" => "Enter to select zones",
@@ -334,12 +337,14 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
             "gcp" => "gcp",
             "azure" => "az",
             "tailscale" => "ts",
+            "oracle" => "oci",
             _ => "prefix",
         },
         ProviderFormField::User => match provider_name {
             "aws" => "ec2-user",
             "gcp" => "ubuntu",
             "azure" => "azureuser",
+            "oracle" => "opc",
             _ => "root",
         },
         ProviderFormField::IdentityFile => "Enter to pick a key",
@@ -392,6 +397,7 @@ fn render_field_content(
         ProviderFormField::Token => &form.token,
         ProviderFormField::Profile => &form.profile,
         ProviderFormField::Project => &form.project,
+        ProviderFormField::Compartment => &form.compartment,
         ProviderFormField::Regions => &form.regions,
         ProviderFormField::AliasPrefix => &form.alias_prefix,
         ProviderFormField::User => &form.user,
@@ -415,7 +421,7 @@ fn render_field_content(
 
     let is_picker = matches!(field, ProviderFormField::IdentityFile)
         || (field == ProviderFormField::Regions
-            && matches!(provider_name, "aws" | "scaleway" | "gcp"));
+            && matches!(provider_name, "aws" | "scaleway" | "gcp" | "oracle"));
 
     let content = if value.is_empty() && is_focused && !is_picker {
         Line::from(Span::styled(
@@ -485,7 +491,7 @@ fn build_region_rows(provider: &str) -> Vec<(String, Option<&'static str>)> {
     for &(label, start, end) in groups {
         rows.push((format!(" {}", label), None));
         for &(code, name) in &zones[start..end] {
-            rows.push((format!("{}  {}", code, name), Some(code)));
+            rows.push((format!("{} {}", code, name), Some(code)));
         }
     }
     rows

@@ -3424,4 +3424,265 @@ mod tests {
         let err = ureq::Error::StatusCode(429);
         assert!(!matches!(err, ureq::Error::StatusCode(401 | 403)));
     }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_cluster_resources_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api2/json/cluster/resources")
+            .match_query(mockito::Matcher::UrlEncoded("type".into(), "vm".into()))
+            .match_header("Authorization", "PVEAPIToken=user@pam!tokenid=secret-uuid")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "data": [
+                        {"type": "qemu", "vmid": 100, "name": "web-1", "node": "pve1", "status": "running", "template": 0, "tags": "prod;web", "maxcpu": 4, "maxmem": 4294967296},
+                        {"type": "lxc", "vmid": 200, "name": "dns-1", "node": "pve2", "status": "stopped", "template": 0}
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/api2/json/cluster/resources?type=vm", server.url());
+        let resp: PveResponse<Vec<ClusterResource>> = agent
+            .get(&url)
+            .header("Authorization", "PVEAPIToken=user@pam!tokenid=secret-uuid")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.data.len(), 2);
+        assert_eq!(resp.data[0].resource_type, "qemu");
+        assert_eq!(resp.data[0].vmid, 100);
+        assert_eq!(resp.data[0].name, "web-1");
+        assert_eq!(resp.data[0].node, "pve1");
+        assert_eq!(resp.data[0].status, "running");
+        assert_eq!(resp.data[0].template, 0);
+        assert_eq!(resp.data[0].tags.as_deref(), Some("prod;web"));
+        assert_eq!(resp.data[0].maxcpu, Some(4));
+        assert_eq!(resp.data[0].maxmem, Some(4294967296));
+        assert_eq!(resp.data[1].resource_type, "lxc");
+        assert_eq!(resp.data[1].vmid, 200);
+        assert_eq!(resp.data[1].name, "dns-1");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_cluster_resources_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api2/json/cluster/resources")
+            .match_query(mockito::Matcher::UrlEncoded("type".into(), "vm".into()))
+            .match_header("Authorization", "PVEAPIToken=bad@pam!bad=bad")
+            .with_status(401)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"data": null}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/api2/json/cluster/resources?type=vm", server.url());
+        let result = agent
+            .get(&url)
+            .header("Authorization", "PVEAPIToken=bad@pam!bad=bad")
+            .call();
+
+        assert!(result.is_err());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_qemu_config_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api2/json/nodes/pve1/qemu/100/config")
+            .match_header("Authorization", "PVEAPIToken=user@pam!tok=uuid")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "data": {
+                        "agent": "1,fstrim_cloned_disks=1",
+                        "ipconfig0": "ip=10.0.0.5/24,gw=10.0.0.1",
+                        "ipconfig1": "ip=dhcp",
+                        "ostype": "l26",
+                        "cores": 4,
+                        "memory": 8192
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/api2/json/nodes/pve1/qemu/100/config", server.url());
+        let resp: PveResponse<VmConfig> = agent
+            .get(&url)
+            .header("Authorization", "PVEAPIToken=user@pam!tok=uuid")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.data.agent, Some("1,fstrim_cloned_disks=1".to_string()));
+        let ipconfigs = extract_numbered_values(&resp.data.extra, "ipconfig");
+        assert_eq!(ipconfigs.len(), 2);
+        assert_eq!(ipconfigs[0], "ip=10.0.0.5/24,gw=10.0.0.1");
+        assert_eq!(ipconfigs[1], "ip=dhcp");
+        assert_eq!(extract_ostype(&resp.data), Some("l26".to_string()));
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_guest_agent_interfaces_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock(
+                "GET",
+                "/api2/json/nodes/pve1/qemu/100/agent/network-get-interfaces",
+            )
+            .match_header("Authorization", "PVEAPIToken=user@pam!tok=uuid")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "data": {
+                        "result": [
+                            {
+                                "name": "lo",
+                                "ip-addresses": [
+                                    {"ip-address": "127.0.0.1", "ip-address-type": "ipv4"}
+                                ]
+                            },
+                            {
+                                "name": "eth0",
+                                "ip-addresses": [
+                                    {"ip-address": "10.0.0.5", "ip-address-type": "ipv4"},
+                                    {"ip-address": "fe80::1", "ip-address-type": "ipv6"}
+                                ]
+                            }
+                        ]
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/api2/json/nodes/pve1/qemu/100/agent/network-get-interfaces",
+            server.url()
+        );
+        let resp: GuestAgentNetworkResponse = agent
+            .get(&url)
+            .header("Authorization", "PVEAPIToken=user@pam!tok=uuid")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.data.result.len(), 2);
+        assert_eq!(resp.data.result[0].name, "lo");
+        assert_eq!(resp.data.result[1].name, "eth0");
+        assert_eq!(resp.data.result[1].ip_addresses.len(), 2);
+        assert_eq!(resp.data.result[1].ip_addresses[0].ip_address, "10.0.0.5");
+        assert_eq!(resp.data.result[1].ip_addresses[0].ip_address_type, "ipv4");
+        // Verify select_guest_agent_ip picks the right one
+        let ip = select_guest_agent_ip(&resp.data.result);
+        assert_eq!(ip, Some("10.0.0.5".to_string()));
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_lxc_config_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api2/json/nodes/pve2/lxc/200/config")
+            .match_header("Authorization", "PVEAPIToken=user@pam!tok=uuid")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "data": {
+                        "net0": "name=eth0,bridge=vmbr0,ip=10.0.0.10/24,gw=10.0.0.1",
+                        "net1": "name=eth1,bridge=vmbr1,ip=dhcp",
+                        "ostype": "ubuntu",
+                        "cores": 2,
+                        "memory": 2048
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/api2/json/nodes/pve2/lxc/200/config", server.url());
+        let resp: PveResponse<VmConfig> = agent
+            .get(&url)
+            .header("Authorization", "PVEAPIToken=user@pam!tok=uuid")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        let nets = extract_numbered_values(&resp.data.extra, "net");
+        assert_eq!(nets.len(), 2);
+        assert_eq!(
+            nets[0],
+            "name=eth0,bridge=vmbr0,ip=10.0.0.10/24,gw=10.0.0.1"
+        );
+        assert_eq!(nets[1], "name=eth1,bridge=vmbr1,ip=dhcp");
+        assert_eq!(extract_ostype(&resp.data), Some("ubuntu".to_string()));
+        // Verify parse_lxc_net_ip finds the static IP from net0
+        assert_eq!(parse_lxc_net_ip(&nets[0]), Some("10.0.0.10".to_string()));
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_lxc_interfaces_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api2/json/nodes/pve2/lxc/200/interfaces")
+            .match_header("Authorization", "PVEAPIToken=user@pam!tok=uuid")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "data": [
+                        {"name": "lo", "inet": "127.0.0.1/8", "inet6": "::1/128"},
+                        {"name": "eth0", "inet": "10.0.0.10/24", "inet6": "fd00::10/64"}
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/api2/json/nodes/pve2/lxc/200/interfaces", server.url());
+        let resp: PveResponse<Vec<LxcInterface>> = agent
+            .get(&url)
+            .header("Authorization", "PVEAPIToken=user@pam!tok=uuid")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.data.len(), 2);
+        assert_eq!(resp.data[0].name, "lo");
+        assert_eq!(resp.data[0].inet.as_deref(), Some("127.0.0.1/8"));
+        assert_eq!(resp.data[1].name, "eth0");
+        assert_eq!(resp.data[1].inet.as_deref(), Some("10.0.0.10/24"));
+        assert_eq!(resp.data[1].inet6.as_deref(), Some("fd00::10/64"));
+        // Verify select_lxc_interface_ip picks the right one
+        let ip = select_lxc_interface_ip(&resp.data);
+        assert_eq!(ip, Some("10.0.0.10".to_string()));
+        mock.assert();
+    }
 }

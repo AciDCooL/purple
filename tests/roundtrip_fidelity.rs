@@ -3862,6 +3862,7 @@ fn test_section(provider: &str, prefix: &str) -> ProviderSection {
         profile: String::new(),
         regions: String::new(),
         project: String::new(),
+        compartment: String::new(),
     }
 }
 

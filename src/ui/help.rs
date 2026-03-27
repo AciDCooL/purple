@@ -44,7 +44,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let overlay_width = if is_host_list {
-        100u16.min(frame.area().width.saturating_sub(4))
+        88u16.min(frame.area().width.saturating_sub(4))
     } else {
         50u16.min(frame.area().width.saturating_sub(4))
     };
@@ -104,7 +104,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     if use_two_cols {
-        let cols = Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+        let cols = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)])
             .split(rows[0]);
         let para1 = Paragraph::new(col1).scroll((app.ui.help_scroll, 0));
         let para2 = Paragraph::new(col2).scroll((app.ui.help_scroll, 0));
@@ -152,16 +152,19 @@ fn context_title(screen: &Screen) -> &'static str {
 }
 
 fn section_header(label: &str) -> Vec<Line<'static>> {
-    let rule: String = "\u{2500}".repeat(label.len() + 2);
+    let rule: String = "\u{2500}".repeat(label.len());
     vec![
-        Line::from(Span::styled(format!(" {}", label), theme::section_header())),
-        Line::from(Span::styled(format!(" {}", rule), theme::muted())),
+        Line::from(Span::styled(
+            format!("  {}", label),
+            theme::section_header(),
+        )),
+        Line::from(Span::styled(format!("  {}", rule), theme::muted())),
     ]
 }
 
 fn help_line(key: &str, desc: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{:>10}  ", key), theme::accent_bold()),
+        Span::styled(format!(" {:>11}  ", key), theme::accent_bold()),
         Span::styled(desc.to_string(), theme::muted()),
     ])
 }
@@ -542,7 +545,7 @@ mod tests {
         let lines = section_header("NAVIGATE");
         let rule_text = lines[1].spans[0].content.trim_start();
         let rule_char_count = rule_text.chars().count();
-        assert_eq!(rule_char_count, "NAVIGATE".len() + 2);
+        assert_eq!(rule_char_count, "NAVIGATE".len());
     }
 
     // --- Context title fallback ---

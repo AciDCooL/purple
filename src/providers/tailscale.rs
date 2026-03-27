@@ -955,4 +955,149 @@ mod tests {
             err
         );
     }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_devices_roundtrip_bearer() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/v2/tailnet/-/devices")
+            .match_query(mockito::Matcher::UrlEncoded("fields".into(), "all".into()))
+            .match_header("Authorization", "Bearer oauth-token-abc123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "devices": [
+                        {
+                            "nodeId": "nDEV123456",
+                            "hostname": "web-prod-1",
+                            "name": "web-prod-1.tailnet-abc.ts.net",
+                            "addresses": ["100.64.0.10", "fd7a:115c:a1e0::a"],
+                            "os": "linux",
+                            "authorized": true,
+                            "connectedToControl": true,
+                            "tags": ["tag:server", "tag:production"]
+                        }
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/api/v2/tailnet/-/devices?fields=all", server.url());
+        let resp: ApiResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer oauth-token-abc123")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.devices.len(), 1);
+        let d = &resp.devices[0];
+        assert_eq!(d.node_id, "nDEV123456");
+        assert_eq!(d.hostname, "web-prod-1");
+        assert_eq!(d.os, "linux");
+        assert!(d.authorized);
+        assert!(d.connected_to_control);
+        assert_eq!(d.addresses, vec!["100.64.0.10", "fd7a:115c:a1e0::a"]);
+        assert_eq!(d.tags, vec!["tag:server", "tag:production"]);
+
+        let hosts = Tailscale::hosts_from_api(resp).unwrap();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].server_id, "nDEV123456");
+        assert_eq!(hosts[0].name, "web-prod-1");
+        assert_eq!(hosts[0].ip, "100.64.0.10");
+        assert_eq!(hosts[0].tags, vec!["server", "production"]);
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_devices_roundtrip_basic_auth() {
+        let mut server = mockito::Server::new();
+        let api_key = "tskey-api-kABC123-CNTRL";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:", api_key));
+        let expected_auth = format!("Basic {}", encoded);
+
+        let mock = server
+            .mock("GET", "/api/v2/tailnet/-/devices")
+            .match_query(mockito::Matcher::UrlEncoded("fields".into(), "all".into()))
+            .match_header("Authorization", expected_auth.as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "devices": [
+                        {
+                            "nodeId": "nBASIC789",
+                            "hostname": "db-replica",
+                            "name": "db-replica.ts.net",
+                            "addresses": ["100.64.1.20"],
+                            "os": "linux",
+                            "authorized": true,
+                            "connectedToControl": false,
+                            "tags": []
+                        }
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/api/v2/tailnet/-/devices?fields=all", server.url());
+        let resp: ApiResponse = agent
+            .get(&url)
+            .header("Authorization", &expected_auth)
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.devices.len(), 1);
+        assert_eq!(resp.devices[0].node_id, "nBASIC789");
+        assert_eq!(resp.devices[0].hostname, "db-replica");
+        assert!(!resp.devices[0].connected_to_control);
+
+        let hosts = Tailscale::hosts_from_api(resp).unwrap();
+        assert_eq!(hosts[0].ip, "100.64.1.20");
+        assert!(
+            hosts[0]
+                .metadata
+                .iter()
+                .any(|(k, v)| k == "status" && v == "offline")
+        );
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_devices_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/v2/tailnet/-/devices")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"message": "Unauthorized"}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/api/v2/tailnet/-/devices?fields=all",
+                server.url()
+            ))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
 }

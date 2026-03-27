@@ -843,4 +843,161 @@ mod tests {
         let resp: HetznerResponse = serde_json::from_str(json).unwrap();
         assert_eq!(select_region(&resp.servers[0]), None);
     }
+
+    // ── HTTP roundtrip tests (mockito) ──────────────────────────────
+
+    #[test]
+    fn test_http_servers_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v1/servers")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "50".into()),
+            ]))
+            .match_header("Authorization", "Bearer test-hetzner-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": [
+                        {
+                            "id": 42,
+                            "name": "web-prod-1",
+                            "public_net": {
+                                "ipv4": {"ip": "116.203.0.10"},
+                                "ipv6": {"ip": "2a01:4f8:c010::1/64"}
+                            },
+                            "labels": {"env": "prod", "team": "backend"},
+                            "server_type": {"name": "cx21"},
+                            "datacenter": {"name": "fsn1-dc14", "location": {"name": "fsn1"}},
+                            "location": {"name": "fsn1"},
+                            "status": "running",
+                            "image": {"name": "ubuntu-22.04"}
+                        }
+                    ],
+                    "meta": {"pagination": {"page": 1, "last_page": 1}}
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/v1/servers?page=1&per_page=50", server.url());
+        let resp: HetznerResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-hetzner-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.servers.len(), 1);
+        let s = &resp.servers[0];
+        assert_eq!(s.id, 42);
+        assert_eq!(s.name, "web-prod-1");
+        assert_eq!(s.public_net.ipv4.as_ref().unwrap().ip, "116.203.0.10");
+        assert_eq!(
+            s.public_net.ipv6.as_ref().unwrap().ip,
+            "2a01:4f8:c010::1/64"
+        );
+        assert_eq!(s.labels.get("env").unwrap(), "prod");
+        assert_eq!(s.labels.get("team").unwrap(), "backend");
+        assert_eq!(s.server_type.as_ref().unwrap().name, "cx21");
+        assert_eq!(s.location.as_ref().unwrap().name, "fsn1");
+        assert_eq!(s.status, "running");
+        assert_eq!(
+            s.image.as_ref().unwrap().name.as_deref(),
+            Some("ubuntu-22.04")
+        );
+        assert_eq!(resp.meta.pagination.page, 1);
+        assert_eq!(resp.meta.pagination.last_page, 1);
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_servers_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/v1/servers")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "50".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": [{"id": 1, "name": "a", "public_net": {"ipv4": {"ip": "1.1.1.1"}}, "labels": {}}],
+                    "meta": {"pagination": {"page": 1, "last_page": 2}}
+                }"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/v1/servers")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "2".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "50".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": [{"id": 2, "name": "b", "public_net": {"ipv4": {"ip": "2.2.2.2"}}, "labels": {}}],
+                    "meta": {"pagination": {"page": 2, "last_page": 2}}
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        // Page 1
+        let r1: HetznerResponse = agent
+            .get(&format!("{}/v1/servers?page=1&per_page=50", server.url()))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.servers.len(), 1);
+        assert_eq!(r1.meta.pagination.page, 1);
+        assert_eq!(r1.meta.pagination.last_page, 2);
+        // Page 2
+        let r2: HetznerResponse = agent
+            .get(&format!("{}/v1/servers?page=2&per_page=50", server.url()))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r2.servers.len(), 1);
+        assert_eq!(r2.meta.pagination.page, 2);
+        assert_eq!(r2.meta.pagination.last_page, 2);
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_servers_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v1/servers")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"error": {"message": "unauthorized", "code": "unauthorized"}}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!("{}/v1/servers?page=1&per_page=50", server.url()))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
 }

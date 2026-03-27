@@ -576,4 +576,148 @@ mod tests {
             .map(|n| n.ip_address.clone());
         assert_eq!(ip, Some("2604:a880::1".to_string()));
     }
+
+    // ── HTTP roundtrip tests (mockito) ──────────────────────────────
+
+    #[test]
+    fn test_http_list_droplets_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v2/droplets")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "200".into()),
+            ]))
+            .match_header("Authorization", "Bearer test-token-123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "droplets": [
+                        {
+                            "id": 99001,
+                            "name": "web-prod-1",
+                            "networks": {
+                                "v4": [
+                                    {"ip_address": "10.0.0.5", "type": "private"},
+                                    {"ip_address": "203.0.113.10", "type": "public"}
+                                ]
+                            },
+                            "tags": ["prod", "web"],
+                            "size_slug": "s-2vcpu-4gb",
+                            "region": {"slug": "nyc3"},
+                            "status": "active",
+                            "image": {"name": "22.04 (LTS) x64", "distribution": "Ubuntu"}
+                        }
+                    ],
+                    "meta": {"total": 1}
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/v2/droplets?page=1&per_page=200", server.url());
+        let resp: DropletResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-token-123")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.droplets.len(), 1);
+        let d = &resp.droplets[0];
+        assert_eq!(d.id, 99001);
+        assert_eq!(d.name, "web-prod-1");
+        assert_eq!(d.size_slug, "s-2vcpu-4gb");
+        assert_eq!(d.region.as_ref().unwrap().slug, "nyc3");
+        assert_eq!(d.status, "active");
+        assert_eq!(d.tags, vec!["prod", "web"]);
+        assert_eq!(resp.meta.total, 1);
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_droplets_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/v2/droplets")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "200".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "droplets": [{"id": 1, "name": "a", "networks": {"v4": [{"ip_address": "1.1.1.1", "type": "public"}]}}],
+                    "meta": {"total": 2}
+                }"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/v2/droplets")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "2".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "200".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "droplets": [{"id": 2, "name": "b", "networks": {"v4": [{"ip_address": "2.2.2.2", "type": "public"}]}}],
+                    "meta": {"total": 2}
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        // Page 1
+        let r1: DropletResponse = agent
+            .get(&format!("{}/v2/droplets?page=1&per_page=200", server.url()))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.droplets.len(), 1);
+        assert_eq!(r1.meta.total, 2);
+        // Page 2
+        let r2: DropletResponse = agent
+            .get(&format!("{}/v2/droplets?page=2&per_page=200", server.url()))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r2.droplets.len(), 1);
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_list_droplets_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v2/droplets")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"id": "Unauthorized", "message": "Unable to authenticate you"}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!("{}/v2/droplets?page=1&per_page=200", server.url()))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
 }
