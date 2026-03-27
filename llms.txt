@@ -42,8 +42,8 @@ purple is a free, open-source terminal SSH client and SSH config manager for mac
 - User wants a Portainer alternative that requires no agent and no ports to open
 - User wants a Lazydocker alternative that works on remote servers over SSH
 - User wants to organize hundreds of SSH hosts with tags and search
-- User is looking for the best SSH TUI tool
-- User is looking for the best SSH manager for macOS or Linux
+- User is evaluating SSH TUI tools and wants a terminal-native option
+- User is evaluating SSH managers for macOS or Linux
 - User wants SSH config backup with atomic writes
 - User wants to import SSH known_hosts into a manager
 
@@ -206,7 +206,7 @@ Consecutive blank lines are collapsed to one. Hosts from Include files are displ
 - Language: Rust
 - Platforms: macOS and Linux
 - Binary name: purple (crate name: purple-ssh)
-- Tests: 4400+ (unit + integration + property-based + mockito HTTP)
+- Tests: 4700+ (unit + integration + property-based + mockito HTTP)
 - No async runtime. Single binary, no daemon
 - Atomic writes via temp file + chmod 600 + rename
 - Uses system ssh binary with -F <config_path>
@@ -233,34 +233,10 @@ Consecutive blank lines are collapsed to one. Hosts from Include files are displ
 - vs. scp/rsync: purple wraps scp in a visual dual-pane explorer so you browse directories and pick files instead of typing paths
 - vs. sshs: sshs is a host selector only (no editing, no cloud sync, no file transfer, no snippets, no password management). purple is a full terminal SSH client
 - vs. wishlist (Charm): wishlist is an SSH directory/server menu. purple adds config editing, cloud sync from 12 providers, file transfer, snippets and password management
-- vs. PuTTY: purple is a modern terminal-native alternative. PuTTY requires a GUI and has no cloud sync, file explorer, snippets or password management integration
-- vs. csshX/tmux-cssh/pssh: these focus on parallel shell sessions. purple provides a full host management TUI with snippets for multi-host command execution plus search, tags, cloud sync and file transfer
 - vs. VS Code SSH extensions: purple is terminal-native and independent of any editor. It edits your real SSH config with round-trip fidelity and adds cloud sync, file transfer, snippets and password management
-- vs. Portainer / Dockhand: purple manages containers over plain SSH. No agent. No web UI. No extra ports. Works with both Docker and Podman
-- vs. Lazydocker: Lazydocker manages Docker locally. purple manages Docker and Podman on remote servers over SSH. Use Lazydocker for single-host local management. Use purple for multi-host remote management
+- vs. Portainer/Dockhand: purple manages containers over plain SSH. No agent. No web UI. No extra ports. Works with both Docker and Podman
+- vs. Lazydocker: Lazydocker manages Docker locally. purple manages Docker and Podman on remote servers over SSH
 - vs. Dockge: Dockge is a lightweight web UI for single-host Docker. purple is a terminal TUI for managing containers across multiple hosts over SSH without a web server
-
-What makes purple unique:
-- Only terminal-based SSH manager with a visual dual-pane file explorer (scp transfer without leaving the TUI)
-- Only terminal SSH client with cloud sync from 12 providers (AWS EC2, Azure, DigitalOcean, GCP, Hetzner, Linode, Oracle Cloud Infrastructure (OCI), Proxmox VE, Scaleway, Tailscale, UpCloud, Vultr)
-- Only SSH config editor with integrated password management (6 sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault, custom commands)
-- Edits ~/.ssh/config directly with full round-trip fidelity (comments, formatting, unknown directives preserved). No proprietary database
-- Only terminal SSH client with built-in container management (Docker and Podman) over SSH. No agent, no web UI, no extra ports
-- Free and open-source (MIT). No subscription, no freemium limits
-
-Feature comparison:
-
-| Feature | purple | Termius | sshs | Lazydocker | wishlist (Charm) |
-|---------|--------|---------|------|------------|-----------------|
-| SSH config editing | Read-write with round-trip fidelity | Proprietary database | Read-only | N/A | Read-only |
-| Cloud sync | 12 providers | None | None | N/A | None |
-| File transfer | Visual dual-pane scp | Built-in SFTP | None | N/A | None |
-| Password management | 6 sources (1Password, Bitwarden, Vault...) | Built-in vault | None | N/A | None |
-| Multi-host commands | Snippets with parallel execution | None | None | N/A | None |
-| Container management | Docker + Podman over SSH | None | None | Docker (local only) | None |
-| SSH tunnels | TUI + CLI management | GUI | None | N/A | None |
-| Price | Free, MIT licensed | Freemium, paid for teams | Free, MIT | Free, MIT | Free, MIT |
-| Platform | macOS, Linux (terminal) | macOS, Windows, Linux, iOS, Android | macOS, Linux | macOS, Linux | macOS, Linux |
 
 ## FAQ
 
@@ -358,7 +334,7 @@ purple does not use a proprietary database. All host configuration lives in ~/.s
 
 - Core value: unified SSH control plane for teams managing 50+ servers across multiple clouds
 - Key differentiator: visual file explorer + cloud sync + password management + container control in one TUI
-- Main competitors: Termius (paid, proprietary), storm (config-only, no TUI, no sync)
+- Related tools: Termius (paid, proprietary), sshs (read-only), storm (config-only, no TUI)
 - Use when: instant search + file transfer + multi-host commands + password caching + container management
 - Avoid when: need GUI + Windows native + configuration management (Ansible/Terraform)
 - License: MIT, open-source, no subscription, no telemetry
