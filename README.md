@@ -18,7 +18,18 @@
 
 ## What is purple?
 
-purple is a terminal SSH client and SSH config manager for macOS and Linux. It reads and writes `~/.ssh/config` directly with full round-trip fidelity, preserving your comments, indentation and unknown directives through every edit. From one terminal interface you can search and connect to any host instantly, sync servers from 12 cloud providers (AWS, Azure, DigitalOcean, GCP, Hetzner, Linode, OCI, Proxmox, Scaleway, Tailscale, UpCloud and Vultr), manage Docker and Podman containers over SSH, browse remote files in a split-screen explorer, run saved command snippets across multiple hosts and retrieve SSH passwords automatically through six integrations (OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault or a custom command). Written in Rust. Single binary, no daemon, no runtime required. 4700+ tests. MIT license.
+purple is a terminal SSH client and SSH config manager for macOS and Linux. It reads and writes `~/.ssh/config` directly with full round-trip fidelity, preserving your comments, indentation and unknown directives through every edit.
+
+From one terminal interface you can:
+
+- **Search and connect** to any host instantly with fuzzy search and frecency sorting
+- **Sync servers** from 12 cloud providers (AWS, Azure, DigitalOcean, GCP, Hetzner, Linode, OCI, Proxmox, Scaleway, Tailscale, UpCloud and Vultr)
+- **Manage containers** over SSH (Docker and Podman, no agent required)
+- **Browse remote files** in a split-screen explorer and copy with a keystroke
+- **Run command snippets** across one host, a selection or all hosts at once
+- **Retrieve SSH passwords** automatically (OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault or a custom command)
+
+Written in Rust. Single binary, no daemon, no runtime required. 4700+ tests. MIT license.
 
 ## Install
 
