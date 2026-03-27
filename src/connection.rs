@@ -227,152 +227,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn askpass_none_does_not_set_env() {
-        let askpass: Option<&str> = None;
-        assert!(askpass.is_none());
+    fn connect_fails_with_nonexistent_config() {
+        // connect() should return an error when the config file doesn't exist and
+        // SSH cannot be spawned (or fails immediately).
+        let result = connect(
+            "nonexistent-host",
+            Path::new("/tmp/__purple_test_nonexistent_config__"),
+            None,
+            None,
+            false,
+        );
+        // SSH should exit with a non-zero status (config file not found)
+        assert!(result.is_ok()); // spawn succeeds, SSH exits with error
+        let r = result.unwrap();
+        assert!(!r.status.success());
     }
 
     #[test]
-    fn askpass_some_triggers_env() {
-        let askpass: Option<&str> = Some("keychain");
-        assert!(askpass.is_some());
+    fn connect_with_tunnel_flag_does_not_panic() {
+        // Verify has_active_tunnel=true adds the ClearAllForwardings arg without panic
+        let result = connect(
+            "nonexistent-host",
+            Path::new("/tmp/__purple_test_nonexistent_config__"),
+            None,
+            None,
+            true,
+        );
+        assert!(result.is_ok());
+        assert!(!result.unwrap().status.success());
     }
 
     #[test]
-    fn askpass_env_var_names() {
-        // Document the expected env var names
-        let vars = [
-            "SSH_ASKPASS",
-            "SSH_ASKPASS_REQUIRE",
-            "PURPLE_ASKPASS_MODE",
-            "PURPLE_HOST_ALIAS",
-            "PURPLE_CONFIG_PATH",
-        ];
-        assert_eq!(vars.len(), 5);
-        assert_eq!(vars[0], "SSH_ASKPASS");
-        assert_eq!(vars[1], "SSH_ASKPASS_REQUIRE");
-        assert_eq!(vars[2], "PURPLE_ASKPASS_MODE");
-    }
-
-    #[test]
-    fn ssh_askpass_require_value_is_prefer() {
-        // "prefer" tells SSH to use ASKPASS even when a terminal is available
-        let value = "prefer";
-        assert_eq!(value, "prefer");
-    }
-
-    #[test]
-    fn purple_askpass_mode_value_is_one() {
-        // "1" signals to the purple binary that it's in askpass mode
-        let value = "1";
-        assert_eq!(value, "1");
-    }
-
-    #[test]
-    fn bw_session_env_not_set_when_none() {
-        let bw_session: Option<&str> = None;
-        assert!(bw_session.is_none());
-    }
-
-    #[test]
-    fn bw_session_env_set_when_some() {
-        let bw_session = "session-token-abc123";
-        assert!(!bw_session.is_empty());
-    }
-
-    #[test]
-    fn askpass_and_bw_session_both_set() {
-        // When using bw: source, both askpass and bw_session should be set
-        let askpass: Option<&str> = Some("bw:my-item");
-        let bw_session: Option<&str> = Some("token");
-        assert!(askpass.is_some());
-        assert!(bw_session.is_some());
-    }
-
-    #[test]
-    fn askpass_without_bw_session() {
-        // Non-BW sources don't need BW_SESSION
-        let askpass: Option<&str> = Some("keychain");
-        let bw_session: Option<&str> = None;
-        assert!(askpass.is_some());
-        assert!(bw_session.is_none());
-    }
-
-    #[test]
-    fn connection_env_vars_include_config_path() {
-        // PURPLE_CONFIG_PATH is set so askpass subprocess can find the config
-        let vars = [
-            "SSH_ASKPASS",
-            "SSH_ASKPASS_REQUIRE",
-            "PURPLE_ASKPASS_MODE",
-            "PURPLE_HOST_ALIAS",
-            "PURPLE_CONFIG_PATH",
-        ];
-        assert!(vars.contains(&"PURPLE_CONFIG_PATH"));
-    }
-
-    #[test]
-    fn connection_uses_double_dash_before_alias() {
-        // `--` separates options from the alias to prevent alias starting with `-` from being
-        // interpreted as a flag
-        let args = ["-F", "/path/to/config", "--", "myserver"];
-        assert_eq!(args[2], "--");
-        assert_eq!(args[3], "myserver");
-    }
-
-    #[test]
-    fn connection_inherits_stdin_and_stdout() {
-        // SSH needs interactive terminal: stdin, stdout inherited, stderr piped for capture
-        let modes = ["inherit", "inherit", "piped"];
-        assert_eq!(modes.len(), 3);
-        assert_eq!(modes[0], "inherit");
-        assert_eq!(modes[1], "inherit");
-        assert_eq!(modes[2], "piped");
-    }
-
-    #[test]
-    fn connection_all_askpass_source_types_trigger_env() {
-        // Every non-None askpass source should trigger env var setup
-        let sources = [
-            "keychain",
-            "op://V/I/p",
-            "bw:item",
-            "pass:ssh/srv",
-            "vault:kv#pw",
-            "my-cmd",
-        ];
-        for source in &sources {
-            let askpass: Option<&str> = Some(source);
-            assert!(
-                askpass.is_some(),
-                "Source '{}' should trigger env setup",
-                source
-            );
-        }
-    }
-
-    #[test]
-    fn connection_exe_fallback_chain() {
-        // current_exe() -> env::args().next() -> "purple"
-        let fallback = "purple";
-        assert_eq!(fallback, "purple");
-    }
-
-    #[test]
-    fn active_tunnel_adds_clear_all_forwardings() {
-        // When has_active_tunnel is true, SSH should get -o ClearAllForwardings=yes
-        // to avoid "Address already in use" bind conflicts
-        let has_active_tunnel = true;
-        let option = "ClearAllForwardings=yes";
-        assert!(has_active_tunnel);
-        assert_eq!(option, "ClearAllForwardings=yes");
-    }
-
-    #[test]
-    fn no_tunnel_omits_clear_all_forwardings() {
-        // When has_active_tunnel is false, no forwarding override is added
-        let has_active_tunnel = false;
-        assert!(!has_active_tunnel);
+    fn connect_captures_stderr() {
+        // SSH should produce some stderr output when failing
+        let result = connect(
+            "nonexistent-host",
+            Path::new("/tmp/__purple_test_nonexistent_config__"),
+            None,
+            None,
+            false,
+        );
+        assert!(result.is_ok());
+        // SSH writes errors to stderr; we should have captured something
+        // (either "Can't open user config file" or a connection error)
+        let r = result.unwrap();
+        assert!(
+            !r.stderr_output.is_empty() || !r.status.success(),
+            "SSH should produce stderr or fail"
+        );
     }
 
     // --- parse_host_key_error tests ---

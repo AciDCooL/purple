@@ -264,6 +264,85 @@ pub(crate) fn strip_cidr(ip: &str) -> &str {
     ip
 }
 
+/// RFC 3986 percent-encoding for URL query parameters.
+/// Encodes all characters except unreserved ones (A-Z, a-z, 0-9, '-', '_', '.', '~').
+pub(crate) fn percent_encode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    for byte in s.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                result.push(byte as char);
+            }
+            _ => {
+                result.push_str(&format!("%{:02X}", byte));
+            }
+        }
+    }
+    result
+}
+
+/// Date components from a Unix epoch timestamp (no chrono dependency).
+pub(crate) struct EpochDate {
+    pub year: u64,
+    pub month: u64, // 1-based
+    pub day: u64,   // 1-based
+    pub hours: u64,
+    pub minutes: u64,
+    pub seconds: u64,
+    /// Days since epoch (for weekday calculation)
+    pub epoch_days: u64,
+}
+
+/// Convert Unix epoch seconds to date components.
+pub(crate) fn epoch_to_date(epoch_secs: u64) -> EpochDate {
+    let secs_per_day = 86400u64;
+    let epoch_days = epoch_secs / secs_per_day;
+    let mut remaining_days = epoch_days;
+    let day_secs = epoch_secs % secs_per_day;
+
+    let mut year = 1970u64;
+    loop {
+        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+        let days_in_year = if leap { 366 } else { 365 };
+        if remaining_days < days_in_year {
+            break;
+        }
+        remaining_days -= days_in_year;
+        year += 1;
+    }
+
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days_per_month: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    let mut month = 0usize;
+    while month < 12 && remaining_days >= days_per_month[month] {
+        remaining_days -= days_per_month[month];
+        month += 1;
+    }
+
+    EpochDate {
+        year,
+        month: (month + 1) as u64,
+        day: remaining_days + 1,
+        hours: day_secs / 3600,
+        minutes: (day_secs % 3600) / 60,
+        seconds: day_secs % 60,
+        epoch_days,
+    }
+}
+
 /// Map a ureq error to a ProviderError.
 fn map_ureq_error(err: ureq::Error) -> ProviderError {
     match err {
@@ -316,6 +395,66 @@ mod tests {
     fn test_strip_cidr_trailing_slash() {
         // Trailing slash with nothing after: pos+1 == ip.len(), should NOT strip
         assert_eq!(strip_cidr("1.2.3.4/"), "1.2.3.4/");
+    }
+
+    // =========================================================================
+    // percent_encode tests
+    // =========================================================================
+
+    #[test]
+    fn test_percent_encode_unreserved_passthrough() {
+        assert_eq!(percent_encode("abc123-_.~"), "abc123-_.~");
+    }
+
+    #[test]
+    fn test_percent_encode_spaces_and_specials() {
+        assert_eq!(percent_encode("hello world"), "hello%20world");
+        assert_eq!(percent_encode("a=b&c"), "a%3Db%26c");
+        assert_eq!(percent_encode("/path"), "%2Fpath");
+    }
+
+    #[test]
+    fn test_percent_encode_empty() {
+        assert_eq!(percent_encode(""), "");
+    }
+
+    #[test]
+    fn test_percent_encode_plus_equals_slash() {
+        assert_eq!(percent_encode("a+b=c/d"), "a%2Bb%3Dc%2Fd");
+    }
+
+    // =========================================================================
+    // epoch_to_date tests
+    // =========================================================================
+
+    #[test]
+    fn test_epoch_to_date_unix_epoch() {
+        let d = epoch_to_date(0);
+        assert_eq!((d.year, d.month, d.day), (1970, 1, 1));
+        assert_eq!((d.hours, d.minutes, d.seconds), (0, 0, 0));
+    }
+
+    #[test]
+    fn test_epoch_to_date_known_date() {
+        // 2024-01-15 12:30:45 UTC = 1705321845
+        let d = epoch_to_date(1705321845);
+        assert_eq!((d.year, d.month, d.day), (2024, 1, 15));
+        assert_eq!((d.hours, d.minutes, d.seconds), (12, 30, 45));
+    }
+
+    #[test]
+    fn test_epoch_to_date_leap_year() {
+        // 2024-02-29 00:00:00 UTC = 1709164800
+        let d = epoch_to_date(1709164800);
+        assert_eq!((d.year, d.month, d.day), (2024, 2, 29));
+    }
+
+    #[test]
+    fn test_epoch_to_date_end_of_year() {
+        // 2023-12-31 23:59:59 UTC = 1704067199
+        let d = epoch_to_date(1704067199);
+        assert_eq!((d.year, d.month, d.day), (2023, 12, 31));
+        assert_eq!((d.hours, d.minutes, d.seconds), (23, 59, 59));
     }
 
     // =========================================================================

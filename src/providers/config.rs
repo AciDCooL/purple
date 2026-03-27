@@ -138,6 +138,12 @@ impl ProviderConfig {
         }
     }
 
+    /// Strip control characters (newlines, tabs, etc.) from a config value
+    /// to prevent INI format corruption from paste errors.
+    fn sanitize_value(s: &str) -> String {
+        s.chars().filter(|c| !c.is_control()).collect()
+    }
+
     /// Save provider config to ~/.purple/providers (atomic write, chmod 600).
     /// Respects path_override when set (used in tests).
     pub fn save(&self) -> io::Result<()> {
@@ -159,30 +165,48 @@ impl ProviderConfig {
             if i > 0 {
                 content.push('\n');
             }
-            content.push_str(&format!("[{}]\n", section.provider));
-            content.push_str(&format!("token={}\n", section.token));
-            content.push_str(&format!("alias_prefix={}\n", section.alias_prefix));
-            content.push_str(&format!("user={}\n", section.user));
+            content.push_str(&format!("[{}]\n", Self::sanitize_value(&section.provider)));
+            content.push_str(&format!("token={}\n", Self::sanitize_value(&section.token)));
+            content.push_str(&format!(
+                "alias_prefix={}\n",
+                Self::sanitize_value(&section.alias_prefix)
+            ));
+            content.push_str(&format!("user={}\n", Self::sanitize_value(&section.user)));
             if !section.identity_file.is_empty() {
-                content.push_str(&format!("key={}\n", section.identity_file));
+                content.push_str(&format!(
+                    "key={}\n",
+                    Self::sanitize_value(&section.identity_file)
+                ));
             }
             if !section.url.is_empty() {
-                content.push_str(&format!("url={}\n", section.url));
+                content.push_str(&format!("url={}\n", Self::sanitize_value(&section.url)));
             }
             if !section.verify_tls {
                 content.push_str("verify_tls=false\n");
             }
             if !section.profile.is_empty() {
-                content.push_str(&format!("profile={}\n", section.profile));
+                content.push_str(&format!(
+                    "profile={}\n",
+                    Self::sanitize_value(&section.profile)
+                ));
             }
             if !section.regions.is_empty() {
-                content.push_str(&format!("regions={}\n", section.regions));
+                content.push_str(&format!(
+                    "regions={}\n",
+                    Self::sanitize_value(&section.regions)
+                ));
             }
             if !section.project.is_empty() {
-                content.push_str(&format!("project={}\n", section.project));
+                content.push_str(&format!(
+                    "project={}\n",
+                    Self::sanitize_value(&section.project)
+                ));
             }
             if !section.compartment.is_empty() {
-                content.push_str(&format!("compartment={}\n", section.compartment));
+                content.push_str(&format!(
+                    "compartment={}\n",
+                    Self::sanitize_value(&section.compartment)
+                ));
             }
             if section.auto_sync != default_auto_sync(&section.provider) {
                 content.push_str(if section.auto_sync {
@@ -1260,5 +1284,49 @@ verify_tls=false
     fn test_auto_sync_default_true_for_oracle() {
         let config = ProviderConfig::parse("[oracle]\ntoken=~/.oci/config\n");
         assert!(config.sections[0].auto_sync);
+    }
+
+    #[test]
+    fn test_sanitize_value_strips_control_chars() {
+        assert_eq!(ProviderConfig::sanitize_value("clean"), "clean");
+        assert_eq!(ProviderConfig::sanitize_value("has\nnewline"), "hasnewline");
+        assert_eq!(ProviderConfig::sanitize_value("has\ttab"), "hastab");
+        assert_eq!(
+            ProviderConfig::sanitize_value("has\rcarriage"),
+            "hascarriage"
+        );
+        assert_eq!(ProviderConfig::sanitize_value("has\x00null"), "hasnull");
+        assert_eq!(ProviderConfig::sanitize_value(""), "");
+    }
+
+    #[test]
+    fn test_save_sanitizes_token_with_newline() {
+        let path = std::env::temp_dir().join(format!(
+            "__purple_test_config_sanitize_{}.ini",
+            std::process::id()
+        ));
+        let config = ProviderConfig {
+            sections: vec![ProviderSection {
+                provider: "digitalocean".to_string(),
+                token: "abc\ndef".to_string(),
+                alias_prefix: "do".to_string(),
+                user: "root".to_string(),
+                identity_file: String::new(),
+                url: String::new(),
+                verify_tls: true,
+                auto_sync: true,
+                profile: String::new(),
+                regions: String::new(),
+                project: String::new(),
+                compartment: String::new(),
+            }],
+            path_override: Some(path.clone()),
+        };
+        config.save().unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        // Token should be on a single line with newline stripped
+        assert!(content.contains("token=abcdef\n"));
+        assert!(!content.contains("token=abc\ndef"));
     }
 }

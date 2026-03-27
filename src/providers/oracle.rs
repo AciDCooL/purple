@@ -146,53 +146,18 @@ const MONTHS: [&str; 12] = [
 ///
 /// Example: `Thu, 26 Mar 2026 12:00:00 GMT`
 fn format_rfc7231(epoch_secs: u64) -> String {
-    let secs_per_day = 86400u64;
-    let epoch_days = epoch_secs / secs_per_day;
-    let mut remaining_days = epoch_days;
-    let day_secs = epoch_secs % secs_per_day;
-    let hours = day_secs / 3600;
-    let minutes = (day_secs % 3600) / 60;
-    let seconds = day_secs % 60;
-
+    let d = super::epoch_to_date(epoch_secs);
     // Day of week: Jan 1 1970 was a Thursday (index 0 in WEEKDAYS)
-    let weekday = WEEKDAYS[(epoch_days % 7) as usize];
-
-    let mut year = 1970u64;
-    loop {
-        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-        let days_in_year = if leap { 366 } else { 365 };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        year += 1;
-    }
-
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days_per_month: [u64; 12] = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    let mut month = 0usize;
-    while month < 12 && remaining_days >= days_per_month[month] {
-        remaining_days -= days_per_month[month];
-        month += 1;
-    }
-    let day = remaining_days + 1;
-
+    let weekday = WEEKDAYS[(d.epoch_days % 7) as usize];
     format!(
         "{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
-        weekday, day, MONTHS[month], year, hours, minutes, seconds,
+        weekday,
+        d.day,
+        MONTHS[(d.month - 1) as usize],
+        d.year,
+        d.hours,
+        d.minutes,
+        d.seconds,
     )
 }
 
@@ -875,26 +840,10 @@ impl Oracle {
     }
 }
 
-/// Minimal percent-encoding for query parameter values.
-/// Encodes characters that are not unreserved per RFC 3986.
+/// Minimal percent-encoding for query parameter values (delegates to shared implementation).
 fn urlencoding_encode(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for b in input.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
-            }
-            _ => {
-                out.push('%');
-                out.push(char::from(HEX_DIGITS[(b >> 4) as usize]));
-                out.push(char::from(HEX_DIGITS[(b & 0x0F) as usize]));
-            }
-        }
-    }
-    out
+    super::percent_encode(input)
 }
-
-const HEX_DIGITS: [u8; 16] = *b"0123456789ABCDEF";
 
 // ---------------------------------------------------------------------------
 // Tests

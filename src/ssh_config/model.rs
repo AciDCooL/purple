@@ -15,6 +15,7 @@ fn provider_group_display_name(name: &str) -> &str {
         "gcp" => "GCP",
         "azure" => "Azure",
         "tailscale" => "Tailscale",
+        "oracle" => "Oracle Cloud",
         other => other,
     }
 }
@@ -2900,6 +2901,7 @@ Host *
             "gcp",
             "azure",
             "tailscale",
+            "oracle",
         ];
         for name in &providers {
             assert_eq!(

@@ -160,74 +160,19 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
-/// RFC 3986 URI encoding.
+/// RFC 3986 URI encoding (delegates to shared implementation).
 fn uri_encode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                result.push(byte as char);
-            }
-            _ => {
-                result.push_str(&format!("%{:02X}", byte));
-            }
-        }
-    }
-    result
+    super::percent_encode(s)
 }
 
 /// Format epoch seconds as (timestamp, datestamp) for SigV4.
 fn format_utc(epoch_secs: u64) -> (String, String) {
-    let secs_per_day = 86400u64;
-    let mut remaining_days = epoch_secs / secs_per_day;
-    let day_secs = epoch_secs % secs_per_day;
-    let hours = day_secs / 3600;
-    let minutes = (day_secs % 3600) / 60;
-    let seconds = day_secs % 60;
-
-    let mut year = 1970u64;
-    loop {
-        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-        let days_in_year = if leap { 366 } else { 365 };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        year += 1;
-    }
-
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days_per_month: [u64; 12] = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    let mut month = 0usize;
-    while month < 12 && remaining_days >= days_per_month[month] {
-        remaining_days -= days_per_month[month];
-        month += 1;
-    }
-    let day = remaining_days + 1;
-
+    let d = super::epoch_to_date(epoch_secs);
     let timestamp = format!(
         "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
-        year,
-        month + 1,
-        day,
-        hours,
-        minutes,
-        seconds,
+        d.year, d.month, d.day, d.hours, d.minutes, d.seconds,
     );
-    let datestamp = format!("{:04}{:02}{:02}", year, month + 1, day);
+    let datestamp = format!("{:04}{:02}{:02}", d.year, d.month, d.day);
     (timestamp, datestamp)
 }
 

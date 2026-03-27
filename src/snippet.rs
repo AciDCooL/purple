@@ -387,7 +387,10 @@ pub struct ChildGuard {
 
 impl ChildGuard {
     fn new(child: std::process::Child) -> Self {
-        let pgid = child.id() as i32;
+        // i32::try_from avoids silent overflow for PIDs > i32::MAX.
+        // Fallback -1 makes killpg a harmless no-op on overflow.
+        // In practice Linux caps PIDs well below i32::MAX.
+        let pgid = i32::try_from(child.id()).unwrap_or(-1);
         Self {
             inner: std::sync::Mutex::new(Some(child)),
             pgid,

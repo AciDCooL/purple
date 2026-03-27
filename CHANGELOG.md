@@ -1,3 +1,15 @@
+## 2.14.1
+
+- Fix Oracle Cloud group header cleanup. Orphaned headers were not removed when all Oracle hosts disappeared
+- Shell-escape alias and hostname in custom askpass commands to prevent metacharacter injection
+- Strip control characters from provider config values to prevent INI format corruption
+- Terminal cleanup on TUI init failure. Raw mode and alternate screen are now restored if cursor hide or clear fails
+- Safe PID conversion in snippet process guard
+- Deduplicate percent-encoding and date formatting across provider modules
+- Cache clipboard command detection to avoid repeated subprocess spawns
+- URL-encode Vultr pagination cursor in query parameters
+- Replace tautological connection tests with real integration tests
+
 ## 2.14.0
 
 - Oracle Cloud Infrastructure (OCI) provider. Sync Compute instances via OCI REST API with RSA-SHA256 request signing

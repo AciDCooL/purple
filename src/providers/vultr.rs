@@ -70,7 +70,7 @@ impl Provider for Vultr {
                 None => "https://api.vultr.com/v2/instances?per_page=500".to_string(),
                 Some(c) => format!(
                     "https://api.vultr.com/v2/instances?per_page=500&cursor={}",
-                    c
+                    super::percent_encode(c)
                 ),
             };
             let resp: InstanceResponse = agent

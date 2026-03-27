@@ -1,31 +1,39 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 
-/// Try to find a working clipboard command by checking PATH.
+/// Cached clipboard command detection result.
+static CLIPBOARD_CMD: OnceLock<Result<&'static str, String>> = OnceLock::new();
+
+/// Try to find a working clipboard command by checking PATH (cached after first call).
 fn clipboard_cmd() -> Result<&'static str, String> {
-    let candidates = [
-        ("pbcopy", &[][..]),                         // macOS
-        ("wl-copy", &[][..]),                        // Wayland
-        ("xclip", &["-selection", "clipboard"][..]), // X11
-        ("xsel", &["--clipboard", "--input"][..]),   // X11 alt
-    ];
+    CLIPBOARD_CMD
+        .get_or_init(|| {
+            let candidates = [
+                ("pbcopy", &[][..]),                         // macOS
+                ("wl-copy", &[][..]),                        // Wayland
+                ("xclip", &["-selection", "clipboard"][..]), // X11
+                ("xsel", &["--clipboard", "--input"][..]),   // X11 alt
+            ];
 
-    for (cmd, _) in &candidates {
-        let found = Command::new("sh")
-            .args(["-c", &format!("command -v {} >/dev/null 2>&1", cmd)])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .is_ok_and(|s| s.success());
-        if found {
-            return Ok(cmd);
-        }
-    }
+            for (cmd, _) in &candidates {
+                let found = Command::new("sh")
+                    .args(["-c", &format!("command -v {} >/dev/null 2>&1", cmd)])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .is_ok_and(|s| s.success());
+                if found {
+                    return Ok(*cmd);
+                }
+            }
 
-    Err(
-        "No clipboard tool found. Install pbcopy (macOS), wl-copy (Wayland), or xclip/xsel (X11)."
-            .to_string(),
-    )
+            Err(
+                "No clipboard tool found. Install pbcopy (macOS), wl-copy (Wayland), or xclip/xsel (X11)."
+                    .to_string(),
+            )
+        })
+        .clone()
 }
 
 /// Get the extra args needed for a clipboard command.

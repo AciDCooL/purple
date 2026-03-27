@@ -355,8 +355,11 @@ fn retrieve_from_vault(spec: &str) -> Result<String> {
 }
 
 /// Retrieve via custom command. Supports %h (hostname) and %a (alias) substitution.
+/// Values are shell-escaped to prevent metacharacter injection.
 fn retrieve_from_command(cmd: &str, alias: &str, hostname: &str) -> Result<String> {
-    let expanded = cmd.replace("%a", alias).replace("%h", hostname);
+    let safe_alias = crate::snippet::shell_escape(alias);
+    let safe_hostname = crate::snippet::shell_escape(hostname);
+    let expanded = cmd.replace("%a", &safe_alias).replace("%h", &safe_hostname);
     let output = Command::new("sh")
         .args(["-c", &expanded])
         .output()
@@ -2003,5 +2006,50 @@ Host beta
         // and returns false for a non-existent alias (won't be in test keychain)
         let result = keychain_has_password("__purple_test_nonexistent_host__");
         assert!(!result);
+    }
+
+    // retrieve_from_command shell escaping
+
+    #[test]
+    fn retrieve_from_command_escapes_alias_metacharacters() {
+        // The command itself will fail but we verify the expansion is safe
+        // by using echo which shows the escaped values
+        let result = retrieve_from_command("echo %a", "$(whoami)", "host.com");
+        // echo prints the shell-escaped alias literally, not the result of $(whoami)
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output, "$(whoami)");
+    }
+
+    #[test]
+    fn retrieve_from_command_escapes_hostname_metacharacters() {
+        let result = retrieve_from_command("echo %h", "myalias", "$(id)");
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output, "$(id)");
+    }
+
+    #[test]
+    fn retrieve_from_command_escapes_backtick_injection() {
+        let result = retrieve_from_command("echo %a", "`uname`", "host");
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output, "`uname`");
+    }
+
+    #[test]
+    fn retrieve_from_command_escapes_semicolon() {
+        let result = retrieve_from_command("echo %a", "foo;id", "host");
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output, "foo;id");
+    }
+
+    #[test]
+    fn retrieve_from_command_normal_values_unchanged() {
+        let result = retrieve_from_command("echo %a %h", "myserver", "10.0.0.1");
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert_eq!(output, "myserver 10.0.0.1");
     }
 }

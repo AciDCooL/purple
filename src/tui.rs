@@ -41,8 +41,14 @@ impl Tui {
             return Err(e.into());
         }
 
-        self.terminal.hide_cursor()?;
-        self.terminal.clear()?;
+        if let Err(e) = self.terminal.hide_cursor() {
+            let _ = Self::reset();
+            return Err(e.into());
+        }
+        if let Err(e) = self.terminal.clear() {
+            let _ = Self::reset();
+            return Err(e.into());
+        }
         Ok(())
     }
 
