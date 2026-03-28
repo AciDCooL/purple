@@ -9,6 +9,7 @@ mod fs_util;
 mod handler;
 mod history;
 mod import;
+mod mcp;
 mod ping;
 mod preferences;
 mod providers;
@@ -128,6 +129,8 @@ enum Commands {
     },
     /// Update purple to the latest version
     Update,
+    /// Start MCP server (Model Context Protocol) for AI agent integration
+    Mcp,
 }
 
 #[derive(Subcommand)]
@@ -341,6 +344,10 @@ fn main() -> Result<()> {
     if let Some(Commands::Password { command }) = cli.command {
         return handle_password_command(command);
     }
+    if let Some(Commands::Mcp) = cli.command {
+        let config_path = resolve_config_path(&cli.config)?;
+        return mcp::run(&config_path);
+    }
 
     let config_path = resolve_config_path(&cli.config)?;
     let mut config = SshConfigFile::parse(&config_path)?;
@@ -374,7 +381,8 @@ fn main() -> Result<()> {
         }
         Some(Commands::Provider { .. })
         | Some(Commands::Update)
-        | Some(Commands::Password { .. }) => unreachable!(),
+        | Some(Commands::Password { .. })
+        | Some(Commands::Mcp) => unreachable!(),
         None => {}
     }
 

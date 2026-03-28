@@ -1,3 +1,12 @@
+## 2.15.0
+
+- MCP server for AI agents
+- `purple mcp` lets Claude Code, Cursor and other AI assistants list hosts, run commands and manage containers via JSON-RPC 2.0
+- Five MCP tools: list_hosts, get_host, run_command, list_containers and container_action
+- Alias validation against SSH config before any SSH execution (prevents connections to hosts outside your config)
+- SSH timeout protection on all MCP tool calls including container operations
+- Container ID injection prevention via ASCII allowlist validation
+
 ## 2.14.2
 
 - Add fuzz-equivalent property tests for SSH config parser

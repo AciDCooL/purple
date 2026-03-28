@@ -1,4 +1,4 @@
-<h1 align="center">purple.<br>Terminal SSH client with container management,<br>file transfer and cloud sync.</h1>
+<h1 align="center">purple.<br>Terminal SSH client with container management,<br>file transfer, cloud sync and AI agent integration.</h1>
 
 <p align="center">
   <strong>Stop scrolling through your SSH config. Start searching it.</strong><br>
@@ -28,8 +28,9 @@ From one terminal interface you can:
 - **Browse remote files** in a split-screen explorer and copy with a keystroke
 - **Run command snippets** across one host, a selection or all hosts at once
 - **Retrieve SSH passwords** automatically (OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault or a custom command)
+- **Integrate with AI agents** via MCP (Model Context Protocol). Claude Code, Cursor and other AI assistants can query hosts, run commands and manage containers
 
-Written in Rust. Single binary, no daemon, no runtime required. 4700+ tests. MIT license.
+Written in Rust. Single binary, no daemon, no runtime required. 4800+ tests. MIT license.
 
 ## Install
 
@@ -108,21 +109,40 @@ Press `T` on any host to manage tunnels (LocalForward, RemoteForward, DynamicFor
 
 Configure a password source per host and purple retrieves passwords automatically on connect via SSH_ASKPASS. Supported sources: **OS Keychain**, **1Password** (`op://`), **Bitwarden** (`bw:`), **pass** (`pass:`), **HashiCorp Vault** (`vault:`) or any custom command.
 
+### AI agent integration (MCP)
+
+purple ships an MCP server that lets Claude Code, Cursor and other AI agents query your SSH hosts, run remote commands and manage containers over JSON-RPC 2.0. Five tools: `list_hosts`, `get_host`, `run_command`, `list_containers` and `container_action`.
+
+**Claude Code.** Add to `~/.claude/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "purple": {
+      "command": "purple",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The client starts `purple mcp` automatically. No manual server process needed. For Cursor, Claude Desktop and other clients see the [MCP Server](https://github.com/erickochen/purple/wiki/MCP-Server) wiki page.
+
 ### Additional features
 
-- **Tags** &mdash; Organize hosts by environment, team or project. Filter with the tag picker (`#`) or `tag:web` in search
-- **Bulk import** &mdash; From hosts files or `~/.ssh/known_hosts`. Press `I` in the TUI or use `purple import` from the CLI
-- **SSH key management** &mdash; Browse keys with metadata (type, bits, fingerprint) and see which hosts use each key
-- **Round-trip fidelity** &mdash; Comments, indentation, unknown directives, CRLF line endings and Include files all preserved
-- **TCP ping** &mdash; Connectivity check per host or all at once
-- **Clipboard** &mdash; Copy the SSH command (`y`) or full config block (`x`)
-- **Atomic writes** &mdash; Temp file, chmod 600, rename. Automatic backups (last 5)
-- **Host key reset** &mdash; Detects changed host keys after a server reinstall and offers to remove the old key and reconnect
-- **Auto-reload** &mdash; Detects external config changes and reloads automatically
-- **Detail panel** &mdash; Split-pane view with connection info, activity sparkline, tags, provider metadata, tunnels, snippets and containers. Toggle with `v`
-- **Minimal UI** &mdash; Monochrome with subtle color for status messages. Works in any terminal, any font. Respects [NO_COLOR](https://no-color.org/)
-- **Shell completions** &mdash; Bash, zsh and fish via `purple --completions`
-- **Self-update** &mdash; `purple update` downloads the latest release and replaces the binary. The TUI shows update notifications
+- **Tags** Organize hosts by environment, team or project. Filter with the tag picker (`#`) or `tag:web` in search
+- **Bulk import** From hosts files or `~/.ssh/known_hosts`. Press `I` in the TUI or use `purple import` from the CLI
+- **SSH key management** Browse keys with metadata (type, bits, fingerprint) and see which hosts use each key
+- **Round-trip fidelity** Comments, indentation, unknown directives, CRLF line endings and Include files all preserved
+- **TCP ping** Connectivity check per host or all at once
+- **Clipboard** Copy the SSH command (`y`) or full config block (`x`)
+- **Atomic writes** Temp file, chmod 600, rename. Automatic backups (last 5)
+- **Host key reset** Detects changed host keys after a server reinstall and offers to remove the old key and reconnect
+- **Auto-reload** Detects external config changes and reloads automatically
+- **Detail panel** Split-pane view with connection info, activity sparkline, tags, provider metadata, tunnels, snippets and containers. Toggle with `v`
+- **Minimal UI** Monochrome with subtle color for status messages. Works in any terminal, any font. Respects [NO_COLOR](https://no-color.org/)
+- **Shell completions** Bash, zsh and fish via `purple --completions`
+- **Self-update** `purple update` downloads the latest release and replaces the binary. The TUI shows update notifications
 
 ---
 
@@ -184,7 +204,7 @@ Found a bug or have a feature request? [Open an issue on GitHub](https://github.
 
 ## Built with
 
-Written in Rust. 4700+ tests (unit, integration, property-based and HTTP mocking). Zero clippy warnings. No async runtime. Works in any terminal emulator that supports ANSI escape codes including iTerm2, Terminal.app, Alacritty, kitty, WezTerm, Warp and Windows Terminal (via WSL).
+Written in Rust. 4800+ tests (unit, integration, property-based and HTTP mocking). Zero clippy warnings. No async runtime. Works in any terminal emulator that supports ANSI escape codes including iTerm2, Terminal.app, Alacritty, kitty, WezTerm, Warp and Windows Terminal (via WSL).
 
 <p align="center">
   <a href="LICENSE">MIT License</a>

@@ -1,0 +1,6 @@
+Host tagged-1
+    HostName 10.0.5.1
+    User deploy
+    # purple:tags prod
+    # purple:provider_tags env:production,team:backend
+    # purple:provider aws:i-xyz789
