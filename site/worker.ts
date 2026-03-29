@@ -1313,7 +1313,7 @@ Provider-specific details:
 - Oracle Cloud Infrastructure (OCI): multi-region sync, reads ~/.oci/config for authentication, RSA-SHA256 HTTP Signature request signing, recursive compartment sync (enumerates sub-compartments via Identity API), IP priority (public > private), freeform tags only. Required IAM: read instance-family, read virtual-network-family and inspect compartments in tenancy
 - Proxmox VE: self-signed TLS certificates supported. Per-VM detail API calls. Guest agent and LXC interface detection
 - Scaleway: multi-zone sync across Paris, Amsterdam, Warsaw and Milan
-- Tailscale: dual mode. Without a token it uses the local `tailscale status --json` CLI (no API key needed). With a token it uses the Tailscale HTTP API. Tags are synced (tag: prefix stripped). IPv4 (100.x) preferred over IPv6
+- Tailscale: dual mode. Without a token it uses the local \`tailscale status --json\` CLI (no API key needed). With a token it uses the Tailscale HTTP API. Tags are synced (tag: prefix stripped). IPv4 (100.x) preferred over IPv6
 
 Per-provider auto_sync toggle controls startup sync. Default is true for all providers except Proxmox (default false). Manual sync via the TUI (s key) or CLI always works. Preview changes with --dry-run. Remove deleted hosts with --remove.
 
@@ -1446,7 +1446,7 @@ Q: How does provider sync handle name conflicts?
 A: Synced hosts get an alias prefix (e.g. do-web-1 for DigitalOcean). If a name collides, purple appends a numeric suffix (do-web-1-2).
 
 Q: How do I install purple?
-A: Three options: `curl -fsSL getpurple.sh | sh` (macOS and Linux, recommended), `brew install erickochen/purple/purple` (Homebrew on macOS) or `cargo install purple-ssh` (any platform with Rust).
+A: Three options: \`curl -fsSL getpurple.sh | sh\` (macOS and Linux, recommended), \`brew install erickochen/purple/purple\` (Homebrew on macOS) or \`cargo install purple-ssh\` (any platform with Rust).
 
 Q: Can I transfer files with purple?
 A: Yes. Press f on any host to open the remote file explorer. It shows your local files on the left and the remote server on the right. Navigate directories with j/k and Enter, select files with Ctrl+Space and press Enter to copy via scp. Works through ProxyJump, password sources and active tunnels. Paths are remembered per host.
