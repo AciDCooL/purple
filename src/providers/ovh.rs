@@ -137,6 +137,10 @@ impl Provider for Ovh {
             ));
         }
 
+        if cancel.load(Ordering::Relaxed) {
+            return Err(ProviderError::Cancelled);
+        }
+
         // Step 1: Get server time
         let time_url = format!("{}/auth/time", base);
         let server_time: u64 = agent
@@ -736,5 +740,16 @@ mod tests {
         };
         assert_eq!(ovh.name(), "ovh");
         assert_eq!(ovh.short_label(), "ovh");
+    }
+
+    #[test]
+    fn test_cancellation_returns_cancelled() {
+        let cancel = AtomicBool::new(true);
+        let ovh = Ovh {
+            project: "test-project".to_string(),
+            endpoint: String::new(),
+        };
+        let result = ovh.fetch_hosts_cancellable("AK:AS:CK", &cancel);
+        assert!(matches!(result, Err(ProviderError::Cancelled)));
     }
 }

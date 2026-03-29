@@ -1,3 +1,12 @@
+## 2.19.0
+
+- i3D.net provider. 15 cloud providers now supported
+- Syncs both dedicated/game servers and FlexMetal on-demand bare metal in a single sync
+- Static API key authentication via PRIVATE-TOKEN header
+- Dedicated hosts: server category and CPU specs as provider metadata
+- FlexMetal servers: location, instance type, OS and status as provider metadata. FlexMetal tags synced as provider tags
+- Cursor-based pagination for dedicated hosts, offset-based for FlexMetal
+
 ## 2.18.0
 
 - Leaseweb provider. 14 cloud providers now supported

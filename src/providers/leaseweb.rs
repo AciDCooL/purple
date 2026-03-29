@@ -253,7 +253,7 @@ impl Provider for Leaseweb {
             }
             offset += limit;
             // Safety guard: prevent infinite pagination loops
-            if offset / limit > 500 {
+            if offset / limit >= 500 {
                 break;
             }
         }
@@ -316,7 +316,7 @@ impl Provider for Leaseweb {
             }
             offset += limit;
             // Safety guard: prevent infinite pagination loops
-            if offset / limit > 500 {
+            if offset / limit >= 500 {
                 break;
             }
         }
@@ -743,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn test_http_auth_failure() {
+    fn test_http_baremetal_auth_failure() {
         let mut server = mockito::Server::new();
         let mock = server
             .mock("GET", "/bareMetals/v2/servers?limit=50&offset=0")
@@ -755,6 +755,30 @@ mod tests {
         let result = agent
             .get(&format!(
                 "{}/bareMetals/v2/servers?limit=50&offset=0",
+                server.url()
+            ))
+            .header("X-Lsw-Auth", "bad-key")
+            .call();
+
+        assert!(result.is_err());
+        let err = super::map_ureq_error(result.unwrap_err());
+        assert!(matches!(err, ProviderError::AuthFailed));
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_cloud_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/publicCloud/v1/instances?limit=50&offset=0")
+            .with_status(401)
+            .with_body(r#"{"errorCode": "401", "errorMessage": "Invalid API key"}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/publicCloud/v1/instances?limit=50&offset=0",
                 server.url()
             ))
             .header("X-Lsw-Auth", "bad-key")
@@ -1075,7 +1099,8 @@ mod tests {
             .read_json()
             .unwrap();
         // Verify the condition: offset(0) + limit(50) >= totalCount(50) -> break
-        assert!(resp.metadata.limit >= resp.metadata.total_count);
+        let offset = 0u64;
+        assert!(offset + resp.metadata.limit >= resp.metadata.total_count);
         page1.assert();
     }
 
