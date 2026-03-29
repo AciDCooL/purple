@@ -23,7 +23,7 @@ purple is a terminal SSH client and SSH config manager for macOS and Linux. It r
 From one terminal interface you can:
 
 - **Search and connect** to any host instantly with fuzzy search and frecency sorting
-- **Sync servers** from 13 cloud providers (AWS, Azure, DigitalOcean, GCP, Hetzner, Linode, OCI, OVHcloud, Proxmox, Scaleway, Tailscale, UpCloud and Vultr)
+- **Sync servers** from 14 cloud providers (AWS, Azure, DigitalOcean, GCP, Hetzner, Leaseweb, Linode, OCI, OVHcloud, Proxmox, Scaleway, Tailscale, UpCloud and Vultr)
 - **Manage containers** over SSH (Docker and Podman, no agent required)
 - **Browse remote files** in a split-screen explorer and copy with a keystroke
 - **Run command snippets** across one host, a selection or all hosts at once

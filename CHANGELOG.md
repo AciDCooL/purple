@@ -1,3 +1,12 @@
+## 2.18.0
+
+- Leaseweb provider. 14 cloud providers now supported
+- Syncs both dedicated (bare metal) servers and public cloud instances in a single sync
+- Static API key authentication via X-Lsw-Auth header
+- Dedicated servers: location, specs (CPU and RAM) and delivery status as provider metadata
+- Public cloud instances: region, instance type, OS image and state as provider metadata
+- Offset-based pagination for both product lines
+
 ## 2.17.0
 
 - OVHcloud Public Cloud provider. 13 cloud providers now supported

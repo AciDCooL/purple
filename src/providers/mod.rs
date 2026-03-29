@@ -4,6 +4,7 @@ pub mod config;
 mod digitalocean;
 pub mod gcp;
 mod hetzner;
+mod leaseweb;
 mod linode;
 pub mod oracle;
 pub mod ovh;
@@ -116,6 +117,7 @@ pub const PROVIDER_NAMES: &[&str] = &[
     "tailscale",
     "oracle",
     "ovh",
+    "leaseweb",
 ];
 
 /// Get a provider implementation by name.
@@ -151,6 +153,7 @@ pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
             project: String::new(),
             endpoint: String::new(),
         })),
+        "leaseweb" => Some(Box::new(leaseweb::Leaseweb)),
         _ => None,
     }
 }
@@ -234,6 +237,7 @@ pub fn provider_display_name(name: &str) -> &str {
         "tailscale" => "Tailscale",
         "oracle" => "Oracle Cloud",
         "ovh" => "OVHcloud",
+        "leaseweb" => "Leaseweb",
         other => other,
     }
 }
@@ -634,6 +638,7 @@ mod tests {
         assert_eq!(provider_display_name("tailscale"), "Tailscale");
         assert_eq!(provider_display_name("oracle"), "Oracle Cloud");
         assert_eq!(provider_display_name("ovh"), "OVHcloud");
+        assert_eq!(provider_display_name("leaseweb"), "Leaseweb");
     }
 
     #[test]
@@ -651,7 +656,7 @@ mod tests {
 
     #[test]
     fn test_provider_names_count() {
-        assert_eq!(PROVIDER_NAMES.len(), 13);
+        assert_eq!(PROVIDER_NAMES.len(), 14);
     }
 
     #[test]
@@ -669,6 +674,7 @@ mod tests {
         assert!(PROVIDER_NAMES.contains(&"tailscale"));
         assert!(PROVIDER_NAMES.contains(&"oracle"));
         assert!(PROVIDER_NAMES.contains(&"ovh"));
+        assert!(PROVIDER_NAMES.contains(&"leaseweb"));
     }
 
     // =========================================================================
@@ -908,6 +914,7 @@ mod tests {
         assert_eq!(provider_display_name("tailscale"), "Tailscale");
         assert_eq!(provider_display_name("oracle"), "Oracle Cloud");
         assert_eq!(provider_display_name("ovh"), "OVHcloud");
+        assert_eq!(provider_display_name("leaseweb"), "Leaseweb");
     }
 
     #[test]
@@ -946,8 +953,8 @@ mod tests {
     // =========================================================================
 
     #[test]
-    fn test_provider_names_has_all_thirteen() {
-        assert_eq!(PROVIDER_NAMES.len(), 13);
+    fn test_provider_names_has_all_fourteen() {
+        assert_eq!(PROVIDER_NAMES.len(), 14);
         assert!(PROVIDER_NAMES.contains(&"digitalocean"));
         assert!(PROVIDER_NAMES.contains(&"proxmox"));
         assert!(PROVIDER_NAMES.contains(&"aws"));
@@ -956,6 +963,7 @@ mod tests {
         assert!(PROVIDER_NAMES.contains(&"tailscale"));
         assert!(PROVIDER_NAMES.contains(&"oracle"));
         assert!(PROVIDER_NAMES.contains(&"ovh"));
+        assert!(PROVIDER_NAMES.contains(&"leaseweb"));
     }
 
     // =========================================================================
@@ -976,6 +984,9 @@ mod tests {
             ("gcp", "gcp"),
             ("azure", "az"),
             ("tailscale", "ts"),
+            ("oracle", "oci"),
+            ("ovh", "ovh"),
+            ("leaseweb", "lsw"),
         ];
         for (name, expected_label) in &cases {
             let p = get_provider(name).unwrap();
