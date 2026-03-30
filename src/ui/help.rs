@@ -205,6 +205,7 @@ fn host_list_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
     let mut col2 = vec![blank()];
     col2.extend(section_header("MANAGE HOSTS"));
     col2.push(help_line("a", "add host"));
+    col2.push(help_line("A", "add pattern"));
     col2.push(help_line("e", "edit"));
     col2.push(help_line("d", "del"));
     col2.push(help_line("c", "clone"));

@@ -153,6 +153,22 @@ impl HostEntry {
     }
 }
 
+/// Convenience view for pattern Host blocks in the TUI.
+#[derive(Debug, Clone, Default)]
+pub struct PatternEntry {
+    pub pattern: String,
+    pub hostname: String,
+    pub user: String,
+    pub port: u16,
+    pub identity_file: String,
+    pub proxy_jump: String,
+    pub tags: Vec<String>,
+    pub askpass: Option<String>,
+    pub source_file: Option<PathBuf>,
+    /// All non-comment directives as key-value pairs for display.
+    pub directives: Vec<(String, String)>,
+}
+
 /// Returns true if the host pattern contains wildcards, character classes,
 /// negation or whitespace-separated multi-patterns (*, ?, [], !, space/tab).
 /// These are SSH match patterns, not concrete hosts.
@@ -163,6 +179,144 @@ pub fn is_host_pattern(pattern: &str) -> bool {
         || pattern.starts_with('!')
         || pattern.contains(' ')
         || pattern.contains('\t')
+}
+
+/// Match a text string against an SSH host pattern.
+/// Supports `*` (any sequence), `?` (single char), `[charset]` (character class),
+/// `[!charset]`/`[^charset]` (negated class), `[a-z]` (ranges) and `!pattern` (negation).
+pub fn ssh_pattern_match(pattern: &str, text: &str) -> bool {
+    if let Some(rest) = pattern.strip_prefix('!') {
+        return !match_glob(rest, text);
+    }
+    match_glob(pattern, text)
+}
+
+/// Core glob matcher without negation prefix handling.
+/// Empty text only matches empty pattern.
+fn match_glob(pattern: &str, text: &str) -> bool {
+    if text.is_empty() {
+        return pattern.is_empty();
+    }
+    if pattern.is_empty() {
+        return false;
+    }
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    glob_match(&pat, &txt)
+}
+
+/// Iterative glob matching with star-backtracking.
+fn glob_match(pat: &[char], txt: &[char]) -> bool {
+    let mut pi = 0;
+    let mut ti = 0;
+    let mut star: Option<(usize, usize)> = None; // (pattern_pos, text_pos)
+
+    while ti < txt.len() {
+        if pi < pat.len() && pat[pi] == '?' {
+            pi += 1;
+            ti += 1;
+        } else if pi < pat.len() && pat[pi] == '*' {
+            star = Some((pi + 1, ti));
+            pi += 1;
+        } else if pi < pat.len() && pat[pi] == '[' {
+            if let Some((matches, end)) = match_char_class(pat, pi, txt[ti]) {
+                if matches {
+                    pi = end;
+                    ti += 1;
+                } else if let Some((spi, sti)) = star {
+                    let sti = sti + 1;
+                    star = Some((spi, sti));
+                    pi = spi;
+                    ti = sti;
+                } else {
+                    return false;
+                }
+            } else if let Some((spi, sti)) = star {
+                // Malformed class: backtrack
+                let sti = sti + 1;
+                star = Some((spi, sti));
+                pi = spi;
+                ti = sti;
+            } else {
+                return false;
+            }
+        } else if pi < pat.len() && pat[pi] == txt[ti] {
+            pi += 1;
+            ti += 1;
+        } else if let Some((spi, sti)) = star {
+            let sti = sti + 1;
+            star = Some((spi, sti));
+            pi = spi;
+            ti = sti;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < pat.len() && pat[pi] == '*' {
+        pi += 1;
+    }
+    pi == pat.len()
+}
+
+/// Parse and match a `[...]` character class starting at `pat[start]`.
+/// Returns `Some((matched, end_index))` where `end_index` is past `]`.
+/// Returns `None` if no closing `]` is found.
+fn match_char_class(pat: &[char], start: usize, ch: char) -> Option<(bool, usize)> {
+    let mut i = start + 1;
+    if i >= pat.len() {
+        return None;
+    }
+
+    let negate = pat[i] == '!' || pat[i] == '^';
+    if negate {
+        i += 1;
+    }
+
+    let mut matched = false;
+    while i < pat.len() && pat[i] != ']' {
+        if i + 2 < pat.len() && pat[i + 1] == '-' && pat[i + 2] != ']' {
+            let lo = pat[i];
+            let hi = pat[i + 2];
+            if ch >= lo && ch <= hi {
+                matched = true;
+            }
+            i += 3;
+        } else {
+            matched |= pat[i] == ch;
+            i += 1;
+        }
+    }
+
+    if i >= pat.len() {
+        return None;
+    }
+
+    let result = if negate { !matched } else { matched };
+    Some((result, i + 1))
+}
+
+/// Check whether a `Host` pattern matches a given alias.
+/// OpenSSH `Host` keyword matches only against the target alias typed on the
+/// command line, never against the resolved HostName.
+pub fn host_pattern_matches(host_pattern: &str, alias: &str) -> bool {
+    let patterns: Vec<&str> = host_pattern.split_whitespace().collect();
+    if patterns.is_empty() {
+        return false;
+    }
+
+    let mut any_positive_match = false;
+    for pat in &patterns {
+        if let Some(neg) = pat.strip_prefix('!') {
+            if match_glob(neg, alias) {
+                return false;
+            }
+        } else if ssh_pattern_match(pat, alias) {
+            any_positive_match = true;
+        }
+    }
+
+    any_positive_match
 }
 
 impl HostBlock {
@@ -545,6 +699,41 @@ impl HostBlock {
         entry
     }
 
+    /// Extract a convenience PatternEntry view from this block.
+    pub fn to_pattern_entry(&self) -> PatternEntry {
+        let mut entry = PatternEntry {
+            pattern: self.host_pattern.clone(),
+            hostname: String::new(),
+            user: String::new(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            tags: self.tags(),
+            askpass: self.askpass(),
+            source_file: None,
+            directives: Vec::new(),
+        };
+        for d in &self.directives {
+            if d.is_non_directive {
+                continue;
+            }
+            match d.key.to_ascii_lowercase().as_str() {
+                "hostname" => entry.hostname = d.value.clone(),
+                "user" => entry.user = d.value.clone(),
+                "port" => entry.port = d.value.parse().unwrap_or(22),
+                "identityfile" => {
+                    if entry.identity_file.is_empty() {
+                        entry.identity_file = d.value.clone();
+                    }
+                }
+                "proxyjump" => entry.proxy_jump = d.value.clone(),
+                _ => {}
+            }
+            entry.directives.push((d.key.clone(), d.value.clone()));
+        }
+        entry
+    }
+
     /// Count forwarding directives (LocalForward, RemoteForward, DynamicForward).
     pub fn tunnel_count(&self) -> u16 {
         let count = self
@@ -587,6 +776,77 @@ impl SshConfigFile {
         let mut entries = Vec::new();
         Self::collect_host_entries(&self.elements, &mut entries);
         entries
+    }
+
+    /// Get all pattern entries as convenience views (including from Include files).
+    pub fn pattern_entries(&self) -> Vec<PatternEntry> {
+        let mut entries = Vec::new();
+        Self::collect_pattern_entries(&self.elements, &mut entries);
+        entries
+    }
+
+    fn collect_pattern_entries(elements: &[ConfigElement], entries: &mut Vec<PatternEntry>) {
+        for e in elements {
+            match e {
+                ConfigElement::HostBlock(block) => {
+                    if !is_host_pattern(&block.host_pattern) {
+                        continue;
+                    }
+                    entries.push(block.to_pattern_entry());
+                }
+                ConfigElement::Include(include) => {
+                    for file in &include.resolved_files {
+                        let start = entries.len();
+                        Self::collect_pattern_entries(&file.elements, entries);
+                        for entry in &mut entries[start..] {
+                            if entry.source_file.is_none() {
+                                entry.source_file = Some(file.path.clone());
+                            }
+                        }
+                    }
+                }
+                ConfigElement::GlobalLine(_) => {}
+            }
+        }
+    }
+
+    /// Find all pattern blocks that match a given host alias and hostname.
+    /// Returns entries in config order (first match first).
+    pub fn matching_patterns(&self, alias: &str) -> Vec<PatternEntry> {
+        let mut matches = Vec::new();
+        Self::collect_matching_patterns(&self.elements, alias, &mut matches);
+        matches
+    }
+
+    fn collect_matching_patterns(
+        elements: &[ConfigElement],
+        alias: &str,
+        matches: &mut Vec<PatternEntry>,
+    ) {
+        for e in elements {
+            match e {
+                ConfigElement::HostBlock(block) => {
+                    if !is_host_pattern(&block.host_pattern) {
+                        continue;
+                    }
+                    if host_pattern_matches(&block.host_pattern, alias) {
+                        matches.push(block.to_pattern_entry());
+                    }
+                }
+                ConfigElement::Include(include) => {
+                    for file in &include.resolved_files {
+                        let start = matches.len();
+                        Self::collect_matching_patterns(&file.elements, alias, matches);
+                        for entry in &mut matches[start..] {
+                            if entry.source_file.is_none() {
+                                entry.source_file = Some(file.path.clone());
+                            }
+                        }
+                    }
+                }
+                ConfigElement::GlobalLine(_) => {}
+            }
+        }
     }
 
     /// Collect all resolved Include file paths (recursively).
@@ -3605,5 +3865,401 @@ Host complex
 
         config.clear_host_stale("web");
         assert_eq!(config.serialize(), config_str);
+    }
+
+    #[test]
+    fn pattern_match_star_wildcard() {
+        assert!(ssh_pattern_match("*", "anything"));
+        assert!(ssh_pattern_match("10.30.0.*", "10.30.0.5"));
+        assert!(ssh_pattern_match("10.30.0.*", "10.30.0.100"));
+        assert!(!ssh_pattern_match("10.30.0.*", "10.30.1.5"));
+        assert!(ssh_pattern_match("*.example.com", "web.example.com"));
+        assert!(!ssh_pattern_match("*.example.com", "example.com"));
+        assert!(ssh_pattern_match("prod-*-web", "prod-us-web"));
+        assert!(!ssh_pattern_match("prod-*-web", "prod-us-api"));
+    }
+
+    #[test]
+    fn pattern_match_question_mark() {
+        assert!(ssh_pattern_match("server-?", "server-1"));
+        assert!(ssh_pattern_match("server-?", "server-a"));
+        assert!(!ssh_pattern_match("server-?", "server-10"));
+        assert!(!ssh_pattern_match("server-?", "server-"));
+    }
+
+    #[test]
+    fn pattern_match_character_class() {
+        assert!(ssh_pattern_match("server-[abc]", "server-a"));
+        assert!(ssh_pattern_match("server-[abc]", "server-c"));
+        assert!(!ssh_pattern_match("server-[abc]", "server-d"));
+        assert!(ssh_pattern_match("server-[0-9]", "server-5"));
+        assert!(!ssh_pattern_match("server-[0-9]", "server-a"));
+        assert!(ssh_pattern_match("server-[!abc]", "server-d"));
+        assert!(!ssh_pattern_match("server-[!abc]", "server-a"));
+        assert!(ssh_pattern_match("server-[^abc]", "server-d"));
+        assert!(!ssh_pattern_match("server-[^abc]", "server-a"));
+    }
+
+    #[test]
+    fn pattern_match_negation() {
+        assert!(!ssh_pattern_match("!prod-*", "prod-web"));
+        assert!(ssh_pattern_match("!prod-*", "staging-web"));
+    }
+
+    #[test]
+    fn pattern_match_exact() {
+        assert!(ssh_pattern_match("myserver", "myserver"));
+        assert!(!ssh_pattern_match("myserver", "myserver2"));
+        assert!(!ssh_pattern_match("myserver", "other"));
+    }
+
+    #[test]
+    fn pattern_match_empty() {
+        assert!(!ssh_pattern_match("", "anything"));
+        assert!(!ssh_pattern_match("*", ""));
+        assert!(ssh_pattern_match("", ""));
+    }
+
+    #[test]
+    fn host_pattern_matches_multi_pattern() {
+        assert!(host_pattern_matches("prod staging", "prod"));
+        assert!(host_pattern_matches("prod staging", "staging"));
+        assert!(!host_pattern_matches("prod staging", "dev"));
+    }
+
+    #[test]
+    fn host_pattern_matches_with_negation() {
+        assert!(host_pattern_matches(
+            "*.example.com !internal.example.com",
+            "web.example.com",
+        ));
+        assert!(!host_pattern_matches(
+            "*.example.com !internal.example.com",
+            "internal.example.com",
+        ));
+    }
+
+    #[test]
+    fn host_pattern_matches_alias_only() {
+        // OpenSSH Host keyword matches only against alias, not HostName
+        assert!(!host_pattern_matches("10.30.0.*", "production"));
+        assert!(host_pattern_matches("prod*", "production"));
+        assert!(!host_pattern_matches("staging*", "production"));
+    }
+
+    #[test]
+    fn pattern_entries_collects_wildcards() {
+        let config = parse_str(
+            "Host myserver\n  Hostname 10.0.0.1\n\nHost 10.30.0.*\n  User debian\n  ProxyJump bastion\n\nHost *\n  ServerAliveInterval 60\n",
+        );
+        let patterns = config.pattern_entries();
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0].pattern, "10.30.0.*");
+        assert_eq!(patterns[0].user, "debian");
+        assert_eq!(patterns[0].proxy_jump, "bastion");
+        assert_eq!(patterns[1].pattern, "*");
+        assert!(
+            patterns[1]
+                .directives
+                .iter()
+                .any(|(k, v)| k == "ServerAliveInterval" && v == "60")
+        );
+    }
+
+    #[test]
+    fn pattern_entries_empty_when_no_patterns() {
+        let config = parse_str("Host myserver\n  Hostname 10.0.0.1\n");
+        let patterns = config.pattern_entries();
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn matching_patterns_returns_in_config_order() {
+        let config = parse_str(
+            "Host 10.30.0.*\n  User debian\n\nHost myserver\n  Hostname 10.30.0.5\n\nHost *\n  ServerAliveInterval 60\n",
+        );
+        // "myserver" matches "*" but not "10.30.0.*" (alias-only matching)
+        let matches = config.matching_patterns("myserver");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].pattern, "*");
+    }
+
+    #[test]
+    fn matching_patterns_negation_excludes() {
+        let config = parse_str(
+            "Host * !bastion\n  ServerAliveInterval 60\n\nHost bastion\n  Hostname 10.0.0.1\n",
+        );
+        let matches = config.matching_patterns("bastion");
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn pattern_entries_and_host_entries_are_disjoint() {
+        let config = parse_str(
+            "Host myserver\n  Hostname 10.0.0.1\n\nHost 10.30.0.*\n  User debian\n\nHost *\n  ServerAliveInterval 60\n",
+        );
+        let hosts = config.host_entries();
+        let patterns = config.pattern_entries();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].alias, "myserver");
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0].pattern, "10.30.0.*");
+        assert_eq!(patterns[1].pattern, "*");
+    }
+
+    #[test]
+    fn pattern_crud_round_trip() {
+        let mut config = parse_str("Host myserver\n  Hostname 10.0.0.1\n");
+        // Add a pattern via HostEntry (the form uses HostEntry for submission)
+        let entry = HostEntry {
+            alias: "10.30.0.*".to_string(),
+            user: "debian".to_string(),
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        assert!(output.contains("Host 10.30.0.*"));
+        assert!(output.contains("User debian"));
+        // Verify it appears in pattern_entries, not host_entries
+        let reparsed = parse_str(&output);
+        assert_eq!(reparsed.host_entries().len(), 1);
+        assert_eq!(reparsed.pattern_entries().len(), 1);
+        assert_eq!(reparsed.pattern_entries()[0].pattern, "10.30.0.*");
+    }
+
+    #[test]
+    fn matching_patterns_full_ssh_semantics() {
+        let config = parse_str(
+            "Host 10.30.0.*\n  User debian\n  IdentityFile ~/.ssh/id_bootstrap\n  ProxyJump bastion\n\n\
+             Host *.internal !secret.internal\n  ForwardAgent yes\n\n\
+             Host myserver\n  Hostname 10.30.0.5\n\n\
+             Host *\n  ServerAliveInterval 60\n",
+        );
+        // "myserver" only matches "*" (alias-only, not hostname)
+        let matches = config.matching_patterns("myserver");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].pattern, "*");
+        assert!(
+            matches[0]
+                .directives
+                .iter()
+                .any(|(k, v)| k == "ServerAliveInterval" && v == "60")
+        );
+    }
+
+    #[test]
+    fn pattern_entries_preserve_all_directives() {
+        let config = parse_str(
+            "Host *.example.com\n  User admin\n  Port 2222\n  IdentityFile ~/.ssh/id_example\n  ProxyJump gateway\n  ServerAliveInterval 30\n  ForwardAgent yes\n",
+        );
+        let patterns = config.pattern_entries();
+        assert_eq!(patterns.len(), 1);
+        let p = &patterns[0];
+        assert_eq!(p.pattern, "*.example.com");
+        assert_eq!(p.user, "admin");
+        assert_eq!(p.port, 2222);
+        assert_eq!(p.identity_file, "~/.ssh/id_example");
+        assert_eq!(p.proxy_jump, "gateway");
+        // All directives should be in the directives vec
+        assert_eq!(p.directives.len(), 6);
+        assert!(
+            p.directives
+                .iter()
+                .any(|(k, v)| k == "ForwardAgent" && v == "yes")
+        );
+        assert!(
+            p.directives
+                .iter()
+                .any(|(k, v)| k == "ServerAliveInterval" && v == "30")
+        );
+    }
+
+    // --- Pattern visibility tests ---
+
+    #[test]
+    fn roundtrip_pattern_blocks_preserved() {
+        let input = "Host myserver\n  Hostname 10.0.0.1\n  User root\n\nHost 10.30.0.*\n  User debian\n  IdentityFile ~/.ssh/id_bootstrap\n  ProxyJump bastion\n\nHost *\n  ServerAliveInterval 60\n  AddKeysToAgent yes\n";
+        let config = parse_str(input);
+        let output = config.serialize();
+        assert_eq!(
+            input, output,
+            "Pattern blocks must survive round-trip exactly"
+        );
+    }
+
+    #[test]
+    fn add_pattern_preserves_existing_config() {
+        let input = "Host myserver\n  Hostname 10.0.0.1\n\nHost otherserver\n  Hostname 10.0.0.2\n\nHost *\n  ServerAliveInterval 60\n";
+        let mut config = parse_str(input);
+        let entry = HostEntry {
+            alias: "10.30.0.*".to_string(),
+            user: "debian".to_string(),
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        // Original hosts must still be there
+        assert!(output.contains("Host myserver"));
+        assert!(output.contains("Hostname 10.0.0.1"));
+        assert!(output.contains("Host otherserver"));
+        assert!(output.contains("Hostname 10.0.0.2"));
+        // New pattern must be present
+        assert!(output.contains("Host 10.30.0.*"));
+        assert!(output.contains("User debian"));
+        // Host * must still be at the end
+        assert!(output.contains("Host *"));
+        // New pattern must be BEFORE Host * (SSH first-match-wins)
+        let new_pos = output.find("Host 10.30.0.*").unwrap();
+        let star_pos = output.find("Host *").unwrap();
+        assert!(new_pos < star_pos, "New pattern must be before Host *");
+        // Reparse and verify counts
+        let reparsed = parse_str(&output);
+        assert_eq!(reparsed.host_entries().len(), 2);
+        assert_eq!(reparsed.pattern_entries().len(), 2); // 10.30.0.* and *
+    }
+
+    #[test]
+    fn update_pattern_preserves_other_blocks() {
+        let input = "Host myserver\n  Hostname 10.0.0.1\n\nHost 10.30.0.*\n  User debian\n\nHost *\n  ServerAliveInterval 60\n";
+        let mut config = parse_str(input);
+        let updated = HostEntry {
+            alias: "10.30.0.*".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        };
+        config.update_host("10.30.0.*", &updated);
+        let output = config.serialize();
+        // Pattern updated
+        assert!(output.contains("User admin"));
+        assert!(!output.contains("User debian"));
+        // Other blocks unchanged
+        assert!(output.contains("Host myserver"));
+        assert!(output.contains("Hostname 10.0.0.1"));
+        assert!(output.contains("Host *"));
+        assert!(output.contains("ServerAliveInterval 60"));
+    }
+
+    #[test]
+    fn delete_pattern_preserves_other_blocks() {
+        let input = "Host myserver\n  Hostname 10.0.0.1\n\nHost 10.30.0.*\n  User debian\n\nHost *\n  ServerAliveInterval 60\n";
+        let mut config = parse_str(input);
+        config.delete_host("10.30.0.*");
+        let output = config.serialize();
+        assert!(!output.contains("Host 10.30.0.*"));
+        assert!(!output.contains("User debian"));
+        assert!(output.contains("Host myserver"));
+        assert!(output.contains("Hostname 10.0.0.1"));
+        assert!(output.contains("Host *"));
+        assert!(output.contains("ServerAliveInterval 60"));
+        let reparsed = parse_str(&output);
+        assert_eq!(reparsed.host_entries().len(), 1);
+        assert_eq!(reparsed.pattern_entries().len(), 1); // only Host *
+    }
+
+    #[test]
+    fn update_pattern_rename() {
+        let input = "Host *.example.com\n  User admin\n\nHost myserver\n  Hostname 10.0.0.1\n";
+        let mut config = parse_str(input);
+        let renamed = HostEntry {
+            alias: "*.prod.example.com".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        };
+        config.update_host("*.example.com", &renamed);
+        let output = config.serialize();
+        assert!(
+            !output.contains("Host *.example.com\n"),
+            "Old pattern removed"
+        );
+        assert!(
+            output.contains("Host *.prod.example.com"),
+            "New pattern present"
+        );
+        assert!(output.contains("Host myserver"), "Other host preserved");
+    }
+
+    #[test]
+    fn config_with_only_patterns() {
+        let input = "Host *.example.com\n  User admin\n\nHost *\n  ServerAliveInterval 60\n";
+        let config = parse_str(input);
+        assert!(config.host_entries().is_empty());
+        assert_eq!(config.pattern_entries().len(), 2);
+        // Round-trip
+        let output = config.serialize();
+        assert_eq!(input, output);
+    }
+
+    #[test]
+    fn host_pattern_matches_all_negative_returns_false() {
+        assert!(!host_pattern_matches("!prod !staging", "anything"));
+        assert!(!host_pattern_matches("!prod !staging", "dev"));
+    }
+
+    #[test]
+    fn host_pattern_matches_negation_only_checks_alias() {
+        // Negation matches against alias only
+        assert!(host_pattern_matches("* !10.0.0.1", "myserver"));
+        assert!(!host_pattern_matches("* !myserver", "myserver"));
+    }
+
+    #[test]
+    fn pattern_match_malformed_char_class() {
+        // Unmatched bracket: should not panic, treat as no-match
+        assert!(!ssh_pattern_match("[abc", "a"));
+        assert!(!ssh_pattern_match("[", "a"));
+        // Empty class body before ]
+        assert!(!ssh_pattern_match("[]", "a"));
+    }
+
+    #[test]
+    fn host_pattern_matches_whitespace_edge_cases() {
+        assert!(host_pattern_matches("prod  staging", "prod"));
+        assert!(host_pattern_matches("  prod  ", "prod"));
+        assert!(host_pattern_matches("prod\tstaging", "prod"));
+        assert!(!host_pattern_matches("   ", "anything"));
+        assert!(!host_pattern_matches("", "anything"));
+    }
+
+    #[test]
+    fn pattern_with_metadata_roundtrip() {
+        let input = "Host 10.30.0.*\n  User debian\n  # purple:tags internal,vpn\n  # purple:askpass keychain\n\nHost myserver\n  Hostname 10.0.0.1\n";
+        let config = parse_str(input);
+        let patterns = config.pattern_entries();
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].tags, vec!["internal", "vpn"]);
+        assert_eq!(patterns[0].askpass.as_deref(), Some("keychain"));
+        // Round-trip
+        let output = config.serialize();
+        assert_eq!(input, output);
+    }
+
+    #[test]
+    fn matching_patterns_multiple_in_config_order() {
+        // Use alias-based patterns that match the alias "my-10-server"
+        let input = "Host my-*\n  User fallback\n\nHost my-10*\n  User team\n\nHost my-10-*\n  User specific\n\nHost other\n  Hostname 10.30.0.5\n\nHost *\n  ServerAliveInterval 60\n";
+        let config = parse_str(input);
+        let matches = config.matching_patterns("my-10-server");
+        assert_eq!(matches.len(), 4);
+        assert_eq!(matches[0].pattern, "my-*");
+        assert_eq!(matches[1].pattern, "my-10*");
+        assert_eq!(matches[2].pattern, "my-10-*");
+        assert_eq!(matches[3].pattern, "*");
+    }
+
+    #[test]
+    fn add_pattern_to_empty_config() {
+        let mut config = parse_str("");
+        let entry = HostEntry {
+            alias: "*.example.com".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        assert!(output.contains("Host *.example.com"));
+        assert!(output.contains("User admin"));
+        let reparsed = parse_str(&output);
+        assert!(reparsed.host_entries().is_empty());
+        assert_eq!(reparsed.pattern_entries().len(), 1);
     }
 }

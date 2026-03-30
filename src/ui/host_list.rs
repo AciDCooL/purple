@@ -359,17 +359,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         super::render_footer_with_status(frame, chunks[3], tag_footer_spans(), app);
     } else {
         render_display_list(frame, app, list_area);
-        super::render_footer_with_status(
-            frame,
-            chunks[2],
+        let spans = if app.is_pattern_selected() {
+            pattern_footer_spans(target_detail)
+        } else {
             footer_spans(
                 target_detail,
                 app.multi_select.len(),
                 app.group_by_provider,
                 app.hosts.iter().filter(|h| h.stale.is_some()).count(),
-            ),
-            app,
-        );
+            )
+        };
+        super::render_footer_with_status(frame, chunks[2], spans, app);
     }
 
     if let Some(detail) = detail_area {
@@ -387,7 +387,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
 fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
     // Build multi-span title: brand badge + position counter
-    let host_count = app.hosts.len();
+    let host_count = app.hosts.len() + app.patterns.len();
     let title = if host_count == 0 {
         Line::from(Span::styled(" purple. ", theme::brand_badge()))
     } else {
@@ -397,7 +397,12 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
                 .map(|slice| {
                     slice
                         .iter()
-                        .filter(|item| matches!(item, HostListItem::Host { .. }))
+                        .filter(|item| {
+                            matches!(
+                                item,
+                                HostListItem::Host { .. } | HostListItem::Pattern { .. }
+                            )
+                        })
                         .count()
                 })
                 .unwrap_or(0)
@@ -541,7 +546,7 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
                 HostListItem::GroupHeader(text) => {
                     current_group = Some(text.as_str());
                 }
-                HostListItem::Host { .. } => {
+                HostListItem::Host { .. } | HostListItem::Pattern { .. } => {
                     if let Some(group) = current_group {
                         *counts.entry(group).or_insert(0) += 1;
                     }
@@ -583,6 +588,13 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
                     items.push(ListItem::new(Line::from(Span::raw(""))));
                 }
             }
+            HostListItem::Pattern { index } => {
+                if let Some(pattern) = app.patterns.get(*index) {
+                    items.push(build_pattern_item(pattern, &cols));
+                } else {
+                    items.push(ListItem::new(Line::from(Span::raw(""))));
+                }
+            }
         }
     }
 
@@ -594,13 +606,12 @@ fn render_display_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::
 }
 
 fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect) {
+    let total_results =
+        app.search.filtered_indices.len() + app.search.filtered_pattern_indices.len();
+    let total = app.hosts.len() + app.patterns.len();
     let title = Line::from(vec![
         Span::styled(" purple. ", theme::brand_badge()),
-        Span::raw(format!(
-            " search: {}/{} ",
-            app.search.filtered_indices.len(),
-            app.hosts.len()
-        )),
+        Span::raw(format!(" search: {}/{} ", total_results, total)),
     ]);
 
     let update_title = app.update_available.as_ref().map(|ver| {
@@ -615,7 +626,7 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
 
     let url_label = Line::from(Span::styled(" getpurple.sh ", theme::muted()));
 
-    if app.search.filtered_indices.is_empty() {
+    if app.search.filtered_indices.is_empty() && app.search.filtered_pattern_indices.is_empty() {
         let mut block = Block::bordered()
             .border_type(BorderType::Rounded)
             .title(title)
@@ -726,6 +737,11 @@ fn render_search_list(frame: &mut Frame, app: &mut App, area: ratatui::layout::R
                 app.multi_select.contains(&idx),
             );
             items.push(list_item);
+        }
+    }
+    for &idx in app.search.filtered_pattern_indices.iter() {
+        if let Some(pattern) = app.patterns.get(idx) {
+            items.push(build_pattern_item(pattern, &cols));
         }
     }
 
@@ -1044,6 +1060,145 @@ fn build_host_item<'a>(
     ListItem::new(Line::from(spans))
 }
 
+fn build_pattern_item<'a>(
+    pattern: &'a crate::ssh_config::model::PatternEntry,
+    cols: &Columns,
+) -> ListItem<'a> {
+    let gap = " ".repeat(cols.gap);
+    let mut spans: Vec<Span> = Vec::new();
+
+    // NAME column: * prefix in accent, pattern text in muted
+    let prefix = "* ";
+    let prefix_w = UnicodeWidthStr::width(prefix);
+    let alias_budget = cols.alias.saturating_sub(prefix_w);
+    let pattern_trunc = super::truncate(&pattern.pattern, alias_budget);
+
+    spans.push(Span::styled(format!("  {}", prefix), theme::accent()));
+    spans.push(Span::styled(
+        format!("{:<width$}", pattern_trunc, width = alias_budget),
+        theme::muted(),
+    ));
+    spans.push(Span::raw(gap.clone()));
+
+    // HOST column: hostname if present, else empty
+    let host_display = if !pattern.hostname.is_empty() {
+        super::truncate(&pattern.hostname, cols.host)
+    } else {
+        String::new()
+    };
+    let host_used = UnicodeWidthStr::width(host_display.as_str());
+    if !host_display.is_empty() {
+        spans.push(Span::styled(host_display, theme::muted()));
+    }
+    let host_pad = cols.host.saturating_sub(host_used);
+    if host_pad > 0 {
+        spans.push(Span::raw(" ".repeat(host_pad)));
+    }
+
+    // AUTH column: identity file if present
+    if cols.flex_gap > 0 {
+        spans.push(Span::raw(" ".repeat(cols.flex_gap)));
+    }
+    if cols.auth > 0 {
+        let auth_display = if !pattern.identity_file.is_empty() {
+            let path = std::path::Path::new(&pattern.identity_file);
+            let label = path
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_else(|| pattern.identity_file.clone());
+            super::truncate(&label, cols.auth)
+        } else {
+            String::new()
+        };
+        let auth_used = UnicodeWidthStr::width(auth_display.as_str());
+        if !auth_display.is_empty() {
+            spans.push(Span::styled(auth_display, theme::muted()));
+        }
+        let auth_pad = cols.auth.saturating_sub(auth_used);
+        if auth_pad > 0 {
+            spans.push(Span::raw(" ".repeat(auth_pad)));
+        }
+        spans.push(Span::raw(gap.clone()));
+    }
+    if cols.tunnel > 0 {
+        spans.push(Span::raw(" ".repeat(cols.tunnel)));
+        spans.push(Span::raw(gap.clone()));
+    }
+    if cols.show_ping {
+        spans.push(Span::raw("    "));
+        spans.push(Span::raw(gap.clone()));
+    }
+    if cols.tags > 0 {
+        build_pattern_tag_column(&mut spans, pattern, cols.tags);
+        if cols.history > 0 {
+            spans.push(Span::raw(gap));
+        }
+    }
+    if cols.history > 0 {
+        spans.push(Span::raw(" ".repeat(cols.history)));
+    }
+
+    ListItem::new(Line::from(spans))
+}
+
+/// Render styled tags into spans within a fixed column width, with +N overflow.
+fn render_tag_spans(spans: &mut Vec<Span<'_>>, all_tags: &[(String, Style)], width: usize) {
+    let mut used = 0usize;
+    let mut shown = 0usize;
+    for (i, (tag, style)) in all_tags.iter().enumerate() {
+        let sep = if shown > 0 { 1 } else { 0 };
+        let tag_w = tag.width();
+        let remaining = all_tags.len() - i - 1;
+        let overflow_count = all_tags.len() - i;
+        let overflow_reserve = if remaining > 0 {
+            format!(" +{}", overflow_count).width()
+        } else {
+            0
+        };
+
+        if used + sep + tag_w <= width
+            && (remaining == 0 || used + sep + tag_w + overflow_reserve <= width)
+        {
+            if shown > 0 {
+                spans.push(Span::raw(" "));
+                used += 1;
+            }
+            spans.push(Span::styled(tag.clone(), *style));
+            used += tag_w;
+            shown += 1;
+        } else {
+            let count = all_tags.len() - i;
+            let overflow = if shown > 0 {
+                format!(" +{}", count)
+            } else {
+                format!("+{}", count)
+            };
+            spans.push(Span::styled(overflow.clone(), theme::muted()));
+            used += overflow.width();
+            break;
+        }
+    }
+
+    let pad = width.saturating_sub(used);
+    if pad > 0 {
+        spans.push(Span::raw(" ".repeat(pad)));
+    }
+}
+
+/// Build tag spans for a pattern entry.
+fn build_pattern_tag_column(
+    spans: &mut Vec<Span<'_>>,
+    pattern: &crate::ssh_config::model::PatternEntry,
+    width: usize,
+) {
+    let all_tags: Vec<(String, Style)> = pattern
+        .tags
+        .iter()
+        .map(|t| (format!("#{}", t), theme::muted()))
+        .collect();
+    render_tag_spans(spans, &all_tags, width);
+}
+
 /// Build tag spans that fit within a fixed column width, with +N overflow.
 fn build_tag_column(
     spans: &mut Vec<Span<'_>>,
@@ -1052,7 +1207,6 @@ fn build_tag_column(
     query: &str,
     width: usize,
 ) {
-    // Collect all tags: provider_tags + user tags + provider + source file
     let mut all_tags: Vec<(String, Style)> = Vec::new();
     for tag in host.provider_tags.iter().chain(host.tags.iter()) {
         let style = if tag_matches && app::contains_ci(tag, query) {
@@ -1078,59 +1232,16 @@ fn build_tag_column(
             }
         }
     }
-
-    let mut used = 0usize;
-    let mut shown = 0usize;
-    for (i, (tag, style)) in all_tags.iter().enumerate() {
-        let sep = if shown > 0 { 1 } else { 0 };
-        let tag_w = tag.width();
-        let remaining = all_tags.len() - i - 1;
-        // Reserve space for +N if there are more tags after this one.
-        // Use len - i (includes current tag) because overflow count includes it.
-        let overflow_count = all_tags.len() - i;
-        let overflow_reserve = if remaining > 0 {
-            format!(" +{}", overflow_count).width()
-        } else {
-            0
-        };
-
-        if used + sep + tag_w <= width
-            && (remaining == 0 || used + sep + tag_w + overflow_reserve <= width)
-        {
-            if shown > 0 {
-                spans.push(Span::raw(" "));
-                used += 1;
-            }
-            spans.push(Span::styled(tag.clone(), *style));
-            used += tag_w;
-            shown += 1;
-        } else {
-            // Show +N for all remaining (including this one)
-            let count = all_tags.len() - i;
-            let overflow = if shown > 0 {
-                format!(" +{}", count)
-            } else {
-                format!("+{}", count)
-            };
-            spans.push(Span::styled(overflow.clone(), theme::muted()));
-            used += overflow.width();
-            break;
-        }
-    }
-
-    let pad = width.saturating_sub(used);
-    if pad > 0 {
-        spans.push(Span::raw(" ".repeat(pad)));
-    }
+    render_tag_spans(spans, &all_tags, width);
 }
 
 fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let query = app.search.query.as_deref().unwrap_or("");
-    let total = app.hosts.len();
+    let total = app.hosts.len() + app.patterns.len();
     let match_info = if query.is_empty() {
         String::new()
     } else {
-        let count = app.search.filtered_indices.len();
+        let count = app.search.filtered_indices.len() + app.search.filtered_pattern_indices.len();
         format!(" ({} of {})", count, total)
     };
     let search_line = Line::from(vec![
@@ -1210,6 +1321,39 @@ fn footer_spans(
         ));
     }
     spans
+}
+
+fn pattern_footer_spans(detail_active: bool) -> Vec<Span<'static>> {
+    let view_label = if detail_active {
+        " compact "
+    } else {
+        " detail "
+    };
+    vec![
+        Span::styled(" /", theme::accent_bold()),
+        Span::styled(" search ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
+        Span::styled("#", theme::accent_bold()),
+        Span::styled(" tag ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
+        Span::styled("A", theme::accent_bold()),
+        Span::styled(" add pattern ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
+        Span::styled("e", theme::accent_bold()),
+        Span::styled(" edit ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
+        Span::styled("d", theme::accent_bold()),
+        Span::styled(" del ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
+        Span::styled("c", theme::accent_bold()),
+        Span::styled(" clone ", theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
+        Span::styled("v", theme::accent_bold()),
+        Span::styled(view_label, theme::muted()),
+        Span::styled("\u{2502} ", theme::muted()),
+        Span::styled("?", theme::accent_bold()),
+        Span::styled(" more ", theme::muted()),
+    ]
 }
 
 fn search_footer_spans<'a>() -> Vec<Span<'a>> {

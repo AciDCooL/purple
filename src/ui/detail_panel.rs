@@ -43,6 +43,12 @@ fn wrap_tags<'a>(tags: &'a [String], max_width: usize) -> Vec<Vec<&'a str>> {
 }
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
+    // Check if a pattern is selected — render pattern detail instead
+    if let Some(pattern) = app.selected_pattern() {
+        render_pattern_detail(frame, app, area, pattern);
+        return;
+    }
+
     let host = match app.selected_host() {
         Some(h) => h,
         None => {
@@ -401,6 +407,26 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         }
     }
 
+    // Inherited directives section — match against alias and hostname for display.
+    // OpenSSH Host keyword matches alias only, but patterns like "10.30.0.*" apply
+    // when the user types the IP directly, so we show those too.
+    let mut inherited = app.config.matching_patterns(&host.alias);
+    if !host.hostname.is_empty() {
+        let hostname_matches = app.config.matching_patterns(&host.hostname);
+        for entry in hostname_matches {
+            if !inherited.iter().any(|e| e.pattern == entry.pattern) {
+                inherited.push(entry);
+            }
+        }
+    }
+    for pattern_entry in &inherited {
+        lines.push(Line::from(""));
+        lines.push(section_header(&pattern_entry.pattern));
+        for (key, value) in &pattern_entry.directives {
+            push_field(&mut lines, key, value, max_value_width);
+        }
+    }
+
     // Source section (for included hosts)
     if let Some(ref source) = host.source_file {
         lines.push(Line::from(""));
@@ -417,6 +443,93 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     lines.push(Line::from(""));
+
+    let paragraph = Paragraph::new(lines)
+        .block(block)
+        .scroll((app.ui.detail_scroll, 0));
+    frame.render_widget(paragraph, area);
+}
+
+fn render_pattern_detail(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    pattern: &crate::ssh_config::model::PatternEntry,
+) {
+    let title = format!(" {} ", pattern.pattern);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .padding(Padding::horizontal(1))
+        .title(Span::styled(title, theme::brand()))
+        .border_style(theme::border());
+
+    let inner_width = (area.width as usize).saturating_sub(4);
+    let max_value_width = inner_width.saturating_sub(LABEL_WIDTH);
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Directives section (like Connection for hosts)
+    if !pattern.directives.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(section_header("Directives"));
+        for (key, value) in &pattern.directives {
+            push_field(&mut lines, key, value, max_value_width);
+        }
+    }
+
+    // Tags section
+    if !pattern.tags.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(section_header("Tags"));
+        let tag_strings: Vec<String> = pattern.tags.iter().map(|t| format!("#{}", t)).collect();
+        let tag_rows = wrap_tags(&tag_strings, inner_width);
+        for row in &tag_rows {
+            lines.push(Line::from(Span::styled(row.join(" "), theme::muted())));
+        }
+    }
+
+    // Matches section: find concrete hosts whose alias OR hostname matches this pattern.
+    // OpenSSH Host keyword matches alias only, but for display purposes we also show
+    // hosts whose HostName matches (e.g. pattern "10.30.0.*" applies when a user types
+    // the IP directly, so showing those hosts helps the user understand the pattern scope).
+    let matching_aliases: Vec<String> = app
+        .hosts
+        .iter()
+        .filter(|h| {
+            crate::ssh_config::model::host_pattern_matches(&pattern.pattern, &h.alias)
+                || (!h.hostname.is_empty()
+                    && crate::ssh_config::model::host_pattern_matches(
+                        &pattern.pattern,
+                        &h.hostname,
+                    ))
+        })
+        .map(|h| h.alias.clone())
+        .collect();
+
+    if !matching_aliases.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(section_header(&format!(
+            "Matches ({})",
+            matching_aliases.len()
+        )));
+        for alias in &matching_aliases {
+            lines.push(Line::from(Span::styled(
+                super::truncate(alias, inner_width),
+                theme::bold(),
+            )));
+        }
+    }
+
+    // Source file (if from Include)
+    if let Some(ref source) = pattern.source_file {
+        lines.push(Line::from(""));
+        push_field(
+            &mut lines,
+            "Source",
+            &source.display().to_string(),
+            max_value_width,
+        );
+    }
 
     let paragraph = Paragraph::new(lines)
         .block(block)

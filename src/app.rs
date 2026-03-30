@@ -8,7 +8,7 @@ use ratatui::widgets::ListState;
 
 use crate::history::ConnectionHistory;
 use crate::providers::config::ProviderConfig;
-use crate::ssh_config::model::{ConfigElement, HostEntry, SshConfigFile};
+use crate::ssh_config::model::{ConfigElement, HostEntry, PatternEntry, SshConfigFile};
 use crate::ssh_keys::{self, SshKeyInfo};
 use crate::tunnel::{TunnelRule, TunnelType};
 
@@ -241,6 +241,8 @@ pub struct HostForm {
     pub cursor_pos: usize,
     /// Real-time validation hint shown in footer.
     pub form_hint: Option<String>,
+    /// When true, alias is a Host pattern (wildcards allowed, hostname optional).
+    pub is_pattern: bool,
 }
 
 impl HostForm {
@@ -257,6 +259,14 @@ impl HostForm {
             focused_field: FormField::Alias,
             cursor_pos: 0,
             form_hint: None,
+            is_pattern: false,
+        }
+    }
+
+    pub fn new_pattern() -> Self {
+        Self {
+            is_pattern: true,
+            ..Self::new()
         }
     }
 
@@ -275,6 +285,26 @@ impl HostForm {
             focused_field: FormField::Alias,
             cursor_pos,
             form_hint: None,
+            is_pattern: false,
+        }
+    }
+
+    pub fn from_pattern_entry(entry: &PatternEntry) -> Self {
+        let alias = entry.pattern.clone();
+        let cursor_pos = alias.chars().count();
+        Self {
+            alias,
+            hostname: entry.hostname.clone(),
+            user: entry.user.clone(),
+            port: entry.port.to_string(),
+            identity_file: entry.identity_file.clone(),
+            proxy_jump: entry.proxy_jump.clone(),
+            askpass: entry.askpass.clone().unwrap_or_default(),
+            tags: entry.tags.join(", "),
+            focused_field: FormField::Alias,
+            cursor_pos,
+            form_hint: None,
+            is_pattern: true,
         }
     }
 
@@ -336,6 +366,12 @@ impl HostForm {
                 let v = self.alias.trim();
                 if v.is_empty() {
                     None // Don't nag while empty (user may not have typed yet)
+                } else if self.is_pattern {
+                    if !crate::ssh_config::model::is_host_pattern(v) {
+                        Some("Pattern needs a wildcard (*, ?, [) or multiple hosts".into())
+                    } else {
+                        None
+                    }
                 } else if v.contains(char::is_whitespace) {
                     Some("Alias can't contain whitespace".into())
                 } else if v.contains('#') {
@@ -382,25 +418,39 @@ impl HostForm {
     pub fn validate(&self) -> Result<(), String> {
         let alias = self.alias.trim();
         if alias.is_empty() {
-            return Err("Alias can't be empty. Every host needs a name!".to_string());
+            return Err(if self.is_pattern {
+                "Pattern can't be empty.".to_string()
+            } else {
+                "Alias can't be empty. Every host needs a name!".to_string()
+            });
         }
-        if alias.contains(char::is_whitespace) {
-            return Err("Alias can't contain whitespace. Keep it simple.".to_string());
-        }
-        if alias.contains('#') {
-            return Err(
-                "Alias can't contain '#'. That's a comment character in SSH config.".to_string(),
-            );
-        }
-        if crate::ssh_config::model::is_host_pattern(alias) {
-            return Err(
-                "Alias can't contain pattern characters. That creates a match pattern, not a host."
-                    .to_string(),
-            );
+        if self.is_pattern && !crate::ssh_config::model::is_host_pattern(alias) {
+            return Err("Pattern needs a wildcard (*, ?, [) or multiple hosts.".to_string());
+        } else if !self.is_pattern {
+            if alias.contains(char::is_whitespace) {
+                return Err("Alias can't contain whitespace. Keep it simple.".to_string());
+            }
+            if alias.contains('#') {
+                return Err(
+                    "Alias can't contain '#'. That's a comment character in SSH config."
+                        .to_string(),
+                );
+            }
+            // Catches *, ?, [, ! — whitespace overlap with the check above is intentional
+            // (user gets the more specific whitespace message first)
+            if crate::ssh_config::model::is_host_pattern(alias) {
+                return Err(
+                    "Alias can't contain pattern characters. That creates a match pattern, not a host."
+                        .to_string(),
+                );
+            }
         }
         // Reject control characters in all fields
         let fields = [
-            (&self.alias, "Alias"),
+            (
+                &self.alias,
+                if self.is_pattern { "Pattern" } else { "Alias" },
+            ),
             (&self.hostname, "Hostname"),
             (&self.user, "User"),
             (&self.port, "Port"),
@@ -417,7 +467,7 @@ impl HostForm {
                 ));
             }
         }
-        if self.hostname.trim().is_empty() {
+        if !self.is_pattern && self.hostname.trim().is_empty() {
             return Err("Hostname can't be empty. Where should we connect to?".to_string());
         }
         if self.hostname.trim().contains(char::is_whitespace) {
@@ -1092,6 +1142,7 @@ pub struct StatusMessage {
 pub enum HostListItem {
     GroupHeader(String),
     Host { index: usize },
+    Pattern { index: usize },
 }
 
 /// Ping status for a host.
@@ -1231,6 +1282,7 @@ pub struct ContainerState {
 pub struct SearchState {
     pub query: Option<String>,
     pub filtered_indices: Vec<usize>,
+    pub filtered_pattern_indices: Vec<usize>,
     pub pre_search_selection: Option<usize>,
 }
 
@@ -1314,6 +1366,7 @@ pub struct App {
     pub running: bool,
     pub config: SshConfigFile,
     pub hosts: Vec<HostEntry>,
+    pub patterns: Vec<PatternEntry>,
     pub display_list: Vec<HostListItem>,
     pub form: HostForm,
     pub status: Option<StatusMessage>,
@@ -1424,13 +1477,16 @@ pub struct App {
 impl App {
     pub fn new(config: SshConfigFile) -> Self {
         let hosts = config.host_entries();
-        let display_list = Self::build_display_list_from(&config, &hosts);
+        let patterns = config.pattern_entries();
+        let display_list = Self::build_display_list_from(&config, &hosts, &patterns);
         let mut list_state = ListState::default();
         // Select first selectable item
-        if let Some(pos) = display_list
-            .iter()
-            .position(|item| matches!(item, HostListItem::Host { .. }))
-        {
+        if let Some(pos) = display_list.iter().position(|item| {
+            matches!(
+                item,
+                HostListItem::Host { .. } | HostListItem::Pattern { .. }
+            )
+        }) {
             list_state.select(Some(pos));
         }
 
@@ -1444,6 +1500,7 @@ impl App {
             running: true,
             config,
             hosts,
+            patterns,
             display_list,
             form: HostForm::new(),
             status: None,
@@ -1470,6 +1527,7 @@ impl App {
             search: SearchState {
                 query: None,
                 filtered_indices: Vec::new(),
+                filtered_pattern_indices: Vec::new(),
                 pre_search_selection: None,
             },
             reload: ReloadState {
@@ -1544,7 +1602,11 @@ impl App {
     /// Comments are associated with the host block directly below them (no blank line between).
     /// Because the parser puts inter-block comments inside the preceding block's directives,
     /// we also extract trailing comments from each HostBlock.
-    fn build_display_list_from(config: &SshConfigFile, hosts: &[HostEntry]) -> Vec<HostListItem> {
+    fn build_display_list_from(
+        config: &SshConfigFile,
+        hosts: &[HostEntry],
+        patterns: &[PatternEntry],
+    ) -> Vec<HostListItem> {
         let mut display_list = Vec::new();
         let mut host_index = 0;
         let mut pending_comment: Option<String> = None;
@@ -1598,7 +1660,44 @@ impl App {
             }
         }
 
+        // Append pattern group at the bottom
+        if !patterns.is_empty() {
+            let mut pattern_index = 0usize;
+            display_list.push(HostListItem::GroupHeader("Patterns".to_string()));
+            Self::append_pattern_items(&config.elements, &mut pattern_index, &mut display_list);
+            debug_assert_eq!(
+                pattern_index,
+                patterns.len(),
+                "append_pattern_items and collect_pattern_entries traversal mismatch"
+            );
+        }
+
         display_list
+    }
+
+    fn append_pattern_items(
+        elements: &[ConfigElement],
+        pattern_index: &mut usize,
+        display_list: &mut Vec<HostListItem>,
+    ) {
+        for e in elements {
+            match e {
+                ConfigElement::HostBlock(block) => {
+                    if crate::ssh_config::model::is_host_pattern(&block.host_pattern) {
+                        display_list.push(HostListItem::Pattern {
+                            index: *pattern_index,
+                        });
+                        *pattern_index += 1;
+                    }
+                }
+                ConfigElement::Include(include) => {
+                    for file in &include.resolved_files {
+                        Self::append_pattern_items(&file.elements, pattern_index, display_list);
+                    }
+                }
+                ConfigElement::GlobalLine(_) => {}
+            }
+        }
     }
 
     /// Extract a trailing comment from a block's directives.
@@ -1705,14 +1804,18 @@ impl App {
 
     /// Rebuild the display list based on the current sort mode and group_by_provider toggle.
     pub fn apply_sort(&mut self) {
-        // Preserve currently selected host across sort changes
-        let selected_alias = self.selected_host().map(|h| h.alias.clone());
+        // Preserve currently selected host or pattern across sort changes
+        let selected_alias = self
+            .selected_host()
+            .map(|h| h.alias.clone())
+            .or_else(|| self.selected_pattern().map(|p| p.pattern.clone()));
 
         // Multi-select indices become visually misleading after reorder
         self.multi_select.clear();
 
         if self.sort_mode == SortMode::Original && !self.group_by_provider {
-            self.display_list = Self::build_display_list_from(&self.config, &self.hosts);
+            self.display_list =
+                Self::build_display_list_from(&self.config, &self.hosts, &self.patterns);
         } else if self.sort_mode == SortMode::Original && self.group_by_provider {
             // Original order but grouped by provider: extract flat indices from config order
             let indices: Vec<usize> = (0..self.hosts.len()).collect();
@@ -1778,10 +1881,25 @@ impl App {
             }
         }
 
+        // Append pattern group at the bottom (sorted/grouped paths skip
+        // build_display_list_from which already handles this)
+        if (self.sort_mode != SortMode::Original || self.group_by_provider)
+            && !self.patterns.is_empty()
+        {
+            self.display_list
+                .push(HostListItem::GroupHeader("Patterns".to_string()));
+            let mut pattern_index = 0usize;
+            Self::append_pattern_items(
+                &self.config.elements,
+                &mut pattern_index,
+                &mut self.display_list,
+            );
+        }
+
         // Restore selection by alias, fall back to first host
         if let Some(alias) = selected_alias {
             self.select_host_by_alias(&alias);
-            if self.selected_host().is_some() {
+            if self.selected_host().is_some() || self.selected_pattern().is_some() {
                 return;
             }
         }
@@ -1790,11 +1908,12 @@ impl App {
 
     /// Select the first host item in the display list.
     pub fn select_first_host(&mut self) {
-        if let Some(pos) = self
-            .display_list
-            .iter()
-            .position(|item| matches!(item, HostListItem::Host { .. }))
-        {
+        if let Some(pos) = self.display_list.iter().position(|item| {
+            matches!(
+                item,
+                HostListItem::Host { .. } | HostListItem::Pattern { .. }
+            )
+        }) {
             self.ui.list_state.select(Some(pos));
         }
     }
@@ -1864,15 +1983,54 @@ impl App {
         self.selected_host_index().and_then(|i| self.hosts.get(i))
     }
 
+    /// Get the currently selected pattern entry (if a pattern is selected).
+    pub fn selected_pattern(&self) -> Option<&PatternEntry> {
+        if self.search.query.is_some() {
+            let sel = self.ui.list_state.selected()?;
+            let host_count = self.search.filtered_indices.len();
+            if sel >= host_count {
+                let pattern_idx = sel - host_count;
+                return self
+                    .search
+                    .filtered_pattern_indices
+                    .get(pattern_idx)
+                    .and_then(|&i| self.patterns.get(i));
+            }
+            return None;
+        }
+        let sel = self.ui.list_state.selected()?;
+        match self.display_list.get(sel) {
+            Some(HostListItem::Pattern { index }) => self.patterns.get(*index),
+            _ => None,
+        }
+    }
+
+    /// Check if the currently selected item is a pattern.
+    pub fn is_pattern_selected(&self) -> bool {
+        if self.search.query.is_some() {
+            let Some(sel) = self.ui.list_state.selected() else {
+                return false;
+            };
+            let total =
+                self.search.filtered_indices.len() + self.search.filtered_pattern_indices.len();
+            return sel >= self.search.filtered_indices.len() && sel < total;
+        }
+        let Some(sel) = self.ui.list_state.selected() else {
+            return false;
+        };
+        matches!(
+            self.display_list.get(sel),
+            Some(HostListItem::Pattern { .. })
+        )
+    }
+
     /// Move selection up, skipping group headers.
     pub fn select_prev(&mut self) {
         self.ui.detail_scroll = 0;
         if self.search.query.is_some() {
-            cycle_selection(
-                &mut self.ui.list_state,
-                self.search.filtered_indices.len(),
-                false,
-            );
+            let total =
+                self.search.filtered_indices.len() + self.search.filtered_pattern_indices.len();
+            cycle_selection(&mut self.ui.list_state, total, false);
         } else {
             self.select_prev_in_display_list();
         }
@@ -1882,11 +2040,9 @@ impl App {
     pub fn select_next(&mut self) {
         self.ui.detail_scroll = 0;
         if self.search.query.is_some() {
-            cycle_selection(
-                &mut self.ui.list_state,
-                self.search.filtered_indices.len(),
-                true,
-            );
+            let total =
+                self.search.filtered_indices.len() + self.search.filtered_pattern_indices.len();
+            cycle_selection(&mut self.ui.list_state, total, true);
         } else {
             self.select_next_in_display_list();
         }
@@ -1898,10 +2054,13 @@ impl App {
         }
         let len = self.display_list.len();
         let current = self.ui.list_state.selected().unwrap_or(0);
-        // Find next Host item after current
+        // Find next Host or Pattern item after current
         for offset in 1..=len {
             let idx = (current + offset) % len;
-            if matches!(self.display_list[idx], HostListItem::Host { .. }) {
+            if matches!(
+                self.display_list[idx],
+                HostListItem::Host { .. } | HostListItem::Pattern { .. }
+            ) {
                 self.ui.list_state.select(Some(idx));
                 return;
             }
@@ -1914,10 +2073,13 @@ impl App {
         }
         let len = self.display_list.len();
         let current = self.ui.list_state.selected().unwrap_or(0);
-        // Find prev Host item before current
+        // Find prev Host or Pattern item before current
         for offset in 1..=len {
             let idx = (current + len - offset) % len;
-            if matches!(self.display_list[idx], HostListItem::Host { .. }) {
+            if matches!(
+                self.display_list[idx],
+                HostListItem::Host { .. } | HostListItem::Pattern { .. }
+            ) {
                 self.ui.list_state.select(Some(idx));
                 return;
             }
@@ -1936,12 +2098,15 @@ impl App {
             );
         } else {
             let current = self.ui.list_state.selected().unwrap_or(0);
-            // Jump PAGE_SIZE host items forward (skip group headers)
+            // Jump PAGE_SIZE host/pattern items forward (skip group headers)
             let mut target = current;
             let mut hosts_skipped = 0;
             let len = self.display_list.len();
             for i in (current + 1)..len {
-                if matches!(self.display_list[i], HostListItem::Host { .. }) {
+                if matches!(
+                    self.display_list[i],
+                    HostListItem::Host { .. } | HostListItem::Pattern { .. }
+                ) {
                     target = i;
                     hosts_skipped += 1;
                     if hosts_skipped >= PAGE_SIZE {
@@ -1967,11 +2132,14 @@ impl App {
             );
         } else {
             let current = self.ui.list_state.selected().unwrap_or(0);
-            // Jump PAGE_SIZE host items backward (skip group headers)
+            // Jump PAGE_SIZE host/pattern items backward (skip group headers)
             let mut target = current;
             let mut hosts_skipped = 0;
             for i in (0..current).rev() {
-                if matches!(self.display_list[i], HostListItem::Host { .. }) {
+                if matches!(
+                    self.display_list[i],
+                    HostListItem::Host { .. } | HostListItem::Pattern { .. }
+                ) {
                     target = i;
                     hosts_skipped += 1;
                     if hosts_skipped >= PAGE_SIZE {
@@ -1988,12 +2156,17 @@ impl App {
     /// Reload hosts from config.
     pub fn reload_hosts(&mut self) {
         let had_search = self.search.query.take();
-        let selected_alias = self.selected_host().map(|h| h.alias.clone());
+        let selected_alias = self
+            .selected_host()
+            .map(|h| h.alias.clone())
+            .or_else(|| self.selected_pattern().map(|p| p.pattern.clone()));
 
         self.tunnel_summaries_cache.clear();
         self.hosts = self.config.host_entries();
+        self.patterns = self.config.pattern_entries();
         if self.sort_mode == SortMode::Original && !self.group_by_provider {
-            self.display_list = Self::build_display_list_from(&self.config, &self.hosts);
+            self.display_list =
+                Self::build_display_list_from(&self.config, &self.hosts, &self.patterns);
         } else {
             self.apply_sort();
         }
@@ -2014,19 +2187,21 @@ impl App {
         } else {
             self.search.query = None;
             self.search.filtered_indices.clear();
+            self.search.filtered_pattern_indices.clear();
             // Fix selection for display list mode
-            if self.hosts.is_empty() {
+            if self.hosts.is_empty() && self.patterns.is_empty() {
                 self.ui.list_state.select(None);
-            } else if let Some(pos) = self
-                .display_list
-                .iter()
-                .position(|item| matches!(item, HostListItem::Host { .. }))
-            {
+            } else if let Some(pos) = self.display_list.iter().position(|item| {
+                matches!(
+                    item,
+                    HostListItem::Host { .. } | HostListItem::Pattern { .. }
+                )
+            }) {
                 let current = self.ui.list_state.selected().unwrap_or(0);
                 if current >= self.display_list.len()
                     || !matches!(
                         self.display_list.get(current),
-                        Some(HostListItem::Host { .. })
+                        Some(HostListItem::Host { .. } | HostListItem::Pattern { .. })
                     )
                 {
                     self.ui.list_state.select(Some(pos));
@@ -2062,15 +2237,17 @@ impl App {
     pub fn cancel_search(&mut self) {
         self.search.query = None;
         self.search.filtered_indices.clear();
+        self.search.filtered_pattern_indices.clear();
         // Restore pre-search position (bounds-checked)
         if let Some(pos) = self.search.pre_search_selection.take() {
             if pos < self.display_list.len() {
                 self.ui.list_state.select(Some(pos));
-            } else if let Some(first) = self
-                .display_list
-                .iter()
-                .position(|item| matches!(item, HostListItem::Host { .. }))
-            {
+            } else if let Some(first) = self.display_list.iter().position(|item| {
+                matches!(
+                    item,
+                    HostListItem::Host { .. } | HostListItem::Pattern { .. }
+                )
+            }) {
                 self.ui.list_state.select(Some(first));
             }
         }
@@ -2082,7 +2259,10 @@ impl App {
             Some(q) if !q.is_empty() => q.clone(),
             Some(_) => {
                 self.search.filtered_indices = (0..self.hosts.len()).collect();
-                if self.search.filtered_indices.is_empty() {
+                self.search.filtered_pattern_indices = (0..self.patterns.len()).collect();
+                let total =
+                    self.search.filtered_indices.len() + self.search.filtered_pattern_indices.len();
+                if total == 0 {
                     self.ui.list_state.select(None);
                 } else {
                     self.ui.list_state.select(Some(0));
@@ -2109,6 +2289,13 @@ impl App {
                 })
                 .map(|(i, _)| i)
                 .collect();
+            self.search.filtered_pattern_indices = self
+                .patterns
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.tags.iter().any(|t| eq_ci(t, tag_exact)))
+                .map(|(i, _)| i)
+                .collect();
         } else if let Some(tag_query) = query.strip_prefix("tag:") {
             // Fuzzy tag match (manual search), includes provider name and virtual "stale"
             self.search.filtered_indices = self
@@ -2127,6 +2314,13 @@ impl App {
                             .as_ref()
                             .is_some_and(|p| contains_ci(p, tag_query))
                 })
+                .map(|(i, _)| i)
+                .collect();
+            self.search.filtered_pattern_indices = self
+                .patterns
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.tags.iter().any(|t| contains_ci(t, tag_query)))
                 .map(|(i, _)| i)
                 .collect();
         } else {
@@ -2150,10 +2344,19 @@ impl App {
                 })
                 .map(|(i, _)| i)
                 .collect();
+            self.search.filtered_pattern_indices = self
+                .patterns
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| contains_ci(&p.pattern, &query))
+                .map(|(i, _)| i)
+                .collect();
         }
 
         // Reset selection
-        if self.search.filtered_indices.is_empty() {
+        let total_results =
+            self.search.filtered_indices.len() + self.search.filtered_pattern_indices.len();
+        if total_results == 0 {
             self.ui.list_state.select(None);
         } else {
             self.ui.list_state.select(Some(0));
@@ -2675,12 +2878,12 @@ impl App {
         let mut has_stale = false;
         for host in &self.hosts {
             for tag in host.provider_tags.iter().chain(host.tags.iter()) {
-                if seen.insert(tag.as_str()) {
+                if seen.insert(tag.clone()) {
                     tags.push(tag.clone());
                 }
             }
             if let Some(ref provider) = host.provider {
-                if seen.insert(provider.as_str()) {
+                if seen.insert(provider.clone()) {
                     tags.push(provider.clone());
                 }
             }
@@ -2688,7 +2891,14 @@ impl App {
                 has_stale = true;
             }
         }
-        if has_stale && seen.insert("stale") {
+        for pattern in &self.patterns {
+            for tag in &pattern.tags {
+                if seen.insert(tag.clone()) {
+                    tags.push(tag.clone());
+                }
+            }
+        }
+        if has_stale && seen.insert("stale".to_string()) {
             tags.push("stale".to_string());
         }
         tags.sort_by_cached_key(|a| a.to_lowercase());
@@ -2821,10 +3031,14 @@ impl App {
         let entry = self.form.to_entry();
         let alias = entry.alias.clone();
         if self.config.has_host(&alias) {
-            return Err(format!(
-                "'{}' already exists. Aliases are like fingerprints — unique.",
-                alias
-            ));
+            return Err(if self.form.is_pattern {
+                format!("Pattern '{}' already exists.", alias)
+            } else {
+                format!(
+                    "'{}' already exists. Aliases are like fingerprints — unique.",
+                    alias
+                )
+            });
         }
         let len_before = self.config.elements.len();
         self.config.add_host(&entry);
@@ -2852,17 +3066,38 @@ impl App {
             return Err("Host no longer exists.".to_string());
         }
         if alias != old_alias && self.config.has_host(&alias) {
-            return Err(format!(
-                "'{}' already exists. Aliases are like fingerprints — unique.",
-                alias
-            ));
+            return Err(if self.form.is_pattern {
+                format!("Pattern '{}' already exists.", alias)
+            } else {
+                format!(
+                    "'{}' already exists. Aliases are like fingerprints — unique.",
+                    alias
+                )
+            });
         }
-        let old_entry = self
-            .hosts
-            .iter()
-            .find(|h| h.alias == old_alias)
-            .cloned()
-            .unwrap_or_default();
+        let old_entry = if self.form.is_pattern {
+            self.patterns
+                .iter()
+                .find(|p| p.pattern == old_alias)
+                .map(|p| HostEntry {
+                    alias: p.pattern.clone(),
+                    hostname: p.hostname.clone(),
+                    user: p.user.clone(),
+                    port: p.port,
+                    identity_file: p.identity_file.clone(),
+                    proxy_jump: p.proxy_jump.clone(),
+                    tags: p.tags.clone(),
+                    askpass: p.askpass.clone(),
+                    ..Default::default()
+                })
+                .unwrap_or_default()
+        } else {
+            self.hosts
+                .iter()
+                .find(|h| h.alias == old_alias)
+                .cloned()
+                .unwrap_or_default()
+        };
         self.config.update_host(old_alias, &entry);
         self.config.set_host_tags(&entry.alias, &entry.tags);
         self.config
@@ -2895,13 +3130,38 @@ impl App {
                     return;
                 }
             }
+            // Also check patterns in search results
+            let host_count = self.search.filtered_indices.len();
+            for (i, &pat_idx) in self.search.filtered_pattern_indices.iter().enumerate() {
+                if self
+                    .patterns
+                    .get(pat_idx)
+                    .is_some_and(|p| p.pattern == alias)
+                {
+                    self.ui.list_state.select(Some(host_count + i));
+                    return;
+                }
+            }
         } else {
             for (i, item) in self.display_list.iter().enumerate() {
-                if let HostListItem::Host { index } = item {
-                    if self.hosts.get(*index).is_some_and(|h| h.alias == alias) {
-                        self.ui.list_state.select(Some(i));
-                        return;
+                match item {
+                    HostListItem::Host { index } => {
+                        if self.hosts.get(*index).is_some_and(|h| h.alias == alias) {
+                            self.ui.list_state.select(Some(i));
+                            return;
+                        }
                     }
+                    HostListItem::Pattern { index } => {
+                        if self
+                            .patterns
+                            .get(*index)
+                            .is_some_and(|p| p.pattern == alias)
+                        {
+                            self.ui.list_state.select(Some(i));
+                            return;
+                        }
+                    }
+                    HostListItem::GroupHeader(_) => {}
                 }
             }
         }
@@ -5282,5 +5542,192 @@ Host do-db
 
         // Clean up
         let _ = std::fs::remove_file(&tmp_path);
+    }
+
+    // --- Pattern form validation tests ---
+
+    #[test]
+    fn pattern_form_validates_wildcard_required() {
+        let mut form = HostForm::new_pattern();
+        form.alias = "myserver".to_string(); // No wildcard
+        assert!(form.validate().is_err());
+        form.alias = "*.example.com".to_string(); // Valid pattern
+        assert!(form.validate().is_ok());
+        form.alias = "10.30.0.*".to_string(); // Valid IP pattern
+        assert!(form.validate().is_ok());
+        form.alias = "server-[123]".to_string(); // Valid char class
+        assert!(form.validate().is_ok());
+        form.alias = "prod staging".to_string(); // Valid multi-pattern (space = pattern)
+        assert!(form.validate().is_ok());
+    }
+
+    #[test]
+    fn pattern_form_hostname_optional() {
+        let mut form = HostForm::new_pattern();
+        form.alias = "*.example.com".to_string();
+        // Hostname empty is OK for patterns
+        assert!(form.validate().is_ok());
+        // Hostname filled is also OK
+        form.hostname = "10.0.0.1".to_string();
+        assert!(form.validate().is_ok());
+    }
+
+    #[test]
+    fn reload_hosts_clears_filtered_pattern_indices() {
+        let config_str = "\
+Host myserver
+  HostName 1.1.1.1
+
+Host 10.30.0.*
+  User debian
+";
+        let mut app = make_app(config_str);
+        assert_eq!(app.patterns.len(), 1);
+        // Start a search that matches the pattern
+        app.start_search();
+        app.search.query = Some("10.30".to_string());
+        app.apply_filter();
+        assert!(!app.search.filtered_pattern_indices.is_empty());
+        // Cancel search and verify cleared
+        app.cancel_search();
+        assert!(app.search.filtered_pattern_indices.is_empty());
+        // Start search again, then reload (simulates config change)
+        app.start_search();
+        app.search.query = Some("10.30".to_string());
+        app.apply_filter();
+        assert!(!app.search.filtered_pattern_indices.is_empty());
+        // Simulate non-search reload path
+        app.search.query = None;
+        app.reload_hosts();
+        assert!(app.search.filtered_pattern_indices.is_empty());
+    }
+
+    #[test]
+    fn pattern_clone_clears_alias() {
+        let entry = crate::ssh_config::model::PatternEntry {
+            pattern: "10.30.0.*".to_string(),
+            user: "debian".to_string(),
+            identity_file: "~/.ssh/id_ed25519".to_string(),
+            ..Default::default()
+        };
+        let mut form = HostForm::from_pattern_entry(&entry);
+        // Simulate clone behavior from handler.rs
+        form.alias.clear();
+        form.cursor_pos = 0;
+        assert!(form.is_pattern);
+        assert!(form.alias.is_empty());
+        assert_eq!(form.cursor_pos, 0);
+        // Other fields should be preserved
+        assert_eq!(form.user, "debian");
+        assert_eq!(form.identity_file, "~/.ssh/id_ed25519");
+    }
+
+    #[test]
+    fn tag_exact_search_finds_patterns() {
+        let config_str = "\
+Host myserver
+  HostName 1.1.1.1
+  # purple:tags web
+
+Host 10.30.0.*
+  User debian
+  # purple:tags internal
+";
+        let mut app = make_app(config_str);
+        app.start_search();
+        app.search.query = Some("tag=internal".to_string());
+        app.apply_filter();
+        // Host should not match
+        assert!(app.search.filtered_indices.is_empty());
+        // Pattern should match
+        assert_eq!(app.search.filtered_pattern_indices.len(), 1);
+        assert_eq!(
+            app.patterns[app.search.filtered_pattern_indices[0]].pattern,
+            "10.30.0.*"
+        );
+    }
+
+    #[test]
+    fn tag_fuzzy_search_finds_patterns() {
+        let config_str = "\
+Host myserver
+  HostName 1.1.1.1
+
+Host 10.30.0.*
+  User debian
+  # purple:tags internal
+";
+        let mut app = make_app(config_str);
+        app.start_search();
+        app.search.query = Some("tag:intern".to_string());
+        app.apply_filter();
+        assert!(app.search.filtered_indices.is_empty());
+        assert_eq!(app.search.filtered_pattern_indices.len(), 1);
+    }
+
+    #[test]
+    fn collect_unique_tags_includes_pattern_tags() {
+        let config_str = "\
+Host myserver
+  HostName 1.1.1.1
+  # purple:tags web
+
+Host 10.30.0.*
+  User debian
+  # purple:tags internal
+";
+        let app = make_app(config_str);
+        let tags = app.collect_unique_tags();
+        assert!(tags.contains(&"web".to_string()));
+        assert!(tags.contains(&"internal".to_string()));
+    }
+
+    #[test]
+    fn pattern_placeholder_text() {
+        use crate::app::FormField;
+        use crate::ui::host_form::{placeholder_text, placeholder_text_pattern};
+        // Regular host placeholder
+        assert_eq!(
+            placeholder_text(FormField::Alias),
+            "user@host:port or alias"
+        );
+        // Pattern placeholder
+        assert_eq!(
+            placeholder_text_pattern(FormField::Alias),
+            "10.0.0.* or *.example.com"
+        );
+        // Non-alias fields should be the same regardless of is_pattern
+        assert_eq!(
+            placeholder_text(FormField::User),
+            placeholder_text_pattern(FormField::User)
+        );
+    }
+
+    #[test]
+    fn pattern_form_from_entry_roundtrip() {
+        let entry = crate::ssh_config::model::PatternEntry {
+            pattern: "10.30.0.*".to_string(),
+            hostname: String::new(),
+            user: "debian".to_string(),
+            port: 2222,
+            identity_file: "~/.ssh/id_ed25519".to_string(),
+            proxy_jump: "bastion".to_string(),
+            tags: vec!["internal".to_string()],
+            askpass: Some("keychain".to_string()),
+            source_file: None,
+            directives: vec![
+                ("User".to_string(), "debian".to_string()),
+                ("Port".to_string(), "2222".to_string()),
+            ],
+        };
+        let form = HostForm::from_pattern_entry(&entry);
+        assert!(form.is_pattern);
+        assert_eq!(form.alias, "10.30.0.*");
+        assert_eq!(form.user, "debian");
+        assert_eq!(form.port, "2222");
+        assert_eq!(form.identity_file, "~/.ssh/id_ed25519");
+        assert_eq!(form.proxy_jump, "bastion");
+        assert_eq!(form.tags, "internal");
+        assert_eq!(form.askpass, "keychain");
     }
 }

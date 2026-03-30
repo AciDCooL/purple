@@ -319,6 +319,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             app.page_up_host();
         }
         KeyCode::Enter => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if let Some(host) = app.selected_host() {
                 let alias = host.alias.clone();
                 let askpass = host.askpass.clone();
@@ -339,13 +342,46 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             app.capture_form_mtime();
             app.capture_form_baseline();
         }
+        KeyCode::Char('A') => {
+            app.form = HostForm::new_pattern();
+            app.screen = Screen::AddHost;
+            app.capture_form_mtime();
+            app.capture_form_baseline();
+        }
         KeyCode::Char('e') => {
-            if let Some(host) = app.selected_host().cloned() {
+            if let Some(pattern) = app.selected_pattern().cloned() {
+                if pattern.source_file.is_some() {
+                    app.set_status(
+                        format!("{} is in an included file. Edit it there.", pattern.pattern),
+                        true,
+                    );
+                    return;
+                }
+                app.form = HostForm::from_pattern_entry(&pattern);
+                app.screen = Screen::EditHost {
+                    alias: pattern.pattern,
+                };
+                app.capture_form_mtime();
+                app.capture_form_baseline();
+            } else if let Some(host) = app.selected_host().cloned() {
                 open_edit_form(app, host);
             }
         }
         KeyCode::Char('d') => {
-            if let Some(host) = app.selected_host() {
+            if let Some(pattern) = app.selected_pattern() {
+                if pattern.source_file.is_some() {
+                    app.set_status(
+                        format!(
+                            "{} is in an included file. Delete it there.",
+                            pattern.pattern
+                        ),
+                        true,
+                    );
+                    return;
+                }
+                let alias = pattern.pattern.clone();
+                app.screen = Screen::ConfirmDelete { alias };
+            } else if let Some(host) = app.selected_host() {
                 if let Some(ref source) = host.source_file {
                     let alias = host.alias.clone();
                     let path = source.display();
@@ -365,7 +401,25 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('c') => {
-            if let Some(host) = app.selected_host() {
+            if let Some(pattern) = app.selected_pattern() {
+                if pattern.source_file.is_some() {
+                    app.set_status(
+                        format!(
+                            "{} is in an included file. Clone it there.",
+                            pattern.pattern
+                        ),
+                        true,
+                    );
+                    return;
+                }
+                let mut form = HostForm::from_pattern_entry(pattern);
+                form.alias.clear();
+                form.cursor_pos = 0;
+                app.form = form;
+                app.screen = Screen::AddHost;
+                app.capture_form_mtime();
+                app.capture_form_baseline();
+            } else if let Some(host) = app.selected_host() {
                 if let Some(ref source) = host.source_file {
                     let alias = host.alias.clone();
                     let path = source.display();
@@ -394,6 +448,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('y') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if let Some(host) = app.selected_host() {
                 let cmd = host.ssh_command(&app.reload.config_path);
                 let alias = host.alias.clone();
@@ -408,6 +465,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('x') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if let Some(host) = app.selected_host() {
                 let alias = host.alias.clone();
                 if let Some(block) =
@@ -425,6 +485,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('p') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if !app.ping_status.is_empty() {
                 app.ping_status.clear();
                 app.status = None;
@@ -468,6 +531,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             app.screen = Screen::KeyList;
         }
         KeyCode::Char('t') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if let Some(host) = app.selected_host() {
                 if let Some(ref source) = host.source_file {
                     let alias = host.alias.clone();
@@ -512,6 +578,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('i') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if let Some(index) = app.selected_host_index() {
                 app.screen = Screen::HostDetail { index };
             }
@@ -572,6 +641,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             app.open_tag_picker();
         }
         KeyCode::Char('T') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if let Some(host) = app.selected_host() {
                 let stale_hint = if host.stale.is_some() {
                     Some(stale_provider_hint(host))
@@ -617,6 +689,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if let Some(idx) = app.selected_host_index() {
                 if app.multi_select.contains(&idx) {
                     app.multi_select.remove(&idx);
@@ -626,6 +701,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('r') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             let (aliases, stale_hint): (Vec<String>, Option<String>) =
                 if app.multi_select.is_empty() {
                     if let Some(host) = app.selected_host() {
@@ -665,6 +743,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('R') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             let aliases: Vec<String> = app
                 .display_list
                 .iter()
@@ -682,6 +763,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('f') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if let Some(host) = app.selected_host() {
                 let stale_hint = if host.stale.is_some() {
                     Some(stale_provider_hint(host))
@@ -783,6 +867,9 @@ fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEv
             }
         }
         KeyCode::Char('C') => {
+            if app.is_pattern_selected() {
+                return;
+            }
             if let Some(host) = app.selected_host() {
                 let stale_hint = if host.stale.is_some() {
                     Some(stale_provider_hint(host))

@@ -1,3 +1,14 @@
+## 2.21.0
+
+- Host patterns support
+- Wildcard blocks like `Host *.example.com` and `Host 10.30.0.*` now appear in a dedicated Patterns group at the bottom of the host list
+- Add, edit, clone and delete pattern blocks directly from the TUI (`A` to add a new pattern)
+- Full SSH glob matching engine: `*`, `?`, `[charset]`, `[!charset]`/`[^charset]`, ranges, `!negation` and multi-pattern (space-separated)
+- Detail panel shows inherited directives from matching patterns for each host. Pattern detail view lists all matching hosts
+- Patterns included in search, tag filtering (`tag:` fuzzy and `tag=` exact) and tag picker
+- Context-aware footer: pattern-specific actions shown when a pattern is selected
+- Dynamic column widths in key list and key picker overlay. Columns now adapt to content width instead of using fixed sizes
+
 ## 2.20.0
 
 - TransIP provider. 16 cloud providers now supported

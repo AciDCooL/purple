@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 use super::theme;
 use crate::app::{App, FormField, Screen};
 
-fn placeholder_for(field: FormField) -> String {
+fn placeholder_for(field: FormField, is_pattern: bool) -> String {
     match field {
         FormField::AskPass => {
             if let Some(default) = crate::preferences::load_askpass_default() {
@@ -17,6 +17,7 @@ fn placeholder_for(field: FormField) -> String {
                 "Enter to pick a source".to_string()
             }
         }
+        FormField::Alias if is_pattern => "10.0.0.* or *.example.com".to_string(),
         FormField::Alias => "user@host:port or alias".to_string(),
         FormField::Hostname => "192.168.1.1 or example.com".to_string(),
         FormField::User => "root".to_string(),
@@ -48,14 +49,26 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let base = super::centered_rect(70, 80, area);
 
-    let title = match &app.screen {
-        Screen::AddHost => " Add New Host ".to_string(),
-        Screen::EditHost { alias } => {
-            let max_alias = (base.width as usize).saturating_sub(12); // " Edit: " + " " + borders
-            let truncated = super::truncate(alias, max_alias);
-            format!(" Edit: {} ", truncated)
+    let title = if app.form.is_pattern {
+        match &app.screen {
+            Screen::AddHost => " Add Pattern ".to_string(),
+            Screen::EditHost { alias } => {
+                let max_alias = (base.width as usize).saturating_sub(14);
+                let truncated = super::truncate(alias, max_alias);
+                format!(" Edit: {} ", truncated)
+            }
+            _ => " Pattern ".to_string(),
         }
-        _ => " Host ".to_string(),
+    } else {
+        match &app.screen {
+            Screen::AddHost => " Add New Host ".to_string(),
+            Screen::EditHost { alias } => {
+                let max_alias = (base.width as usize).saturating_sub(12);
+                let truncated = super::truncate(alias, max_alias);
+                format!(" Edit: {} ", truncated)
+            }
+            _ => " Host ".to_string(),
+        }
     };
     let form_area = super::centered_rect_fixed(base.width, total_height, area);
     frame.render_widget(Clear, form_area);
@@ -70,8 +83,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(block_area);
     frame.render_widget(block, block_area);
 
+    // Suppress cursor when a picker overlay is visible above this form
+    let picker_open =
+        app.ui.show_key_picker || app.ui.show_proxyjump_picker || app.ui.show_password_picker;
+
     // Render dividers and content for each field
-    for (i, &(field, is_required)) in FIELDS.iter().enumerate() {
+    for (i, &(field, field_required)) in FIELDS.iter().enumerate() {
         let divider_y = inner.y + (2 * i) as u16;
         let content_y = divider_y + 1;
 
@@ -81,10 +98,20 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         } else {
             theme::muted()
         };
-        let label = if is_required {
-            format!(" {}* ", field.label())
+        let field_label = if app.form.is_pattern && field == FormField::Alias {
+            "Pattern"
         } else {
-            format!(" {} ", field.label())
+            field.label()
+        };
+        let is_required = if app.form.is_pattern && field == FormField::Hostname {
+            false
+        } else {
+            field_required
+        };
+        let label = if is_required {
+            format!(" {}* ", field_label)
+        } else {
+            format!(" {} ", field_label)
         };
         render_divider(
             frame,
@@ -96,7 +123,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         );
 
         let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
-        render_field_content(frame, content_area, field, &app.form);
+        render_field_content(frame, content_area, field, &app.form, picker_open);
     }
 
     // Footer below the block
@@ -175,12 +202,43 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
     }
 
     let height = (app.keys.len() as u16 + 4).min(16);
-    let width = frame.area().width.clamp(58, 72);
-    let area = super::centered_rect_fixed(width, height, frame.area());
+    let area = {
+        let r = super::centered_rect(70, 80, frame.area());
+        super::centered_rect_fixed(r.width, height, frame.area())
+    };
     frame.render_widget(Clear, area);
 
-    // Comment gets remaining space after name(16) + type(10) + borders(2) + highlight(2) + lead(1)
-    let comment_max = (width as usize).saturating_sub(2 + 2 + 1 + 16 + 10);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(" Select Key ", theme::brand()))
+        .border_style(theme::accent());
+
+    let inner_width = block.inner(area).width;
+
+    // Column layout following containers.rs pattern
+    let usable = inner_width.saturating_sub(2) as usize; // 1 highlight + 1 right margin
+    let gap: usize = 2;
+    let padded = |w: usize| -> usize { if w == 0 { 0 } else { w + w / 10 + 1 } };
+
+    let name_w = padded(
+        app.keys
+            .iter()
+            .map(|k| k.name.len())
+            .max()
+            .unwrap_or(4)
+            .max(4),
+    );
+    let type_w = padded(
+        app.keys
+            .iter()
+            .map(|k| k.type_display().len())
+            .max()
+            .unwrap_or(4)
+            .max(4),
+    );
+    let left = name_w + gap + type_w;
+    let comment_w = usable.saturating_sub(left + gap);
+    let gap_str = " ".repeat(gap);
 
     let items: Vec<ListItem> = app
         .keys
@@ -190,21 +248,21 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
             let comment = if key.comment.is_empty() {
                 String::new()
             } else {
-                super::truncate(&key.comment, comment_max)
+                super::truncate(&key.comment, comment_w.saturating_sub(1))
             };
-            let line = Line::from(vec![
-                Span::styled(format!(" {:<16}", key.name), theme::bold()),
-                Span::styled(format!("{:<10}", type_display), theme::muted()),
-                Span::styled(comment, theme::muted()),
-            ]);
+            let mut spans = vec![
+                Span::styled(format!(" {:<name_w$}", key.name), theme::bold()),
+                Span::raw(gap_str.clone()),
+                Span::styled(format!("{:<type_w$}", type_display), theme::muted()),
+            ];
+            if comment_w > 0 {
+                spans.push(Span::raw(gap_str.clone()));
+                spans.push(Span::styled(comment, theme::muted()));
+            }
+            let line = Line::from(spans);
             ListItem::new(line)
         })
         .collect();
-
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .title(Span::styled(" Select Key ", theme::brand()))
-        .border_style(theme::accent());
 
     let list = List::new(items)
         .block(block)
@@ -338,7 +396,12 @@ fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
 /// Get the placeholder text for a field (public for tests).
 #[cfg(test)]
 pub fn placeholder_text(field: FormField) -> String {
-    placeholder_for(field)
+    placeholder_for(field, false)
+}
+
+#[cfg(test)]
+pub fn placeholder_text_pattern(field: FormField) -> String {
+    placeholder_for(field, true)
 }
 
 /// Delegate to shared render_divider in mod.rs.
@@ -359,6 +422,7 @@ fn render_field_content(
     area: Rect,
     field: FormField,
     form: &crate::app::HostForm,
+    picker_open: bool,
 ) {
     let is_focused = form.focused_field == field;
 
@@ -380,13 +444,13 @@ fn render_field_content(
 
     // Show placeholder only when field is empty and focused
     let content = if value.is_empty() && is_focused && !is_picker {
-        let ph = placeholder_for(field);
+        let ph = placeholder_for(field, form.is_pattern);
         Line::from(Span::styled(ph, theme::muted()))
     } else if is_picker && is_focused {
         let inner_width = area.width as usize;
         let arrow_pos = inner_width.saturating_sub(1);
         let (display, display_style) = if value.is_empty() {
-            (placeholder_for(field), theme::muted())
+            (placeholder_for(field, form.is_pattern), theme::muted())
         } else {
             (value.to_string(), theme::bold())
         };
@@ -405,7 +469,7 @@ fn render_field_content(
 
     frame.render_widget(Paragraph::new(content), area);
 
-    if is_focused {
+    if is_focused && !picker_open {
         let prefix: String = value.chars().take(form.cursor_pos).collect();
         let cursor_x = area
             .x
