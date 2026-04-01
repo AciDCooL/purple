@@ -1,6 +1,15 @@
-name: Build Static RHEL 8 Binary
+name: Build and Release Static RHEL 8 Binary
+
 on:
   workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag for the release (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write  # This is required to create a release
 
 jobs:
   build:
@@ -18,8 +27,24 @@ jobs:
       - name: Build static binary using cross
         run: cross build --release --target x86_64-unknown-linux-musl
 
-      - name: Upload Artifact
+      # Rename the binary so it's clear what it is in the release
+      - name: Prepare Release Asset
+        run: |
+          mkdir -p release_assets
+          cp target/x86_64-unknown-linux-musl/release/purple release_assets/purple-linux-x86_64-static
+
+      - name: Upload Artifact (Internal)
         uses: actions/upload-artifact@v4
         with:
           name: purple-static-linux
-          path: target/x86_64-unknown-linux-musl/release/purple
+          path: release_assets/purple-linux-x86_64-static
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag_name }}
+          name: Release ${{ github.event.inputs.tag_name }}
+          body: "Static RHEL 8 compatible binary generated via manual workflow."
+          files: release_assets/purple-linux-x86_64-static
+          draft: false
+          prerelease: false
