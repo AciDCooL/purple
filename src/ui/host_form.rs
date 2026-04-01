@@ -8,7 +8,7 @@ use unicode_width::UnicodeWidthStr;
 use super::theme;
 use crate::app::{App, FormField, Screen};
 
-fn placeholder_for(field: FormField) -> String {
+fn placeholder_for(field: FormField, is_pattern: bool) -> String {
     match field {
         FormField::AskPass => {
             if let Some(default) = crate::preferences::load_askpass_default() {
@@ -17,7 +17,8 @@ fn placeholder_for(field: FormField) -> String {
                 "Enter to pick a source".to_string()
             }
         }
-        FormField::Alias => "my-server".to_string(),
+        FormField::Alias if is_pattern => "10.0.0.* or *.example.com".to_string(),
+        FormField::Alias => "user@host:port or alias".to_string(),
         FormField::Hostname => "192.168.1.1 or example.com".to_string(),
         FormField::User => "root".to_string(),
         FormField::Port => "22".to_string(),
@@ -42,17 +43,33 @@ const FIELDS: &[(FormField, bool)] = &[
 pub fn render(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
 
-    let title = match &app.screen {
-        Screen::AddHost => " Add New Host ",
-        Screen::EditHost { .. } => " Edit Host ",
-        _ => " Host ",
-    };
-
     // Block: top(1) + fields * 2 (divider + content) + bottom(1)
     let block_height = 2 + FIELDS.len() as u16 * 2;
     let total_height = block_height + 1; // + footer
 
     let base = super::centered_rect(70, 80, area);
+
+    let title = if app.form.is_pattern {
+        match &app.screen {
+            Screen::AddHost => " Add Pattern ".to_string(),
+            Screen::EditHost { alias } => {
+                let max_alias = (base.width as usize).saturating_sub(14);
+                let truncated = super::truncate(alias, max_alias);
+                format!(" Edit: {} ", truncated)
+            }
+            _ => " Pattern ".to_string(),
+        }
+    } else {
+        match &app.screen {
+            Screen::AddHost => " Add New Host ".to_string(),
+            Screen::EditHost { alias } => {
+                let max_alias = (base.width as usize).saturating_sub(12);
+                let truncated = super::truncate(alias, max_alias);
+                format!(" Edit: {} ", truncated)
+            }
+            _ => " Host ".to_string(),
+        }
+    };
     let form_area = super::centered_rect_fixed(base.width, total_height, area);
     frame.render_widget(Clear, form_area);
 
@@ -61,41 +78,77 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .title(Span::styled(title, theme::brand()))
-        .border_style(theme::border());
+        .border_style(theme::accent());
 
     let inner = block.inner(block_area);
     frame.render_widget(block, block_area);
 
+    // Suppress cursor when a picker overlay is visible above this form
+    let picker_open =
+        app.ui.show_key_picker || app.ui.show_proxyjump_picker || app.ui.show_password_picker;
+
     // Render dividers and content for each field
-    for (i, &(field, is_required)) in FIELDS.iter().enumerate() {
+    for (i, &(field, field_required)) in FIELDS.iter().enumerate() {
         let divider_y = inner.y + (2 * i) as u16;
         let content_y = divider_y + 1;
 
         let is_focused = app.form.focused_field == field;
-        let label_style = if is_focused { theme::accent_bold() } else { theme::muted() };
-        let label = if is_required {
-            format!(" {}* ", field.label())
+        let label_style = if is_focused {
+            theme::accent_bold()
         } else {
-            format!(" {} ", field.label())
+            theme::muted()
         };
-        render_divider(frame, block_area, divider_y, &label, label_style, theme::border());
+        let field_label = if app.form.is_pattern && field == FormField::Alias {
+            "Pattern"
+        } else {
+            field.label()
+        };
+        let is_required = if app.form.is_pattern && field == FormField::Hostname {
+            false
+        } else {
+            field_required
+        };
+        let label = if is_required {
+            format!(" {}* ", field_label)
+        } else {
+            format!(" {} ", field_label)
+        };
+        render_divider(
+            frame,
+            block_area,
+            divider_y,
+            &label,
+            label_style,
+            theme::accent(),
+        );
 
         let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
-        render_field_content(frame, content_area, field, &app.form);
+        render_field_content(frame, content_area, field, &app.form, picker_open);
     }
 
     // Footer below the block
     let footer_area = Rect::new(form_area.x, form_area.y + block_height, form_area.width, 1);
-    let mut footer_spans = vec![
-        Span::styled(" Enter", theme::primary_action()),
-        Span::styled(" save ", theme::muted()),
-        Span::styled("\u{2502} ", theme::muted()),
-        Span::styled("Tab", theme::accent_bold()),
-        Span::styled(" next ", theme::muted()),
-        Span::styled("\u{2502} ", theme::muted()),
-        Span::styled("Esc", theme::accent_bold()),
-        Span::styled(" cancel", theme::muted()),
-    ];
+    let mut footer_spans = if app.pending_discard_confirm {
+        vec![
+            Span::styled(" Discard changes? ", theme::error()),
+            Span::styled("y", theme::accent_bold()),
+            Span::styled(" yes ", theme::muted()),
+            Span::styled("\u{2502} ", theme::muted()),
+            Span::styled("Esc", theme::accent_bold()),
+            Span::styled(" no", theme::muted()),
+        ]
+    } else {
+        vec![
+            Span::styled(" Enter", theme::primary_action()),
+            Span::styled(" save ", theme::muted()),
+            Span::styled("\u{2502} ", theme::muted()),
+            Span::styled("Tab", theme::accent_bold()),
+            Span::styled(" next ", theme::muted()),
+            Span::styled("\u{2502} ", theme::muted()),
+            Span::styled("Esc", theme::accent_bold()),
+            Span::styled(" cancel", theme::muted()),
+        ]
+    };
     if let Some(ref hint) = app.form.form_hint {
         let hint_width: usize = hint.width() + 4; // " ⚠ {hint} "
         let shortcuts_width: usize = footer_spans.iter().map(|s| s.width()).sum();
@@ -149,12 +202,43 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
     }
 
     let height = (app.keys.len() as u16 + 4).min(16);
-    let width = frame.area().width.clamp(58, 72);
-    let area = super::centered_rect_fixed(width, height, frame.area());
+    let area = {
+        let r = super::centered_rect(70, 80, frame.area());
+        super::centered_rect_fixed(r.width, height, frame.area())
+    };
     frame.render_widget(Clear, area);
 
-    // Comment gets remaining space after name(16) + type(10) + borders(2) + highlight(2) + lead(1)
-    let comment_max = (width as usize).saturating_sub(2 + 2 + 1 + 16 + 10);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(Span::styled(" Select Key ", theme::brand()))
+        .border_style(theme::accent());
+
+    let inner_width = block.inner(area).width;
+
+    // Column layout following containers.rs pattern
+    let usable = inner_width.saturating_sub(2) as usize; // 1 highlight + 1 right margin
+    let gap: usize = 2;
+    let padded = |w: usize| -> usize { if w == 0 { 0 } else { w + w / 10 + 1 } };
+
+    let name_w = padded(
+        app.keys
+            .iter()
+            .map(|k| k.name.len())
+            .max()
+            .unwrap_or(4)
+            .max(4),
+    );
+    let type_w = padded(
+        app.keys
+            .iter()
+            .map(|k| k.type_display().len())
+            .max()
+            .unwrap_or(4)
+            .max(4),
+    );
+    let left = name_w + gap + type_w;
+    let comment_w = usable.saturating_sub(left + gap);
+    let gap_str = " ".repeat(gap);
 
     let items: Vec<ListItem> = app
         .keys
@@ -164,21 +248,21 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
             let comment = if key.comment.is_empty() {
                 String::new()
             } else {
-                super::truncate(&key.comment, comment_max)
+                super::truncate(&key.comment, comment_w.saturating_sub(1))
             };
-            let line = Line::from(vec![
-                Span::styled(format!(" {:<16}", key.name), theme::bold()),
-                Span::styled(format!("{:<10}", type_display), theme::muted()),
-                Span::styled(comment, theme::muted()),
-            ]);
+            let mut spans = vec![
+                Span::styled(format!(" {:<name_w$}", key.name), theme::bold()),
+                Span::raw(gap_str.clone()),
+                Span::styled(format!("{:<type_w$}", type_display), theme::muted()),
+            ];
+            if comment_w > 0 {
+                spans.push(Span::raw(gap_str.clone()));
+                spans.push(Span::styled(comment, theme::muted()));
+            }
+            let line = Line::from(spans);
             ListItem::new(line)
         })
         .collect();
-
-    let block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .title(Span::styled(" Select Key ", theme::brand()))
-        .border_style(theme::accent());
 
     let list = List::new(items)
         .block(block)
@@ -212,14 +296,24 @@ fn render_proxyjump_picker_overlay(frame: &mut Frame, app: &mut App) {
     let area = super::centered_rect_fixed(width, height, frame.area());
     frame.render_widget(Clear, area);
 
-    let host_max = (width as usize).saturating_sub(2 + 2 + 1 + 20);
+    let alias_col = 20;
+    let gap = 2;
+    let host_max = (width as usize).saturating_sub(2 + 2 + 1 + alias_col + gap);
 
     let items: Vec<ListItem> = candidates
         .iter()
         .map(|(alias, hostname)| {
             let host_display = super::truncate(hostname, host_max);
             let line = Line::from(vec![
-                Span::styled(format!(" {:<20}", super::truncate(alias, 20)), theme::bold()),
+                Span::styled(
+                    format!(
+                        " {:<width$}",
+                        super::truncate(alias, alias_col),
+                        width = alias_col
+                    ),
+                    theme::bold(),
+                ),
+                Span::raw(" ".repeat(gap)),
                 Span::styled(host_display, theme::muted()),
             ]);
             ListItem::new(line)
@@ -241,7 +335,7 @@ fn render_proxyjump_picker_overlay(frame: &mut Frame, app: &mut App) {
 
 fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
     let sources = crate::askpass::PASSWORD_SOURCES;
-    let height = sources.len() as u16 + 4; // items + borders + footer
+    let height = sources.len() as u16 + 5; // items + borders + spacer + footer
     let area = super::centered_rect_fixed(54, height, frame.area());
     frame.render_widget(Clear, area);
 
@@ -249,9 +343,15 @@ fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
         .iter()
         .map(|src| {
             let hint_width = src.hint.len();
-            let label_width = 48_usize.saturating_sub(4).saturating_sub(hint_width).saturating_sub(1);
+            let label_width = 48_usize
+                .saturating_sub(4)
+                .saturating_sub(hint_width)
+                .saturating_sub(1);
             let line = Line::from(vec![
-                Span::styled(format!(" {:<width$}", src.label, width = label_width), theme::bold()),
+                Span::styled(
+                    format!(" {:<width$}", src.label, width = label_width),
+                    theme::bold(),
+                ),
                 Span::styled(src.hint, theme::muted()),
             ]);
             ListItem::new(line)
@@ -266,9 +366,10 @@ fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Split into list area and footer
+    // Split into list area + spacer + footer
     let chunks = ratatui::layout::Layout::vertical([
-        ratatui::layout::Constraint::Min(1),
+        ratatui::layout::Constraint::Min(0),
+        ratatui::layout::Constraint::Length(1),
         ratatui::layout::Constraint::Length(1),
     ])
     .split(inner);
@@ -289,13 +390,18 @@ fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
         Span::styled("Esc", theme::accent_bold()),
         Span::styled(" cancel", theme::muted()),
     ];
-    super::render_footer_with_status(frame, chunks[1], spans, app);
+    super::render_footer_with_status(frame, chunks[2], spans, app);
 }
 
 /// Get the placeholder text for a field (public for tests).
 #[cfg(test)]
 pub fn placeholder_text(field: FormField) -> String {
-    placeholder_for(field)
+    placeholder_for(field, false)
+}
+
+#[cfg(test)]
+pub fn placeholder_text_pattern(field: FormField) -> String {
+    placeholder_for(field, true)
 }
 
 /// Delegate to shared render_divider in mod.rs.
@@ -316,6 +422,7 @@ fn render_field_content(
     area: Rect,
     field: FormField,
     form: &crate::app::HostForm,
+    picker_open: bool,
 ) {
     let is_focused = form.focused_field == field;
 
@@ -330,17 +437,20 @@ fn render_field_content(
         FormField::Tags => &form.tags,
     };
 
-    let is_picker = matches!(field, FormField::IdentityFile | FormField::ProxyJump | FormField::AskPass);
+    let is_picker = matches!(
+        field,
+        FormField::IdentityFile | FormField::ProxyJump | FormField::AskPass
+    );
 
     // Show placeholder only when field is empty and focused
     let content = if value.is_empty() && is_focused && !is_picker {
-        let ph = placeholder_for(field);
+        let ph = placeholder_for(field, form.is_pattern);
         Line::from(Span::styled(ph, theme::muted()))
     } else if is_picker && is_focused {
         let inner_width = area.width as usize;
         let arrow_pos = inner_width.saturating_sub(1);
         let (display, display_style) = if value.is_empty() {
-            (placeholder_for(field), theme::muted())
+            (placeholder_for(field, form.is_pattern), theme::muted())
         } else {
             (value.to_string(), theme::bold())
         };
@@ -359,7 +469,7 @@ fn render_field_content(
 
     frame.render_widget(Paragraph::new(content), area);
 
-    if is_focused {
+    if is_focused && !picker_open {
         let prefix: String = value.chars().take(form.cursor_pos).collect();
         let cursor_x = area
             .x
@@ -368,5 +478,27 @@ fn render_field_content(
         if area.width > 0 && cursor_x < area.x.saturating_add(area.width) {
             frame.set_cursor_position((cursor_x, cursor_y));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn password_picker_layout_has_spacer() {
+        let area = Rect::new(0, 0, 54, 15);
+        let chunks = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        assert_eq!(chunks[1].height, 1, "spacer row should be 1 tall");
+        assert_eq!(chunks[2].height, 1, "footer row should be 1 tall");
+        assert!(
+            chunks[2].y > chunks[0].y + chunks[0].height,
+            "footer should be below content end"
+        );
     }
 }

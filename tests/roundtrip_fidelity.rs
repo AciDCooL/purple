@@ -474,7 +474,10 @@ fn add_host_default_port_not_written() {
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(!output.contains("Port"), "Port 22 should not be written explicitly");
+    assert!(
+        !output.contains("Port"),
+        "Port 22 should not be written explicitly"
+    );
 }
 
 /// FIXED: add_host to config that already ends with a blank line no longer creates double blank lines.
@@ -956,7 +959,10 @@ Host myserver
         },
     );
     let output = config.serialize();
-    assert!(!output.contains("IdentityFile"), "IdentityFile should be removed when empty");
+    assert!(
+        !output.contains("IdentityFile"),
+        "IdentityFile should be removed when empty"
+    );
 }
 
 #[test]
@@ -977,7 +983,10 @@ Host myserver
         },
     );
     let output = config.serialize();
-    assert!(!output.contains("Port"), "Port 22 should be removed (it's the default)");
+    assert!(
+        !output.contains("Port"),
+        "Port 22 should be removed (it's the default)"
+    );
 }
 
 /// FIXED: update_host now detects and preserves the original indentation of the block.
@@ -1153,7 +1162,10 @@ Host beta
     let output = config.serialize();
 
     let lines: Vec<&str> = output.lines().collect();
-    let tags_pos = lines.iter().position(|l| l.contains("purple:tags")).unwrap();
+    let tags_pos = lines
+        .iter()
+        .position(|l| l.contains("purple:tags"))
+        .unwrap();
     let blank_pos = lines.iter().position(|l| l.is_empty()).unwrap();
 
     assert!(
@@ -1188,7 +1200,10 @@ Host myserver
 ";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, Some("op://Vault/Item/password".to_string()));
+    assert_eq!(
+        entries[0].askpass,
+        Some("op://Vault/Item/password".to_string())
+    );
 }
 
 #[test]
@@ -1247,7 +1262,11 @@ Host myserver
     let mut config = parse_str(input);
     config.set_host_askpass("myserver", "keychain");
     let output = config.serialize();
-    assert!(output.contains("# purple:askpass keychain"), "output: {}", output);
+    assert!(
+        output.contains("# purple:askpass keychain"),
+        "output: {}",
+        output
+    );
     let entries = config.host_entries();
     assert_eq!(entries[0].askpass, Some("keychain".to_string()));
 }
@@ -1276,7 +1295,10 @@ Host myserver
     let mut config = parse_str(input);
     config.set_host_askpass("myserver", "");
     let output = config.serialize();
-    assert!(!output.contains("purple:askpass"), "askpass comment should be removed");
+    assert!(
+        !output.contains("purple:askpass"),
+        "askpass comment should be removed"
+    );
     let entries = config.host_entries();
     assert_eq!(entries[0].askpass, None);
 }
@@ -1295,7 +1317,10 @@ Host beta
     let output = config.serialize();
 
     let lines: Vec<&str> = output.lines().collect();
-    let askpass_pos = lines.iter().position(|l| l.contains("purple:askpass")).unwrap();
+    let askpass_pos = lines
+        .iter()
+        .position(|l| l.contains("purple:askpass"))
+        .unwrap();
     let blank_pos = lines.iter().position(|l| l.is_empty()).unwrap();
 
     assert!(
@@ -1316,7 +1341,10 @@ Host myserver
 ";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, Some("vault:secret/data/myapp#password".to_string()));
+    assert_eq!(
+        entries[0].askpass,
+        Some("vault:secret/data/myapp#password".to_string())
+    );
 }
 
 #[test]
@@ -1328,7 +1356,10 @@ Host myserver
 ";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, Some("vault:secret/data/myapp".to_string()));
+    assert_eq!(
+        entries[0].askpass,
+        Some("vault:secret/data/myapp".to_string())
+    );
 }
 
 #[test]
@@ -1340,9 +1371,16 @@ Host myserver
     let mut config = parse_str(input);
     config.set_host_askpass("myserver", "vault:secret/ssh/prod#api_key");
     let output = config.serialize();
-    assert!(output.contains("# purple:askpass vault:secret/ssh/prod#api_key"), "output: {}", output);
+    assert!(
+        output.contains("# purple:askpass vault:secret/ssh/prod#api_key"),
+        "output: {}",
+        output
+    );
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, Some("vault:secret/ssh/prod#api_key".to_string()));
+    assert_eq!(
+        entries[0].askpass,
+        Some("vault:secret/ssh/prod#api_key".to_string())
+    );
 }
 
 #[test]
@@ -1355,7 +1393,10 @@ Host myserver
     let mut config = parse_str(input);
     config.set_host_askpass("myserver", "keychain");
     let output = config.serialize();
-    assert!(!output.contains("vault:"), "old vault source should be removed");
+    assert!(
+        !output.contains("vault:"),
+        "old vault source should be removed"
+    );
     assert!(output.contains("# purple:askpass keychain"));
 }
 
@@ -1417,11 +1458,23 @@ Host myserver
     let mut config = parse_str(input);
     config.set_host_askpass("myserver", "op://Vault/SSH/password");
     let output = config.serialize();
-    assert!(output.contains("# purple:tags prod,us-east"), "tags preserved");
-    assert!(output.contains("# purple:provider digitalocean:12345"), "provider preserved");
-    assert!(output.contains("# purple:askpass op://Vault/SSH/password"), "askpass added");
+    assert!(
+        output.contains("# purple:tags prod,us-east"),
+        "tags preserved"
+    );
+    assert!(
+        output.contains("# purple:provider digitalocean:12345"),
+        "provider preserved"
+    );
+    assert!(
+        output.contains("# purple:askpass op://Vault/SSH/password"),
+        "askpass added"
+    );
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, Some("op://Vault/SSH/password".to_string()));
+    assert_eq!(
+        entries[0].askpass,
+        Some("op://Vault/SSH/password".to_string())
+    );
     assert_eq!(entries[0].tags, vec!["prod", "us-east"]);
 }
 
@@ -1448,13 +1501,19 @@ Host myserver
     let mut config = parse_str(input);
     // Set
     config.set_host_askpass("myserver", "keychain");
-    assert_eq!(config.host_entries()[0].askpass, Some("keychain".to_string()));
+    assert_eq!(
+        config.host_entries()[0].askpass,
+        Some("keychain".to_string())
+    );
     // Clear
     config.set_host_askpass("myserver", "");
     assert_eq!(config.host_entries()[0].askpass, None);
     // Set again with different source
     config.set_host_askpass("myserver", "vault:secret/ssh#pass");
-    assert_eq!(config.host_entries()[0].askpass, Some("vault:secret/ssh#pass".to_string()));
+    assert_eq!(
+        config.host_entries()[0].askpass,
+        Some("vault:secret/ssh#pass".to_string())
+    );
     let output = config.serialize();
     // Should have exactly one askpass comment
     assert_eq!(output.matches("purple:askpass").count(), 1);
@@ -1535,7 +1594,10 @@ Host myserver
 ";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, None, "Empty askpass value should be None");
+    assert_eq!(
+        entries[0].askpass, None,
+        "Empty askpass value should be None"
+    );
 }
 
 #[test]
@@ -1547,7 +1609,10 @@ Host myserver
 ";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, None, "Whitespace-only askpass value should be None");
+    assert_eq!(
+        entries[0].askpass, None,
+        "Whitespace-only askpass value should be None"
+    );
 }
 
 #[test]
@@ -1586,7 +1651,10 @@ Host myserver
 ";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, None, "Tags/provider should not be parsed as askpass");
+    assert_eq!(
+        entries[0].askpass, None,
+        "Tags/provider should not be parsed as askpass"
+    );
 }
 
 #[test]
@@ -1599,7 +1667,10 @@ Host myserver
 ";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, None, "Wrong case prefix should not be parsed");
+    assert_eq!(
+        entries[0].askpass, None,
+        "Wrong case prefix should not be parsed"
+    );
 }
 
 #[test]
@@ -1612,7 +1683,10 @@ Host myserver
 ";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, None, "No space after prefix should not match");
+    assert_eq!(
+        entries[0].askpass, None,
+        "No space after prefix should not match"
+    );
 }
 
 #[test]
@@ -1624,7 +1698,10 @@ Host myserver
     let mut config = parse_str(input);
     config.set_host_askpass("nonexistent", "keychain");
     let output = config.serialize();
-    assert!(!output.contains("purple:askpass"), "Should not add askpass to nonexistent host");
+    assert!(
+        !output.contains("purple:askpass"),
+        "Should not add askpass to nonexistent host"
+    );
 }
 
 #[test]
@@ -1643,7 +1720,10 @@ Host myserver
     // Askpass should still be there
     let output = config.serialize();
     assert!(output.contains("10.0.0.2"), "Hostname should be updated");
-    assert!(output.contains("# purple:askpass pass:ssh/myserver"), "Askpass should survive update");
+    assert!(
+        output.contains("# purple:askpass pass:ssh/myserver"),
+        "Askpass should survive update"
+    );
 }
 
 #[test]
@@ -1651,9 +1731,16 @@ fn askpass_crlf_roundtrip() {
     let input = "Host myserver\r\n  HostName 10.0.0.1\r\n  # purple:askpass keychain\r\n";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].askpass, Some("keychain".to_string()), "CRLF askpass should parse");
+    assert_eq!(
+        entries[0].askpass,
+        Some("keychain".to_string()),
+        "CRLF askpass should parse"
+    );
     let output = config.serialize();
-    assert!(output.contains("purple:askpass keychain"), "CRLF askpass should survive serialize");
+    assert!(
+        output.contains("purple:askpass keychain"),
+        "CRLF askpass should survive serialize"
+    );
 }
 
 #[test]
@@ -1677,12 +1764,18 @@ fn askpass_survives_add_host_then_update() {
     };
     config.add_host(&entry);
     config.set_host_askpass("newhost", "bw:my-item");
-    assert_eq!(config.host_entries()[0].askpass, Some("bw:my-item".to_string()));
+    assert_eq!(
+        config.host_entries()[0].askpass,
+        Some("bw:my-item".to_string())
+    );
     // Update hostname
     let mut updated = config.host_entries()[0].clone();
     updated.hostname = "10.0.0.2".to_string();
     config.update_host("newhost", &updated);
-    assert_eq!(config.host_entries()[0].askpass, Some("bw:my-item".to_string()));
+    assert_eq!(
+        config.host_entries()[0].askpass,
+        Some("bw:my-item".to_string())
+    );
     assert_eq!(config.host_entries()[0].hostname, "10.0.0.2");
 }
 
@@ -1740,7 +1833,10 @@ Host myserver
 ";
     let mut config = parse_str(input);
     config.set_host_askpass("myserver", "get-p\u{00E4}ss %h");
-    assert_eq!(config.host_entries()[0].askpass, Some("get-p\u{00E4}ss %h".to_string()));
+    assert_eq!(
+        config.host_entries()[0].askpass,
+        Some("get-p\u{00E4}ss %h".to_string())
+    );
     let output = config.serialize();
     assert!(output.contains("get-p\u{00E4}ss %h"));
 }
@@ -1875,7 +1971,10 @@ fn multiple_adds_check_spacing() {
             prev_blank = false;
         }
     }
-    assert_eq!(blank_count, 4, "Should have exactly 4 blank line separators");
+    assert_eq!(
+        blank_count, 4,
+        "Should have exactly 4 blank line separators"
+    );
 }
 
 #[test]
@@ -1893,7 +1992,8 @@ fn repeated_add_delete_cycle_no_blank_line_accumulation() {
     let output = config.serialize();
     let consecutive_blanks = output.matches("\n\n\n").count();
     assert_eq!(
-        consecutive_blanks, 0,
+        consecutive_blanks,
+        0,
         "No triple newlines should accumulate. Got:\n{}",
         visible(&output)
     );
@@ -2272,8 +2372,8 @@ Host beta
     // alpha's directives should include: HostName, blank, "# Group B"
     assert_eq!(alpha.directives.len(), 3);
     assert!(!alpha.directives[0].is_non_directive); // HostName
-    assert!(alpha.directives[1].is_non_directive);  // blank
-    assert!(alpha.directives[2].is_non_directive);  // # Group B
+    assert!(alpha.directives[1].is_non_directive); // blank
+    assert!(alpha.directives[2].is_non_directive); // # Group B
     assert_eq!(alpha.directives[2].raw_line, "# Group B");
 }
 
@@ -2289,7 +2389,11 @@ Host beta
     let mut config = parse_str(input);
     config.delete_host("alpha");
     let output = config.serialize();
-    assert!(output.starts_with("Host beta"), "Should start with beta. Got:\n{}", visible(&output));
+    assert!(
+        output.starts_with("Host beta"),
+        "Should start with beta. Got:\n{}",
+        visible(&output)
+    );
 }
 
 /// FIXED: Include directives between host blocks are now parsed as top-level elements.
@@ -2309,18 +2413,32 @@ Host beta
 ";
     let config = parse_str(input);
 
-    let include_count = config.elements.iter().filter(|e| matches!(e, ConfigElement::Include(_))).count();
-    let host_count = config.elements.iter().filter(|e| matches!(e, ConfigElement::HostBlock(_))).count();
+    let include_count = config
+        .elements
+        .iter()
+        .filter(|e| matches!(e, ConfigElement::Include(_)))
+        .count();
+    let host_count = config
+        .elements
+        .iter()
+        .filter(|e| matches!(e, ConfigElement::HostBlock(_)))
+        .count();
 
     assert_eq!(host_count, 2, "Should have 2 host blocks");
-    assert_eq!(include_count, 1, "Include between hosts should be a top-level element");
+    assert_eq!(
+        include_count, 1,
+        "Include between hosts should be a top-level element"
+    );
 
     // Include should NOT be inside alpha's directives
     let alpha = match &config.elements[0] {
         ConfigElement::HostBlock(b) => b,
         _ => panic!("Expected HostBlock"),
     };
-    let has_include_in_directives = alpha.directives.iter().any(|d| d.raw_line.contains("Include"));
+    let has_include_in_directives = alpha
+        .directives
+        .iter()
+        .any(|d| d.raw_line.contains("Include"));
     assert!(
         !has_include_in_directives,
         "Include line should NOT be inside alpha's directives"
@@ -2485,7 +2603,10 @@ fn crlf_preserved_in_round_trip() {
             "raw_host_line should not contain \\r"
         );
         for d in &block.directives {
-            assert!(!d.raw_line.contains('\r'), "raw_line should not contain \\r");
+            assert!(
+                !d.raw_line.contains('\r'),
+                "raw_line should not contain \\r"
+            );
         }
     }
     // But serialize re-adds CRLF
@@ -3000,8 +3121,10 @@ Host myserver
 ";
     let config = parse_str(input);
     let entries = config.host_entries();
-    assert_eq!(entries[0].identity_file, "~/.ssh/id_ed25519",
-        "to_host_entry should capture the FIRST IdentityFile");
+    assert_eq!(
+        entries[0].identity_file, "~/.ssh/id_ed25519",
+        "to_host_entry should capture the FIRST IdentityFile"
+    );
 
     // Edit hostname only (identity_file unchanged from to_host_entry)
     let mut config = parse_str(input);
@@ -3011,20 +3134,33 @@ Host myserver
     let output = config.serialize();
 
     // All three IdentityFile directives must survive
-    assert!(output.contains("IdentityFile ~/.ssh/id_ed25519"),
-        "First IdentityFile should be preserved");
-    assert!(output.contains("IdentityFile ~/.ssh/id_rsa"),
-        "Second IdentityFile should be preserved");
-    assert!(output.contains("IdentityFile ~/.ssh/company_key"),
-        "Third IdentityFile should be preserved");
-    assert!(output.contains("HostName 10.0.0.2"),
-        "Hostname should be updated");
+    assert!(
+        output.contains("IdentityFile ~/.ssh/id_ed25519"),
+        "First IdentityFile should be preserved"
+    );
+    assert!(
+        output.contains("IdentityFile ~/.ssh/id_rsa"),
+        "Second IdentityFile should be preserved"
+    );
+    assert!(
+        output.contains("IdentityFile ~/.ssh/company_key"),
+        "Third IdentityFile should be preserved"
+    );
+    assert!(
+        output.contains("HostName 10.0.0.2"),
+        "Hostname should be updated"
+    );
 
     // Count IdentityFile lines — must be exactly 3
-    let id_count = output.lines().filter(|l| l.trim().starts_with("IdentityFile")).count();
-    assert_eq!(id_count, 3,
+    let id_count = output
+        .lines()
+        .filter(|l| l.trim().starts_with("IdentityFile"))
+        .count();
+    assert_eq!(
+        id_count, 3,
         "Should have exactly 3 IdentityFile directives. Got:\n{}",
-        output);
+        output
+    );
 }
 
 /// Changing the primary IdentityFile updates only the first directive.
@@ -3048,14 +3184,23 @@ Host myserver
         },
     );
     let output = config.serialize();
-    let id_lines: Vec<&str> = output.lines()
+    let id_lines: Vec<&str> = output
+        .lines()
         .filter(|l| l.trim().starts_with("IdentityFile"))
         .collect();
-    assert_eq!(id_lines.len(), 2, "Should still have 2 IdentityFile directives");
-    assert!(id_lines[0].contains("~/.ssh/new_key"),
-        "First IdentityFile should be updated");
-    assert!(id_lines[1].contains("~/.ssh/id_rsa"),
-        "Second IdentityFile should be untouched");
+    assert_eq!(
+        id_lines.len(),
+        2,
+        "Should still have 2 IdentityFile directives"
+    );
+    assert!(
+        id_lines[0].contains("~/.ssh/new_key"),
+        "First IdentityFile should be updated"
+    );
+    assert!(
+        id_lines[1].contains("~/.ssh/id_rsa"),
+        "Second IdentityFile should be untouched"
+    );
 }
 
 // ============================================================================
@@ -3078,8 +3223,14 @@ Host other
     let mut config = parse_str(input);
     config.delete_host("myserver");
     let output = config.serialize();
-    assert!(output.contains("Match host *.example.com"), "Match block should survive host deletion");
-    assert!(output.contains("ForwardAgent yes"), "Match directives should survive host deletion");
+    assert!(
+        output.contains("Match host *.example.com"),
+        "Match block should survive host deletion"
+    );
+    assert!(
+        output.contains("ForwardAgent yes"),
+        "Match directives should survive host deletion"
+    );
     assert!(output.contains("Host other"));
     assert!(!output.contains("Host myserver"));
 }
@@ -3134,8 +3285,10 @@ Host myserver
         },
     );
     let output = config.serialize();
-    assert!(!output.contains("IdentityFile"),
-        "All IdentityFile directives should be removed when cleared");
+    assert!(
+        !output.contains("IdentityFile"),
+        "All IdentityFile directives should be removed when cleared"
+    );
 }
 
 // ============================================================================
@@ -3155,9 +3308,21 @@ Host myserver
     entry.hostname = "10.0.0.2".to_string();
     config.update_host("myserver", &entry);
     let output = config.serialize();
-    assert!(output.contains("HostName=10.0.0.2"), "Equals-syntax should be preserved after value change: {}", output);
-    assert!(output.contains("User=admin"), "Unchanged equals-syntax directive should survive: {}", output);
-    assert!(output.contains("Port=2222"), "Unchanged equals-syntax Port should survive: {}", output);
+    assert!(
+        output.contains("HostName=10.0.0.2"),
+        "Equals-syntax should be preserved after value change: {}",
+        output
+    );
+    assert!(
+        output.contains("User=admin"),
+        "Unchanged equals-syntax directive should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("Port=2222"),
+        "Unchanged equals-syntax Port should survive: {}",
+        output
+    );
 }
 
 #[test]
@@ -3172,8 +3337,15 @@ Host myserver
     entry.user = "deploy".to_string();
     config.update_host("myserver", &entry);
     let output = config.serialize();
-    assert!(output.contains("HostName=10.0.0.1"), "Unchanged equals-syntax HostName should survive");
-    assert!(output.contains("User=deploy"), "Equals-syntax should be preserved after User change: {}", output);
+    assert!(
+        output.contains("HostName=10.0.0.1"),
+        "Unchanged equals-syntax HostName should survive"
+    );
+    assert!(
+        output.contains("User=deploy"),
+        "Equals-syntax should be preserved after User change: {}",
+        output
+    );
 }
 
 #[test]
@@ -3191,10 +3363,23 @@ Host myserver
     entry.user = "deploy".to_string();
     config.update_host("myserver", &entry);
     let output = config.serialize();
-    assert!(output.contains("HostName=10.0.0.2"), "Equals-syntax should be preserved for HostName");
-    assert!(output.contains("User deploy"), "Space-syntax should be preserved for User: {}", output);
-    assert!(output.contains("Port=2222"), "Unchanged equals-syntax Port should survive");
-    assert!(output.contains("IdentityFile ~/.ssh/id_rsa"), "Space-syntax IdentityFile should survive");
+    assert!(
+        output.contains("HostName=10.0.0.2"),
+        "Equals-syntax should be preserved for HostName"
+    );
+    assert!(
+        output.contains("User deploy"),
+        "Space-syntax should be preserved for User: {}",
+        output
+    );
+    assert!(
+        output.contains("Port=2222"),
+        "Unchanged equals-syntax Port should survive"
+    );
+    assert!(
+        output.contains("IdentityFile ~/.ssh/id_rsa"),
+        "Space-syntax IdentityFile should survive"
+    );
 }
 
 #[test]
@@ -3211,9 +3396,21 @@ Host myserver
     entry.user = "deploy".to_string();
     config.update_host("myserver", &entry);
     let output = config.serialize();
-    assert!(output.contains("HostName = 10.0.0.2"), "Spaced equals-syntax should be preserved for HostName: {}", output);
-    assert!(output.contains("User = deploy"), "Spaced equals-syntax should be preserved for User: {}", output);
-    assert!(output.contains("Port = 2222"), "Unchanged spaced equals-syntax Port should survive: {}", output);
+    assert!(
+        output.contains("HostName = 10.0.0.2"),
+        "Spaced equals-syntax should be preserved for HostName: {}",
+        output
+    );
+    assert!(
+        output.contains("User = deploy"),
+        "Spaced equals-syntax should be preserved for User: {}",
+        output
+    );
+    assert!(
+        output.contains("Port = 2222"),
+        "Unchanged spaced equals-syntax Port should survive: {}",
+        output
+    );
 }
 
 // ============================================================================
@@ -3229,12 +3426,23 @@ fn crlf_preserved_after_hostname_change() {
     entry.hostname = "10.0.0.2".to_string();
     config.update_host("myserver", &entry);
     let output = config.serialize();
-    assert!(output.contains("\r\n"), "CRLF should be preserved after mutation");
-    assert!(output.contains("HostName 10.0.0.2"), "Hostname should be updated");
+    assert!(
+        output.contains("\r\n"),
+        "CRLF should be preserved after mutation"
+    );
+    assert!(
+        output.contains("HostName 10.0.0.2"),
+        "Hostname should be updated"
+    );
     // Verify no bare \n (every \n should be preceded by \r)
     for (i, b) in output.bytes().enumerate() {
         if b == b'\n' && i > 0 {
-            assert_eq!(output.as_bytes()[i - 1], b'\r', "All line endings should be CRLF, found bare LF at byte {}", i);
+            assert_eq!(
+                output.as_bytes()[i - 1],
+                b'\r',
+                "All line endings should be CRLF, found bare LF at byte {}",
+                i
+            );
         }
     }
 }
@@ -3252,11 +3460,19 @@ fn crlf_preserved_after_add_host() {
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("\r\n"), "CRLF should be preserved after add");
+    assert!(
+        output.contains("\r\n"),
+        "CRLF should be preserved after add"
+    );
     // Verify no bare \n
     for (i, b) in output.bytes().enumerate() {
         if b == b'\n' && i > 0 {
-            assert_eq!(output.as_bytes()[i - 1], b'\r', "All line endings should be CRLF after add, found bare LF at byte {}", i);
+            assert_eq!(
+                output.as_bytes()[i - 1],
+                b'\r',
+                "All line endings should be CRLF after add, found bare LF at byte {}",
+                i
+            );
         }
     }
 }
@@ -3268,11 +3484,19 @@ fn crlf_preserved_after_delete_host() {
     assert!(config.crlf, "CRLF should be detected");
     config.delete_host("first");
     let output = config.serialize();
-    assert!(output.contains("\r\n"), "CRLF should be preserved after delete");
+    assert!(
+        output.contains("\r\n"),
+        "CRLF should be preserved after delete"
+    );
     assert!(output.contains("Host second"), "Second host should survive");
     for (i, b) in output.bytes().enumerate() {
         if b == b'\n' && i > 0 {
-            assert_eq!(output.as_bytes()[i - 1], b'\r', "All line endings should be CRLF after delete, found bare LF at byte {}", i);
+            assert_eq!(
+                output.as_bytes()[i - 1],
+                b'\r',
+                "All line endings should be CRLF after delete, found bare LF at byte {}",
+                i
+            );
         }
     }
 }
@@ -3328,7 +3552,10 @@ fn delete_host_multi_pattern_not_deleted_by_single() {
     let mut config = parse_str(input);
     config.delete_host("prod");
     let output = config.serialize();
-    assert!(output.contains("Host prod staging"), "Multi-pattern host should survive single-pattern delete");
+    assert!(
+        output.contains("Host prod staging"),
+        "Multi-pattern host should survive single-pattern delete"
+    );
     assert!(output.contains("Host other"), "Other host should survive");
 }
 
@@ -3473,9 +3700,8 @@ fn has_forward_after_add() {
 
 #[test]
 fn remove_forward_then_has_forward_false() {
-    let mut config = parse_str(
-        "Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n",
-    );
+    let mut config =
+        parse_str("Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n");
     assert!(config.has_forward("myserver", "LocalForward", "8080 localhost:80"));
     config.remove_forward("myserver", "LocalForward", "8080 localhost:80");
     assert!(!config.has_forward("myserver", "LocalForward", "8080 localhost:80"));
@@ -3541,7 +3767,10 @@ Host myserver
     let reparsed = parse_str(&output);
     let rules = reparsed.find_tunnel_directives("myserver");
     assert_eq!(rules.len(), 1);
-    assert_eq!(rules[0].tunnel_type, purple_ssh::tunnel::TunnelType::Dynamic);
+    assert_eq!(
+        rules[0].tunnel_type,
+        purple_ssh::tunnel::TunnelType::Dynamic
+    );
     assert_eq!(rules[0].bind_port, 1080);
 }
 
@@ -3563,7 +3792,10 @@ fn update_host_equals_in_value_preserves_space_separator() {
     config.update_host("myserver", &entry);
     let output = config.serialize();
 
-    assert_eq_visible("Host myserver\n  HostName 10.0.0.2\n  IdentityFile ~/.ssh/id=staging\n", &output);
+    assert_eq_visible(
+        "Host myserver\n  HostName 10.0.0.2\n  IdentityFile ~/.ssh/id=staging\n",
+        &output,
+    );
 }
 
 #[test]
@@ -3582,7 +3814,10 @@ fn update_host_equals_separator_with_equals_in_value() {
     config.update_host("myserver", &entry);
     let output = config.serialize();
 
-    assert_eq_visible("Host myserver\n  HostName=10.0.0.2\n  IdentityFile=~/.ssh/id=staging\n", &output);
+    assert_eq_visible(
+        "Host myserver\n  HostName=10.0.0.2\n  IdentityFile=~/.ssh/id=staging\n",
+        &output,
+    );
 }
 
 // ============================================================================
@@ -3590,7 +3825,7 @@ fn update_host_equals_separator_with_equals_in_value() {
 // ============================================================================
 
 use purple_ssh::providers::config::ProviderSection;
-use purple_ssh::providers::sync::{sync_provider, sync_provider_with_options};
+use purple_ssh::providers::sync::sync_provider;
 use purple_ssh::providers::{Provider, ProviderError, ProviderHost};
 
 struct TestProvider {
@@ -3627,6 +3862,7 @@ fn test_section(provider: &str, prefix: &str) -> ProviderSection {
         profile: String::new(),
         regions: String::new(),
         project: String::new(),
+        compartment: String::new(),
     }
 }
 
@@ -3634,17 +3870,42 @@ fn test_section(provider: &str, prefix: &str) -> ProviderSection {
 fn sync_adds_host_to_empty_config() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string()])];
-    let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "1.2.3.4".to_string(),
+        vec!["prod".to_string()],
+    )];
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result.added, 1);
 
     let output = config.serialize();
     assert!(output.contains("Host do-web-1"), "alias should be do-web-1");
-    assert!(output.contains("HostName 1.2.3.4"), "hostname should be 1.2.3.4");
+    assert!(
+        output.contains("HostName 1.2.3.4"),
+        "hostname should be 1.2.3.4"
+    );
     assert!(output.contains("User root"), "user should be root");
-    assert!(output.contains("# purple:provider digitalocean:123"), "provider marker");
-    assert!(output.contains("# purple:tags prod"), "tags");
+    assert!(
+        output.contains("# purple:provider digitalocean:123"),
+        "provider marker"
+    );
+    assert!(
+        output.contains("# purple:provider_tags prod"),
+        "provider tags"
+    );
 }
 
 #[test]
@@ -3652,29 +3913,68 @@ fn sync_preserves_existing_hosts() {
     let input = "Host manual-host\n  HostName 10.0.0.1\n  User admin\n";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("456".to_string(), "db-1".to_string(), "5.6.7.8".to_string(), Vec::new())];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "456".to_string(),
+        "db-1".to_string(),
+        "5.6.7.8".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
     assert!(output.contains("Host manual-host"), "manual host preserved");
-    assert!(output.contains("HostName 10.0.0.1"), "manual host IP preserved");
+    assert!(
+        output.contains("HostName 10.0.0.1"),
+        "manual host IP preserved"
+    );
     assert!(output.contains("Host do-db-1"), "synced host added");
 }
 
 #[test]
 fn sync_updates_ip_preserves_formatting() {
-    let input = "Host do-web-1\n  HostName 1.2.3.4\n  User root\n  # purple:provider digitalocean:123\n";
+    let input =
+        "Host do-web-1\n  HostName 1.2.3.4\n  User root\n  # purple:provider digitalocean:123\n";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.8.7.6".to_string(), Vec::new())];
-    let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "9.8.7.6".to_string(),
+        Vec::new(),
+    )];
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result.updated, 1);
 
     let output = config.serialize();
     assert!(output.contains("HostName 9.8.7.6"), "IP should be updated");
-    assert!(output.contains("# purple:provider digitalocean:123"), "provider marker preserved");
+    assert!(
+        output.contains("# purple:provider digitalocean:123"),
+        "provider marker preserved"
+    );
 }
 
 #[test]
@@ -3692,10 +3992,26 @@ Host do-db-1
 ";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
     // Only web-1 in remote, db-1 should be removed
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
-    let result = sync_provider(&mut config, &provider, &remote, &section, true, false);
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "1.2.3.4".to_string(),
+        Vec::new(),
+    )];
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        true,
+        false,
+        false,
+    );
     assert_eq!(result.removed, 1);
     assert_eq!(result.unchanged, 1);
 
@@ -3715,9 +4031,25 @@ Host do-web-1
 ";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string(), "us-east".to_string()])];
-    let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "1.2.3.4".to_string(),
+        vec!["prod".to_string(), "us-east".to_string()],
+    )];
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result.updated, 1); // new tag "us-east" added
 
     let output = config.serialize();
@@ -3727,7 +4059,7 @@ Host do-web-1
 }
 
 #[test]
-fn sync_reset_tags_replaces_all() {
+fn sync_provider_tags_replaces_all() {
     let input = "\
 Host do-web-1
   HostName 1.2.3.4
@@ -3737,14 +4069,37 @@ Host do-web-1
 ";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), vec!["staging".to_string()])];
-    let result = sync_provider_with_options(&mut config, &provider, &remote, &section, false, false, true);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "1.2.3.4".to_string(),
+        vec!["staging".to_string()],
+    )];
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result.updated, 1);
 
     let output = config.serialize();
-    assert!(output.contains("staging"), "new tag set");
-    assert!(!output.contains("my-custom"), "local tag replaced");
+    assert!(
+        output.contains("# purple:provider_tags staging"),
+        "provider tags set"
+    );
+    // User tags preserved (no overlap with remote)
+    assert!(
+        output.contains("# purple:tags prod,my-custom"),
+        "user tags preserved"
+    );
 }
 
 #[test]
@@ -3757,16 +4112,38 @@ Host do-old-name
 ";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "new-name".to_string(), "1.2.3.4".to_string(), Vec::new())];
-    let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "new-name".to_string(),
+        "1.2.3.4".to_string(),
+        Vec::new(),
+    )];
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result.renames.len(), 1);
-    assert_eq!(result.renames[0], ("do-old-name".to_string(), "do-new-name".to_string()));
+    assert_eq!(
+        result.renames[0],
+        ("do-old-name".to_string(), "do-new-name".to_string())
+    );
 
     let output = config.serialize();
     assert!(output.contains("Host do-new-name"), "alias renamed");
     assert!(!output.contains("Host do-old-name"), "old alias gone");
-    assert!(output.contains("# purple:provider digitalocean:123"), "provider marker updated");
+    assert!(
+        output.contains("# purple:provider digitalocean:123"),
+        "provider marker updated"
+    );
 }
 
 #[test]
@@ -3774,36 +4151,101 @@ fn sync_with_identity_file() {
     let mut config = parse_str("");
     let mut section = test_section("digitalocean", "do");
     section.identity_file = "~/.ssh/do_key".to_string();
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "1".to_string(),
+        "web".to_string(),
+        "1.2.3.4".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
-    assert!(output.contains("IdentityFile ~/.ssh/do_key"), "identity file set");
+    assert!(
+        output.contains("IdentityFile ~/.ssh/do_key"),
+        "identity file set"
+    );
 }
 
 #[test]
 fn sync_two_providers_coexist() {
     let mut config = parse_str("");
     let do_section = test_section("digitalocean", "do");
-    let do_provider = TestProvider { name: "digitalocean", label: "do" };
+    let do_provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
     let hetzner_section = test_section("hetzner", "hz");
-    let hetzner_provider = TestProvider { name: "hetzner", label: "hetzner" };
+    let hetzner_provider = TestProvider {
+        name: "hetzner",
+        label: "hetzner",
+    };
 
-    let do_remote = vec![ProviderHost::new("1".to_string(), "do-web".to_string(), "1.1.1.1".to_string(), Vec::new())];
-    sync_provider(&mut config, &do_provider, &do_remote, &do_section, false, false);
+    let do_remote = vec![ProviderHost::new(
+        "1".to_string(),
+        "do-web".to_string(),
+        "1.1.1.1".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &do_provider,
+        &do_remote,
+        &do_section,
+        false,
+        false,
+        false,
+    );
 
-    let hz_remote = vec![ProviderHost::new("2".to_string(), "hz-db".to_string(), "2.2.2.2".to_string(), Vec::new())];
-    sync_provider(&mut config, &hetzner_provider, &hz_remote, &hetzner_section, false, false);
+    let hz_remote = vec![ProviderHost::new(
+        "2".to_string(),
+        "hz-db".to_string(),
+        "2.2.2.2".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &hetzner_provider,
+        &hz_remote,
+        &hetzner_section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
     assert!(output.contains("Host do-do-web"), "DO host present");
     assert!(output.contains("Host hz-hz-db"), "Hetzner host present");
-    assert!(output.contains("# purple:provider digitalocean:1"), "DO marker");
-    assert!(output.contains("# purple:provider hetzner:2"), "Hetzner marker");
+    assert!(
+        output.contains("# purple:provider digitalocean:1"),
+        "DO marker"
+    );
+    assert!(
+        output.contains("# purple:provider hetzner:2"),
+        "Hetzner marker"
+    );
 
     // Remove DO hosts, Hetzner should survive
-    let result = sync_provider(&mut config, &do_provider, &[], &do_section, true, false);
+    let result = sync_provider(
+        &mut config,
+        &do_provider,
+        &[],
+        &do_section,
+        true,
+        false,
+        false,
+    );
     assert_eq!(result.removed, 1);
     let output = config.serialize();
     assert!(!output.contains("Host do-do-web"), "DO host removed");
@@ -3820,15 +4262,34 @@ Host do-web-1
 ";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
     // Server exists but has empty IP (stopped VM)
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "".to_string(), Vec::new())];
-    let result = sync_provider(&mut config, &provider, &remote, &section, true, false);
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "".to_string(),
+        Vec::new(),
+    )];
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        true,
+        false,
+        false,
+    );
     assert_eq!(result.removed, 0, "should not remove stopped VMs");
     assert_eq!(result.unchanged, 1);
 
     let output = config.serialize();
-    assert!(output.contains("Host do-web-1"), "host preserved despite empty IP");
+    assert!(
+        output.contains("Host do-web-1"),
+        "host preserved despite empty IP"
+    );
 }
 
 #[test]
@@ -3842,13 +4303,35 @@ Host do-web-1
 ";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.8.7.6".to_string(), Vec::new())];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "9.8.7.6".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
-    assert!(output.contains("    HostName 9.8.7.6"), "4-space indent preserved on update");
-    assert!(output.contains("    User root"), "other directives unchanged");
+    assert!(
+        output.contains("    HostName 9.8.7.6"),
+        "4-space indent preserved on update"
+    );
+    assert!(
+        output.contains("    User root"),
+        "other directives unchanged"
+    );
 }
 
 #[test]
@@ -3862,12 +4345,31 @@ Host do-web-1
 ";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.8.7.6".to_string(), Vec::new())];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "9.8.7.6".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
-    assert!(output.contains("# This is a custom comment"), "custom comment preserved");
+    assert!(
+        output.contains("# This is a custom comment"),
+        "custom comment preserved"
+    );
 }
 
 #[test]
@@ -3876,53 +4378,129 @@ fn sync_alias_dedup_in_serialized_output() {
     let input = "Host do-web\n  HostName 10.0.0.1\n";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "1".to_string(),
+        "web".to_string(),
+        "1.2.3.4".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
     assert!(output.contains("Host do-web\n"), "manual host preserved");
-    assert!(output.contains("Host do-web-2"), "synced host deduped with -2 suffix");
+    assert!(
+        output.contains("Host do-web-2"),
+        "synced host deduped with -2 suffix"
+    );
 }
 
 #[test]
 fn sync_group_header_in_output() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "1".to_string(),
+        "web".to_string(),
+        "1.2.3.4".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
-    assert!(output.contains("# purple:group DigitalOcean"), "group header present");
+    assert!(
+        output.contains("# purple:group DigitalOcean"),
+        "group header present"
+    );
 }
 
 #[test]
 fn sync_group_header_removed_after_all_deleted() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), Vec::new())];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "1".to_string(),
+        "web".to_string(),
+        "1.2.3.4".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     let output = config.serialize();
     assert!(output.contains("# purple:group DigitalOcean"));
 
     // Remove all
-    sync_provider(&mut config, &provider, &[], &section, true, false);
+    sync_provider(&mut config, &provider, &[], &section, true, false, false);
     let output = config.serialize();
-    assert!(!output.contains("# purple:group DigitalOcean"), "header cleaned up");
+    assert!(
+        !output.contains("# purple:group DigitalOcean"),
+        "header cleaned up"
+    );
 }
 
 #[test]
 fn sync_multiple_tags_serialized_comma_separated() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("1".to_string(), "web".to_string(), "1.2.3.4".to_string(), vec!["prod".to_string(), "us-east".to_string(), "web".to_string()])];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "1".to_string(),
+        "web".to_string(),
+        "1.2.3.4".to_string(),
+        vec!["prod".to_string(), "us-east".to_string(), "web".to_string()],
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
-    assert!(output.contains("# purple:tags prod,us-east,web"), "tags comma-separated");
+    assert!(
+        output.contains("# purple:provider_tags prod,us-east,web"),
+        "provider tags comma-separated"
+    );
 }
 
 #[test]
@@ -3936,9 +4514,25 @@ Host do-web-1
     let mut config = parse_str(input);
     let mut section = test_section("digitalocean", "ocean");
     section.user = "root".to_string();
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "1.2.3.4".to_string(), Vec::new())];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "1.2.3.4".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
     assert!(output.contains("Host ocean-web-1"), "alias uses new prefix");
@@ -3957,28 +4551,70 @@ Host do-web-1
 ";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.8.7.6".to_string(), Vec::new())];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "9.8.7.6".to_string(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let output = config.serialize();
     assert!(output.contains("HostName 9.8.7.6"), "IP updated");
-    assert!(output.contains("ProxyJump bastion"), "unknown directive preserved");
-    assert!(output.contains("ForwardAgent yes"), "unknown directive preserved");
+    assert!(
+        output.contains("ProxyJump bastion"),
+        "unknown directive preserved"
+    );
+    assert!(
+        output.contains("ForwardAgent yes"),
+        "unknown directive preserved"
+    );
 }
 
 #[test]
 fn sync_dry_run_serialized_unchanged() {
-    let input = "Host do-web-1\n  HostName 1.2.3.4\n  User root\n  # purple:provider digitalocean:123\n";
+    let input =
+        "Host do-web-1\n  HostName 1.2.3.4\n  User root\n  # purple:provider digitalocean:123\n";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
-    let remote = vec![ProviderHost::new("123".to_string(), "web-1".to_string(), "9.9.9.9".to_string(), Vec::new())];
-    let result = sync_provider(&mut config, &provider, &remote, &section, false, true);
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost::new(
+        "123".to_string(),
+        "web-1".to_string(),
+        "9.9.9.9".to_string(),
+        Vec::new(),
+    )];
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        true,
+    );
     assert_eq!(result.updated, 1);
 
     let output = config.serialize();
-    assert!(output.contains("HostName 1.2.3.4"), "IP unchanged in dry-run");
+    assert!(
+        output.contains("HostName 1.2.3.4"),
+        "IP unchanged in dry-run"
+    );
     assert!(!output.contains("9.9.9.9"), "new IP not applied in dry-run");
 }
 
@@ -3986,16 +4622,29 @@ fn sync_dry_run_serialized_unchanged() {
 fn sync_large_batch_serialized() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
     let remote: Vec<ProviderHost> = (0..20)
-        .map(|i| ProviderHost::new(
-            format!("{}", i),
-            format!("server-{}", i),
-            format!("10.0.0.{}", i),
-            Vec::new(),
-        ))
+        .map(|i| {
+            ProviderHost::new(
+                format!("{}", i),
+                format!("server-{}", i),
+                format!("10.0.0.{}", i),
+                Vec::new(),
+            )
+        })
         .collect();
-    let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result.added, 20);
 
     let output = config.serialize();
@@ -4044,15 +4693,24 @@ Host do-web
     config.update_host("do-web", &updated);
     let output = config.serialize();
     assert!(output.contains("HostName 5.6.7.8"), "IP updated");
-    assert!(output.contains("# purple:provider digitalocean:123"), "provider preserved");
-    assert!(output.contains("# purple:meta region=nyc3,plan=s-1vcpu-1gb"), "meta preserved");
+    assert!(
+        output.contains("# purple:provider digitalocean:123"),
+        "provider preserved"
+    );
+    assert!(
+        output.contains("# purple:meta region=nyc3,plan=s-1vcpu-1gb"),
+        "meta preserved"
+    );
 }
 
 #[test]
 fn sync_adds_metadata_to_config() {
     let mut config = parse_str("");
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
     let remote = vec![ProviderHost {
         server_id: "123".to_string(),
         name: "web".to_string(),
@@ -4063,16 +4721,33 @@ fn sync_adds_metadata_to_config() {
             ("plan".to_string(), "s-1vcpu-1gb".to_string()),
         ],
     }];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     let output = config.serialize();
-    assert!(output.contains("# purple:meta region=nyc3,plan=s-1vcpu-1gb"), "meta written");
+    assert!(
+        output.contains("# purple:meta region=nyc3,plan=s-1vcpu-1gb"),
+        "meta written"
+    );
 
     // Re-parse and verify
     let config2 = parse_str(&output);
     let entries = config2.host_entries();
     assert_eq!(entries[0].provider_meta.len(), 2);
-    assert_eq!(entries[0].provider_meta[0], ("region".to_string(), "nyc3".to_string()));
-    assert_eq!(entries[0].provider_meta[1], ("plan".to_string(), "s-1vcpu-1gb".to_string()));
+    assert_eq!(
+        entries[0].provider_meta[0],
+        ("region".to_string(), "nyc3".to_string())
+    );
+    assert_eq!(
+        entries[0].provider_meta[1],
+        ("plan".to_string(), "s-1vcpu-1gb".to_string())
+    );
 }
 
 // =========================================================================
@@ -4083,7 +4758,10 @@ fn sync_adds_metadata_to_config() {
 fn sync_gcp_adds_host_with_metadata_and_tags() {
     let mut config = parse_str("");
     let section = test_section("gcp", "gcp");
-    let provider = TestProvider { name: "gcp", label: "gcp" };
+    let provider = TestProvider {
+        name: "gcp",
+        label: "gcp",
+    };
     let remote = vec![ProviderHost {
         server_id: "1234567890123456789".to_string(),
         name: "web-1".to_string(),
@@ -4096,23 +4774,46 @@ fn sync_gcp_adds_host_with_metadata_and_tags() {
             ("status".to_string(), "RUNNING".to_string()),
         ],
     }];
-    let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result.added, 1);
 
     let output = config.serialize();
-    assert!(output.contains("Host gcp-web-1"), "alias should be gcp-web-1");
-    assert!(output.contains("HostName 35.192.0.1"), "hostname should be external IP");
-    assert!(output.contains("# purple:provider gcp:1234567890123456789"), "provider marker with uint64 ID");
-    assert!(output.contains("# purple:tags http-server,env:prod"), "tags from network tags and labels");
-    assert!(output.contains("# purple:meta zone=us-central1-a,machine=e2-micro,os=debian-11"), "metadata (status excluded as volatile)");
+    assert!(
+        output.contains("Host gcp-web-1"),
+        "alias should be gcp-web-1"
+    );
+    assert!(
+        output.contains("HostName 35.192.0.1"),
+        "hostname should be external IP"
+    );
+    assert!(
+        output.contains("# purple:provider gcp:1234567890123456789"),
+        "provider marker with uint64 ID"
+    );
+    assert!(
+        output.contains("# purple:provider_tags http-server,env:prod"),
+        "provider tags from network tags and labels"
+    );
+    assert!(
+        output.contains("# purple:meta zone=us-central1-a,machine=e2-micro,os=debian-11"),
+        "metadata (status excluded as volatile)"
+    );
 
     // Re-parse and verify roundtrip fidelity
     let config2 = parse_str(&output);
     let entries = config2.host_entries();
     let gcp_entry = entries.iter().find(|e| e.alias == "gcp-web-1").unwrap();
     assert_eq!(gcp_entry.provider.as_deref(), Some("gcp"));
-    assert!(gcp_entry.tags.contains(&"http-server".to_string()));
-    assert!(gcp_entry.tags.contains(&"env:prod".to_string()));
+    assert!(gcp_entry.provider_tags.contains(&"http-server".to_string()));
+    assert!(gcp_entry.provider_tags.contains(&"env:prod".to_string()));
 }
 
 #[test]
@@ -4127,7 +4828,10 @@ Host gcp-web-1
 ";
     let mut config = parse_str(input);
     let section = test_section("gcp", "gcp");
-    let provider = TestProvider { name: "gcp", label: "gcp" };
+    let provider = TestProvider {
+        name: "gcp",
+        label: "gcp",
+    };
     let remote = vec![ProviderHost {
         server_id: "123".to_string(),
         name: "web-1".to_string(),
@@ -4138,7 +4842,15 @@ Host gcp-web-1
             ("machine".to_string(), "e2-micro".to_string()),
         ],
     }];
-    let result = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result.updated, 1);
 
     let output = config.serialize();
@@ -4170,16 +4882,26 @@ Host signalproxy-nl
 
     // The group comment should be a GlobalLine, not part of arcusit's directives
     assert!(
-        config.elements.iter().any(|e| matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group DigitalOcean"))),
+        config.elements.iter().any(
+            |e| matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group DigitalOcean"))
+        ),
         "group comment should be a GlobalLine element, not absorbed into arcusit block"
     );
 
     // arcusit should still have its directives (ProxyJump, tags)
-    let arcusit = config.host_entries().into_iter().find(|e| e.alias == "arcusit").unwrap();
+    let arcusit = config
+        .host_entries()
+        .into_iter()
+        .find(|e| e.alias == "arcusit")
+        .unwrap();
     assert_eq!(arcusit.hostname, "212.57.57.42");
 
     // signalproxy-nl should be a separate host
-    let signal = config.host_entries().into_iter().find(|e| e.alias == "signalproxy-nl").unwrap();
+    let signal = config
+        .host_entries()
+        .into_iter()
+        .find(|e| e.alias == "signalproxy-nl")
+        .unwrap();
     assert_eq!(signal.hostname, "128.199.41.235");
 
     // Roundtrip fidelity
@@ -4265,7 +4987,15 @@ Host gamma
             Vec::new(),
         ),
     ];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     // Verify manual hosts retain exactly their original directives
     assert_host_directives(
@@ -4273,7 +5003,11 @@ Host gamma
         "alpha",
         &["HostName", "User", "ProxyJump", "IdentityFile"],
     );
-    assert_host_directives(&config, "beta", &["HostName", "User", "ForwardAgent", "Port"]);
+    assert_host_directives(
+        &config,
+        "beta",
+        &["HostName", "User", "ForwardAgent", "Port"],
+    );
     assert_host_directives(&config, "gamma", &["HostName", "User", "LocalForward"]);
 }
 
@@ -4374,7 +5108,7 @@ Host gamma
     };
 
     // Sync with empty remote list and --remove to remove the provider host
-    sync_provider(&mut config, &provider, &[], &section, true, false);
+    sync_provider(&mut config, &provider, &[], &section, true, false, false);
 
     assert_host_directives(
         &config,
@@ -4484,9 +5218,20 @@ Host do-worker-1
             vec!["cache".to_string()],
         ),
     ];
-    let result = sync_provider(&mut config, &provider, &remote, &section, true, false);
+    let result = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        true,
+        false,
+        false,
+    );
     assert_eq!(result.added, 2, "should add cache-1 and cache-2");
-    assert_eq!(result.updated, 1, "should update api-1 IP");
+    assert_eq!(
+        result.updated, 2,
+        "should update api-1 (IP + tags) and api-2 (tags migration)"
+    );
     assert_eq!(result.removed, 1, "should remove worker-1");
 
     // Verify all manual hosts retain exactly their original directives
@@ -4565,9 +5310,15 @@ Host charlie
 
     // Serialized output should have hosts in the new order: charlie, bravo, alpha.
     let output = config.serialize();
-    let pos_charlie = output.find("Host charlie").expect("charlie missing from output");
-    let pos_bravo = output.find("Host bravo").expect("bravo missing from output");
-    let pos_alpha = output.find("Host alpha").expect("alpha missing from output");
+    let pos_charlie = output
+        .find("Host charlie")
+        .expect("charlie missing from output");
+    let pos_bravo = output
+        .find("Host bravo")
+        .expect("bravo missing from output");
+    let pos_alpha = output
+        .find("Host alpha")
+        .expect("alpha missing from output");
     assert!(
         pos_charlie < pos_bravo,
         "After swap, charlie should come before bravo.\n{}",
@@ -4617,17 +5368,37 @@ Host db-primary
             Vec::new(),
         ),
     ];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
 
     let entries = config.host_entries();
 
-    let web = entries.iter().find(|e| e.alias == "web-prod").expect("web-prod missing");
-    assert_eq!(web.hostname, "10.20.30.40", "web-prod hostname value changed");
+    let web = entries
+        .iter()
+        .find(|e| e.alias == "web-prod")
+        .expect("web-prod missing");
+    assert_eq!(
+        web.hostname, "10.20.30.40",
+        "web-prod hostname value changed"
+    );
     assert_eq!(web.user, "deployer", "web-prod user value changed");
     assert_eq!(web.port, 2200, "web-prod port value changed");
 
-    let db = entries.iter().find(|e| e.alias == "db-primary").expect("db-primary missing");
-    assert_eq!(db.hostname, "db.internal.example.com", "db-primary hostname value changed");
+    let db = entries
+        .iter()
+        .find(|e| e.alias == "db-primary")
+        .expect("db-primary missing");
+    assert_eq!(
+        db.hostname, "db.internal.example.com",
+        "db-primary hostname value changed"
+    );
     assert_eq!(db.user, "dbadmin", "db-primary user value changed");
     assert_eq!(db.port, 5432, "db-primary port value changed");
 }
@@ -4660,15 +5431,33 @@ Host last
 
     let entries = config.host_entries();
 
-    let first = entries.iter().find(|e| e.alias == "first").expect("first missing");
-    assert_eq!(first.hostname, "first.example.com", "first hostname value changed");
+    let first = entries
+        .iter()
+        .find(|e| e.alias == "first")
+        .expect("first missing");
+    assert_eq!(
+        first.hostname, "first.example.com",
+        "first hostname value changed"
+    );
     assert_eq!(first.user, "alice", "first user value changed");
 
-    let middle = entries.iter().find(|e| e.alias == "middle").expect("middle missing");
-    assert_eq!(middle.hostname, "middle-new.example.com", "middle hostname should be updated");
+    let middle = entries
+        .iter()
+        .find(|e| e.alias == "middle")
+        .expect("middle missing");
+    assert_eq!(
+        middle.hostname, "middle-new.example.com",
+        "middle hostname should be updated"
+    );
 
-    let last = entries.iter().find(|e| e.alias == "last").expect("last missing");
-    assert_eq!(last.hostname, "last.example.com", "last hostname value changed");
+    let last = entries
+        .iter()
+        .find(|e| e.alias == "last")
+        .expect("last missing");
+    assert_eq!(
+        last.hostname, "last.example.com",
+        "last hostname value changed"
+    );
     assert_eq!(last.user, "carol", "last user value changed");
 }
 
@@ -4693,12 +5482,24 @@ Host last
     let entries = config.host_entries();
     assert_eq!(entries.len(), 2, "should have 2 hosts after delete");
 
-    let first = entries.iter().find(|e| e.alias == "first").expect("first missing");
-    assert_eq!(first.hostname, "first.example.com", "first hostname value changed");
+    let first = entries
+        .iter()
+        .find(|e| e.alias == "first")
+        .expect("first missing");
+    assert_eq!(
+        first.hostname, "first.example.com",
+        "first hostname value changed"
+    );
     assert_eq!(first.user, "alice", "first user value changed");
 
-    let last = entries.iter().find(|e| e.alias == "last").expect("last missing");
-    assert_eq!(last.hostname, "last.example.com", "last hostname value changed");
+    let last = entries
+        .iter()
+        .find(|e| e.alias == "last")
+        .expect("last missing");
+    assert_eq!(
+        last.hostname, "last.example.com",
+        "last hostname value changed"
+    );
     assert_eq!(last.user, "carol", "last user value changed");
 }
 
@@ -4738,7 +5539,15 @@ Host manual-db
     ];
 
     // --- First sync: adds 2 provider hosts ---
-    let result1 = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let result1 = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result1.added, 2, "first sync should add 2 hosts");
     assert_eq!(result1.removed, 0);
     assert_eq!(result1.updated, 0);
@@ -4752,10 +5561,21 @@ Host manual-db
     let output_after_first_sync = config.serialize();
 
     // --- Second sync: same remote hosts, no changes ---
-    let result2 = sync_provider(&mut config, &provider, &remote, &section, false, false);
+    let result2 = sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     assert_eq!(result2.added, 0, "second sync should add 0 hosts");
     assert_eq!(result2.removed, 0, "second sync should remove 0 hosts");
-    assert_eq!(result2.unchanged, 2, "second sync should report 2 unchanged");
+    assert_eq!(
+        result2.unchanged, 2,
+        "second sync should report 2 unchanged"
+    );
 
     let output_after_second_sync = config.serialize();
 
@@ -4841,7 +5661,11 @@ Host myserver
     let config = parse_str(input);
     // The ProxyCommand value should contain the quoted # but not the comment
     if let ConfigElement::HostBlock(block) = &config.elements[0] {
-        let proxy = block.directives.iter().find(|d| d.key == "ProxyCommand").unwrap();
+        let proxy = block
+            .directives
+            .iter()
+            .find(|d| d.key == "ProxyCommand")
+            .unwrap();
         assert_eq!(proxy.value, "ssh -W \"%h #test\" gateway");
     }
     // Round-trip: comment is preserved in raw_line
@@ -4893,14 +5717,25 @@ Host do-web-1
 ";
     let mut config = parse_str(input);
     let section = test_section("digitalocean", "do");
-    let provider = TestProvider { name: "digitalocean", label: "do" };
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
     let remote = vec![ProviderHost::new(
         "123".to_string(),
         "web-1".to_string(),
         "9.8.7.6".to_string(),
         Vec::new(),
     )];
-    sync_provider(&mut config, &provider, &remote, &section, false, false);
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
     let output = config.serialize();
     assert!(
         output.contains("HostName 9.8.7.6 # nyc3 region"),
@@ -4924,7 +5759,11 @@ fn bom_prefixed_config_parses_first_host() {
         bom: true,
     };
     let entries = config.host_entries();
-    assert_eq!(entries.len(), 1, "BOM-prefixed config should still parse the first host");
+    assert_eq!(
+        entries.len(),
+        1,
+        "BOM-prefixed config should still parse the first host"
+    );
     assert_eq!(entries[0].alias, "myserver");
     assert_eq!(entries[0].hostname, "10.0.0.1");
 }
@@ -4940,8 +5779,14 @@ fn bom_roundtrip_preserved() {
         bom: true,
     };
     let output = config.serialize();
-    assert!(output.starts_with('\u{FEFF}'), "BOM should be preserved in output");
-    assert!(output.contains("Host myserver"), "Content should follow BOM");
+    assert!(
+        output.starts_with('\u{FEFF}'),
+        "BOM should be preserved in output"
+    );
+    assert!(
+        output.contains("Host myserver"),
+        "Content should follow BOM"
+    );
 }
 
 #[test]
@@ -4949,7 +5794,10 @@ fn no_bom_config_stays_without_bom() {
     let input = "Host myserver\n  HostName 10.0.0.1\n";
     let config = parse_str(input);
     let output = config.serialize();
-    assert!(!output.starts_with('\u{FEFF}'), "Non-BOM config should not gain a BOM");
+    assert!(
+        !output.starts_with('\u{FEFF}'),
+        "Non-BOM config should not gain a BOM"
+    );
 }
 
 // ============================================================================
@@ -4968,7 +5816,10 @@ Host manual
     let removed = config.remove_all_orphaned_group_headers();
     assert_eq!(removed, 1, "Should remove 1 orphaned header");
     let output = config.serialize();
-    assert!(!output.contains("# purple:group"), "Orphaned header should be gone");
+    assert!(
+        !output.contains("# purple:group"),
+        "Orphaned header should be gone"
+    );
     assert!(output.contains("Host manual"), "Manual host should survive");
 }
 
@@ -4983,7 +5834,10 @@ Host do-web
 ";
     let mut config = parse_str(input);
     let removed = config.remove_all_orphaned_group_headers();
-    assert_eq!(removed, 0, "Should not remove header with active provider hosts");
+    assert_eq!(
+        removed, 0,
+        "Should not remove header with active provider hosts"
+    );
     assert!(config.serialize().contains("# purple:group DigitalOcean"));
 }
 
@@ -5006,7 +5860,10 @@ Host do-web
     // Undo: re-insert
     config.insert_host_at(element, pos);
     let output = config.serialize();
-    assert!(output.contains("# purple:group DigitalOcean"), "Header present after undo");
+    assert!(
+        output.contains("# purple:group DigitalOcean"),
+        "Header present after undo"
+    );
     assert!(output.contains("Host do-web"), "Host restored after undo");
     assert_eq_visible(input, &output);
 }
@@ -5025,7 +5882,10 @@ fn bom_plus_empty_config_has_newline() {
         bom: true,
     };
     let output = config.serialize();
-    assert_eq!(output, "\u{FEFF}\n", "BOM + empty config should have trailing newline");
+    assert_eq!(
+        output, "\u{FEFF}\n",
+        "BOM + empty config should have trailing newline"
+    );
 }
 
 #[test]
@@ -5045,7 +5905,8 @@ fn bom_plus_crlf_combined() {
     for (i, b) in output.bytes().enumerate() {
         if b == b'\n' && i > 0 {
             assert_eq!(
-                output.as_bytes()[i - 1], b'\r',
+                output.as_bytes()[i - 1],
+                b'\r',
                 "All line endings should be CRLF with BOM+CRLF config"
             );
         }
@@ -5069,13 +5930,28 @@ Host hz-web
 ";
     let mut config = parse_str(input);
     let removed = config.remove_all_orphaned_group_headers();
-    assert_eq!(removed, 2, "Should remove DO and AWS headers (orphaned), keep Hetzner (active)");
+    assert_eq!(
+        removed, 2,
+        "Should remove DO and AWS headers (orphaned), keep Hetzner (active)"
+    );
     let output = config.serialize();
-    assert!(!output.contains("# purple:group DigitalOcean"), "DO header should be gone");
-    assert!(!output.contains("# purple:group AWS EC2"), "AWS header should be gone");
-    assert!(output.contains("# purple:group Hetzner"), "Hetzner header should survive");
+    assert!(
+        !output.contains("# purple:group DigitalOcean"),
+        "DO header should be gone"
+    );
+    assert!(
+        !output.contains("# purple:group AWS EC2"),
+        "AWS header should be gone"
+    );
+    assert!(
+        output.contains("# purple:group Hetzner"),
+        "Hetzner header should survive"
+    );
     assert!(output.contains("Host manual"), "Manual host should survive");
-    assert!(output.contains("Host hz-web"), "Hetzner host should survive");
+    assert!(
+        output.contains("Host hz-web"),
+        "Hetzner host should survive"
+    );
 }
 
 #[test]
@@ -5095,8 +5971,14 @@ Host do-web
     // Delete last DO host. Group header should remain for undo.
     let (element, pos) = config.delete_host_undoable("do-web").unwrap();
     let output = config.serialize();
-    assert!(output.contains("# purple:group AWS EC2"), "AWS header intact");
-    assert!(output.contains("# purple:group DigitalOcean"), "DO header kept for undo");
+    assert!(
+        output.contains("# purple:group AWS EC2"),
+        "AWS header intact"
+    );
+    assert!(
+        output.contains("# purple:group DigitalOcean"),
+        "DO header kept for undo"
+    );
     assert!(output.contains("Host aws-web"), "AWS host intact");
     assert!(!output.contains("Host do-web"), "DO host deleted");
 
@@ -5127,7 +6009,10 @@ Host gamma
 
     // Simulate "write to disk" by serializing
     let on_disk = config.serialize();
-    assert!(!on_disk.contains("Host beta"), "beta should be deleted on disk");
+    assert!(
+        !on_disk.contains("Host beta"),
+        "beta should be deleted on disk"
+    );
 
     // Undo: re-insert
     config.insert_host_at(element, pos);
@@ -5148,19 +6033,49 @@ fn repair_then_serialize_then_reparse_is_stable() {
                 host_pattern: "manual".to_string(),
                 raw_host_line: "Host manual".to_string(),
                 directives: vec![
-                    Directive { key: "HostName".to_string(), value: "10.0.0.1".to_string(), raw_line: "  HostName 10.0.0.1".to_string(), is_non_directive: false },
-                    Directive { key: "User".to_string(), value: "admin".to_string(), raw_line: "  User admin".to_string(), is_non_directive: false },
+                    Directive {
+                        key: "HostName".to_string(),
+                        value: "10.0.0.1".to_string(),
+                        raw_line: "  HostName 10.0.0.1".to_string(),
+                        is_non_directive: false,
+                    },
+                    Directive {
+                        key: "User".to_string(),
+                        value: "admin".to_string(),
+                        raw_line: "  User admin".to_string(),
+                        is_non_directive: false,
+                    },
                     // Absorbed group comment (the bug)
-                    Directive { key: String::new(), value: String::new(), raw_line: "# purple:group DigitalOcean".to_string(), is_non_directive: true },
+                    Directive {
+                        key: String::new(),
+                        value: String::new(),
+                        raw_line: "# purple:group DigitalOcean".to_string(),
+                        is_non_directive: true,
+                    },
                 ],
             }),
             ConfigElement::HostBlock(HostBlock {
                 host_pattern: "do-web".to_string(),
                 raw_host_line: "Host do-web".to_string(),
                 directives: vec![
-                    Directive { key: "HostName".to_string(), value: "1.2.3.4".to_string(), raw_line: "  HostName 1.2.3.4".to_string(), is_non_directive: false },
-                    Directive { key: "User".to_string(), value: "root".to_string(), raw_line: "  User root".to_string(), is_non_directive: false },
-                    Directive { key: String::new(), value: String::new(), raw_line: "  # purple:provider digitalocean:123".to_string(), is_non_directive: true },
+                    Directive {
+                        key: "HostName".to_string(),
+                        value: "1.2.3.4".to_string(),
+                        raw_line: "  HostName 1.2.3.4".to_string(),
+                        is_non_directive: false,
+                    },
+                    Directive {
+                        key: "User".to_string(),
+                        value: "root".to_string(),
+                        raw_line: "  User root".to_string(),
+                        is_non_directive: false,
+                    },
+                    Directive {
+                        key: String::new(),
+                        value: String::new(),
+                        raw_line: "  # purple:provider digitalocean:123".to_string(),
+                        is_non_directive: true,
+                    },
                 ],
             }),
         ],
@@ -5209,9 +6124,18 @@ Host myserver
         },
     );
     let output = config.serialize();
-    assert!(!output.contains("Port"), "Port 22 should be removed (by design)");
-    assert!(!output.contains("# custom port"), "Inline comment on Port 22 is lost (by design)");
-    assert!(output.contains("HostName 10.0.0.1"), "Other directives survive");
+    assert!(
+        !output.contains("Port"),
+        "Port 22 should be removed (by design)"
+    );
+    assert!(
+        !output.contains("# custom port"),
+        "Inline comment on Port 22 is lost (by design)"
+    );
+    assert!(
+        output.contains("HostName 10.0.0.1"),
+        "Other directives survive"
+    );
 }
 
 // ============================================================================
@@ -5236,7 +6160,10 @@ fn bom_file_parse_via_real_path() {
 
     // Serialize and verify BOM is preserved
     let output = config.serialize();
-    assert!(output.starts_with('\u{FEFF}'), "BOM should be preserved in serialize");
+    assert!(
+        output.starts_with('\u{FEFF}'),
+        "BOM should be preserved in serialize"
+    );
     assert!(output.contains("Host bomhost"), "Host should follow BOM");
 
     // Re-parse the serialized output (write + re-read)
@@ -5305,7 +6232,10 @@ fn include_glob_dirs_expands_env_vars() {
 
     // Main config uses ${VAR} in Include
     let main_path = dir.join("config");
-    let main_content = format!("Host local\n  HostName 10.0.0.1\n\nInclude ${{{}}}/config.d/*\n", var_name);
+    let main_content = format!(
+        "Host local\n  HostName 10.0.0.1\n\nInclude ${{{}}}/config.d/*\n",
+        var_name
+    );
     std::fs::write(&main_path, &main_content).unwrap();
 
     let config = SshConfigFile::parse(&main_path).unwrap();
@@ -5630,9 +6560,18 @@ Host case-test
         },
     );
     let output = config2.serialize();
-    assert!(output.contains("hostname 10.0.0.2"), "lowercase 'hostname' key preserved");
-    assert!(output.contains("user deploy"), "lowercase 'user' key preserved");
-    assert!(output.contains("PORT 2222"), "uppercase 'PORT' key preserved");
+    assert!(
+        output.contains("hostname 10.0.0.2"),
+        "lowercase 'hostname' key preserved"
+    );
+    assert!(
+        output.contains("user deploy"),
+        "lowercase 'user' key preserved"
+    );
+    assert!(
+        output.contains("PORT 2222"),
+        "uppercase 'PORT' key preserved"
+    );
 }
 
 #[test]
@@ -5733,7 +6672,11 @@ Host myserver
     assert_eq!(config.serialize(), content);
     // Parser should store the value as-is in raw_line
     if let ConfigElement::HostBlock(block) = &config.elements[0] {
-        let port = block.directives.iter().find(|d| d.key.eq_ignore_ascii_case("Port")).unwrap();
+        let port = block
+            .directives
+            .iter()
+            .find(|d| d.key.eq_ignore_ascii_case("Port"))
+            .unwrap();
         assert_eq!(port.raw_line, "  Port 02222");
     }
 }
@@ -5939,7 +6882,10 @@ fn roundtrip_crlf_through_mutations() {
     let mut config = parse_str(content);
     config.delete_host("alpha");
     let output = config.serialize();
-    assert!(output.contains("\r\n"), "CRLF should be preserved after deletion");
+    assert!(
+        output.contains("\r\n"),
+        "CRLF should be preserved after deletion"
+    );
     assert!(output.contains("Host beta\r\n"));
     assert!(!output.contains("Host alpha"));
 }
@@ -5964,9 +6910,21 @@ Host myserver
         },
     );
     let output = config.serialize();
-    assert!(output.contains("HostName=10.0.0.2"), "equals syntax preserved: {}", output);
-    assert!(output.contains("User = deploy"), "spaced equals preserved: {}", output);
-    assert!(output.contains("Port=3333"), "equals syntax for port preserved: {}", output);
+    assert!(
+        output.contains("HostName=10.0.0.2"),
+        "equals syntax preserved: {}",
+        output
+    );
+    assert!(
+        output.contains("User = deploy"),
+        "spaced equals preserved: {}",
+        output
+    );
+    assert!(
+        output.contains("Port=3333"),
+        "equals syntax for port preserved: {}",
+        output
+    );
 }
 
 #[test]
@@ -6015,7 +6973,11 @@ fn roundtrip_500_host_stress_test() {
         ));
     }
     let config = parse_str(&content);
-    assert_eq!(config.serialize(), content, "500-host config should roundtrip exactly");
+    assert_eq!(
+        config.serialize(),
+        content,
+        "500-host config should roundtrip exactly"
+    );
     assert_eq!(config.host_entries().len(), 500);
 }
 
@@ -6051,9 +7013,21 @@ Match host *.corp
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("Host newhost"), "New host should be added: {}", output);
-    assert!(output.contains("Match host *.corp"), "Match block should survive: {}", output);
-    assert!(output.contains("ForwardAgent yes"), "Match directive should survive: {}", output);
+    assert!(
+        output.contains("Host newhost"),
+        "New host should be added: {}",
+        output
+    );
+    assert!(
+        output.contains("Match host *.corp"),
+        "Match block should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("ForwardAgent yes"),
+        "Match directive should survive: {}",
+        output
+    );
 }
 
 // ============================================================================
@@ -6082,7 +7056,10 @@ Host alpha
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.starts_with("\u{FEFF}"), "BOM should be preserved after add_host");
+    assert!(
+        output.starts_with("\u{FEFF}"),
+        "BOM should be preserved after add_host"
+    );
     assert!(output.contains("Host alpha"));
     assert!(output.contains("Host beta"));
 }
@@ -6099,7 +7076,10 @@ Host beta
     let mut config = parse_str_bom(content);
     config.delete_host("alpha");
     let output = config.serialize();
-    assert!(output.starts_with("\u{FEFF}"), "BOM should be preserved after delete_host");
+    assert!(
+        output.starts_with("\u{FEFF}"),
+        "BOM should be preserved after delete_host"
+    );
     assert!(!output.contains("Host alpha"));
     assert!(output.contains("Host beta"));
 }
@@ -6111,13 +7091,19 @@ Host alpha
   HostName 10.0.0.1
 ";
     let mut config = parse_str_bom(content);
-    config.update_host("alpha", &HostEntry {
-        alias: "alpha".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "alpha",
+        &HostEntry {
+            alias: "alpha".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.starts_with("\u{FEFF}"), "BOM should be preserved after update_host");
+    assert!(
+        output.starts_with("\u{FEFF}"),
+        "BOM should be preserved after update_host"
+    );
     assert!(output.contains("HostName 10.0.0.2"));
 }
 
@@ -6133,7 +7119,10 @@ Host beta
     let mut config = parse_str_bom(content);
     config.swap_hosts("alpha", "beta");
     let output = config.serialize();
-    assert!(output.starts_with("\u{FEFF}"), "BOM should be preserved after swap_hosts");
+    assert!(
+        output.starts_with("\u{FEFF}"),
+        "BOM should be preserved after swap_hosts"
+    );
     assert!(output.contains("Host alpha"));
     assert!(output.contains("Host beta"));
 }
@@ -6148,11 +7137,17 @@ fn crlf_preserved_after_swap_hosts() {
     let mut config = parse_str(content);
     config.swap_hosts("alpha", "beta");
     let output = config.serialize();
-    assert!(output.contains("\r\n"), "CRLF should be preserved after swap");
+    assert!(
+        output.contains("\r\n"),
+        "CRLF should be preserved after swap"
+    );
     // After swap, beta should come first
     let beta_pos = output.find("Host beta").unwrap();
     let alpha_pos = output.find("Host alpha").unwrap();
-    assert!(beta_pos < alpha_pos, "beta should come before alpha after swap");
+    assert!(
+        beta_pos < alpha_pos,
+        "beta should come before alpha after swap"
+    );
 }
 
 // ============================================================================
@@ -6195,7 +7190,11 @@ Host = foo bar
     assert_eq_visible(input, &config.serialize());
     // Multi-pattern hosts should be filtered from host_entries
     let entries = config.host_entries();
-    assert_eq!(entries.len(), 0, "Multi-pattern Host = foo bar should be filtered");
+    assert_eq!(
+        entries.len(),
+        0,
+        "Multi-pattern Host = foo bar should be filtered"
+    );
 }
 
 // ============================================================================
@@ -6252,12 +7251,15 @@ fn update_host_with_no_directives_adds_directives() {
 Host emptyhost
 ";
     let mut config = parse_str(content);
-    config.update_host("emptyhost", &HostEntry {
-        alias: "emptyhost".to_string(),
-        hostname: "10.0.0.1".to_string(),
-        user: "admin".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "emptyhost",
+        &HostEntry {
+            alias: "emptyhost".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(output.contains("Host emptyhost"));
     assert!(output.contains("HostName 10.0.0.1"));
@@ -6284,7 +7286,11 @@ Match host *.corp
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("Match host *.corp"), "Match block should survive add_host: {}", output);
+    assert!(
+        output.contains("Match host *.corp"),
+        "Match block should survive add_host: {}",
+        output
+    );
     assert!(output.contains("ForwardAgent yes"));
 }
 
@@ -6298,13 +7304,19 @@ Match host *.corp
   ForwardAgent yes
 ";
     let mut config = parse_str(content);
-    config.update_host("alpha", &HostEntry {
-        alias: "alpha".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "alpha",
+        &HostEntry {
+            alias: "alpha".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains("Match host *.corp"), "Match block should survive update_host");
+    assert!(
+        output.contains("Match host *.corp"),
+        "Match block should survive update_host"
+    );
     assert!(output.contains("ForwardAgent yes"));
     assert!(output.contains("HostName 10.0.0.2"));
 }
@@ -6324,7 +7336,11 @@ Host beta
     let mut config = parse_str(content);
     config.swap_hosts("alpha", "beta");
     let output = config.serialize();
-    assert!(output.contains("Match host *.corp"), "Match block should survive swap_hosts: {}", output);
+    assert!(
+        output.contains("Match host *.corp"),
+        "Match block should survive swap_hosts: {}",
+        output
+    );
     assert!(output.contains("ForwardAgent yes"));
 }
 
@@ -6341,15 +7357,22 @@ Host myserver
   # purple:tags prod,us-east
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        user: "admin".to_string(),
-        tags: vec!["prod".to_string(), "us-east".to_string()],
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            tags: vec!["prod".to_string(), "us-east".to_string()],
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains("purple:tags prod,us-east"), "Tags should survive hostname update: {}", output);
+    assert!(
+        output.contains("purple:tags prod,us-east"),
+        "Tags should survive hostname update: {}",
+        output
+    );
     assert!(output.contains("HostName 10.0.0.2"));
 }
 
@@ -6364,18 +7387,33 @@ Host aws-server
   # purple:tags cloud,prod
 ";
     let mut config = parse_str(content);
-    config.update_host("aws-server", &HostEntry {
-        alias: "aws-server".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        user: "ec2-user".to_string(),
-        tags: vec!["cloud".to_string(), "prod".to_string()],
-        provider: Some("aws:i-12345".to_string()),
-        ..Default::default()
-    });
+    config.update_host(
+        "aws-server",
+        &HostEntry {
+            alias: "aws-server".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "ec2-user".to_string(),
+            tags: vec!["cloud".to_string(), "prod".to_string()],
+            provider: Some("aws:i-12345".to_string()),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains("purple:provider aws:i-12345"), "Provider should survive: {}", output);
-    assert!(output.contains("purple:meta"), "Meta should survive: {}", output);
-    assert!(output.contains("purple:tags"), "Tags should survive: {}", output);
+    assert!(
+        output.contains("purple:provider aws:i-12345"),
+        "Provider should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:meta"),
+        "Meta should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:tags"),
+        "Tags should survive: {}",
+        output
+    );
     assert!(output.contains("HostName 10.0.0.2"));
 }
 
@@ -6388,15 +7426,22 @@ Host myserver
   # purple:askpass keychain
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        user: "admin".to_string(),
-        askpass: Some("keychain".to_string()),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            askpass: Some("keychain".to_string()),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains("purple:askpass keychain"), "Askpass should survive hostname update: {}", output);
+    assert!(
+        output.contains("purple:askpass keychain"),
+        "Askpass should survive hostname update: {}",
+        output
+    );
 }
 
 // ============================================================================
@@ -6419,8 +7464,16 @@ Host other
     // Undo
     config.insert_host_at(element, pos);
     let output = config.serialize();
-    assert!(output.contains("purple:provider aws:i-12345"), "Provider should be restored after undo: {}", output);
-    assert!(output.contains("purple:tags cloud,prod"), "Tags should be restored after undo: {}", output);
+    assert!(
+        output.contains("purple:provider aws:i-12345"),
+        "Provider should be restored after undo: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:tags cloud,prod"),
+        "Tags should be restored after undo: {}",
+        output
+    );
 }
 
 // ============================================================================
@@ -6442,7 +7495,11 @@ Host beta
     let mut config = parse_str(content);
     config.delete_host("alpha");
     let output = config.serialize();
-    assert!(output.contains("Host foo bar"), "Multi-pattern host should survive adjacent delete: {}", output);
+    assert!(
+        output.contains("Host foo bar"),
+        "Multi-pattern host should survive adjacent delete: {}",
+        output
+    );
     assert!(output.contains("Host beta"));
 }
 
@@ -6465,14 +7522,30 @@ Host *
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("Host newhost"), "New host should be added: {}", output);
+    assert!(
+        output.contains("Host newhost"),
+        "New host should be added: {}",
+        output
+    );
     // New host should appear before the wildcard, but the Match block and wildcard should survive
-    assert!(output.contains("Match host *.staging"), "Match block should survive: {}", output);
-    assert!(output.contains("Host *"), "Wildcard should survive: {}", output);
+    assert!(
+        output.contains("Match host *.staging"),
+        "Match block should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("Host *"),
+        "Wildcard should survive: {}",
+        output
+    );
     // Verify ordering: newhost before Host *
     let new_pos = output.find("Host newhost").unwrap();
     let wild_pos = output.find("Host *").unwrap();
-    assert!(new_pos < wild_pos, "New host should be before wildcard: {}", output);
+    assert!(
+        new_pos < wild_pos,
+        "New host should be before wildcard: {}",
+        output
+    );
 }
 
 #[test]
@@ -6491,7 +7564,11 @@ Host beta
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("Host foo bar"), "Multi-pattern host should survive add: {}", output);
+    assert!(
+        output.contains("Host foo bar"),
+        "Multi-pattern host should survive add: {}",
+        output
+    );
     assert!(output.contains("Host gamma"));
 }
 
@@ -6507,12 +7584,15 @@ Host myserver
   User admin
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        user: "admin".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(
         output.contains("# prod ## main"),
@@ -6529,11 +7609,14 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(
         output.contains("ssh -W \"%h #test\" gateway"),
@@ -6556,7 +7639,11 @@ fn crlf_preserved_after_add_host_with_tags() {
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("\r\n"), "CRLF should be preserved after add_host with tags: {}", output);
+    assert!(
+        output.contains("\r\n"),
+        "CRLF should be preserved after add_host with tags: {}",
+        output
+    );
     assert!(output.contains("Host beta"));
     assert!(output.contains("purple:tags existing"));
 }
@@ -6584,14 +7671,20 @@ Host myserver
 ";
     let long_host = "b".repeat(5000);
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: long_host.clone(),
-        user: "admin".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: long_host.clone(),
+            user: "admin".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains(&long_host), "Very long hostname should be stored");
+    assert!(
+        output.contains(&long_host),
+        "Very long hostname should be stored"
+    );
 }
 
 // ============================================================================
@@ -6608,7 +7701,11 @@ fn add_host_to_whitespace_only_config() {
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("Host newhost"), "Should be able to add host to whitespace-only config: {}", output);
+    assert!(
+        output.contains("Host newhost"),
+        "Should be able to add host to whitespace-only config: {}",
+        output
+    );
     assert!(output.contains("HostName 10.0.0.1"));
 }
 
@@ -6622,7 +7719,11 @@ fn add_host_to_completely_empty_config() {
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("Host newhost"), "Should be able to add host to empty config: {}", output);
+    assert!(
+        output.contains("Host newhost"),
+        "Should be able to add host to empty config: {}",
+        output
+    );
 }
 
 // ============================================================================
@@ -6646,7 +7747,11 @@ Host beta
     let output = config.serialize();
     assert!(!output.contains("Host alpha"));
     assert!(!output.contains("Host beta"));
-    assert!(output.contains("# My config"), "Global comments should survive: {}", output);
+    assert!(
+        output.contains("# My config"),
+        "Global comments should survive: {}",
+        output
+    );
     // Should not have excessive blank lines
     assert!(
         !output.contains("\n\n\n"),
@@ -6668,7 +7773,11 @@ Host myserver
     let mut config = parse_str(content);
     config.set_host_tags("myserver", &["prod".to_string(), "us-east".to_string()]);
     let output = config.serialize();
-    assert!(output.contains("purple:tags prod,us-east"), "Tags should be set: {}", output);
+    assert!(
+        output.contains("purple:tags prod,us-east"),
+        "Tags should be set: {}",
+        output
+    );
 
     // Re-parse and verify
     let config2 = parse_str(&output);
@@ -6685,13 +7794,16 @@ Host myserver
 \tPort 2222
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        user: "deploy".to_string(),
-        port: 3333,
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "deploy".to_string(),
+            port: 3333,
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(
         output.contains("\tHostName 10.0.0.2"),
@@ -6717,12 +7829,15 @@ Host myserver
 \tHostName 10.0.0.1
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.1".to_string(),
-        user: "admin".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(
         output.contains("\tUser admin"),
@@ -6760,15 +7875,26 @@ Host oldname
   User admin
 ";
     let mut config = parse_str(content);
-    config.update_host("oldname", &HostEntry {
-        alias: "newname".to_string(),
-        hostname: "10.0.0.1".to_string(),
-        user: "admin".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "oldname",
+        &HostEntry {
+            alias: "newname".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(!output.contains("Host oldname"), "Old alias should be gone: {}", output);
-    assert!(output.contains("Host newname"), "New alias should exist: {}", output);
+    assert!(
+        !output.contains("Host oldname"),
+        "Old alias should be gone: {}",
+        output
+    );
+    assert!(
+        output.contains("Host newname"),
+        "New alias should exist: {}",
+        output
+    );
     assert!(output.contains("HostName 10.0.0.1"));
 }
 
@@ -6782,16 +7908,31 @@ Host oldname
   # This is a comment
 ";
     let mut config = parse_str(content);
-    config.update_host("oldname", &HostEntry {
-        alias: "newname".to_string(),
-        hostname: "10.0.0.1".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "oldname",
+        &HostEntry {
+            alias: "newname".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(output.contains("Host newname"));
-    assert!(output.contains("ForwardAgent yes"), "ForwardAgent should survive rename: {}", output);
-    assert!(output.contains("LocalForward 8080 localhost:80"), "LocalForward should survive rename: {}", output);
-    assert!(output.contains("# This is a comment"), "Comment should survive rename: {}", output);
+    assert!(
+        output.contains("ForwardAgent yes"),
+        "ForwardAgent should survive rename: {}",
+        output
+    );
+    assert!(
+        output.contains("LocalForward 8080 localhost:80"),
+        "LocalForward should survive rename: {}",
+        output
+    );
+    assert!(
+        output.contains("# This is a comment"),
+        "Comment should survive rename: {}",
+        output
+    );
 }
 
 // ============================================================================
@@ -6805,15 +7946,30 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(content);
-    config.set_host_meta("myserver", &[
-        ("key,with,commas".to_string(), "value1".to_string()),
-        ("key=with=equals".to_string(), "value2".to_string()),
-    ]);
+    config.set_host_meta(
+        "myserver",
+        &[
+            ("key,with,commas".to_string(), "value1".to_string()),
+            ("key=with=equals".to_string(), "value2".to_string()),
+        ],
+    );
     let output = config.serialize();
     // Commas and equals in keys should be stripped
-    assert!(!output.contains("key,with"), "Commas in keys should be stripped: {}", output);
-    assert!(!output.contains("key=with"), "Equals in keys should be stripped: {}", output);
-    assert!(output.contains("purple:meta"), "Meta should be set: {}", output);
+    assert!(
+        !output.contains("key,with"),
+        "Commas in keys should be stripped: {}",
+        output
+    );
+    assert!(
+        !output.contains("key=with"),
+        "Equals in keys should be stripped: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:meta"),
+        "Meta should be set: {}",
+        output
+    );
 }
 
 // ============================================================================
@@ -6831,7 +7987,11 @@ Host myserver-2
 ";
     let config = parse_str(content);
     let unique = config.deduplicate_alias("myserver");
-    assert_eq!(unique, "myserver-3", "Should skip myserver-2 which exists: {}", unique);
+    assert_eq!(
+        unique, "myserver-3",
+        "Should skip myserver-2 which exists: {}",
+        unique
+    );
 }
 
 #[test]
@@ -6842,7 +8002,11 @@ Host other
 ";
     let config = parse_str(content);
     let unique = config.deduplicate_alias("myserver");
-    assert_eq!(unique, "myserver", "Should return base when not taken: {}", unique);
+    assert_eq!(
+        unique, "myserver",
+        "Should return base when not taken: {}",
+        unique
+    );
 }
 
 // ============================================================================
@@ -6866,8 +8030,16 @@ Host manual
     let config = parse_str(content);
     let hosts = config.find_hosts_by_provider("digitalocean");
     assert_eq!(hosts.len(), 2);
-    assert!(hosts.iter().any(|(alias, id)| alias == "do-web" && id == "123"));
-    assert!(hosts.iter().any(|(alias, id)| alias == "do-db" && id == "456"));
+    assert!(
+        hosts
+            .iter()
+            .any(|(alias, id)| alias == "do-web" && id == "123")
+    );
+    assert!(
+        hosts
+            .iter()
+            .any(|(alias, id)| alias == "do-db" && id == "456")
+    );
 }
 
 #[test]
@@ -6906,13 +8078,29 @@ Host beta
     let mut config = parse_str(content);
     config.swap_hosts("alpha", "beta");
     let output = config.serialize();
-    assert!(output.contains("Host alpha"), "alpha should exist after swap: {}", output);
-    assert!(output.contains("Host beta"), "beta should exist after swap: {}", output);
-    assert!(output.contains("Match host *.corp"), "Match block should survive swap: {}", output);
+    assert!(
+        output.contains("Host alpha"),
+        "alpha should exist after swap: {}",
+        output
+    );
+    assert!(
+        output.contains("Host beta"),
+        "beta should exist after swap: {}",
+        output
+    );
+    assert!(
+        output.contains("Match host *.corp"),
+        "Match block should survive swap: {}",
+        output
+    );
     // After swap, beta should come first
     let beta_pos = output.find("Host beta").unwrap();
     let alpha_pos = output.find("Host alpha").unwrap();
-    assert!(beta_pos < alpha_pos, "beta should be before alpha after swap: {}", output);
+    assert!(
+        beta_pos < alpha_pos,
+        "beta should be before alpha after swap: {}",
+        output
+    );
 }
 
 // ============================================================================
@@ -6929,7 +8117,10 @@ Host foo bar baz
     assert!(config.has_host("foo"), "Should find foo in multi-pattern");
     assert!(config.has_host("bar"), "Should find bar in multi-pattern");
     assert!(config.has_host("baz"), "Should find baz in multi-pattern");
-    assert!(!config.has_host("qux"), "Should not find non-existent alias");
+    assert!(
+        !config.has_host("qux"),
+        "Should not find non-existent alias"
+    );
 }
 
 // ============================================================================
@@ -6943,7 +8134,10 @@ Host myserver
   HostName 10.0.0.1
 ";
     let config = parse_str(content);
-    assert!(!config.is_included_host("myserver"), "Top-level host is not included");
+    assert!(
+        !config.is_included_host("myserver"),
+        "Top-level host is not included"
+    );
 }
 
 // ============================================================================
@@ -6962,8 +8156,16 @@ Host myserver
     config.set_host_tags("myserver", &["new".to_string()]);
     let output = config.serialize();
     let tag_count = output.lines().filter(|l| l.contains("purple:tags")).count();
-    assert_eq!(tag_count, 1, "Should have exactly one tags line after set_host_tags: {}", output);
-    assert!(output.contains("purple:tags new"), "New tag should be set: {}", output);
+    assert_eq!(
+        tag_count, 1,
+        "Should have exactly one tags line after set_host_tags: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:tags new"),
+        "New tag should be set: {}",
+        output
+    );
 }
 
 #[test]
@@ -6975,11 +8177,22 @@ Host myserver
   # purple:meta region=eu-west-1
 ";
     let mut config = parse_str(content);
-    config.set_host_meta("myserver", &[("region".to_string(), "ap-south-1".to_string())]);
+    config.set_host_meta(
+        "myserver",
+        &[("region".to_string(), "ap-south-1".to_string())],
+    );
     let output = config.serialize();
     let meta_count = output.lines().filter(|l| l.contains("purple:meta")).count();
-    assert_eq!(meta_count, 1, "Should have exactly one meta line after set_host_meta: {}", output);
-    assert!(output.contains("ap-south-1"), "New meta should be set: {}", output);
+    assert_eq!(
+        meta_count, 1,
+        "Should have exactly one meta line after set_host_meta: {}",
+        output
+    );
+    assert!(
+        output.contains("ap-south-1"),
+        "New meta should be set: {}",
+        output
+    );
 }
 
 #[test]
@@ -6991,8 +8204,11 @@ fn mixed_crlf_and_lf_detected_as_crlf() {
     assert!(config.crlf, "Mixed CRLF/LF should be detected as CRLF");
     let output = config.serialize();
     // All line endings should be \r\n
-    assert!(!output.contains("\n\n") || output.contains("\r\n\r\n"),
-        "All newlines should be CRLF in output: {}", visible(&output));
+    assert!(
+        !output.contains("\n\n") || output.contains("\r\n\r\n"),
+        "All newlines should be CRLF in output: {}",
+        visible(&output)
+    );
 }
 
 #[test]
@@ -7045,7 +8261,11 @@ Host web?
 ";
     let config = parse_str(content);
     assert_eq_visible(content, &config.serialize());
-    assert_eq!(config.host_entries().len(), 0, "Pattern with ? should be filtered");
+    assert_eq!(
+        config.host_entries().len(),
+        0,
+        "Pattern with ? should be filtered"
+    );
 }
 
 #[test]
@@ -7056,12 +8276,19 @@ Host myserver
 ";
     let original = content.to_string();
     let mut config = parse_str(content);
-    config.update_host("nonexistent", &HostEntry {
-        alias: "nonexistent".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        ..Default::default()
-    });
-    assert_eq!(config.serialize(), original, "Config should be unchanged after updating nonexistent host");
+    config.update_host(
+        "nonexistent",
+        &HostEntry {
+            alias: "nonexistent".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            ..Default::default()
+        },
+    );
+    assert_eq!(
+        config.serialize(),
+        original,
+        "Config should be unchanged after updating nonexistent host"
+    );
 }
 
 #[test]
@@ -7086,13 +8313,21 @@ Host myserver
     let mut config = parse_str(content);
     config.add_forward("myserver", "LocalForward", "8080 localhost:80");
     let output = config.serialize();
-    assert!(output.contains("LocalForward 8080 localhost:80"), "Forward should be added: {}", output);
+    assert!(
+        output.contains("LocalForward 8080 localhost:80"),
+        "Forward should be added: {}",
+        output
+    );
 
     // Remove it
     let removed = config.remove_forward("myserver", "LocalForward", "8080 localhost:80");
     assert!(removed, "Forward should be removed");
     let output2 = config.serialize();
-    assert!(!output2.contains("LocalForward"), "Forward should be gone: {}", output2);
+    assert!(
+        !output2.contains("LocalForward"),
+        "Forward should be gone: {}",
+        output2
+    );
 }
 
 #[test]
@@ -7106,9 +8341,21 @@ Host myserver
     let mut config = parse_str(content);
     config.add_forward("myserver", "LocalForward", "8080 localhost:80");
     let output = config.serialize();
-    assert!(output.contains("HostName 10.0.0.1"), "HostName should survive: {}", output);
-    assert!(output.contains("User admin"), "User should survive: {}", output);
-    assert!(output.contains("purple:tags prod"), "Tags should survive: {}", output);
+    assert!(
+        output.contains("HostName 10.0.0.1"),
+        "HostName should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("User admin"),
+        "User should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:tags prod"),
+        "Tags should survive: {}",
+        output
+    );
     assert!(output.contains("LocalForward 8080 localhost:80"));
 }
 
@@ -7135,8 +8382,16 @@ Host emptyhost
     let mut config = parse_str(content);
     config.set_host_tags("emptyhost", &["prod".to_string()]);
     let output = config.serialize();
-    assert!(output.contains("purple:tags prod"), "Tags should be set on empty host: {}", output);
-    assert!(output.contains("Host emptyhost"), "Host should still exist: {}", output);
+    assert!(
+        output.contains("purple:tags prod"),
+        "Tags should be set on empty host: {}",
+        output
+    );
+    assert!(
+        output.contains("Host emptyhost"),
+        "Host should still exist: {}",
+        output
+    );
 }
 
 #[test]
@@ -7145,11 +8400,16 @@ fn set_meta_on_host_with_no_directives() {
 Host emptyhost
 ";
     let mut config = parse_str(content);
-    config.set_host_meta("emptyhost", &[
-        ("region".to_string(), "us-east-1".to_string()),
-    ]);
+    config.set_host_meta(
+        "emptyhost",
+        &[("region".to_string(), "us-east-1".to_string())],
+    );
     let output = config.serialize();
-    assert!(output.contains("purple:meta region=us-east-1"), "Meta should be set on empty host: {}", output);
+    assert!(
+        output.contains("purple:meta region=us-east-1"),
+        "Meta should be set on empty host: {}",
+        output
+    );
 }
 
 #[test]
@@ -7160,7 +8420,11 @@ Host emptyhost
     let mut config = parse_str(content);
     config.set_host_provider("emptyhost", "aws", "i-12345");
     let output = config.serialize();
-    assert!(output.contains("purple:provider aws:i-12345"), "Provider should be set on empty host: {}", output);
+    assert!(
+        output.contains("purple:provider aws:i-12345"),
+        "Provider should be set on empty host: {}",
+        output
+    );
 }
 
 #[test]
@@ -7171,7 +8435,11 @@ Host emptyhost
     let mut config = parse_str(content);
     config.set_host_askpass("emptyhost", "keychain");
     let output = config.serialize();
-    assert!(output.contains("purple:askpass keychain"), "Askpass should be set on empty host: {}", output);
+    assert!(
+        output.contains("purple:askpass keychain"),
+        "Askpass should be set on empty host: {}",
+        output
+    );
 }
 
 #[test]
@@ -7195,7 +8463,9 @@ Host myserver
     // Without the fix, it would split into "config.d/my" and "configs"
     // which would yield different (wrong) parent dirs.
     assert!(
-        !dirs.iter().any(|d| d.to_string_lossy().ends_with("configs")),
+        !dirs
+            .iter()
+            .any(|d| d.to_string_lossy().ends_with("configs")),
         "Should not split quoted Include path on whitespace: {:?}",
         dirs
     );
@@ -7223,12 +8493,15 @@ Host myserver
   IdentityFile ~/.ssh/id=prod
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        identity_file: "~/.ssh/id=prod".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            identity_file: "~/.ssh/id=prod".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(
         output.contains("IdentityFile ~/.ssh/id=prod"),
@@ -7260,14 +8533,24 @@ Host myserver
   SendEnv TERM
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    let sendenv_count = output.lines().filter(|l| l.trim().starts_with("SendEnv")).count();
-    assert_eq!(sendenv_count, 3, "All three SendEnv directives should survive: {}", output);
+    let sendenv_count = output
+        .lines()
+        .filter(|l| l.trim().starts_with("SendEnv"))
+        .count();
+    assert_eq!(
+        sendenv_count, 3,
+        "All three SendEnv directives should survive: {}",
+        output
+    );
 }
 
 #[test]
@@ -7301,7 +8584,12 @@ Host only
     let output = config.serialize();
     assert!(!output.contains("Host only"), "Deleted host should be gone");
     // Should produce a minimal config (just a newline)
-    assert_eq!(output, "\n", "Empty config should be just a newline: {}", visible(&output));
+    assert_eq!(
+        output,
+        "\n",
+        "Empty config should be just a newline: {}",
+        visible(&output)
+    );
 }
 
 #[test]
@@ -7314,7 +8602,10 @@ Host myserver
     let mut config = parse_str(content);
     config.delete_host("nonexistent");
     let output = config.serialize();
-    assert_eq!(output, config_before, "Config should be unchanged after deleting nonexistent host");
+    assert_eq!(
+        output, config_before,
+        "Config should be unchanged after deleting nonexistent host"
+    );
 }
 
 #[test]
@@ -7330,7 +8621,12 @@ fn consecutive_add_operations_maintain_separators() {
     let output = config.serialize();
     // All hosts should exist
     for i in 0..5 {
-        assert!(output.contains(&format!("Host host-{}", i)), "host-{} should exist: {}", i, output);
+        assert!(
+            output.contains(&format!("Host host-{}", i)),
+            "host-{} should exist: {}",
+            i,
+            output
+        );
     }
     // No triple blank lines
     assert!(
@@ -7364,13 +8660,16 @@ Host existing
     assert!(after_add.contains("HostName 10.0.0.2"));
 
     // Update
-    config.update_host("lifecycle", &HostEntry {
-        alias: "lifecycle".to_string(),
-        hostname: "10.0.0.3".to_string(),
-        user: "deploy".to_string(),
-        port: 2222,
-        ..Default::default()
-    });
+    config.update_host(
+        "lifecycle",
+        &HostEntry {
+            alias: "lifecycle".to_string(),
+            hostname: "10.0.0.3".to_string(),
+            user: "deploy".to_string(),
+            port: 2222,
+            ..Default::default()
+        },
+    );
     let after_update = config.serialize();
     assert!(after_update.contains("HostName 10.0.0.3"));
     assert!(after_update.contains("User deploy"));
@@ -7453,8 +8752,12 @@ Host bastion
     let entries = config.host_entries();
     // Host * is a pattern, filtered out
     // Match block is not a host
-    assert_eq!(entries.len(), 4, "Should have 4 concrete hosts: {:?}",
-        entries.iter().map(|e| &e.alias).collect::<Vec<_>>());
+    assert_eq!(
+        entries.len(),
+        4,
+        "Should have 4 concrete hosts: {:?}",
+        entries.iter().map(|e| &e.alias).collect::<Vec<_>>()
+    );
 
     // Verify specific entries
     let work_web = entries.iter().find(|e| e.alias == "work-web").unwrap();
@@ -7503,13 +8806,16 @@ Host *
     });
 
     // Update alpha
-    config.update_host("alpha", &HostEntry {
-        alias: "alpha".to_string(),
-        hostname: "10.0.0.10".to_string(),
-        user: "deploy".to_string(),
-        tags: vec!["prod".to_string()],
-        ..Default::default()
-    });
+    config.update_host(
+        "alpha",
+        &HostEntry {
+            alias: "alpha".to_string(),
+            hostname: "10.0.0.10".to_string(),
+            user: "deploy".to_string(),
+            tags: vec!["prod".to_string()],
+            ..Default::default()
+        },
+    );
 
     // Delete beta
     config.delete_host("beta");
@@ -7517,12 +8823,24 @@ Host *
     let output = config.serialize();
 
     // Structural checks
-    assert!(output.contains("# Global comment"), "Global comment should survive");
-    assert!(output.contains("Match host *.corp"), "Match block should survive");
+    assert!(
+        output.contains("# Global comment"),
+        "Global comment should survive"
+    );
+    assert!(
+        output.contains("Match host *.corp"),
+        "Match block should survive"
+    );
     assert!(output.contains("Host *"), "Wildcard should survive");
     assert!(output.contains("Host gamma"), "New host should exist");
-    assert!(output.contains("HostName 10.0.0.10"), "Alpha should be updated");
-    assert!(output.contains("User deploy"), "Alpha user should be updated");
+    assert!(
+        output.contains("HostName 10.0.0.10"),
+        "Alpha should be updated"
+    );
+    assert!(
+        output.contains("User deploy"),
+        "Alpha user should be updated"
+    );
     assert!(!output.contains("Host beta"), "Beta should be deleted");
 
     // Ordering: gamma should be before Host *
@@ -7531,7 +8849,11 @@ Host *
     assert!(gamma_pos < wild_pos, "gamma before wildcard");
 
     // No formatting corruption
-    assert!(!output.contains("\n\n\n"), "No triple newlines: {}", visible(&output));
+    assert!(
+        !output.contains("\n\n\n"),
+        "No triple newlines: {}",
+        visible(&output)
+    );
 }
 
 // ============================================================================
@@ -7557,12 +8879,23 @@ fn stress_interleaved_add_delete() {
     let output = config.serialize();
     assert!(output.contains("Host seed"), "Seed host should survive");
     for i in (1..20).step_by(2) {
-        assert!(output.contains(&format!("Host host-{}", i)), "Odd host-{} should survive", i);
+        assert!(
+            output.contains(&format!("Host host-{}", i)),
+            "Odd host-{} should survive",
+            i
+        );
     }
     for i in (0..20).step_by(2) {
-        assert!(!output.contains(&format!("Host host-{}", i)), "Even host-{} should be deleted", i);
+        assert!(
+            !output.contains(&format!("Host host-{}", i)),
+            "Even host-{} should be deleted",
+            i
+        );
     }
-    assert!(!output.contains("\n\n\n"), "No triple newlines after stress test");
+    assert!(
+        !output.contains("\n\n\n"),
+        "No triple newlines after stress test"
+    );
 }
 
 // ============================================================================
@@ -7620,8 +8953,16 @@ Host user
     let config = parse_str(content);
     let entries = config.host_entries();
     assert_eq!(entries.len(), 2);
-    assert!(entries.iter().any(|e| e.alias == "hostname" && e.hostname == "10.0.0.1"));
-    assert!(entries.iter().any(|e| e.alias == "user" && e.hostname == "10.0.0.2"));
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.alias == "hostname" && e.hostname == "10.0.0.1")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|e| e.alias == "user" && e.hostname == "10.0.0.2")
+    );
 }
 
 // ============================================================================
@@ -7662,21 +9003,32 @@ fn reparse_after_add_produces_identical_entries() {
         reparsed.host_entries().len(),
         "Re-parsed config should have same number of entries"
     );
-    assert_eq!(serialized, reparsed.serialize(), "Double serialize should be identical");
+    assert_eq!(
+        serialized,
+        reparsed.serialize(),
+        "Double serialize should be identical"
+    );
 }
 
 #[test]
 fn reparse_after_update_produces_identical_entries() {
     let mut config = parse_str("Host alpha\n  HostName 10.0.0.1\n  User old\n");
-    config.update_host("alpha", &HostEntry {
-        alias: "alpha".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        user: "new".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "alpha",
+        &HostEntry {
+            alias: "alpha".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "new".to_string(),
+            ..Default::default()
+        },
+    );
     let serialized = config.serialize();
     let reparsed = parse_str(&serialized);
-    assert_eq!(serialized, reparsed.serialize(), "Double serialize after update should be identical");
+    assert_eq!(
+        serialized,
+        reparsed.serialize(),
+        "Double serialize after update should be identical"
+    );
 }
 
 #[test]
@@ -7686,7 +9038,11 @@ fn reparse_after_delete_produces_identical_entries() {
     config.delete_host("alpha");
     let serialized = config.serialize();
     let reparsed = parse_str(&serialized);
-    assert_eq!(serialized, reparsed.serialize(), "Double serialize after delete should be identical");
+    assert_eq!(
+        serialized,
+        reparsed.serialize(),
+        "Double serialize after delete should be identical"
+    );
 }
 
 #[test]
@@ -7706,16 +9062,22 @@ fn bom_plus_crlf_full_lifecycle() {
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.starts_with("\u{FEFF}"), "BOM should be present after add");
+    assert!(
+        output.starts_with("\u{FEFF}"),
+        "BOM should be present after add"
+    );
     assert!(output.contains("\r\n"), "CRLF should be present after add");
     assert!(output.contains("Host gamma"));
 
     // Update
-    config.update_host("alpha", &HostEntry {
-        alias: "alpha".to_string(),
-        hostname: "10.0.0.10".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "alpha",
+        &HostEntry {
+            alias: "alpha".to_string(),
+            hostname: "10.0.0.10".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(output.starts_with("\u{FEFF}"), "BOM after update");
     assert!(output.contains("HostName 10.0.0.10"));
@@ -7743,7 +9105,10 @@ fn serialize_empty_config_with_bom() {
         bom: true,
     };
     let output = config.serialize();
-    assert_eq!(output, "\u{FEFF}\n", "Empty BOM config should be BOM + newline");
+    assert_eq!(
+        output, "\u{FEFF}\n",
+        "Empty BOM config should be BOM + newline"
+    );
 }
 
 #[test]
@@ -7767,7 +9132,10 @@ fn serialize_empty_config_with_bom_and_crlf() {
         bom: true,
     };
     let output = config.serialize();
-    assert_eq!(output, "\u{FEFF}\r\n", "Empty BOM+CRLF config should be BOM + CRLF");
+    assert_eq!(
+        output, "\u{FEFF}\r\n",
+        "Empty BOM+CRLF config should be BOM + CRLF"
+    );
 }
 
 #[test]
@@ -7781,19 +9149,37 @@ Host myserver
 ";
     let mut config = parse_str(content);
     // Clear user, identity_file and proxy_jump by setting empty
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.1".to_string(),
-        user: String::new(),
-        identity_file: String::new(),
-        proxy_jump: String::new(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            user: String::new(),
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains("HostName 10.0.0.1"), "HostName should remain");
-    assert!(!output.contains("User"), "User should be removed: {}", output);
-    assert!(!output.contains("IdentityFile"), "IdentityFile should be removed: {}", output);
-    assert!(!output.contains("ProxyJump"), "ProxyJump should be removed: {}", output);
+    assert!(
+        output.contains("HostName 10.0.0.1"),
+        "HostName should remain"
+    );
+    assert!(
+        !output.contains("User"),
+        "User should be removed: {}",
+        output
+    );
+    assert!(
+        !output.contains("IdentityFile"),
+        "IdentityFile should be removed: {}",
+        output
+    );
+    assert!(
+        !output.contains("ProxyJump"),
+        "ProxyJump should be removed: {}",
+        output
+    );
 }
 
 #[test]
@@ -7803,20 +9189,39 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.1".to_string(),
-        user: "admin".to_string(),
-        port: 2222,
-        identity_file: "~/.ssh/mykey".to_string(),
-        proxy_jump: "bastion".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            user: "admin".to_string(),
+            port: 2222,
+            identity_file: "~/.ssh/mykey".to_string(),
+            proxy_jump: "bastion".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains("User admin"), "User should be added: {}", output);
-    assert!(output.contains("Port 2222"), "Port should be added: {}", output);
-    assert!(output.contains("IdentityFile ~/.ssh/mykey"), "IdentityFile should be added: {}", output);
-    assert!(output.contains("ProxyJump bastion"), "ProxyJump should be added: {}", output);
+    assert!(
+        output.contains("User admin"),
+        "User should be added: {}",
+        output
+    );
+    assert!(
+        output.contains("Port 2222"),
+        "Port should be added: {}",
+        output
+    );
+    assert!(
+        output.contains("IdentityFile ~/.ssh/mykey"),
+        "IdentityFile should be added: {}",
+        output
+    );
+    assert!(
+        output.contains("ProxyJump bastion"),
+        "ProxyJump should be added: {}",
+        output
+    );
 }
 
 #[test]
@@ -7877,10 +9282,22 @@ Host do-web
     assert_eq!(e.provider, Some("digitalocean".to_string()));
     assert_eq!(e.tags, vec!["cloud", "prod", "web"]);
     assert_eq!(e.askpass, Some("keychain".to_string()));
-    assert!(e.provider_meta.iter().any(|(k, v)| k == "region" && v == "nyc3"));
-    assert!(e.provider_meta.iter().any(|(k, v)| k == "size" && v == "s-2vcpu-4gb"));
+    assert!(
+        e.provider_meta
+            .iter()
+            .any(|(k, v)| k == "region" && v == "nyc3")
+    );
+    assert!(
+        e.provider_meta
+            .iter()
+            .any(|(k, v)| k == "size" && v == "s-2vcpu-4gb")
+    );
     // Status is included in meta
-    assert!(e.provider_meta.iter().any(|(k, v)| k == "status" && v == "active"));
+    assert!(
+        e.provider_meta
+            .iter()
+            .any(|(k, v)| k == "status" && v == "active")
+    );
 }
 
 #[test]
@@ -7896,18 +9313,41 @@ Host do-web
 ";
     let mut config = parse_str(content);
     // Only change hostname
-    config.update_host("do-web", &HostEntry {
-        alias: "do-web".to_string(),
-        hostname: "5.6.7.8".to_string(),
-        user: "deploy".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "do-web",
+        &HostEntry {
+            alias: "do-web".to_string(),
+            hostname: "5.6.7.8".to_string(),
+            user: "deploy".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains("HostName 5.6.7.8"), "Hostname should be updated: {}", output);
-    assert!(output.contains("purple:provider digitalocean:123"), "Provider should survive: {}", output);
-    assert!(output.contains("purple:tags cloud,prod"), "Tags should survive: {}", output);
-    assert!(output.contains("purple:meta region=nyc3"), "Meta should survive: {}", output);
-    assert!(output.contains("purple:askpass keychain"), "Askpass should survive: {}", output);
+    assert!(
+        output.contains("HostName 5.6.7.8"),
+        "Hostname should be updated: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:provider digitalocean:123"),
+        "Provider should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:tags cloud,prod"),
+        "Tags should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:meta region=nyc3"),
+        "Meta should survive: {}",
+        output
+    );
+    assert!(
+        output.contains("purple:askpass keychain"),
+        "Askpass should survive: {}",
+        output
+    );
 }
 
 #[test]
@@ -7985,7 +9425,11 @@ Include config.d/*
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("Host newhost"), "New host should be added: {}", output);
+    assert!(
+        output.contains("Host newhost"),
+        "New host should be added: {}",
+        output
+    );
     assert!(output.contains("Host *"), "Wildcard should survive");
 }
 
@@ -8027,7 +9471,11 @@ fn reparse_after_swap_produces_identical_entries() {
     config.swap_hosts("alpha", "beta");
     let serialized = config.serialize();
     let reparsed = parse_str(&serialized);
-    assert_eq!(serialized, reparsed.serialize(), "Double serialize after swap should be identical");
+    assert_eq!(
+        serialized,
+        reparsed.serialize(),
+        "Double serialize after swap should be identical"
+    );
 }
 
 // ============================================================================
@@ -8082,12 +9530,15 @@ Host myserver
   user admin
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        user: "deploy".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "deploy".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     // Key case should be preserved from original
     assert!(
@@ -8126,12 +9577,15 @@ Host myserver
   User admin
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        user: "admin".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(
         output.contains("Commentaire en francais"),
@@ -8160,7 +9614,11 @@ Host beta
     let mut config = parse_str(content);
     config.delete_host("alpha");
     let output = config.serialize();
-    assert!(output.contains("Host commented"), "Comment-only host should survive: {}", output);
+    assert!(
+        output.contains("Host commented"),
+        "Comment-only host should survive: {}",
+        output
+    );
     assert!(output.contains("Just comments"));
     assert!(output.contains("Host beta"));
 }
@@ -8228,8 +9686,14 @@ Host existing
         ..Default::default()
     });
     let output = config.serialize();
-    assert!(output.contains("# Global settings"), "Global comments should survive");
-    assert!(output.contains("# Some notes here"), "Mid-file comments should survive");
+    assert!(
+        output.contains("# Global settings"),
+        "Global comments should survive"
+    );
+    assert!(
+        output.contains("# Some notes here"),
+        "Mid-file comments should survive"
+    );
     assert!(output.contains("Host newhost"));
     assert!(
         !output.contains("\n\n\n"),
@@ -8302,13 +9766,16 @@ Host beta
     let mut config = parse_str(original);
 
     // Cycle 1: update alpha hostname
-    config.update_host("alpha", &HostEntry {
-        alias: "alpha".to_string(),
-        hostname: "10.0.0.10".to_string(),
-        user: "admin".to_string(),
-        tags: vec!["prod".to_string()],
-        ..Default::default()
-    });
+    config.update_host(
+        "alpha",
+        &HostEntry {
+            alias: "alpha".to_string(),
+            hostname: "10.0.0.10".to_string(),
+            user: "admin".to_string(),
+            tags: vec!["prod".to_string()],
+            ..Default::default()
+        },
+    );
     let round1 = config.serialize();
 
     // Cycle 2: re-parse, add a host
@@ -8327,29 +9794,49 @@ Host beta
 
     // Cycle 4: re-parse, update gamma
     let mut config4 = parse_str(&round3);
-    config4.update_host("gamma", &HostEntry {
-        alias: "gamma".to_string(),
-        hostname: "10.0.0.30".to_string(),
-        user: "deploy".to_string(),
-        ..Default::default()
-    });
+    config4.update_host(
+        "gamma",
+        &HostEntry {
+            alias: "gamma".to_string(),
+            hostname: "10.0.0.30".to_string(),
+            user: "deploy".to_string(),
+            ..Default::default()
+        },
+    );
     let round4 = config4.serialize();
 
     // Verify final state
     assert!(round4.contains("Host alpha"), "alpha should exist");
-    assert!(round4.contains("HostName 10.0.0.10"), "alpha hostname should be updated");
-    assert!(round4.contains("purple:tags prod"), "alpha tags should survive");
+    assert!(
+        round4.contains("HostName 10.0.0.10"),
+        "alpha hostname should be updated"
+    );
+    assert!(
+        round4.contains("purple:tags prod"),
+        "alpha tags should survive"
+    );
     assert!(!round4.contains("Host beta"), "beta should be deleted");
     assert!(round4.contains("Host gamma"), "gamma should exist");
-    assert!(round4.contains("HostName 10.0.0.30"), "gamma hostname should be updated");
+    assert!(
+        round4.contains("HostName 10.0.0.30"),
+        "gamma hostname should be updated"
+    );
     assert!(round4.contains("User deploy"), "gamma user should be set");
 
     // No formatting corruption across all cycles
-    assert!(!round4.contains("\n\n\n"), "No triple newlines: {}", visible(&round4));
+    assert!(
+        !round4.contains("\n\n\n"),
+        "No triple newlines: {}",
+        visible(&round4)
+    );
 
     // Final idempotency check
     let config5 = parse_str(&round4);
-    assert_eq!(round4, config5.serialize(), "Final serialize should be idempotent");
+    assert_eq!(
+        round4,
+        config5.serialize(),
+        "Final serialize should be idempotent"
+    );
 }
 
 #[test]
@@ -8361,14 +9848,25 @@ Host oldname\t# production
   HostName 10.0.0.1
 ";
     let mut config = parse_str(content);
-    config.update_host("oldname", &HostEntry {
-        alias: "newname".to_string(),
-        hostname: "10.0.0.1".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "oldname",
+        &HostEntry {
+            alias: "newname".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains("Host newname"), "New alias should exist: {}", output);
-    assert!(!output.contains("Host oldname"), "Old alias should be gone: {}", output);
+    assert!(
+        output.contains("Host newname"),
+        "New alias should exist: {}",
+        output
+    );
+    assert!(
+        !output.contains("Host oldname"),
+        "Old alias should be gone: {}",
+        output
+    );
     // The inline comment on the Host line is lost during rename (by design)
     // because raw_host_line is rebuilt as "Host newname"
 }
@@ -8389,7 +9887,8 @@ fn idempotent_serialize_complex_config() {
         let config2 = parse_str(&first);
         let second = config2.serialize();
         assert_eq!(
-            first, second,
+            first,
+            second,
             "Serialize should be idempotent for: {}",
             visible(content)
         );
@@ -8474,12 +9973,15 @@ Host myserver
         User admin
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        user: "deploy".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "deploy".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
     assert!(
         output.contains("        HostName 10.0.0.2"),
@@ -8556,7 +10058,11 @@ Host c
     assert!(output.contains("Host a"));
     assert!(output.contains("Host c"));
     // Should NOT have triple newlines
-    assert!(!output.contains("\n\n\n"), "No triple newlines: {}", visible(&output));
+    assert!(
+        !output.contains("\n\n\n"),
+        "No triple newlines: {}",
+        visible(&output)
+    );
 }
 
 // ============================================================================
@@ -8622,12 +10128,15 @@ Host gamma
   Port 2222
 ";
     let mut config = parse_str(content);
-    config.update_host("beta", &HostEntry {
-        alias: "beta".to_string(),
-        hostname: "10.0.0.20".to_string(),
-        user: "bob-new".to_string(),
-        ..Default::default()
-    });
+    config.update_host(
+        "beta",
+        &HostEntry {
+            alias: "beta".to_string(),
+            hostname: "10.0.0.20".to_string(),
+            user: "bob-new".to_string(),
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
 
     // Alpha should be completely unchanged
@@ -8711,7 +10220,10 @@ Host do-web
 ";
     let mut config = parse_str(content);
     let repaired = config.repair_absorbed_group_comments();
-    assert_eq!(repaired, 0, "No repairs needed when groups are already GlobalLines");
+    assert_eq!(
+        repaired, 0,
+        "No repairs needed when groups are already GlobalLines"
+    );
 }
 
 // ============================================================================
@@ -8731,7 +10243,11 @@ Host manual
     let removed = config.remove_all_orphaned_group_headers();
     assert_eq!(removed, 1, "Should remove 1 orphaned header");
     let output = config.serialize();
-    assert!(!output.contains("purple:group"), "Orphaned header should be removed: {}", output);
+    assert!(
+        !output.contains("purple:group"),
+        "Orphaned header should be removed: {}",
+        output
+    );
     assert!(output.contains("Host manual"), "Manual host should survive");
 }
 
@@ -8761,7 +10277,11 @@ Host manual
   HostName 10.0.0.1
 ";
     let config = parse_str(content);
-    assert!(config.find_provider_insert_position("digitalocean").is_none());
+    assert!(
+        config
+            .find_provider_insert_position("digitalocean")
+            .is_none()
+    );
 }
 
 #[test]
@@ -8814,14 +10334,20 @@ Host myserver
   Port 65535
 ";
     let mut config = parse_str(content);
-    config.update_host("myserver", &HostEntry {
-        alias: "myserver".to_string(),
-        hostname: "10.0.0.2".to_string(),
-        port: 65535,
-        ..Default::default()
-    });
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            port: 65535,
+            ..Default::default()
+        },
+    );
     let output = config.serialize();
-    assert!(output.contains("Port 65535"), "Max port should be preserved");
+    assert!(
+        output.contains("Port 65535"),
+        "Max port should be preserved"
+    );
 }
 
 // ============================================================================
@@ -8911,13 +10437,16 @@ fn batch_operations_without_intermediate_serialize() {
     }
 
     // Update host-2
-    config.update_host("host-2", &HostEntry {
-        alias: "host-2".to_string(),
-        hostname: "10.0.0.99".to_string(),
-        user: "deploy".to_string(),
-        tags: vec!["group-0".to_string()],
-        ..Default::default()
-    });
+    config.update_host(
+        "host-2",
+        &HostEntry {
+            alias: "host-2".to_string(),
+            hostname: "10.0.0.99".to_string(),
+            user: "deploy".to_string(),
+            tags: vec!["group-0".to_string()],
+            ..Default::default()
+        },
+    );
 
     // Delete host-1 and host-3
     config.delete_host("host-1");
@@ -8933,8 +10462,14 @@ fn batch_operations_without_intermediate_serialize() {
     assert!(output.contains("Host host-2"));
     assert!(!output.contains("Host host-3"));
     assert!(output.contains("Host host-4"));
-    assert!(output.contains("HostName 10.0.0.99"), "host-2 should be updated");
-    assert!(output.contains("User deploy"), "host-2 user should be deploy");
+    assert!(
+        output.contains("HostName 10.0.0.99"),
+        "host-2 should be updated"
+    );
+    assert!(
+        output.contains("User deploy"),
+        "host-2 user should be deploy"
+    );
 
     // Verify host-4 comes before host-0 after swap
     let h4_pos = output.find("Host host-4").unwrap();
@@ -8942,7 +10477,11 @@ fn batch_operations_without_intermediate_serialize() {
     assert!(h4_pos < h0_pos, "host-4 should be before host-0 after swap");
 
     // No corruption
-    assert!(!output.contains("\n\n\n"), "No triple newlines: {}", visible(&output));
+    assert!(
+        !output.contains("\n\n\n"),
+        "No triple newlines: {}",
+        visible(&output)
+    );
 
     // Idempotent
     let reparsed = parse_str(&output);
@@ -9172,8 +10711,12 @@ Match host 10.10.*
     let entries = config.host_entries();
     // Host * is filtered (pattern)
     // Match blocks are not hosts
-    assert_eq!(entries.len(), 7, "Should have 7 concrete hosts: {:?}",
-        entries.iter().map(|e| &e.alias).collect::<Vec<_>>());
+    assert_eq!(
+        entries.len(),
+        7,
+        "Should have 7 concrete hosts: {:?}",
+        entries.iter().map(|e| &e.alias).collect::<Vec<_>>()
+    );
 
     // Spot checks
     let bastion = entries.iter().find(|e| e.alias == "bastion").unwrap();
@@ -9191,9 +10734,1613 @@ Match host 10.10.*
 
     let do1 = entries.iter().find(|e| e.alias == "do-worker-01").unwrap();
     assert_eq!(do1.provider, Some("digitalocean".to_string()));
-    assert!(do1.provider_meta.iter().any(|(k, v)| k == "region" && v == "nyc3"));
+    assert!(
+        do1.provider_meta
+            .iter()
+            .any(|(k, v)| k == "region" && v == "nyc3")
+    );
 
     // Verify find_hosts_by_provider
     let do_hosts = config.find_hosts_by_provider("digitalocean");
     assert_eq!(do_hosts.len(), 2);
+}
+
+// =========================================================================
+// Stale annotation round-trip
+// =========================================================================
+
+#[test]
+fn sync_stale_roundtrip() {
+    // 1. Sync-add a host with metadata
+    let mut config = parse_str("");
+    let section = test_section("digitalocean", "do");
+    let provider = TestProvider {
+        name: "digitalocean",
+        label: "do",
+    };
+    let remote = vec![ProviderHost {
+        server_id: "999".to_string(),
+        name: "stale-test".to_string(),
+        ip: "10.0.0.99".to_string(),
+        tags: vec!["prod".to_string()],
+        metadata: vec![
+            ("region".to_string(), "ams3".to_string()),
+            ("status".to_string(), "active".to_string()),
+        ],
+    }];
+    sync_provider(
+        &mut config,
+        &provider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(config.host_entries().len(), 1);
+
+    // 2. Mark stale (simulates host disappearing from provider)
+    config.set_host_stale("do-stale-test", 1700000000);
+    let entries = config.host_entries();
+    assert_eq!(entries[0].stale, Some(1700000000));
+
+    // 3. Serialize -> reparse -> verify stale + all annotations survive
+    let output = config.serialize();
+    assert!(
+        output.contains("# purple:stale 1700000000"),
+        "stale comment must appear in serialized output"
+    );
+
+    let config2 = parse_str(&output);
+    let entries2 = config2.host_entries();
+    assert_eq!(entries2.len(), 1);
+    let e = &entries2[0];
+    assert_eq!(e.alias, "do-stale-test");
+    assert_eq!(e.stale, Some(1700000000));
+    assert_eq!(e.provider.as_deref(), Some("digitalocean"));
+    assert!(e.tags.is_empty(), "user tags should be empty");
+    assert!(
+        e.provider_tags.contains(&"prod".to_string()),
+        "provider tags preserved"
+    );
+    assert!(
+        e.provider_meta
+            .iter()
+            .any(|(k, v)| k == "region" && v == "ams3"),
+        "metadata preserved"
+    );
+
+    // 4. Second round-trip must be idempotent
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+
+    // 5. Clear stale, verify it disappears on round-trip
+    let mut config3 = config2;
+    config3.clear_host_stale("do-stale-test");
+    let output3 = config3.serialize();
+    assert!(
+        !output3.contains("purple:stale"),
+        "stale comment must be gone after clear"
+    );
+    let config4 = parse_str(&output3);
+    assert_eq!(config4.host_entries()[0].stale, None);
+    let output4 = config4.serialize();
+    assert_eq_visible(&output3, &output4);
+}
+
+// ---------------------------------------------------------------------------
+// Malformed input edge cases (Iteration 1 of SSH config parser audit)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn roundtrip_null_byte_in_alias() {
+    // Null byte embedded in a host alias — parser must not panic and
+    // round-trip must be idempotent (whatever it produces).
+    let content = "Host my\x00server\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_null_byte_in_directive_value() {
+    let content = "Host myserver\n  HostName 10.0\x00.0.1\n  User ad\x00min\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_control_chars_in_comment() {
+    // Control characters (bell, backspace, form feed) inside a comment
+    let content = "Host myserver\n  # note: \x07bell \x08bs \x0Cff\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_control_chars_in_directive_value() {
+    // Tab is legitimate whitespace, but other control chars are not.
+    // Parser should preserve them verbatim for round-trip fidelity.
+    let content = "Host myserver\n  ProxyCommand /usr/bin/cmd \x01\x02\x03\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_lone_cr_line_endings() {
+    // Old Mac-style \r line endings (not \r\n). Rust's str::lines()
+    // does NOT split on bare \r so the whole thing is one long line.
+    // Parser should not panic and round-trip should be stable.
+    let content = "Host myserver\r  HostName 10.0.0.1\r  User admin\r";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_mixed_cr_lf_crlf() {
+    // Mix of all three line ending styles in one file
+    let content =
+        "Host server1\n  HostName 10.0.0.1\r\n  User admin\rHost server2\r\n  HostName 10.0.0.2\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_truncated_no_newline_at_eof() {
+    // File truncated mid-directive, no trailing newline
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin";
+    let config = parse_str(content);
+    let output = config.serialize();
+    // Serializer always adds trailing newline
+    assert!(output.ends_with('\n'));
+    // But round-trip of the output must be idempotent
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_truncated_mid_host_keyword() {
+    // File is just "Hos" — truncated Host keyword
+    let content = "Hos";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+    assert!(config.host_entries().is_empty());
+}
+
+#[test]
+fn roundtrip_utf8_bom_mid_file() {
+    // BOM only valid at start; mid-file BOM should be preserved verbatim
+    let content = "Host server1\n  HostName 10.0.0.1\n\u{FEFF}Host server2\n  HostName 10.0.0.2\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    // BOM mid-file is just a zero-width no-break space, preserved as-is
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_all_ascii_control_chars_in_value() {
+    // Every ASCII control char (0x01-0x1F except \t \n \r) in a directive value
+    let mut value = String::new();
+    for c in 1u8..=31 {
+        if c != b'\t' && c != b'\n' && c != b'\r' {
+            value.push(c as char);
+        }
+    }
+    let content = format!("Host myserver\n  ProxyCommand {}\n", value);
+    let config = parse_str(&content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_del_char_in_value() {
+    // DEL (0x7F) is a control character that's sometimes forgotten
+    let content = "Host myserver\n  HostName 10.0.0\x7F.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_empty_host_pattern_with_trailing_spaces() {
+    // "Host   " — all spaces after Host keyword
+    let content = "Host   \n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_only_whitespace_lines() {
+    // File with only spaces/tabs on some lines (not empty, not blank)
+    let content = "Host myserver\n  HostName 10.0.0.1\n   \t  \n  User admin\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_directive_key_only_no_space() {
+    // A directive line that is just a keyword with no separator or value
+    let content = "Host myserver\n  HostName\n  User\n  Port\n  IdentityFile\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_extremely_long_alias() {
+    let alias = "x".repeat(10_000);
+    let content = format!("Host {}\n  HostName 10.0.0.1\n", alias);
+    let config = parse_str(&content);
+    let output = config.serialize();
+    assert_eq_visible(&content, &output);
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].alias, alias);
+}
+
+#[test]
+fn roundtrip_many_hosts_1000() {
+    let mut content = String::new();
+    for i in 0..1000 {
+        content.push_str(&format!(
+            "Host server{}\n  HostName 10.0.{}.{}\n\n",
+            i,
+            i / 256,
+            i % 256
+        ));
+    }
+    let config = parse_str(&content);
+    let output = config.serialize();
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1000);
+    // Round-trip idempotency
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn mutation_after_malformed_input_stays_stable() {
+    // Parse config with null bytes, then mutate it and verify stability
+    let content = "Host clean\n  HostName 10.0.0.1\n\nHost dir\x00ty\n  HostName 10.0.0.2\n";
+    let mut config = parse_str(content);
+    // Add a host after the malformed one
+    config.add_host(&HostEntry {
+        alias: "newhost".to_string(),
+        hostname: "10.0.0.3".to_string(),
+        ..Default::default()
+    });
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+    // Delete the malformed host
+    let alias_with_null = "dir\x00ty";
+    config.delete_host(alias_with_null);
+    let output3 = config.serialize();
+    let config3 = parse_str(&output3);
+    let output4 = config3.serialize();
+    assert_eq_visible(&output3, &output4);
+}
+
+#[test]
+fn update_host_with_control_chars_in_existing_value_preserves_others() {
+    // Config has a directive with control chars; updating hostname should
+    // not corrupt the control-char directive
+    let content =
+        "Host myserver\n  HostName 10.0.0.1\n  ProxyCommand /bin/cmd\x01\x02\n  User admin\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("ProxyCommand /bin/cmd\x01\x02"),
+        "Control char directive must be preserved after update"
+    );
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_backslash_in_values() {
+    // Backslashes can appear in paths and ProxyCommand
+    let content = "Host myserver\n  IdentityFile C:\\Users\\admin\\.ssh\\id_rsa\n  ProxyCommand C:\\tools\\ssh.exe -W %h:%p bastion\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_semicolons_in_values() {
+    // Semicolons appear in some complex SSH configs
+    let content = "Host myserver\n  ProxyCommand bash -c 'echo hello; ssh bastion'\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_tilde_and_env_vars_in_values() {
+    // These should be preserved verbatim (not expanded by the parser)
+    let content =
+        "Host myserver\n  IdentityFile ~/keys/${HOST}_rsa\n  ControlPath ~/.ssh/ctrl-%r@%h:%p\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+// ---------------------------------------------------------------------------
+// Quoting edge cases (Iteration 2 of SSH config parser audit)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn roundtrip_unmatched_opening_quote_in_value() {
+    // Unmatched opening quote — parser should preserve verbatim
+    let content = "Host myserver\n  ProxyCommand ssh -W \"%h:22 gateway\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_unmatched_closing_quote_in_value() {
+    // Quote only at the end of the value
+    let content = "Host myserver\n  ProxyCommand ssh -W %h:22\" gateway\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_empty_quoted_string_in_value() {
+    // Empty quotes in a value
+    let content = "Host myserver\n  ProxyCommand \"\" --flag\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_multiple_quoted_segments() {
+    // Multiple separate quoted segments in one value
+    let content =
+        "Host myserver\n  ProxyCommand \"path with spaces\" -W \"%h:%p\" \"another path\"\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_hash_after_unmatched_quote_is_not_comment() {
+    // If a quote is unmatched, any # after it should be treated as inside
+    // a quoted string (OpenSSH behavior: quote toggles state)
+    let content = "Host myserver\n  ProxyCommand \"path # with hash\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Verify the parsed value includes the hash (not stripped as comment)
+    if let ConfigElement::HostBlock(block) = &config.elements[0] {
+        let cmd = block
+            .directives
+            .iter()
+            .find(|d| d.key == "ProxyCommand")
+            .unwrap();
+        assert!(
+            cmd.value.contains("# with hash"),
+            "Hash inside unmatched quotes should NOT be stripped: got '{}'",
+            cmd.value
+        );
+    }
+}
+
+#[test]
+fn roundtrip_single_quotes_are_literal() {
+    // OpenSSH does NOT support single-quoted strings — they are literal
+    let content = "Host myserver\n  ProxyCommand 'echo hello # world'\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // The # is outside double-quotes, so it MAY be stripped as inline comment
+    // depending on whether there's preceding whitespace. Let's verify raw_line
+    // is preserved regardless.
+    if let ConfigElement::HostBlock(block) = &config.elements[0] {
+        assert_eq!(
+            block.directives[0].raw_line,
+            "  ProxyCommand 'echo hello # world'"
+        );
+    }
+}
+
+#[test]
+fn roundtrip_quoted_host_pattern() {
+    // Host pattern can be quoted in OpenSSH
+    let content = "Host \"my server\"\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_equals_syntax_with_quoted_value() {
+    // Key=Value where Value is quoted
+    let content = "Host myserver\n  IdentityFile=\"~/.ssh/my key\"\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_quotes_in_include_pattern() {
+    // Include with quoted path
+    let content = "Include \"~/.ssh/config.d/my configs/*\"\nHost myserver\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn inline_comment_stripping_with_quotes_consistency() {
+    // Verify the parsed value after inline comment stripping is consistent
+    // across parse-serialize-reparse cycles
+    let cases = vec![
+        // (input, expected_value_contains)
+        ("Host s\n  HostName 10.0.0.1 # comment\n", "10.0.0.1"),
+        (
+            "Host s\n  ProxyCommand \"cmd # hash\" arg\n",
+            "\"cmd # hash\" arg",
+        ),
+        (
+            "Host s\n  ProxyCommand cmd \"arg # hash\"\n",
+            "cmd \"arg # hash\"",
+        ),
+        ("Host s\n  ProxyCommand cmd # hash\n", "cmd"),
+        ("Host s\n  ProxyCommand cmd#nospace\n", "cmd#nospace"),
+    ];
+    for (content, expected_substr) in &cases {
+        let config = parse_str(content);
+        let output = config.serialize();
+        assert_eq_visible(content, &output);
+        if let ConfigElement::HostBlock(block) = &config.elements[0] {
+            let directive = block
+                .directives
+                .iter()
+                .find(|d| !d.is_non_directive)
+                .unwrap();
+            assert!(
+                directive.value.contains(expected_substr),
+                "For input {:?}, expected value to contain {:?}, got {:?}",
+                content,
+                expected_substr,
+                directive.value
+            );
+        }
+    }
+}
+
+#[test]
+fn roundtrip_adjacent_quotes_in_value() {
+    // Quotes right next to each other: ""
+    let content = "Host myserver\n  ProxyCommand cmd \"\"arg\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_backslash_before_quote_in_value() {
+    // Backslash-quote — OpenSSH does NOT support escape sequences in quotes,
+    // so \" is just a literal backslash followed by a quote
+    let content = "Host myserver\n  ProxyCommand cmd \\\"arg\\\"\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn update_host_preserves_quoted_proxy_command() {
+    // Updating hostname should NOT touch the ProxyCommand with quotes
+    let content = "Host myserver\n  HostName 10.0.0.1\n  ProxyCommand ssh -W \"%h:%p\" \"my bastion\"\n  User admin\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("ProxyCommand ssh -W \"%h:%p\" \"my bastion\""),
+        "Quoted ProxyCommand must survive update: {}",
+        visible(&output)
+    );
+    // Round-trip
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn roundtrip_value_is_only_a_hash() {
+    // Edge case: value is literally just "#" — should it be treated as
+    // a comment or a value? Since there's no preceding whitespace before #
+    // at the value start, strip_inline_comment won't touch it.
+    let content = "Host myserver\n  ProxyCommand #\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_value_starts_with_hash_no_space() {
+    let content = "Host myserver\n  ProxyCommand #/usr/bin/cmd\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_multiple_hashes_in_value() {
+    let content = "Host myserver\n  ProxyCommand cmd arg1 # first # second # third\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Only the first inline comment (preceded by space) should be stripped
+    if let ConfigElement::HostBlock(block) = &config.elements[0] {
+        let d = &block.directives[0];
+        assert_eq!(d.value, "cmd arg1");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Match blocks and Host pattern edge cases (Iteration 3)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn roundtrip_consecutive_match_blocks() {
+    // Two Match blocks back-to-back, no Host blocks between them
+    let content = "\
+Match host *.example.com
+  ForwardAgent yes
+
+Match user admin
+  ForwardX11 no
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Both should be global lines (Match = inert)
+    assert!(config.host_entries().is_empty());
+}
+
+#[test]
+fn roundtrip_match_then_host_then_match() {
+    let content = "\
+Match host *.example.com
+  ForwardAgent yes
+
+Host myserver
+  HostName 10.0.0.1
+
+Match user admin
+  ForwardX11 no
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    assert_eq!(config.host_entries().len(), 1);
+}
+
+#[test]
+fn roundtrip_match_with_complex_criteria() {
+    // Match with multiple criteria on one line
+    let content = "\
+Match host *.example.com user admin exec \"/usr/bin/test -f /tmp/flag\"
+  ForwardAgent yes
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_match_all() {
+    // "Match all" is a valid OpenSSH construct
+    let content = "\
+Host myserver
+  HostName 10.0.0.1
+
+Match all
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_match_case_insensitive() {
+    // "MATCH", "match", "Match" should all be recognized
+    let content = "\
+MATCH host *.example.com
+  ForwardAgent yes
+
+match user admin
+  ForwardX11 no
+
+Match all
+  ServerAliveInterval 60
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    assert!(config.host_entries().is_empty());
+}
+
+#[test]
+fn roundtrip_indented_match_inside_host_block() {
+    // An indented "Match" inside a Host block should be treated as a directive,
+    // not a block boundary
+    let content = "\
+Host myserver
+  HostName 10.0.0.1
+  Match exec \"/usr/bin/check\"
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Should still be 1 host with the indented Match as a directive
+    assert_eq!(config.host_entries().len(), 1);
+}
+
+#[test]
+fn match_block_with_host_add_delete_preserves_structure() {
+    let content = "\
+Match host *.example.com
+  ForwardAgent yes
+
+Host server1
+  HostName 10.0.0.1
+
+Match all
+  ServerAliveInterval 60
+";
+    let mut config = parse_str(content);
+    // Add a host
+    config.add_host(&HostEntry {
+        alias: "server2".to_string(),
+        hostname: "10.0.0.2".to_string(),
+        ..Default::default()
+    });
+    let output = config.serialize();
+    // Both Match blocks should survive
+    assert!(output.contains("Match host *.example.com"));
+    assert!(output.contains("Match all"));
+    // Delete the original host
+    config.delete_host("server1");
+    let output2 = config.serialize();
+    assert!(output2.contains("Match host *.example.com"));
+    assert!(output2.contains("Match all"));
+    // Round-trip
+    let config2 = parse_str(&output2);
+    let output3 = config2.serialize();
+    assert_eq_visible(&output2, &output3);
+}
+
+#[test]
+fn roundtrip_host_alias_named_match() {
+    // What if a host alias is literally "match"? The Host line parser runs
+    // first, so "Host match" should create a HostBlock, not a Match block.
+    let content = "Host match\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].alias, "match");
+}
+
+#[test]
+fn roundtrip_host_alias_named_include() {
+    // Host alias named "include"
+    let content = "Host include\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].alias, "include");
+}
+
+#[test]
+fn roundtrip_host_pattern_with_asterisk_and_question_mark() {
+    let content = "Host web-??-*.prod\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_host_pattern_with_negation_first() {
+    // Negation pattern as the first (and only) pattern
+    let content = "Host !*.internal\n  ProxyJump bastion\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_host_pattern_many_patterns() {
+    // Many patterns on one Host line
+    let content =
+        "Host alpha bravo charlie delta echo foxtrot golf hotel india\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    // Multi-pattern hosts are treated as patterns (contain spaces) and
+    // filtered out by host_entries() — this is by design
+    assert!(
+        config.host_entries().is_empty(),
+        "Multi-pattern hosts are pattern entries, not visible hosts"
+    );
+    // But the raw host_pattern is preserved
+    if let ConfigElement::HostBlock(block) = &config.elements[0] {
+        assert_eq!(
+            block.host_pattern,
+            "alpha bravo charlie delta echo foxtrot golf hotel india"
+        );
+    }
+}
+
+#[test]
+fn roundtrip_host_case_insensitive_keyword() {
+    // "host", "HOST", "hOsT" should all be recognized
+    let cases = vec![
+        "host myserver\n  HostName 10.0.0.1\n",
+        "HOST myserver\n  HostName 10.0.0.1\n",
+        "hOsT myserver\n  HostName 10.0.0.1\n",
+    ];
+    for content in cases {
+        let config = parse_str(content);
+        let output = config.serialize();
+        assert_eq_visible(content, &output);
+        assert_eq!(config.host_entries().len(), 1, "Failed for: {:?}", content);
+    }
+}
+
+#[test]
+fn roundtrip_match_at_eof_no_directives() {
+    // Match block at EOF with no directives following it
+    let content = "Host myserver\n  HostName 10.0.0.1\n\nMatch all\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn roundtrip_match_with_equals_syntax() {
+    // Match=host *.example.com — unusual but potentially parseable
+    // The is_match_line splits on whitespace, so "Match=host" would be the keyword.
+    // This should NOT match as a Match block (it's "match=host", not "match").
+    let content = "Match=host *.example.com\n  ForwardAgent yes\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn delete_host_between_match_blocks_no_corruption() {
+    let content = "\
+Match host *.a.com
+  ForwardAgent yes
+
+Host target
+  HostName 10.0.0.1
+
+Match host *.b.com
+  ForwardX11 no
+
+Host keeper
+  HostName 10.0.0.2
+";
+    let mut config = parse_str(content);
+    config.delete_host("target");
+    let output = config.serialize();
+    // Match blocks intact
+    assert!(output.contains("Match host *.a.com"));
+    assert!(output.contains("Match host *.b.com"));
+    // keeper still there
+    assert!(output.contains("Host keeper"));
+    assert!(!output.contains("Host target"));
+    // Round-trip
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn host_pattern_with_ipv6_address() {
+    let content = "Host 2001:db8::1\n  User admin\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+    let entries = config.host_entries();
+    assert_eq!(entries[0].alias, "2001:db8::1");
+}
+
+#[test]
+fn host_pattern_with_brackets_for_ipv6() {
+    let content = "Host [2001:db8::1]\n  User admin\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+// ---------------------------------------------------------------------------
+// Directive edge cases and mutation sequences (Iteration 4)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn interleaved_add_update_delete_swap_with_tags_and_provider() {
+    // Complex realistic workflow: multiple operations with annotations
+    let mut config = parse_str("");
+
+    // Add 5 hosts
+    for i in 1..=5 {
+        config.add_host(&HostEntry {
+            alias: format!("host{}", i),
+            hostname: format!("10.0.0.{}", i),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        });
+    }
+    assert_eq!(config.host_entries().len(), 5);
+
+    // Add tags to host2 and host4
+    config.set_host_tags("host2", &["prod".to_string(), "us-east".to_string()]);
+    config.set_host_tags("host4", &["staging".to_string()]);
+
+    // Update host3's hostname
+    config.update_host(
+        "host3",
+        &HostEntry {
+            alias: "host3".to_string(),
+            hostname: "10.0.1.3".to_string(),
+            user: "deploy".to_string(),
+            port: 2222,
+            ..Default::default()
+        },
+    );
+
+    // Swap host1 and host5
+    config.swap_hosts("host1", "host5");
+
+    // Delete host2
+    config.delete_host("host2");
+
+    // Verify state
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    assert_eq!(entries.len(), 4, "Should have 4 hosts after delete");
+
+    // Verify host3 was updated
+    let h3 = entries.iter().find(|e| e.alias == "host3").unwrap();
+    assert_eq!(h3.hostname, "10.0.1.3");
+    assert_eq!(h3.user, "deploy");
+    assert_eq!(h3.port, 2222);
+
+    // Verify host4's tags survived
+    let h4 = entries.iter().find(|e| e.alias == "host4").unwrap();
+    assert!(h4.tags.contains(&"staging".to_string()));
+
+    // Verify host2 is gone
+    assert!(entries.iter().all(|e| e.alias != "host2"));
+
+    // Round-trip idempotency
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn delete_undoable_then_update_then_undo_sequence() {
+    let content = "\
+Host server1
+  HostName 10.0.0.1
+  User admin
+
+Host server2
+  HostName 10.0.0.2
+  User deploy
+";
+    let mut config = parse_str(content);
+
+    // Delete server1 undoably
+    let undo = config.delete_host_undoable("server1");
+    assert!(undo.is_some());
+
+    // Update server2 while server1 is deleted
+    config.update_host(
+        "server2",
+        &HostEntry {
+            alias: "server2".to_string(),
+            hostname: "10.0.0.22".to_string(),
+            user: "deploy".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+
+    // Undo the delete of server1
+    let (block, pos) = undo.unwrap();
+    config.insert_host_at(block, pos);
+
+    // Verify both hosts exist and server2 has the updated hostname
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    assert_eq!(entries.len(), 2);
+
+    let s1 = entries.iter().find(|e| e.alias == "server1").unwrap();
+    assert_eq!(s1.hostname, "10.0.0.1");
+    let s2 = entries.iter().find(|e| e.alias == "server2").unwrap();
+    assert_eq!(s2.hostname, "10.0.0.22");
+
+    // Round-trip
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn rapid_tag_changes_no_duplicate_tag_lines() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(content);
+
+    // Set tags multiple times rapidly
+    for i in 0..20 {
+        let tags: Vec<String> = (0..=i).map(|j| format!("tag{}", j)).collect();
+        config.set_host_tags("myserver", &tags);
+    }
+
+    let output = config.serialize();
+    // Should have exactly ONE purple:tags line
+    let tag_line_count = output.matches("# purple:tags").count();
+    assert_eq!(
+        tag_line_count,
+        1,
+        "Expected 1 tag line, got {}: {}",
+        tag_line_count,
+        visible(&output)
+    );
+
+    // Round-trip
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn rapid_askpass_changes_no_duplicate_askpass_lines() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(content);
+
+    let sources = vec![
+        "keychain",
+        "op://vault/item",
+        "bw:item-id",
+        "pass:entry",
+        "vault:secret/ssh",
+    ];
+    for source in &sources {
+        config.set_host_askpass("myserver", source);
+    }
+
+    let output = config.serialize();
+    let askpass_count = output.matches("# purple:askpass").count();
+    assert_eq!(
+        askpass_count,
+        1,
+        "Expected 1 askpass line, got {}: {}",
+        askpass_count,
+        visible(&output)
+    );
+
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn set_tags_then_set_provider_then_set_meta_then_set_askpass_all_coexist() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin\n";
+    let mut config = parse_str(content);
+
+    config.set_host_tags("myserver", &["prod".to_string(), "us-east".to_string()]);
+    config.set_host_provider("myserver", "aws", "i-123abc");
+    config.set_host_meta(
+        "myserver",
+        &[("region".to_string(), "us-east-1".to_string())],
+    );
+    config.set_host_askpass("myserver", "keychain");
+
+    let output = config.serialize();
+    assert!(output.contains("# purple:tags prod,us-east"));
+    assert!(output.contains("# purple:provider aws:i-123abc"));
+    assert!(output.contains("# purple:meta region=us-east-1"));
+    assert!(output.contains("# purple:askpass keychain"));
+
+    // All four annotation types must survive a round-trip
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    let e = &entries[0];
+    assert_eq!(e.tags, vec!["prod", "us-east"]);
+    assert_eq!(e.provider.as_deref(), Some("aws"));
+    assert_eq!(e.askpass.as_deref(), Some("keychain"));
+    assert!(
+        e.provider_meta
+            .iter()
+            .any(|(k, v)| k == "region" && v == "us-east-1")
+    );
+
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn update_host_rename_preserves_all_annotations() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin\n";
+    let mut config = parse_str(content);
+
+    // Add all annotation types
+    config.set_host_tags("myserver", &["prod".to_string()]);
+    config.set_host_provider("myserver", "aws", "i-123");
+    config.set_host_meta(
+        "myserver",
+        &[("region".to_string(), "us-east-1".to_string())],
+    );
+    config.set_host_askpass("myserver", "keychain");
+    config.set_host_stale("myserver", 1700000000);
+
+    // Rename the host
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "renamed".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+
+    let output = config.serialize();
+    let config2 = parse_str(&output);
+    let entries = config2.host_entries();
+    let e = &entries[0];
+    assert_eq!(e.alias, "renamed");
+    assert_eq!(e.tags, vec!["prod"]);
+    assert_eq!(e.provider.as_deref(), Some("aws"));
+    assert_eq!(e.askpass.as_deref(), Some("keychain"));
+    assert_eq!(e.stale, Some(1700000000));
+
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn delete_all_then_readd_produces_clean_config() {
+    let mut config = parse_str("");
+
+    // Add 3 hosts
+    for i in 1..=3 {
+        config.add_host(&HostEntry {
+            alias: format!("host{}", i),
+            hostname: format!("10.0.0.{}", i),
+            ..Default::default()
+        });
+    }
+
+    // Delete all hosts
+    config.delete_host("host1");
+    config.delete_host("host2");
+    config.delete_host("host3");
+    assert!(config.host_entries().is_empty());
+
+    // Re-add 2 hosts
+    config.add_host(&HostEntry {
+        alias: "newhost1".to_string(),
+        hostname: "10.0.1.1".to_string(),
+        ..Default::default()
+    });
+    config.add_host(&HostEntry {
+        alias: "newhost2".to_string(),
+        hostname: "10.0.1.2".to_string(),
+        ..Default::default()
+    });
+
+    let output = config.serialize();
+    // No triple blank lines
+    assert!(
+        !output.contains("\n\n\n"),
+        "Should have no triple blanks: {}",
+        visible(&output)
+    );
+    let config2 = parse_str(&output);
+    assert_eq!(config2.host_entries().len(), 2);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn swap_all_pairs_in_5_host_config() {
+    // Exhaustive swap test: swap every pair and verify stability
+    let mut content = String::new();
+    for i in 1..=5 {
+        content.push_str(&format!("Host host{}\n  HostName 10.0.0.{}\n\n", i, i));
+    }
+
+    for i in 1..=5 {
+        for j in (i + 1)..=5 {
+            let mut config = parse_str(&content);
+            config.swap_hosts(&format!("host{}", i), &format!("host{}", j));
+            let output = config.serialize();
+            // Should still have 5 hosts
+            let config2 = parse_str(&output);
+            assert_eq!(
+                config2.host_entries().len(),
+                5,
+                "Swap({}, {}) lost hosts",
+                i,
+                j
+            );
+            // Swap back should restore the same host order and values
+            let mut config3 = config2;
+            config3.swap_hosts(&format!("host{}", i), &format!("host{}", j));
+            let output3 = config3.serialize();
+            let entries3 = parse_str(&output3).host_entries();
+            // Verify host order is restored
+            for (k, entry) in entries3.iter().enumerate().take(5) {
+                assert_eq!(
+                    entry.alias,
+                    format!("host{}", k + 1),
+                    "Swap({},{}) then swap back: host order wrong at index {}",
+                    i,
+                    j,
+                    k
+                );
+            }
+            // Swap-swap round-trip must be idempotent (swap twice more)
+            let mut config4 = parse_str(&output3);
+            config4.swap_hosts(&format!("host{}", i), &format!("host{}", j));
+            config4.swap_hosts(&format!("host{}", i), &format!("host{}", j));
+            let output4 = config4.serialize();
+            assert_eq_visible(&output3, &output4);
+        }
+    }
+}
+
+#[test]
+fn update_host_with_duplicate_directive_keys_preserves_all() {
+    // Config with multiple IdentityFile directives (valid in OpenSSH)
+    let content = "\
+Host myserver
+  HostName 10.0.0.1
+  IdentityFile ~/.ssh/id_rsa
+  IdentityFile ~/.ssh/id_ed25519
+  IdentityFile ~/.ssh/id_ecdsa
+  User admin
+";
+    let mut config = parse_str(content);
+    // Update just the hostname — all IdentityFile lines should survive
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            identity_file: "~/.ssh/id_rsa".to_string(), // first one
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    let id_count = output.matches("IdentityFile").count();
+    assert_eq!(
+        id_count,
+        3,
+        "All 3 IdentityFile lines should survive: {}",
+        visible(&output)
+    );
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn add_forward_then_update_then_delete_forward_roundtrip() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin\n";
+    let mut config = parse_str(content);
+
+    // Add a tunnel
+    config.add_forward("myserver", "LocalForward", "8080 localhost:80");
+    let output1 = config.serialize();
+    assert!(output1.contains("LocalForward 8080 localhost:80"));
+
+    // Update hostname — tunnel should survive
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output2 = config.serialize();
+    assert!(
+        output2.contains("LocalForward 8080 localhost:80"),
+        "Tunnel should survive update: {}",
+        visible(&output2)
+    );
+
+    // Remove the tunnel
+    config.remove_forward("myserver", "LocalForward", "8080 localhost:80");
+    let output3 = config.serialize();
+    assert!(!output3.contains("LocalForward"));
+
+    // Final round-trip
+    let config3 = parse_str(&output3);
+    let output4 = config3.serialize();
+    assert_eq_visible(&output3, &output4);
+}
+
+#[test]
+fn stale_host_edit_clears_stale_then_reannotate() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(content);
+
+    // Mark stale
+    config.set_host_stale("myserver", 1700000000);
+    assert_eq!(config.host_entries()[0].stale, Some(1700000000));
+
+    // Edit (update) should clear stale
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            ..Default::default()
+        },
+    );
+    // Stale comment is preserved through update (clearing is done by app.rs)
+    // So let's manually clear it
+    config.clear_host_stale("myserver");
+    assert_eq!(config.host_entries()[0].stale, None);
+
+    // Re-mark stale
+    config.set_host_stale("myserver", 1700001000);
+    assert_eq!(config.host_entries()[0].stale, Some(1700001000));
+
+    let output = config.serialize();
+    assert!(output.contains("# purple:stale 1700001000"));
+    assert!(!output.contains("1700000000"));
+
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+// ---------------------------------------------------------------------------
+// Writer/serialization edge cases and Include parsing (Iteration 5)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn serialize_bom_plus_crlf_plus_hosts_roundtrip() {
+    let content = "\u{FEFF}Host server1\r\n  HostName 10.0.0.1\r\n\r\nHost server2\r\n  HostName 10.0.0.2\r\n";
+    let config = SshConfigFile {
+        elements: SshConfigFile::parse_content(content.strip_prefix('\u{FEFF}').unwrap()),
+        path: PathBuf::from("/tmp/test"),
+        crlf: true,
+        bom: true,
+    };
+    let output = config.serialize();
+    assert!(output.starts_with('\u{FEFF}'), "BOM must be at start");
+    assert!(output.contains("\r\n"), "CRLF must be used");
+    let stripped = output.strip_prefix('\u{FEFF}').unwrap_or(&output);
+    let config2 = SshConfigFile {
+        elements: SshConfigFile::parse_content(stripped),
+        path: PathBuf::from("/tmp/test"),
+        crlf: true,
+        bom: true,
+    };
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn serialize_collapse_many_blank_elements() {
+    // Start with two hosts separated by many blank lines
+    let mut content = String::from("Host server1\n  HostName 10.0.0.1\n");
+    for _ in 0..10 {
+        content.push('\n');
+    }
+    content.push_str("Host server2\n  HostName 10.0.0.2\n");
+    let config = parse_str(&content);
+    let output = config.serialize();
+    // Should not have triple blank lines
+    assert!(
+        !output.contains("\n\n\n"),
+        "Blank lines should be collapsed: {}",
+        visible(&output)
+    );
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn serialize_empty_config_variants() {
+    let cases: Vec<(bool, bool)> = vec![(false, false), (true, false), (false, true), (true, true)];
+    for (bom, crlf) in cases {
+        let config = SshConfigFile {
+            elements: Vec::new(),
+            path: PathBuf::from("/tmp/test"),
+            crlf,
+            bom,
+        };
+        let output = config.serialize();
+        if bom {
+            assert!(
+                output.starts_with('\u{FEFF}'),
+                "BOM expected for bom={}",
+                bom
+            );
+        }
+        if crlf {
+            assert!(output.contains("\r\n"), "CRLF expected for crlf={}", crlf);
+        }
+        assert!(
+            output.ends_with('\n'),
+            "Must end with newline for bom={}, crlf={}",
+            bom,
+            crlf
+        );
+    }
+}
+
+#[test]
+fn upsert_preserves_equals_separator_on_value_change() {
+    let content = "Host myserver\n  HostName=10.0.0.1\n  User=admin\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "deploy".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("HostName=10.0.0.2"),
+        "Equals separator should be preserved: {}",
+        visible(&output)
+    );
+    assert!(
+        output.contains("User=deploy"),
+        "Equals separator should be preserved: {}",
+        visible(&output)
+    );
+}
+
+#[test]
+fn upsert_preserves_spaced_equals_separator() {
+    let content = "Host myserver\n  HostName = 10.0.0.1\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("HostName = 10.0.0.2"),
+        "Spaced equals should be preserved: {}",
+        visible(&output)
+    );
+}
+
+#[test]
+fn upsert_preserves_tab_indent_on_value_change() {
+    let content = "Host myserver\n\tHostName 10.0.0.1\n\tUser admin\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            user: "admin".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("\tHostName 10.0.0.2"),
+        "Tab indent should be preserved: {}",
+        visible(&output)
+    );
+}
+
+#[test]
+fn upsert_removes_directive_when_value_empty() {
+    let content = "Host myserver\n  HostName 10.0.0.1\n  User admin\n  Port 2222\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.1".to_string(),
+            user: String::new(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(!output.contains("User"), "Empty user should be removed");
+    assert!(!output.contains("Port"), "Port 22 should be removed");
+    assert!(output.contains("HostName 10.0.0.1"));
+}
+
+#[test]
+fn include_split_patterns_edge_cases() {
+    let test_cases = vec![
+        "Include config.d/*\n",
+        "Include config.d/* other.d/*\n",
+        "Include \"config dir/my configs/*\"\n",
+        "Include \"path with spaces\" simple_path\n",
+        "Include \"path one\" \"path two\"\n",
+    ];
+    for include_line in test_cases {
+        let full = format!("{}Host myserver\n  HostName 10.0.0.1\n", include_line);
+        let config = parse_str(&full);
+        let output = config.serialize();
+        assert_eq_visible(&full, &output);
+    }
+}
+
+#[test]
+fn include_between_many_hosts_preserved() {
+    let content = "\
+Host server1
+  HostName 10.0.0.1
+
+Include ~/.ssh/config.d/*
+
+Host server2
+  HostName 10.0.0.2
+
+Include ~/.ssh/extra/*
+
+Host server3
+  HostName 10.0.0.3
+";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+
+    let mut config = config;
+    config.add_host(&HostEntry {
+        alias: "server4".to_string(),
+        hostname: "10.0.0.4".to_string(),
+        ..Default::default()
+    });
+    let output = config.serialize();
+    assert!(output.contains("Include ~/.ssh/config.d/*"));
+    assert!(output.contains("Include ~/.ssh/extra/*"));
+    assert!(output.contains("Host server4"));
+
+    let config2 = parse_str(&output);
+    let output2 = config2.serialize();
+    assert_eq_visible(&output, &output2);
+}
+
+#[test]
+fn include_with_equals_syntax_roundtrip() {
+    let content = "Include=~/.ssh/config.d/*\nHost myserver\n  HostName 10.0.0.1\n";
+    let config = parse_str(content);
+    let output = config.serialize();
+    assert_eq_visible(content, &output);
+}
+
+#[test]
+fn include_case_insensitive_roundtrip() {
+    let cases = vec![
+        "include ~/.ssh/config.d/*\nHost s\n  HostName 10.0.0.1\n",
+        "INCLUDE ~/.ssh/config.d/*\nHost s\n  HostName 10.0.0.1\n",
+        "Include ~/.ssh/config.d/*\nHost s\n  HostName 10.0.0.1\n",
+    ];
+    for content in cases {
+        let config = parse_str(content);
+        let output = config.serialize();
+        assert_eq_visible(content, &output);
+    }
+}
+
+#[test]
+fn update_host_when_value_has_equals_in_it() {
+    let content = "Host myserver\n  IdentityFile ~/.ssh/id=prod\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "myserver",
+        &HostEntry {
+            alias: "myserver".to_string(),
+            hostname: "10.0.0.2".to_string(),
+            identity_file: "~/.ssh/id=prod".to_string(),
+            ..Default::default()
+        },
+    );
+    let output = config.serialize();
+    assert!(
+        output.contains("IdentityFile ~/.ssh/id=prod"),
+        "Identity file with = in value should be preserved: {}",
+        visible(&output)
+    );
+    assert!(output.contains("HostName 10.0.0.2"));
 }

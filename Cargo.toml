@@ -1,15 +1,15 @@
 [package]
 name = "purple-ssh"
-version = "2.8.0"
+version = "2.24.0"
 edition = "2024"
-description = "TUI for managing SSH servers. Search, connect, transfer files and sync from 11 cloud providers. Edits ~/.ssh/config with round-trip fidelity."
+description = "Search your SSH config instantly, connect to any host with one keystroke and sync servers from 16 cloud providers. Visual file transfer, container management over SSH, password management, command snippets and MCP server for AI agent integration. Edits ~/.ssh/config with round-trip fidelity."
 license = "MIT"
 repository = "https://github.com/erickochen/purple"
 homepage = "https://getpurple.sh"
 readme = "README.md"
-keywords = ["ssh", "tui", "ssh-config", "ssh-manager", "cloud-sync"]
-categories = ["command-line-utilities", "network-programming", "development-tools"]
-rust-version = "1.85"
+keywords = ["ssh", "ssh-client", "tui", "ssh-manager", "mcp"]
+categories = ["command-line-utilities", "development-tools"]
+rust-version = "1.86"
 exclude = [".github/", ".gitignore"]
 
 [lib]
@@ -30,15 +30,20 @@ glob = "0.3"
 anyhow = "1"
 thiserror = "2"
 unicode-width = "0.2.2"
-ureq = { version = "2", features = ["json", "native-tls"] }
+ureq = { version = "3", features = ["json", "native-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha1 = "0.11"
 sha2 = "0.10"
 hmac = "0.12"
-quick-xml = { version = "0.37", features = ["serde", "serialize"] }
+quick-xml = { version = "0.39", features = ["serde", "serialize"] }
 rsa = { version = "0.9", features = ["sha2"] }
 base64 = "0.22"
 libc = "0.2"
+
+[dev-dependencies]
+mockito = "1.7.2"
+proptest = "1"
 
 [profile.release]
 strip = true

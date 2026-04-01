@@ -70,15 +70,16 @@ impl Provider for Vultr {
                 None => "https://api.vultr.com/v2/instances?per_page=500".to_string(),
                 Some(c) => format!(
                     "https://api.vultr.com/v2/instances?per_page=500&cursor={}",
-                    c
+                    super::percent_encode(c)
                 ),
             };
             let resp: InstanceResponse = agent
                 .get(&url)
-                .set("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &format!("Bearer {}", token))
                 .call()
                 .map_err(map_ureq_error)?
-                .into_json()
+                .body_mut()
+                .read_json()
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
             if resp.instances.is_empty() {
@@ -232,7 +233,10 @@ mod tests {
             "meta": {"links": {"next": ""}}
         }"#;
         let resp: InstanceResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(select_vultr_ip(&resp.instances[0]), Some("5.6.7.8".to_string()));
+        assert_eq!(
+            select_vultr_ip(&resp.instances[0]),
+            Some("5.6.7.8".to_string())
+        );
     }
 
     #[test]
@@ -317,7 +321,10 @@ mod tests {
             "meta": {"links": {"next": ""}}
         }"#;
         let resp: InstanceResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(select_vultr_ip(&resp.instances[0]), Some("5.6.7.8".to_string()));
+        assert_eq!(
+            select_vultr_ip(&resp.instances[0]),
+            Some("5.6.7.8".to_string())
+        );
     }
 
     #[test]
@@ -333,7 +340,10 @@ mod tests {
             "meta": {"links": {"next": ""}}
         }"#;
         let resp: InstanceResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(select_vultr_ip(&resp.instances[0]), Some("2001:db8::1".to_string()));
+        assert_eq!(
+            select_vultr_ip(&resp.instances[0]),
+            Some("2001:db8::1".to_string())
+        );
     }
 
     #[test]
@@ -425,7 +435,10 @@ mod tests {
         }"#;
         let resp: InstanceResponse = serde_json::from_str(json).unwrap();
         // 0.0.0.0 treated as placeholder, falls back to v6
-        assert_eq!(select_vultr_ip(&resp.instances[0]), Some("2001:db8::1".to_string()));
+        assert_eq!(
+            select_vultr_ip(&resp.instances[0]),
+            Some("2001:db8::1".to_string())
+        );
     }
 
     #[test]
@@ -488,7 +501,10 @@ mod tests {
         }"#;
         let resp: InstanceResponse = serde_json::from_str(json).unwrap();
         assert_eq!(resp.instances[0].label, "");
-        assert_eq!(select_vultr_ip(&resp.instances[0]), Some("1.2.3.4".to_string()));
+        assert_eq!(
+            select_vultr_ip(&resp.instances[0]),
+            Some("1.2.3.4".to_string())
+        );
     }
 
     // --- Resilience: extra/unknown fields are ignored by serde ---
@@ -547,5 +563,153 @@ mod tests {
         let resp: InstanceResponse = serde_json::from_str(json).unwrap();
         assert!(resp.instances.is_empty());
         assert!(resp.meta.links.next.is_empty());
+    }
+
+    // ── HTTP roundtrip tests (mockito) ──────────────────────────────
+
+    #[test]
+    fn test_http_instances_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v2/instances")
+            .match_query(mockito::Matcher::AllOf(vec![mockito::Matcher::UrlEncoded(
+                "per_page".into(),
+                "500".into(),
+            )]))
+            .match_header("Authorization", "Bearer test-vultr-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "instances": [
+                        {
+                            "id": "cb676a46-66fd-4dfb-b839-443f2e6c0b60",
+                            "label": "web-prod-1",
+                            "main_ip": "149.28.100.10",
+                            "v6_main_ip": "2001:19f0:5001::1",
+                            "tags": ["prod", "web"],
+                            "region": "ewr",
+                            "plan": "vc2-2c-4gb",
+                            "os": "Ubuntu 22.04 LTS x64",
+                            "power_status": "running"
+                        }
+                    ],
+                    "meta": {"links": {"next": ""}}
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/v2/instances?per_page=500", server.url());
+        let resp: InstanceResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-vultr-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.instances.len(), 1);
+        let i = &resp.instances[0];
+        assert_eq!(i.id, "cb676a46-66fd-4dfb-b839-443f2e6c0b60");
+        assert_eq!(i.label, "web-prod-1");
+        assert_eq!(i.main_ip, "149.28.100.10");
+        assert_eq!(i.v6_main_ip, "2001:19f0:5001::1");
+        assert_eq!(i.region, "ewr");
+        assert_eq!(i.plan, "vc2-2c-4gb");
+        assert_eq!(i.os, "Ubuntu 22.04 LTS x64");
+        assert_eq!(i.power_status, "running");
+        assert_eq!(i.tags, vec!["prod", "web"]);
+        assert!(resp.meta.links.next.is_empty());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_instances_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/v2/instances")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("per_page".into(), "500".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "instances": [{"id": "aaa", "label": "web-1", "main_ip": "1.1.1.1", "tags": []}],
+                    "meta": {"links": {"next": "bmV4dEN1cnNvcg=="}}
+                }"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/v2/instances")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("per_page".into(), "500".into()),
+                mockito::Matcher::UrlEncoded("cursor".into(), "bmV4dEN1cnNvcg==".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "instances": [{"id": "bbb", "label": "web-2", "main_ip": "2.2.2.2", "tags": []}],
+                    "meta": {"links": {"next": ""}}
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        // Page 1
+        let r1: InstanceResponse = agent
+            .get(&format!("{}/v2/instances?per_page=500", server.url()))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.instances.len(), 1);
+        assert_eq!(r1.instances[0].id, "aaa");
+        assert_eq!(r1.meta.links.next, "bmV4dEN1cnNvcg==");
+        // Page 2
+        let r2: InstanceResponse = agent
+            .get(&format!(
+                "{}/v2/instances?per_page=500&cursor=bmV4dEN1cnNvcg==",
+                server.url()
+            ))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r2.instances.len(), 1);
+        assert_eq!(r2.instances[0].id, "bbb");
+        assert!(r2.meta.links.next.is_empty());
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_instances_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v2/instances")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"error": "Invalid API token", "status": 401}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!("{}/v2/instances?per_page=500", server.url()))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
     }
 }

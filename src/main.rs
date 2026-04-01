@@ -2,12 +2,14 @@ mod app;
 mod askpass;
 mod clipboard;
 mod connection;
+mod containers;
 mod event;
 mod file_browser;
-mod handler;
 mod fs_util;
+mod handler;
 mod history;
 mod import;
+mod mcp;
 mod ping;
 mod preferences;
 mod providers;
@@ -34,7 +36,7 @@ use ssh_config::model::{HostEntry, SshConfigFile};
 #[command(
     name = "purple",
     about = "Your SSH config is a mess. Purple fixes that.",
-    long_about = "Purple is a fast, friendly TUI for managing your SSH hosts.\n\
+    long_about = "Purple is a terminal SSH client for managing your hosts.\n\
                   Add, edit, delete and connect without opening a text editor.\n\n\
                   Life's too short for nano ~/.ssh/config.",
     version
@@ -92,7 +94,7 @@ enum Commands {
         #[arg(short, long)]
         group: Option<String>,
     },
-    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, AWS EC2, Scaleway, GCP, Azure, Tailscale)
+    /// Sync hosts from cloud providers (DigitalOcean, Vultr, Linode, Hetzner, UpCloud, Proxmox VE, AWS EC2, Scaleway, GCP, Azure, Tailscale, Oracle Cloud)
     Sync {
         /// Sync a specific provider (default: all configured)
         provider: Option<String>,
@@ -104,10 +106,6 @@ enum Commands {
         /// Remove hosts that no longer exist on the provider
         #[arg(long)]
         remove: bool,
-
-        /// Replace local tags with provider tags instead of merging
-        #[arg(long)]
-        reset_tags: bool,
     },
     /// Manage cloud provider configurations
     Provider {
@@ -131,13 +129,16 @@ enum Commands {
     },
     /// Update purple to the latest version
     Update,
+    /// Start MCP server (Model Context Protocol) for AI agent integration
+    Mcp,
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum ProviderCommands {
     /// Add or update a provider configuration
     Add {
-        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale)
+        /// Provider name (digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle)
         provider: String,
 
         /// API token (or set PURPLE_TOKEN env var, or use --token-stdin)
@@ -175,6 +176,10 @@ enum ProviderCommands {
         /// GCP project ID
         #[arg(long)]
         project: Option<String>,
+
+        /// OCI compartment OCID (Oracle)
+        #[arg(long)]
+        compartment: Option<String>,
 
         /// Skip TLS certificate verification (for self-signed certs)
         #[arg(long, conflicts_with = "verify_tls")]
@@ -339,6 +344,10 @@ fn main() -> Result<()> {
     if let Some(Commands::Password { command }) = cli.command {
         return handle_password_command(command);
     }
+    if let Some(Commands::Mcp) = cli.command {
+        let config_path = resolve_config_path(&cli.config)?;
+        return mcp::run(&config_path);
+    }
 
     let config_path = resolve_config_path(&cli.config)?;
     let mut config = SshConfigFile::parse(&config_path)?;
@@ -361,9 +370,8 @@ fn main() -> Result<()> {
             provider,
             dry_run,
             remove,
-            reset_tags,
         }) => {
-            return handle_sync(config, provider.as_deref(), dry_run, remove, reset_tags);
+            return handle_sync(config, provider.as_deref(), dry_run, remove);
         }
         Some(Commands::Tunnel { command }) => {
             return handle_tunnel_command(config, command);
@@ -371,19 +379,30 @@ fn main() -> Result<()> {
         Some(Commands::Snippet { command }) => {
             return handle_snippet_command(config, command, &config_path);
         }
-        Some(Commands::Provider { .. }) | Some(Commands::Update) | Some(Commands::Password { .. }) => unreachable!(),
+        Some(Commands::Provider { .. })
+        | Some(Commands::Update)
+        | Some(Commands::Password { .. })
+        | Some(Commands::Mcp) => unreachable!(),
         None => {}
     }
 
     // Direct connect mode (--connect)
     if let Some(alias) = cli.connect {
-        let askpass = config.host_entries().iter()
+        let askpass = config
+            .host_entries()
+            .iter()
             .find(|h| h.alias == alias)
             .and_then(|h| h.askpass.clone())
             .or_else(preferences::load_askpass_default);
         let bw_session = ensure_bw_session(None, askpass.as_deref());
         ensure_keychain_password(&alias, askpass.as_deref());
-        let result = connection::connect(&alias, &config_path, askpass.as_deref(), bw_session.as_deref(), false)?;
+        let result = connection::connect(
+            &alias,
+            &config_path,
+            askpass.as_deref(),
+            bw_session.as_deref(),
+            false,
+        )?;
         let code = result.status.code().unwrap_or(1);
         if code != 255 {
             history::ConnectionHistory::load().record(&alias);
@@ -420,12 +439,20 @@ fn main() -> Result<()> {
         let entries = config.host_entries();
         if let Some(host) = entries.iter().find(|h| h.alias == *alias) {
             let alias = host.alias.clone();
-            let askpass = host.askpass.clone()
+            let askpass = host
+                .askpass
+                .clone()
                 .or_else(preferences::load_askpass_default);
             let bw_session = ensure_bw_session(None, askpass.as_deref());
             ensure_keychain_password(&alias, askpass.as_deref());
             println!("Beaming you up to {}...\n", alias);
-            let result = connection::connect(&alias, &config_path, askpass.as_deref(), bw_session.as_deref(), false)?;
+            let result = connection::connect(
+                &alias,
+                &config_path,
+                askpass.as_deref(),
+                bw_session.as_deref(),
+                false,
+            )?;
             let code = result.status.code().unwrap_or(1);
             if code != 255 {
                 history::ConnectionHistory::load().record(&alias);
@@ -472,16 +499,44 @@ fn main() -> Result<()> {
 
 fn apply_saved_sort(app: &mut App) {
     let saved = preferences::load_sort_mode();
-    let group = preferences::load_group_by_provider();
+    let group = preferences::load_group_by();
     app.sort_mode = saved;
-    app.group_by_provider = group;
+    app.group_by = group;
     app.view_mode = preferences::load_view_mode();
-    if saved != app::SortMode::Original || group {
+    app.collapsed_groups = preferences::load_collapsed_groups();
+    // Clear stale tag preference if the tag no longer exists in any host
+    if app.clear_stale_group_tag() {
+        if let Err(e) = preferences::save_group_by(&app.group_by) {
+            app.set_status(
+                format!("Group preference reset. (save failed: {})", e),
+                true,
+            );
+        }
+    }
+    if saved != app::SortMode::Original || !matches!(app.group_by, app::GroupBy::None) {
         app.apply_sort();
+        // After startup sort, select the first host in the sorted order
+        // rather than preserving the arbitrary first-in-config selection.
+        app.select_first_host();
     }
 }
 
 /// Build a rolling sync summary from completed providers.
+/// Format a sync diff summary like "(+3 ~1 -2)" from add/update/stale counts.
+/// Returns empty string when all counts are zero.
+fn format_sync_diff(added: usize, updated: usize, stale: usize) -> String {
+    let diff_parts: Vec<String> = [(added, "+"), (updated, "~"), (stale, "-")]
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, prefix)| format!("{}{}", prefix, n))
+        .collect();
+    if diff_parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", diff_parts.join(" "))
+    }
+}
+
 /// Shows "Synced: AWS, DO, Vultr" that grows as each provider finishes.
 /// Clears the batch state once all providers are done so the status can expire normally.
 fn set_sync_summary(app: &mut App) {
@@ -507,8 +562,7 @@ fn first_launch_init(purple_dir: &Path, config_path: &Path) -> Option<bool> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ =
-            std::fs::set_permissions(purple_dir, std::fs::Permissions::from_mode(0o700));
+        let _ = std::fs::set_permissions(purple_dir, std::fs::Permissions::from_mode(0o700));
     }
     // One-time backup of the original SSH config before purple touches it.
     // Stored as config.original and never overwritten or pruned.
@@ -518,10 +572,8 @@ fn first_launch_init(purple_dir: &Path, config_path: &Path) -> Option<bool> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
-                &original_backup,
-                std::fs::Permissions::from_mode(0o600),
-            );
+            let _ =
+                std::fs::set_permissions(&original_backup, std::fs::Permissions::from_mode(0o600));
         }
     }
     Some(original_backup.exists())
@@ -562,7 +614,8 @@ fn run_tui(mut app: App) -> Result<()> {
         }
         if !app.syncing_providers.contains_key(&section.provider) {
             let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            app.syncing_providers.insert(section.provider.clone(), cancel.clone());
+            app.syncing_providers
+                .insert(section.provider.clone(), cancel.clone());
             handler::spawn_provider_sync(&section, events_tx.clone(), cancel);
         }
     }
@@ -571,11 +624,26 @@ fn run_tui(mut app: App) -> Result<()> {
     update::spawn_version_check(events_tx.clone());
 
     while app.running {
+        // Detect overlay transitions and snapshot animation progress before
+        // rendering, so the first frame of a new animation sees the correct
+        // progress instead of a stale None.
+        app.detect_overlay_transition();
+        app.tick_animations();
         terminal.draw(&mut app)?;
 
-        match events.next()? {
-            AppEvent::Key(key) => handler::handle_key_event(&mut app, key, &events_tx)?,
-            AppEvent::Tick => {
+        // During animation, use a short timeout for smooth frames (~60fps).
+        // Otherwise, block until the next event arrives.
+        let event = if app.is_animating() {
+            events.next_timeout(std::time::Duration::from_millis(16))?
+        } else {
+            Some(events.next()?)
+        };
+
+        match event {
+            Some(AppEvent::Key(key)) => {
+                handler::handle_key_event(&mut app, key, &events_tx)?;
+            }
+            Some(AppEvent::Tick) | None => {
                 app.tick_status();
                 // Throttle config file stat() to every 4 seconds
                 if last_config_check.elapsed() >= std::time::Duration::from_secs(4) {
@@ -588,15 +656,21 @@ fn run_tui(mut app: App) -> Result<()> {
                     app.set_status(msg, is_error);
                 }
             }
-            AppEvent::PingResult { alias, reachable } => {
-                let status = if reachable {
-                    app::PingStatus::Reachable
-                } else {
-                    app::PingStatus::Unreachable
-                };
-                app.ping_status.insert(alias, status);
+            Some(AppEvent::PingResult {
+                alias,
+                reachable,
+                generation,
+            }) => {
+                if generation == app.ping_generation {
+                    let status = if reachable {
+                        app::PingStatus::Reachable
+                    } else {
+                        app::PingStatus::Unreachable
+                    };
+                    app.ping_status.insert(alias, status);
+                }
             }
-            AppEvent::SyncProgress { provider, message } => {
+            Some(AppEvent::SyncProgress { provider, message }) => {
                 // Only show per-provider progress if no providers have completed yet,
                 // otherwise the rolling summary is more useful.
                 if app.sync_done.is_empty() {
@@ -604,79 +678,118 @@ fn run_tui(mut app: App) -> Result<()> {
                     app.set_status(format!("{}: {}", name, message), false);
                 }
             }
-            AppEvent::SyncComplete { provider, hosts } => {
+            Some(AppEvent::SyncComplete { provider, hosts }) => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
                 let display_name = providers::provider_display_name(&provider);
-                let (_msg, is_err, total) = app.apply_sync_result(&provider, hosts);
+                let (_msg, is_err, total, added, updated, stale) =
+                    app.apply_sync_result(&provider, hosts, false);
                 if is_err {
-                    app.sync_history.insert(provider.clone(), app::SyncRecord {
-                        timestamp: now,
-                        message: format!("{}: sync failed", display_name),
-                        is_error: true,
-                    });
+                    app.sync_history.insert(
+                        provider.clone(),
+                        app::SyncRecord {
+                            timestamp: now,
+                            message: format!("{}: sync failed", display_name),
+                            is_error: true,
+                        },
+                    );
                     app.sync_had_errors = true;
                 } else {
                     let label = if total == 1 { "server" } else { "servers" };
-                    app.sync_history.insert(provider.clone(), app::SyncRecord {
-                        timestamp: now,
-                        message: format!("{} {}", total, label),
-                        is_error: false,
-                    });
+                    let message = format!(
+                        "{} {}{}",
+                        total,
+                        label,
+                        format_sync_diff(added, updated, stale)
+                    );
+                    app.sync_history.insert(
+                        provider.clone(),
+                        app::SyncRecord {
+                            timestamp: now,
+                            message,
+                            is_error: false,
+                        },
+                    );
                 }
                 app.syncing_providers.remove(&provider);
                 app.sync_done.push(display_name.to_string());
                 set_sync_summary(&mut app);
             }
-            AppEvent::SyncPartial { provider, hosts, failures, total } => {
+            Some(AppEvent::SyncPartial {
+                provider,
+                hosts,
+                failures,
+                total,
+            }) => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
                 let display_name = providers::provider_display_name(provider.as_str());
-                let (msg, is_err, synced) = app.apply_sync_result(&provider, hosts);
+                let (msg, is_err, synced, added, updated, stale) =
+                    app.apply_sync_result(&provider, hosts, true);
                 if is_err {
-                    app.sync_history.insert(provider.clone(), app::SyncRecord {
-                        timestamp: now,
-                        message: msg,
-                        is_error: true,
-                    });
+                    app.sync_history.insert(
+                        provider.clone(),
+                        app::SyncRecord {
+                            timestamp: now,
+                            message: msg,
+                            is_error: true,
+                        },
+                    );
                 } else {
                     let label = if synced == 1 { "server" } else { "servers" };
-                    app.sync_history.insert(provider.clone(), app::SyncRecord {
-                        timestamp: now,
-                        message: format!("{} {} ({} of {} failed)", synced, label, failures, total),
-                        is_error: true,
-                    });
+                    app.sync_history.insert(
+                        provider.clone(),
+                        app::SyncRecord {
+                            timestamp: now,
+                            message: format!(
+                                "{} {}{} ({} of {} failed)",
+                                synced,
+                                label,
+                                format_sync_diff(added, updated, stale),
+                                failures,
+                                total
+                            ),
+                            is_error: true,
+                        },
+                    );
                 }
                 app.sync_had_errors = true;
                 app.syncing_providers.remove(&provider);
                 app.sync_done.push(display_name.to_string());
                 set_sync_summary(&mut app);
             }
-            AppEvent::SyncError { provider, message } => {
+            Some(AppEvent::SyncError { provider, message }) => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_secs();
                 let display_name = providers::provider_display_name(provider.as_str());
-                app.sync_history.insert(provider.clone(), app::SyncRecord {
-                    timestamp: now,
-                    message: message.clone(),
-                    is_error: true,
-                });
+                app.sync_history.insert(
+                    provider.clone(),
+                    app::SyncRecord {
+                        timestamp: now,
+                        message: message.clone(),
+                        is_error: true,
+                    },
+                );
                 app.sync_had_errors = true;
                 app.syncing_providers.remove(&provider);
                 app.sync_done.push(display_name.to_string());
                 set_sync_summary(&mut app);
             }
-            AppEvent::UpdateAvailable { version, headline } => {
+            Some(AppEvent::UpdateAvailable { version, headline }) => {
                 app.update_available = Some(version);
                 app.update_headline = headline;
             }
-            AppEvent::FileBrowserListing { alias, path, entries } => {
+            Some(AppEvent::FileBrowserListing {
+                alias,
+                path,
+                entries,
+            }) => {
                 let mut record_connection = false;
                 if let Some(ref mut fb) = app.file_browser {
                     if fb.alias == alias {
@@ -710,12 +823,23 @@ fn run_tui(mut app: App) -> Result<()> {
                     app.apply_sort();
                 }
                 // Force full redraw: ssh may have written to /dev/tty
+                app.overlay_buffer = None;
                 terminal.force_redraw();
             }
-            AppEvent::ScpComplete { alias, success, message } => {
+            Some(AppEvent::ScpComplete {
+                alias,
+                success,
+                message,
+            }) => {
                 // Track whether we need to spawn a remote refresh (can't do it inside the fb borrow
                 // because spawn_remote_listing needs values from app too)
-                let mut refresh_remote: Option<(String, Option<String>, String, bool, file_browser::BrowserSort)> = None;
+                let mut refresh_remote: Option<(
+                    String,
+                    Option<String>,
+                    String,
+                    bool,
+                    file_browser::BrowserSort,
+                )> = None;
                 let matched = if let Some(ref mut fb) = app.file_browser {
                     if fb.alias == alias {
                         fb.transferring = None;
@@ -723,9 +847,16 @@ fn run_tui(mut app: App) -> Result<()> {
                             app.history.record(&alias);
                             fb.local_selected.clear();
                             fb.remote_selected.clear();
-                            match file_browser::list_local(&fb.local_path, fb.show_hidden, fb.sort) {
-                                Ok(entries) => { fb.local_entries = entries; fb.local_error = None; }
-                                Err(e) => { fb.local_entries = Vec::new(); fb.local_error = Some(e.to_string()); }
+                            match file_browser::list_local(&fb.local_path, fb.show_hidden, fb.sort)
+                            {
+                                Ok(entries) => {
+                                    fb.local_entries = entries;
+                                    fb.local_error = None;
+                                }
+                                Err(e) => {
+                                    fb.local_entries = Vec::new();
+                                    fb.local_error = Some(e.to_string());
+                                }
                             }
                             fb.local_list_state.select(Some(0));
                             if !fb.remote_path.is_empty() {
@@ -734,16 +865,23 @@ fn run_tui(mut app: App) -> Result<()> {
                                 fb.remote_error = None;
                                 fb.remote_list_state = ratatui::widgets::ListState::default();
                                 refresh_remote = Some((
-                                    fb.alias.clone(), fb.askpass.clone(),
-                                    fb.remote_path.clone(), fb.show_hidden, fb.sort,
+                                    fb.alias.clone(),
+                                    fb.askpass.clone(),
+                                    fb.remote_path.clone(),
+                                    fb.show_hidden,
+                                    fb.sort,
                                 ));
                             }
                         } else {
                             fb.transfer_error = Some(message.clone());
                         }
                         true
-                    } else { false }
-                } else { false };
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 if matched && success {
                     app.set_status("Transfer complete.", false);
                     // Rebuild display list so frecency sort and LAST column reflect the transfer
@@ -755,17 +893,35 @@ fn run_tui(mut app: App) -> Result<()> {
                     let bw = app.bw_session.clone();
                     let tx = events_tx.clone();
                     file_browser::spawn_remote_listing(
-                        fb_alias, config_path, path, show_hidden, sort,
-                        askpass_fb, bw, has_tunnel, move |a, p, e| {
-                            let _ = tx.send(AppEvent::FileBrowserListing { alias: a, path: p, entries: e });
+                        fb_alias,
+                        config_path,
+                        path,
+                        show_hidden,
+                        sort,
+                        askpass_fb,
+                        bw,
+                        has_tunnel,
+                        move |a, p, e| {
+                            let _ = tx.send(AppEvent::FileBrowserListing {
+                                alias: a,
+                                path: p,
+                                entries: e,
+                            });
                         },
                     );
                 }
                 askpass::cleanup_marker(&alias);
                 // Force full redraw: ssh may have written to /dev/tty
+                app.overlay_buffer = None;
                 terminal.force_redraw();
             }
-            AppEvent::SnippetHostDone { run_id, alias, stdout, stderr, exit_code } => {
+            Some(AppEvent::SnippetHostDone {
+                run_id,
+                alias,
+                stdout,
+                stderr,
+                exit_code,
+            }) => {
                 if let Some(ref mut state) = app.snippet_output {
                     if state.run_id == run_id {
                         state.results.push(app::SnippetHostOutput {
@@ -777,7 +933,11 @@ fn run_tui(mut app: App) -> Result<()> {
                     }
                 }
             }
-            AppEvent::SnippetProgress { run_id, completed, total } => {
+            Some(AppEvent::SnippetProgress {
+                run_id,
+                completed,
+                total,
+            }) => {
                 if let Some(ref mut state) = app.snippet_output {
                     if state.run_id == run_id {
                         state.completed = completed;
@@ -785,14 +945,119 @@ fn run_tui(mut app: App) -> Result<()> {
                     }
                 }
             }
-            AppEvent::SnippetAllDone { run_id } => {
+            Some(AppEvent::SnippetAllDone { run_id }) => {
                 if let Some(ref mut state) = app.snippet_output {
                     if state.run_id == run_id {
                         state.all_done = true;
                     }
                 }
             }
-            AppEvent::PollError => {
+            Some(AppEvent::ContainerListing { alias, result }) => {
+                // Always update cache, even if overlay is closed
+                match &result {
+                    Ok((runtime, containers)) => {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        app.container_cache.insert(
+                            alias.clone(),
+                            crate::containers::ContainerCacheEntry {
+                                timestamp: now,
+                                runtime: *runtime,
+                                containers: containers.clone(),
+                            },
+                        );
+                        crate::containers::save_container_cache(&app.container_cache);
+                    }
+                    Err(e) => {
+                        // Preserve runtime even on error
+                        if let Some(rt) = e.runtime {
+                            if let Some(entry) = app.container_cache.get_mut(&alias) {
+                                entry.runtime = rt;
+                            }
+                        }
+                    }
+                }
+                // Update overlay state if open
+                if let Some(ref mut state) = app.container_state {
+                    if state.alias == alias {
+                        match result {
+                            Ok((runtime, containers)) => {
+                                state.runtime = Some(runtime);
+                                state.containers = containers;
+                                state.loading = false;
+                                state.error = None;
+                                if let Some(sel) = state.list_state.selected() {
+                                    if sel >= state.containers.len() && !state.containers.is_empty()
+                                    {
+                                        state.list_state.select(Some(0));
+                                    }
+                                } else if !state.containers.is_empty() {
+                                    state.list_state.select(Some(0));
+                                }
+                            }
+                            Err(e) => {
+                                if let Some(rt) = e.runtime {
+                                    state.runtime = Some(rt);
+                                }
+                                state.loading = false;
+                                state.error = Some(e.message);
+                            }
+                        }
+                    }
+                }
+                askpass::cleanup_marker(&alias);
+            }
+            Some(AppEvent::ContainerActionComplete {
+                alias,
+                action,
+                result,
+            }) => {
+                // Check if overlay matches and extract refresh info before set_status
+                let should_refresh = if let Some(ref mut state) = app.container_state {
+                    if state.alias == alias {
+                        state.action_in_progress = None;
+                        match result {
+                            Ok(()) => {
+                                state.loading = true;
+                                Some((state.alias.clone(), state.askpass.clone(), state.runtime))
+                            }
+                            Err(e) => {
+                                state.error = Some(e);
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if let Some((refresh_alias, askpass, cached_runtime)) = should_refresh {
+                    app.set_status(format!("Container {} complete.", action.as_str()), false);
+                    let has_tunnel = app.active_tunnels.contains_key(&refresh_alias);
+                    let config_path = app.reload.config_path.clone();
+                    let bw = app.bw_session.clone();
+                    let tx = events_tx.clone();
+                    crate::containers::spawn_container_listing(
+                        refresh_alias,
+                        config_path,
+                        askpass,
+                        bw,
+                        has_tunnel,
+                        cached_runtime,
+                        move |a, r| {
+                            let _ = tx.send(AppEvent::ContainerListing {
+                                alias: a,
+                                result: r,
+                            });
+                        },
+                    );
+                }
+                askpass::cleanup_marker(&alias);
+            }
+            Some(AppEvent::PollError) => {
                 app.running = false;
             }
         }
@@ -808,7 +1073,13 @@ fn run_tui(mut app: App) -> Result<()> {
             ensure_keychain_password(&alias, askpass.as_deref());
             println!("Beaming you up to {}...\n", alias);
             let has_active_tunnel = app.active_tunnels.contains_key(&alias);
-            let result = connection::connect(&alias, &app.reload.config_path, askpass.as_deref(), app.bw_session.as_deref(), has_active_tunnel);
+            let result = connection::connect(
+                &alias,
+                &app.reload.config_path,
+                askpass.as_deref(),
+                app.bw_session.as_deref(),
+                has_active_tunnel,
+            );
             println!();
             match &result {
                 Ok(cr) => {
@@ -817,7 +1088,9 @@ fn run_tui(mut app: App) -> Result<()> {
                         app.history.record(&alias);
                     }
                     if code != 0 {
-                        if let Some((hostname, known_hosts_path)) = connection::parse_host_key_error(&cr.stderr_output) {
+                        if let Some((hostname, known_hosts_path)) =
+                            connection::parse_host_key_error(&cr.stderr_output)
+                        {
                             app.screen = app::Screen::ConfirmHostKeyReset {
                                 alias: alias.clone(),
                                 hostname,
@@ -854,11 +1127,15 @@ fn run_tui(mut app: App) -> Result<()> {
 
             let multi = aliases.len() > 1;
             for alias in &aliases {
-                let askpass = app.hosts.iter()
+                let askpass = app
+                    .hosts
+                    .iter()
                     .find(|h| h.alias == *alias)
                     .and_then(|h| h.askpass.clone())
                     .or_else(preferences::load_askpass_default);
-                if let Some(token) = ensure_bw_session(app.bw_session.as_deref(), askpass.as_deref()) {
+                if let Some(token) =
+                    ensure_bw_session(app.bw_session.as_deref(), askpass.as_deref())
+                {
                     app.bw_session = Some(token);
                 }
                 ensure_keychain_password(alias, askpass.as_deref());
@@ -909,7 +1186,6 @@ fn run_tui(mut app: App) -> Result<()> {
             app.reload_hosts();
             app.update_last_modified();
         }
-
     }
 
     // Kill all active tunnels on exit
@@ -930,16 +1206,14 @@ fn handle_quick_add(
 ) -> Result<()> {
     let parsed = quick_add::parse_target(target).map_err(|e| anyhow::anyhow!(e))?;
 
-    let alias_str = alias
-        .map(|a| a.to_string())
-        .unwrap_or_else(|| {
-            parsed
-                .hostname
-                .split('.')
-                .next()
-                .unwrap_or(&parsed.hostname)
-                .to_string()
-        });
+    let alias_str = alias.map(|a| a.to_string()).unwrap_or_else(|| {
+        parsed
+            .hostname
+            .split('.')
+            .next()
+            .unwrap_or(&parsed.hostname)
+            .to_string()
+    });
 
     if alias_str.trim().is_empty() {
         eprintln!("Alias can't be empty. Use --alias to specify one.");
@@ -979,7 +1253,10 @@ fn handle_quick_add(
     }
 
     if config.has_host(&alias_str) {
-        eprintln!("'{}' already exists. Use --alias to pick a different name.", alias_str);
+        eprintln!(
+            "'{}' already exists. Use --alias to pick a different name.",
+            alias_str
+        );
         std::process::exit(1);
     }
 
@@ -1054,13 +1331,12 @@ fn handle_sync(
     provider_name: Option<&str>,
     dry_run: bool,
     remove: bool,
-    reset_tags: bool,
 ) -> Result<()> {
     let provider_config = providers::config::ProviderConfig::load();
     let sections: Vec<&providers::config::ProviderSection> = if let Some(name) = provider_name {
         if providers::get_provider(name).is_none() {
             eprintln!(
-                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale.",
+                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle.",
                 name
             );
             std::process::exit(1);
@@ -1093,7 +1369,7 @@ fn handle_sync(
             Some(p) => p,
             None => {
                 eprintln!(
-                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale.",
+                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle.",
                     section.provider
                 );
                 any_failures = true;
@@ -1115,7 +1391,11 @@ fn handle_sync(
                 let _ = std::io::Write::flush(&mut std::io::stdout());
             }
         };
-        let fetch_result = provider.fetch_hosts_with_progress(&section.token, &std::sync::atomic::AtomicBool::new(false), &progress);
+        let fetch_result = provider.fetch_hosts_with_progress(
+            &section.token,
+            &std::sync::atomic::AtomicBool::new(false),
+            &progress,
+        );
         let summary = last_summary.into_inner();
         // Complete the Syncing line: TTY overwrites with summary; non-TTY appends.
         if is_tty {
@@ -1130,13 +1410,22 @@ fn handle_sync(
         }
         let (hosts, suppress_remove) = match fetch_result {
             Ok(hosts) => (hosts, false),
-            Err(providers::ProviderError::PartialResult { hosts, failures, total }) => {
+            Err(providers::ProviderError::PartialResult {
+                hosts,
+                failures,
+                total,
+            }) => {
                 println!(
                     "{} servers found ({} of {} failed to fetch).",
-                    hosts.len(), failures, total
+                    hosts.len(),
+                    failures,
+                    total
                 );
                 if remove {
-                    eprintln!("! {}: skipping --remove due to partial failures.", display_name);
+                    eprintln!(
+                        "! {}: skipping --remove due to partial failures.",
+                        display_name
+                    );
                 }
                 any_failures = true;
                 (hosts, true)
@@ -1153,8 +1442,14 @@ fn handle_sync(
             println!("{} servers found.", hosts.len());
         }
         let effective_remove = remove && !suppress_remove;
-        let result = providers::sync::sync_provider_with_options(
-            &mut config, &*provider, &hosts, section, effective_remove, dry_run, reset_tags,
+        let result = providers::sync::sync_provider(
+            &mut config,
+            &*provider,
+            &hosts,
+            section,
+            effective_remove,
+            suppress_remove, // suppress stale marking when partial failures occurred
+            dry_run,
         );
         let prefix = if dry_run { "  Would have: " } else { "  " };
         println!(
@@ -1164,7 +1459,10 @@ fn handle_sync(
         if result.removed > 0 {
             println!("  Removed {}.", result.removed);
         }
-        if result.added > 0 || result.updated > 0 || result.removed > 0 {
+        if result.stale > 0 {
+            println!("  Marked {} stale.", result.stale);
+        }
+        if result.added > 0 || result.updated > 0 || result.removed > 0 || result.stale > 0 {
             any_changes = true;
         }
     }
@@ -1197,6 +1495,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             mut profile,
             mut regions,
             mut project,
+            mut compartment,
             no_verify_tls,
             verify_tls,
             auto_sync,
@@ -1206,7 +1505,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 Some(p) => p,
                 None => {
                     eprintln!(
-                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale.",
+                        "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle.",
                         provider
                     );
                     std::process::exit(1);
@@ -1224,11 +1523,15 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     url = None;
                 }
                 if no_verify_tls {
-                    eprintln!("Warning: --no-verify-tls is only used by the Proxmox provider. Ignoring.");
+                    eprintln!(
+                        "Warning: --no-verify-tls is only used by the Proxmox provider. Ignoring."
+                    );
                     no_verify_tls = false;
                 }
                 if verify_tls {
-                    eprintln!("Warning: --verify-tls is only used by the Proxmox provider. Ignoring.");
+                    eprintln!(
+                        "Warning: --verify-tls is only used by the Proxmox provider. Ignoring."
+                    );
                     verify_tls = false;
                 }
             }
@@ -1237,13 +1540,23 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 eprintln!("Warning: --profile is only used by the AWS provider. Ignoring.");
                 profile = None;
             }
-            if !matches!(provider.as_str(), "aws" | "scaleway" | "gcp" | "azure") && regions.is_some() {
-                eprintln!("Warning: --regions is only used by the AWS, Scaleway, GCP and Azure providers. Ignoring.");
+            if !matches!(
+                provider.as_str(),
+                "aws" | "scaleway" | "gcp" | "azure" | "oracle"
+            ) && regions.is_some()
+            {
+                eprintln!(
+                    "Warning: --regions is only used by the AWS, Scaleway, GCP, Azure and Oracle providers. Ignoring."
+                );
                 regions = None;
             }
             if provider != "gcp" && project.is_some() {
                 eprintln!("Warning: --project is only used by the GCP provider. Ignoring.");
                 project = None;
+            }
+            if provider != "oracle" && compartment.is_some() {
+                eprintln!("Warning: --compartment is only used by the Oracle provider. Ignoring.");
+                compartment = None;
             }
 
             // When updating an existing section, fall back to stored values for fields not supplied
@@ -1256,7 +1569,11 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 if provider == "proxmox" && url.is_none() && !existing.url.is_empty() {
                     url = Some(existing.url.clone());
                 }
-                if token.is_none() && !token_stdin && std::env::var("PURPLE_TOKEN").is_err() && !existing.token.is_empty() {
+                if token.is_none()
+                    && !token_stdin
+                    && std::env::var("PURPLE_TOKEN").is_err()
+                    && !existing.token.is_empty()
+                {
                     token = Some(existing.token.clone());
                 }
                 if prefix.is_none() {
@@ -1273,18 +1590,26 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     no_verify_tls = true;
                 }
                 // AWS: fall back to stored profile/regions
-                if provider == "aws"
-                    && profile.is_none() && !existing.profile.is_empty() {
+                if provider == "aws" && profile.is_none() && !existing.profile.is_empty() {
                     profile = Some(existing.profile.clone());
                 }
                 // AWS/Scaleway/GCP/Azure: fall back to stored regions
-                if matches!(provider.as_str(), "aws" | "scaleway" | "gcp" | "azure")
-                    && regions.is_none() && !existing.regions.is_empty() {
+                if matches!(
+                    provider.as_str(),
+                    "aws" | "scaleway" | "gcp" | "azure" | "oracle"
+                ) && regions.is_none()
+                    && !existing.regions.is_empty()
+                {
                     regions = Some(existing.regions.clone());
                 }
                 // GCP: fall back to stored project
                 if provider == "gcp" && project.is_none() && !existing.project.is_empty() {
                     project = Some(existing.project.clone());
+                }
+                // Oracle: fall back to stored compartment
+                if provider == "oracle" && compartment.is_none() && !existing.compartment.is_empty()
+                {
+                    compartment = Some(existing.compartment.clone());
                 }
             }
 
@@ -1296,14 +1621,21 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 }
                 let u = url.as_deref().unwrap();
                 if !u.to_ascii_lowercase().starts_with("https://") {
-                    eprintln!("URL must start with https://. For self-signed certificates use --no-verify-tls.");
+                    eprintln!(
+                        "URL must start with https://. For self-signed certificates use --no-verify-tls."
+                    );
                     std::process::exit(1);
                 }
             }
 
             // AWS allows empty token when --profile is set
-            let aws_has_profile = provider == "aws" && profile.as_deref().is_some_and(|p| !p.trim().is_empty());
-            let token = if aws_has_profile && token.is_none() && !token_stdin && std::env::var("PURPLE_TOKEN").is_err() {
+            let aws_has_profile =
+                provider == "aws" && profile.as_deref().is_some_and(|p| !p.trim().is_empty());
+            let token = if aws_has_profile
+                && token.is_none()
+                && !token_stdin
+                && std::env::var("PURPLE_TOKEN").is_err()
+            {
                 String::new()
             } else {
                 match resolve_token(token, token_stdin) {
@@ -1317,7 +1649,13 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
 
             if token.trim().is_empty() && !aws_has_profile && provider != "tailscale" {
                 if provider == "gcp" {
-                    eprintln!("Token can't be empty. Provide a service account JSON key file path or access token.");
+                    eprintln!(
+                        "Token can't be empty. Provide a service account JSON key file path or access token."
+                    );
+                } else if provider == "oracle" {
+                    eprintln!(
+                        "Token can't be empty. Provide the path to your OCI config file (e.g. ~/.oci/config)."
+                    );
                 } else {
                     eprintln!(
                         "Token can't be empty. Grab one from your {} dashboard.",
@@ -1341,6 +1679,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             let profile_value = profile.clone().unwrap_or_default();
             let regions_value = regions.clone().unwrap_or_default();
             let project_value = project.clone().unwrap_or_default();
+            let compartment_value = compartment.clone().unwrap_or_default();
             for (value, name) in [
                 (&url_value, "URL"),
                 (&token, "Token"),
@@ -1350,6 +1689,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 (&profile_value, "Profile"),
                 (&project_value, "Project"),
                 (&regions_value, "Regions"),
+                (&compartment_value, "Compartment"),
             ] {
                 if value.chars().any(|c| c.is_control()) {
                     eprintln!("{} contains control characters.", name);
@@ -1375,6 +1715,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             let resolved_profile = profile.unwrap_or_default();
             let resolved_regions = regions.unwrap_or_default();
             let resolved_project = project.unwrap_or_default();
+            let resolved_compartment = compartment.unwrap_or_default();
 
             // AWS/Scaleway/Azure requires at least one region/zone/subscription
             if provider == "aws" && resolved_regions.trim().is_empty() {
@@ -1382,7 +1723,9 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 std::process::exit(1);
             }
             if provider == "scaleway" && resolved_regions.trim().is_empty() {
-                eprintln!("Scaleway requires --regions with one or more zones (e.g. --regions fr-par-1,nl-ams-1).");
+                eprintln!(
+                    "Scaleway requires --regions with one or more zones (e.g. --regions fr-par-1,nl-ams-1)."
+                );
                 std::process::exit(1);
             }
             if provider == "azure" {
@@ -1390,7 +1733,11 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     eprintln!("Azure requires --regions with one or more subscription IDs.");
                     std::process::exit(1);
                 }
-                for sub in resolved_regions.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                for sub in resolved_regions
+                    .split(',')
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                {
                     if !providers::azure::is_valid_subscription_id(sub) {
                         eprintln!(
                             "Invalid subscription ID '{}'. Expected UUID format (e.g. 12345678-1234-1234-1234-123456789012).",
@@ -1403,6 +1750,13 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             // GCP requires --project
             if provider == "gcp" && resolved_project.trim().is_empty() {
                 eprintln!("GCP requires --project (e.g. --project my-gcp-project-id).");
+                std::process::exit(1);
+            }
+            // Oracle requires --compartment
+            if provider == "oracle" && resolved_compartment.trim().is_empty() {
+                eprintln!(
+                    "Oracle requires --compartment (e.g. --compartment ocid1.compartment.oc1..aaa...)."
+                );
                 std::process::exit(1);
             }
 
@@ -1418,6 +1772,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 profile: resolved_profile,
                 regions: resolved_regions,
                 project: resolved_project,
+                compartment: resolved_compartment,
             };
 
             let mut config = providers::config::ProviderConfig::load();
@@ -1436,10 +1791,7 @@ fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             } else {
                 for s in sections {
                     let display_name = providers::provider_display_name(s.provider.as_str());
-                    println!(
-                        "  {:<16} {}-*{:>8}",
-                        display_name, s.alias_prefix, s.user
-                    );
+                    println!("  {:<16} {}-*{:>8}", display_name, s.alias_prefix, s.user);
                 }
             }
             Ok(())
@@ -1504,7 +1856,10 @@ fn handle_tunnel_command(mut config: SshConfigFile, command: TunnelCommands) -> 
                 std::process::exit(1);
             }
             if config.is_included_host(&alias) {
-                eprintln!("Host '{}' is from an included file and cannot be modified.", alias);
+                eprintln!(
+                    "Host '{}' is from an included file and cannot be modified.",
+                    alias
+                );
                 std::process::exit(1);
             }
             let rule = tunnel::TunnelRule::from_cli_spec(&forward).unwrap_or_else(|e| {
@@ -1532,7 +1887,10 @@ fn handle_tunnel_command(mut config: SshConfigFile, command: TunnelCommands) -> 
                 std::process::exit(1);
             }
             if config.is_included_host(&alias) {
-                eprintln!("Host '{}' is from an included file and cannot be modified.", alias);
+                eprintln!(
+                    "Host '{}' is from an included file and cannot be modified.",
+                    alias
+                );
                 std::process::exit(1);
             }
             let rule = tunnel::TunnelRule::from_cli_spec(&forward).unwrap_or_else(|e| {
@@ -1679,18 +2037,22 @@ fn ensure_keychain_password(alias: &str, askpass: Option<&str>) {
         return;
     }
     // Prompt for password and store it
-    let password = match prompt_hidden_input(&format!("Password for {} (stored in keychain): ", alias)) {
-        Ok(Some(p)) if !p.is_empty() => p,
-        Ok(Some(_)) => {
-            eprintln!("Empty password. SSH will prompt for password.");
-            return;
-        }
-        Ok(None) => return, // Esc
-        Err(_) => return,
-    };
+    let password =
+        match prompt_hidden_input(&format!("Password for {} (stored in keychain): ", alias)) {
+            Ok(Some(p)) if !p.is_empty() => p,
+            Ok(Some(_)) => {
+                eprintln!("Empty password. SSH will prompt for password.");
+                return;
+            }
+            Ok(None) => return, // Esc
+            Err(_) => return,
+        };
     match askpass::store_in_keychain(alias, &password) {
         Ok(()) => eprintln!("Password stored in keychain."),
-        Err(e) => eprintln!("Failed to store in keychain: {}. SSH will prompt for password.", e),
+        Err(e) => eprintln!(
+            "Failed to store in keychain: {}. SSH will prompt for password.",
+            e
+        ),
     }
 }
 
@@ -1710,7 +2072,10 @@ fn handle_password_command(command: PasswordCommands) -> Result<()> {
             };
 
             askpass::store_in_keychain(&alias, &password)?;
-            println!("Password stored for {}. Set 'keychain' as password source to use it.", alias);
+            println!(
+                "Password stored for {}. Set 'keychain' as password source to use it.",
+                alias
+            );
             Ok(())
         }
         PasswordCommands::Remove { alias } => {
@@ -1721,7 +2086,11 @@ fn handle_password_command(command: PasswordCommands) -> Result<()> {
     }
 }
 
-fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, config_path: &Path) -> Result<()> {
+fn handle_snippet_command(
+    config: SshConfigFile,
+    command: SnippetCommands,
+    config_path: &Path,
+) -> Result<()> {
     match command {
         SnippetCommands::List => {
             let store = snippet::SnippetStore::load();
@@ -1830,7 +2199,10 @@ fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, confi
             if targets.len() == 1 {
                 // Single host: run directly
                 let host = targets[0];
-                let askpass = host.askpass.clone().or_else(preferences::load_askpass_default);
+                let askpass = host
+                    .askpass
+                    .clone()
+                    .or_else(preferences::load_askpass_default);
                 let bw_session = ensure_bw_session(None, askpass.as_deref());
                 ensure_keychain_password(&host.alias, askpass.as_deref());
                 match snippet::run_snippet(
@@ -1869,7 +2241,8 @@ fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, confi
                     askpass.as_deref().unwrap_or("").starts_with("bw:")
                 });
                 let bw_session = if any_bw {
-                    let bw_askpass = targets.iter()
+                    let bw_askpass = targets
+                        .iter()
                         .find_map(|h| h.askpass.as_ref().filter(|a| a.starts_with("bw:")))
                         .cloned()
                         .or_else(preferences::load_askpass_default);
@@ -1930,8 +2303,13 @@ fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, confi
                 // Multi-host sequential
                 let mut bw_session: Option<String> = None;
                 for host in &targets {
-                    let askpass = host.askpass.clone().or_else(preferences::load_askpass_default);
-                    if let Some(token) = ensure_bw_session(bw_session.as_deref(), askpass.as_deref()) {
+                    let askpass = host
+                        .askpass
+                        .clone()
+                        .or_else(preferences::load_askpass_default);
+                    if let Some(token) =
+                        ensure_bw_session(bw_session.as_deref(), askpass.as_deref())
+                    {
                         bw_session = Some(token);
                     }
                     ensure_keychain_password(&host.alias, askpass.as_deref());
@@ -1947,10 +2325,7 @@ fn handle_snippet_command(config: SshConfigFile, command: SnippetCommands, confi
                     ) {
                         Ok(r) => {
                             if !r.status.success() {
-                                eprintln!(
-                                    "Exited with code {}.",
-                                    r.status.code().unwrap_or(1)
-                                );
+                                eprintln!("Exited with code {}.", r.status.code().unwrap_or(1));
                             }
                         }
                         Err(e) => eprintln!("[{}] Failed: {}", host.alias, e),
@@ -2051,7 +2426,11 @@ mod tests {
         std::fs::write(&config_path, "Host myserver\n  HostName 10.0.0.1\n").unwrap();
 
         let result = first_launch_init(&purple_dir, &config_path);
-        assert_eq!(result, Some(true), "Should return Some(true) when config exists");
+        assert_eq!(
+            result,
+            Some(true),
+            "Should return Some(true) when config exists"
+        );
         assert!(purple_dir.exists(), ".purple dir should be created");
         let backup = purple_dir.join("config.original");
         assert!(backup.exists(), "config.original should be created");
@@ -2094,7 +2473,11 @@ mod tests {
         let config_path = dir.join("nonexistent_config");
 
         let result = first_launch_init(&purple_dir, &config_path);
-        assert_eq!(result, Some(false), "Should return Some(false) when no config");
+        assert_eq!(
+            result,
+            Some(false),
+            "Should return Some(false) when no config"
+        );
         assert!(purple_dir.exists(), ".purple dir should be created");
         assert!(
             !purple_dir.join("config.original").exists(),
@@ -2119,7 +2502,10 @@ mod tests {
 
         first_launch_init(&purple_dir, &config_path);
         let backup = purple_dir.join("config.original");
-        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "original content\n");
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            "original content\n"
+        );
 
         // Modify the config and call again (simulates second launch)
         std::fs::write(&config_path, "modified content\n").unwrap();
@@ -2184,8 +2570,15 @@ mod tests {
     #[test]
     fn welcome_enter_goes_to_host_list() {
         let mut app = empty_app();
-        app.screen = app::Screen::Welcome { has_backup: false, host_count: 0, known_hosts_count: 0 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+        app.screen = app::Screen::Welcome {
+            has_backup: false,
+            host_count: 0,
+            known_hosts_count: 0,
+        };
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::HostList));
@@ -2194,8 +2587,15 @@ mod tests {
     #[test]
     fn welcome_esc_goes_to_host_list() {
         let mut app = empty_app();
-        app.screen = app::Screen::Welcome { has_backup: true, host_count: 5, known_hosts_count: 0 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Esc, crossterm::event::KeyModifiers::NONE);
+        app.screen = app::Screen::Welcome {
+            has_backup: true,
+            host_count: 5,
+            known_hosts_count: 0,
+        };
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::HostList));
@@ -2204,18 +2604,32 @@ mod tests {
     #[test]
     fn welcome_question_mark_goes_to_help() {
         let mut app = empty_app();
-        app.screen = app::Screen::Welcome { has_backup: false, host_count: 0, known_hosts_count: 0 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('?'), crossterm::event::KeyModifiers::NONE);
+        app.screen = app::Screen::Welcome {
+            has_backup: false,
+            host_count: 0,
+            known_hosts_count: 0,
+        };
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('?'),
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
-        assert!(matches!(app.screen, app::Screen::Help));
+        assert!(matches!(app.screen, app::Screen::Help { .. }));
     }
 
     #[test]
     fn welcome_i_without_known_hosts_goes_to_host_list() {
         let mut app = empty_app();
-        app.screen = app::Screen::Welcome { has_backup: false, host_count: 0, known_hosts_count: 0 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('I'), crossterm::event::KeyModifiers::SHIFT);
+        app.screen = app::Screen::Welcome {
+            has_backup: false,
+            host_count: 0,
+            known_hosts_count: 0,
+        };
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('I'),
+            crossterm::event::KeyModifiers::SHIFT,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::HostList));
@@ -2224,8 +2638,15 @@ mod tests {
     #[test]
     fn welcome_random_char_goes_to_host_list() {
         let mut app = empty_app();
-        app.screen = app::Screen::Welcome { has_backup: false, host_count: 3, known_hosts_count: 0 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('z'), crossterm::event::KeyModifiers::NONE);
+        app.screen = app::Screen::Welcome {
+            has_backup: false,
+            host_count: 3,
+            known_hosts_count: 0,
+        };
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('z'),
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::HostList));
@@ -2234,8 +2655,15 @@ mod tests {
     #[test]
     fn welcome_arrow_key_goes_to_host_list() {
         let mut app = empty_app();
-        app.screen = app::Screen::Welcome { has_backup: false, host_count: 0, known_hosts_count: 5 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Down, crossterm::event::KeyModifiers::NONE);
+        app.screen = app::Screen::Welcome {
+            has_backup: false,
+            host_count: 0,
+            known_hosts_count: 5,
+        };
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Down,
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::HostList));
@@ -2256,7 +2684,10 @@ mod tests {
     fn confirm_import_esc_goes_to_host_list() {
         let mut app = empty_app();
         app.screen = app::Screen::ConfirmImport { count: 10 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Esc, crossterm::event::KeyModifiers::NONE);
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Esc,
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::HostList));
@@ -2266,7 +2697,10 @@ mod tests {
     fn confirm_import_n_goes_to_host_list() {
         let mut app = empty_app();
         app.screen = app::Screen::ConfirmImport { count: 10 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('n'), crossterm::event::KeyModifiers::NONE);
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('n'),
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::HostList));
@@ -2276,7 +2710,10 @@ mod tests {
     fn confirm_import_random_key_stays() {
         let mut app = empty_app();
         app.screen = app::Screen::ConfirmImport { count: 10 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('x'), crossterm::event::KeyModifiers::NONE);
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('x'),
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::ConfirmImport { .. }));
@@ -2286,7 +2723,10 @@ mod tests {
     fn confirm_import_enter_stays() {
         let mut app = empty_app();
         app.screen = app::Screen::ConfirmImport { count: 10 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Enter, crossterm::event::KeyModifiers::NONE);
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::ConfirmImport { .. }));
@@ -2296,7 +2736,10 @@ mod tests {
     fn confirm_import_question_mark_stays() {
         let mut app = empty_app();
         app.screen = app::Screen::ConfirmImport { count: 10 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Char('?'), crossterm::event::KeyModifiers::NONE);
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Char('?'),
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::ConfirmImport { .. }));
@@ -2306,7 +2749,10 @@ mod tests {
     fn confirm_import_arrow_key_stays() {
         let mut app = empty_app();
         app.screen = app::Screen::ConfirmImport { count: 5 };
-        let key = crossterm::event::KeyEvent::new(crossterm::event::KeyCode::Up, crossterm::event::KeyModifiers::NONE);
+        let key = crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Up,
+            crossterm::event::KeyModifiers::NONE,
+        );
         let (tx, _rx) = std::sync::mpsc::channel();
         let _ = crate::handler::handle_key_event(&mut app, key, &tx);
         assert!(matches!(app.screen, app::Screen::ConfirmImport { .. }));
@@ -2568,7 +3014,8 @@ mod tests {
         app.reload_hosts();
 
         // Second import - all duplicates
-        let (imported, skipped, _, _) = import::import_from_file(&mut app.config, &hosts_file, None).unwrap();
+        let (imported, skipped, _, _) =
+            import::import_from_file(&mut app.config, &hosts_file, None).unwrap();
         assert_eq!(imported, 0);
         assert_eq!(skipped, 1);
 
@@ -2606,7 +3053,8 @@ mod tests {
         let hosts_file = dir.join("hosts.txt");
         std::fs::write(&hosts_file, "web.example.com\n").unwrap();
 
-        let (imported, _, _, _) = import::import_from_file(&mut app.config, &hosts_file, None).unwrap();
+        let (imported, _, _, _) =
+            import::import_from_file(&mut app.config, &hosts_file, None).unwrap();
         assert_eq!(imported, 1);
 
         // Write should fail because parent dir doesn't exist
@@ -2682,23 +3130,28 @@ mod tests {
 
     #[test]
     fn cheat_sheet_contains_import_entry() {
-        // The help.rs middle_column() should contain " I         " with "import known_hosts"
-        // We verify by checking the source directly would be fragile, so we
-        // verify the middle_column function output contains the entry
-        // (middle_column is not pub, so we test by reading the source)
+        // The help.rs host_list_columns() should contain "I" key with "import known_hosts"
         let source = include_str!("ui/help.rs");
-        assert!(source.contains(r#"" I         ""#), "cheat sheet should have I key");
-        assert!(source.contains(r#""import known_hosts""#), "cheat sheet should describe I");
+        assert!(
+            source.contains(r#"help_line("I", "import known_hosts")"#),
+            "cheat sheet should have I key"
+        );
     }
 
     #[test]
-    fn cheat_sheet_i_between_s_and_k() {
+    fn cheat_sheet_i_after_s_and_k() {
         let source = include_str!("ui/help.rs");
-        let s_pos = source.find(r#"" S         ""#).expect("S should be in cheat sheet");
-        let i_pos = source.find(r#"" I         ""#).expect("I should be in cheat sheet");
-        let k_pos = source.find(r#"" K         ""#).expect("K should be in cheat sheet");
+        let k_pos = source
+            .find(r#"help_line("K","#)
+            .expect("K should be in cheat sheet");
+        let s_pos = source
+            .find(r#"help_line("S","#)
+            .expect("S should be in cheat sheet");
+        let i_pos = source
+            .find(r#"help_line("I","#)
+            .expect("I should be in cheat sheet");
+        assert!(k_pos < s_pos, "K should come before S");
         assert!(s_pos < i_pos, "S should come before I");
-        assert!(i_pos < k_pos, "I should come before K");
     }
 
     // =========================================================================
@@ -2745,12 +3198,32 @@ mod tests {
             host_count: 12,
             known_hosts_count: 34,
         };
-        if let app::Screen::Welcome { has_backup, host_count, known_hosts_count } = screen {
+        if let app::Screen::Welcome {
+            has_backup,
+            host_count,
+            known_hosts_count,
+        } = screen
+        {
             assert!(has_backup);
             assert_eq!(host_count, 12);
             assert_eq!(known_hosts_count, 34);
         } else {
             panic!("expected Welcome");
         }
+    }
+
+    #[test]
+    fn test_format_sync_diff_all_changes() {
+        assert_eq!(format_sync_diff(3, 1, 2), " (+3 ~1 -2)");
+    }
+
+    #[test]
+    fn test_format_sync_diff_no_changes() {
+        assert_eq!(format_sync_diff(0, 0, 0), "");
+    }
+
+    #[test]
+    fn test_format_sync_diff_only_added() {
+        assert_eq!(format_sync_diff(5, 0, 0), " (+5)");
     }
 }

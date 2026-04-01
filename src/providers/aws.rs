@@ -138,8 +138,7 @@ fn read_credentials_file(profile: &str) -> Result<AwsCredentials, ProviderError>
         .ok_or(ProviderError::AuthFailed)?
         .join(".aws")
         .join("credentials");
-    let content = std::fs::read_to_string(&path)
-        .map_err(|_| ProviderError::AuthFailed)?;
+    let content = std::fs::read_to_string(&path).map_err(|_| ProviderError::AuthFailed)?;
     parse_credentials(&content, profile).ok_or(ProviderError::AuthFailed)
 }
 
@@ -161,65 +160,19 @@ fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
-/// RFC 3986 URI encoding.
+/// RFC 3986 URI encoding (delegates to shared implementation).
 fn uri_encode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                result.push(byte as char);
-            }
-            _ => {
-                result.push_str(&format!("%{:02X}", byte));
-            }
-        }
-    }
-    result
+    super::percent_encode(s)
 }
 
 /// Format epoch seconds as (timestamp, datestamp) for SigV4.
 fn format_utc(epoch_secs: u64) -> (String, String) {
-    let secs_per_day = 86400u64;
-    let mut remaining_days = epoch_secs / secs_per_day;
-    let day_secs = epoch_secs % secs_per_day;
-    let hours = day_secs / 3600;
-    let minutes = (day_secs % 3600) / 60;
-    let seconds = day_secs % 60;
-
-    let mut year = 1970u64;
-    loop {
-        let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-        let days_in_year = if leap { 366 } else { 365 };
-        if remaining_days < days_in_year {
-            break;
-        }
-        remaining_days -= days_in_year;
-        year += 1;
-    }
-
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
-    let days_per_month: [u64; 12] = [
-        31,
-        if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
-    ];
-    let mut month = 0usize;
-    while month < 12 && remaining_days >= days_per_month[month] {
-        remaining_days -= days_per_month[month];
-        month += 1;
-    }
-    let day = remaining_days + 1;
-
+    let d = super::epoch_to_date(epoch_secs);
     let timestamp = format!(
         "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
-        year,
-        month + 1,
-        day,
-        hours,
-        minutes,
-        seconds,
+        d.year, d.month, d.day, d.hours, d.minutes, d.seconds,
     );
-    let datestamp = format!("{:04}{:02}{:02}", year, month + 1, day);
+    let datestamp = format!("{:04}{:02}{:02}", d.year, d.month, d.day);
     (timestamp, datestamp)
 }
 
@@ -375,14 +328,15 @@ fn ec2_get(
     let auth = sign_request(creds, region, &host, &query_string, &timestamp, &datestamp);
     let url = format!("https://{}/?{}", host, query_string);
 
-    let resp = agent
+    let mut resp = agent
         .get(&url)
-        .set("Authorization", &auth)
-        .set("x-amz-date", &timestamp)
+        .header("Authorization", &auth)
+        .header("x-amz-date", &timestamp)
         .call()
         .map_err(super::map_ureq_error)?;
 
-    resp.into_string()
+    resp.body_mut()
+        .read_to_string()
         .map_err(|e| ProviderError::Parse(e.to_string()))
 }
 
@@ -543,7 +497,12 @@ impl Provider for Aws {
                 return Err(ProviderError::Cancelled);
             }
 
-            progress(&format!("Fetching {} ({}/{})...", region, i + 1, total_regions));
+            progress(&format!(
+                "Fetching {} ({}/{})...",
+                region,
+                i + 1,
+                total_regions
+            ));
 
             let instances = match describe_instances(&agent, &creds, region, cancel) {
                 Ok(instances) => instances,
@@ -748,7 +707,10 @@ mod tests {
     #[test]
     fn test_hmac_sha256_known() {
         // HMAC-SHA256("key", "message") is a well-known test vector
-        let result = hex_encode(&hmac_sha256(b"key", b"The quick brown fox jumps over the lazy dog"));
+        let result = hex_encode(&hmac_sha256(
+            b"key",
+            b"The quick brown fox jumps over the lazy dog",
+        ));
         assert_eq!(
             result,
             "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
@@ -786,8 +748,22 @@ mod tests {
             access_key: "AK".to_string(),
             secret_key: "SK".to_string(),
         };
-        let a = sign_request(&creds, "us-east-1", "ec2.us-east-1.amazonaws.com", "Action=DescribeInstances", "20240101T000000Z", "20240101");
-        let b = sign_request(&creds, "us-east-1", "ec2.us-east-1.amazonaws.com", "Action=DescribeInstances", "20240101T000000Z", "20240101");
+        let a = sign_request(
+            &creds,
+            "us-east-1",
+            "ec2.us-east-1.amazonaws.com",
+            "Action=DescribeInstances",
+            "20240101T000000Z",
+            "20240101",
+        );
+        let b = sign_request(
+            &creds,
+            "us-east-1",
+            "ec2.us-east-1.amazonaws.com",
+            "Action=DescribeInstances",
+            "20240101T000000Z",
+            "20240101",
+        );
         assert_eq!(a, b);
     }
 
@@ -797,8 +773,22 @@ mod tests {
             access_key: "AK".to_string(),
             secret_key: "SK".to_string(),
         };
-        let a = sign_request(&creds, "us-east-1", "ec2.us-east-1.amazonaws.com", "Action=DescribeInstances", "20240101T000000Z", "20240101");
-        let b = sign_request(&creds, "eu-west-1", "ec2.eu-west-1.amazonaws.com", "Action=DescribeInstances", "20240101T000000Z", "20240101");
+        let a = sign_request(
+            &creds,
+            "us-east-1",
+            "ec2.us-east-1.amazonaws.com",
+            "Action=DescribeInstances",
+            "20240101T000000Z",
+            "20240101",
+        );
+        let b = sign_request(
+            &creds,
+            "eu-west-1",
+            "ec2.eu-west-1.amazonaws.com",
+            "Action=DescribeInstances",
+            "20240101T000000Z",
+            "20240101",
+        );
         assert_ne!(a, b);
     }
 
@@ -836,7 +826,8 @@ mod tests {
 
     #[test]
     fn test_parse_credentials_whitespace_handling() {
-        let content = "[default]\n  aws_access_key_id  =  AKID  \n  aws_secret_access_key  =  SECRET  \n";
+        let content =
+            "[default]\n  aws_access_key_id  =  AKID  \n  aws_secret_access_key  =  SECRET  \n";
         let creds = parse_credentials(content, "default").unwrap();
         assert_eq!(creds.access_key, "AKID");
         assert_eq!(creds.secret_key, "SECRET");
@@ -967,10 +958,7 @@ mod tests {
 </DescribeInstancesResponse>"#;
 
         let resp: DescribeInstancesResponse = quick_xml::de::from_str(xml).unwrap();
-        assert_eq!(
-            resp.next_token.as_deref(),
-            Some("eyJ0b2tlbiI6ICJ0ZXN0In0=")
-        );
+        assert_eq!(resp.next_token.as_deref(), Some("eyJ0b2tlbiI6ICJ0ZXN0In0="));
     }
 
     #[test]
@@ -1053,9 +1041,18 @@ mod tests {
     #[test]
     fn test_extract_tags_name_and_values() {
         let tags = vec![
-            Ec2Tag { key: "Name".to_string(), value: "web-01".to_string() },
-            Ec2Tag { key: "Environment".to_string(), value: "prod".to_string() },
-            Ec2Tag { key: "Team".to_string(), value: "backend".to_string() },
+            Ec2Tag {
+                key: "Name".to_string(),
+                value: "web-01".to_string(),
+            },
+            Ec2Tag {
+                key: "Environment".to_string(),
+                value: "prod".to_string(),
+            },
+            Ec2Tag {
+                key: "Team".to_string(),
+                value: "backend".to_string(),
+            },
         ];
         let (name, extracted) = extract_tags(&tags);
         assert_eq!(name, "web-01");
@@ -1065,10 +1062,22 @@ mod tests {
     #[test]
     fn test_extract_tags_filters_aws_prefix() {
         let tags = vec![
-            Ec2Tag { key: "Name".to_string(), value: "srv".to_string() },
-            Ec2Tag { key: "aws:cloudformation:stack-name".to_string(), value: "my-stack".to_string() },
-            Ec2Tag { key: "aws:autoscaling:groupName".to_string(), value: "my-asg".to_string() },
-            Ec2Tag { key: "custom".to_string(), value: "val".to_string() },
+            Ec2Tag {
+                key: "Name".to_string(),
+                value: "srv".to_string(),
+            },
+            Ec2Tag {
+                key: "aws:cloudformation:stack-name".to_string(),
+                value: "my-stack".to_string(),
+            },
+            Ec2Tag {
+                key: "aws:autoscaling:groupName".to_string(),
+                value: "my-asg".to_string(),
+            },
+            Ec2Tag {
+                key: "custom".to_string(),
+                value: "val".to_string(),
+            },
         ];
         let (name, extracted) = extract_tags(&tags);
         assert_eq!(name, "srv");
@@ -1077,9 +1086,10 @@ mod tests {
 
     #[test]
     fn test_extract_tags_no_name() {
-        let tags = vec![
-            Ec2Tag { key: "Environment".to_string(), value: "dev".to_string() },
-        ];
+        let tags = vec![Ec2Tag {
+            key: "Environment".to_string(),
+            value: "dev".to_string(),
+        }];
         let (name, extracted) = extract_tags(&tags);
         assert!(name.is_empty());
         assert_eq!(extracted, vec!["dev"]);
@@ -1087,9 +1097,10 @@ mod tests {
 
     #[test]
     fn test_extract_tags_empty_value_skipped() {
-        let tags = vec![
-            Ec2Tag { key: "flag".to_string(), value: "".to_string() },
-        ];
+        let tags = vec![Ec2Tag {
+            key: "flag".to_string(),
+            value: "".to_string(),
+        }];
         let (_, extracted) = extract_tags(&tags);
         assert!(extracted.is_empty());
     }
@@ -1225,7 +1236,10 @@ mod tests {
 
     #[test]
     fn test_ami_batch_size_is_reasonable() {
-        assert_eq!(AMI_BATCH_SIZE, 100, "AMI batch size should be 100 (AWS limit per DescribeImages call)");
+        assert_eq!(
+            AMI_BATCH_SIZE, 100,
+            "AMI batch size should be 100 (AWS limit per DescribeImages call)"
+        );
     }
 
     // =========================================================================
@@ -1278,5 +1292,171 @@ mod tests {
         let inst = &resp.reservation_set.item[0].instances_set.item[0];
         assert!(inst.ip_address.is_none());
         assert!(inst.private_ip_address.is_none());
+    }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_describe_instances_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("Action".into(), "DescribeInstances".into()),
+                mockito::Matcher::UrlEncoded("Version".into(), "2016-11-15".into()),
+            ]))
+            .match_header("Authorization", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(
+                r#"<DescribeInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+  <reservationSet>
+    <item>
+      <instancesSet>
+        <item>
+          <instanceId>i-1234567890</instanceId>
+          <instanceState><name>running</name></instanceState>
+          <privateIpAddress>10.0.0.1</privateIpAddress>
+          <ipAddress>54.1.2.3</ipAddress>
+          <imageId>ami-12345678</imageId>
+          <instanceType>t3.micro</instanceType>
+          <tagSet><item><key>Name</key><value>web-1</value></item></tagSet>
+        </item>
+      </instancesSet>
+    </item>
+  </reservationSet>
+</DescribeInstancesResponse>"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/?Action=DescribeInstances&Version=2016-11-15",
+            server.url()
+        );
+        let body = agent
+            .get(&url)
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=fake")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_to_string()
+            .unwrap();
+        let resp: DescribeInstancesResponse = quick_xml::de::from_str(&body).unwrap();
+
+        assert_eq!(resp.reservation_set.item.len(), 1);
+        let inst = &resp.reservation_set.item[0].instances_set.item[0];
+        assert_eq!(inst.instance_id, "i-1234567890");
+        assert_eq!(inst.instance_state.name, "running");
+        assert_eq!(inst.ip_address.as_deref(), Some("54.1.2.3"));
+        assert_eq!(inst.private_ip_address.as_deref(), Some("10.0.0.1"));
+        assert_eq!(inst.image_id, "ami-12345678");
+        assert_eq!(inst.instance_type, "t3.micro");
+        assert_eq!(inst.tag_set.item.len(), 1);
+        assert_eq!(inst.tag_set.item[0].key, "Name");
+        assert_eq!(inst.tag_set.item[0].value, "web-1");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_describe_instances_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_header("content-type", "text/xml")
+            .with_body("<Error><Code>AuthFailure</Code></Error>")
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/?Action=DescribeInstances&Version=2016-11-15",
+                server.url()
+            ))
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=bad")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_describe_images_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("Action".into(), "DescribeImages".into()),
+                mockito::Matcher::UrlEncoded("Version".into(), "2016-11-15".into()),
+                mockito::Matcher::UrlEncoded("ImageId.1".into(), "ami-12345678".into()),
+            ]))
+            .match_header("Authorization", mockito::Matcher::Any)
+            .with_status(200)
+            .with_header("content-type", "text/xml")
+            .with_body(
+                r#"<DescribeImagesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+  <imagesSet>
+    <item>
+      <imageId>ami-12345678</imageId>
+      <name>amzn2-ami-hvm-2.0</name>
+    </item>
+  </imagesSet>
+</DescribeImagesResponse>"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/?Action=DescribeImages&Version=2016-11-15&ImageId.1=ami-12345678",
+            server.url()
+        );
+        let body = agent
+            .get(&url)
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=fake")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_to_string()
+            .unwrap();
+        let resp: DescribeImagesResponse = quick_xml::de::from_str(&body).unwrap();
+
+        assert_eq!(resp.images_set.item.len(), 1);
+        assert_eq!(resp.images_set.item[0].image_id, "ami-12345678");
+        assert_eq!(resp.images_set.item[0].name, "amzn2-ami-hvm-2.0");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_describe_images_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_header("content-type", "text/xml")
+            .with_body("<Error><Code>AuthFailure</Code></Error>")
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/?Action=DescribeImages&Version=2016-11-15&ImageId.1=ami-abc",
+                server.url()
+            ))
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=bad")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
     }
 }

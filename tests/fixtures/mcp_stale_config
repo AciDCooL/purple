@@ -1,0 +1,8 @@
+Host stale-1
+    HostName 10.0.4.1
+    User root
+    # purple:stale 1711622400
+
+Host active-1
+    HostName 10.0.4.2
+    User root

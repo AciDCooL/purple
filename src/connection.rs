@@ -9,16 +9,74 @@ pub struct ConnectResult {
     pub stderr_output: String,
 }
 
+/// RAII guard that restores the signal mask when dropped.
+/// Ensures SIGINT/SIGTSTP are unmasked even on early return or error.
+#[cfg(unix)]
+struct SignalMaskGuard {
+    old: libc::sigset_t,
+}
+
+#[cfg(unix)]
+impl SignalMaskGuard {
+    /// Block SIGINT and SIGTSTP, saving the previous mask for restore on drop.
+    fn block_interactive() -> Self {
+        unsafe {
+            let mut old: libc::sigset_t = std::mem::zeroed();
+            let mut mask: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut mask);
+            libc::sigaddset(&mut mask, libc::SIGINT);
+            libc::sigaddset(&mut mask, libc::SIGTSTP);
+            libc::sigprocmask(libc::SIG_BLOCK, &mask, &mut old);
+            Self { old }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SignalMaskGuard {
+    fn drop(&mut self) {
+        unsafe {
+            // Discard any pending SIGINT/SIGTSTP that arrived while masked.
+            // Without this, queued signals would fire immediately on unmask and
+            // kill/suspend purple before the TUI can be restored.
+            let mut pending: libc::sigset_t = std::mem::zeroed();
+            libc::sigpending(&mut pending);
+            let has_sigint = libc::sigismember(&pending, libc::SIGINT) == 1;
+            let has_sigtstp = libc::sigismember(&pending, libc::SIGTSTP) == 1;
+            // Temporarily ignore pending signals so they're consumed on unmask.
+            if has_sigint {
+                libc::signal(libc::SIGINT, libc::SIG_IGN);
+            }
+            if has_sigtstp {
+                libc::signal(libc::SIGTSTP, libc::SIG_IGN);
+            }
+            libc::sigprocmask(libc::SIG_SETMASK, &self.old, std::ptr::null_mut());
+            // Restore default handlers after pending signals are consumed.
+            if has_sigint {
+                libc::signal(libc::SIGINT, libc::SIG_DFL);
+            }
+            if has_sigtstp {
+                libc::signal(libc::SIGTSTP, libc::SIG_DFL);
+            }
+        }
+    }
+}
+
 /// Launch an SSH connection to the given host alias.
 /// Uses the system `ssh` binary with inherited stdin/stdout. Stderr is piped and
 /// forwarded to real stderr in real time so the output is captured for error detection.
 /// Passes `-F <config_path>` so the alias resolves against the correct config file.
 /// When `askpass` is Some, sets SSH_ASKPASS environment variables so SSH retrieves
 /// the password from the configured source via purple's askpass handler.
-pub fn connect(alias: &str, config_path: &Path, askpass: Option<&str>, bw_session: Option<&str>, has_active_tunnel: bool) -> Result<ConnectResult> {
+pub fn connect(
+    alias: &str,
+    config_path: &Path,
+    askpass: Option<&str>,
+    bw_session: Option<&str>,
+    has_active_tunnel: bool,
+) -> Result<ConnectResult> {
     let mut cmd = Command::new("ssh");
-    cmd.arg("-F")
-        .arg(config_path);
+    cmd.arg("-F").arg(config_path);
 
     // When a tunnel is already running for this host, disable forwards in the
     // interactive session to avoid "Address already in use" bind conflicts.
@@ -49,9 +107,31 @@ pub fn connect(alias: &str, config_path: &Path, askpass: Option<&str>, bw_sessio
         cmd.env("BW_SESSION", token);
     }
 
+    // Reset signal mask in the child process so SSH receives Ctrl+C normally.
+    // We mask signals in the parent AFTER spawn so the child doesn't inherit
+    // the blocked mask.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            // Ensure SSH starts with default signal handling even if parent
+            // has signals blocked. This runs after fork, before exec.
+            let mut mask: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut mask);
+            libc::sigprocmask(libc::SIG_SETMASK, &mask, std::ptr::null_mut());
+            Ok(())
+        });
+    }
+
     let mut child = cmd
         .spawn()
         .with_context(|| format!("Failed to launch ssh for '{}'", alias))?;
+
+    // Mask SIGINT/SIGTSTP in purple AFTER spawn so SSH doesn't inherit
+    // the blocked mask. SSH receives Ctrl+C normally via the terminal driver.
+    // The guard restores the mask on drop (even on early return).
+    #[cfg(unix)]
+    let _signal_guard = SignalMaskGuard::block_interactive();
 
     // Tee stderr: forward to real stderr while capturing for error detection
     let stderr_pipe = child.stderr.take().expect("stderr was piped");
@@ -80,7 +160,13 @@ pub fn connect(alias: &str, config_path: &Path, askpass: Option<&str>, bw_sessio
         .with_context(|| format!("Failed to wait for ssh for '{}'", alias))?;
     let stderr_output = stderr_thread.join().unwrap_or_default();
 
-    Ok(ConnectResult { status, stderr_output })
+    // _signal_guard drops here, restoring the original signal mask.
+    // Any pending SIGINT from Ctrl+C during SSH is safely consumed.
+
+    Ok(ConnectResult {
+        status,
+        stderr_output,
+    })
 }
 
 /// Parse host key verification error from SSH stderr output.
@@ -103,7 +189,8 @@ pub fn parse_host_key_error(stderr: &str) -> Option<(String, String)> {
     }
 
     // Parse hostname from "Host key for <hostname> has changed"
-    let hostname = stderr.lines()
+    let hostname = stderr
+        .lines()
         .find(|l| l.contains("Host key for") && l.contains("has changed"))
         .and_then(|l| {
             let start = l.find("Host key for ")? + "Host key for ".len();
@@ -113,7 +200,8 @@ pub fn parse_host_key_error(stderr: &str) -> Option<(String, String)> {
         });
 
     // Parse known_hosts path from "Offending ... key in <path>:<line>"
-    let known_hosts_path = stderr.lines()
+    let known_hosts_path = stderr
+        .lines()
         .find(|l| l.starts_with("Offending") && l.contains(" key in "))
         .and_then(|l| {
             let start = l.find(" key in ")? + " key in ".len();
@@ -139,129 +227,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn askpass_none_does_not_set_env() {
-        let askpass: Option<&str> = None;
-        assert!(askpass.is_none());
+    fn connect_fails_with_nonexistent_config() {
+        // connect() should return an error when the config file doesn't exist and
+        // SSH cannot be spawned (or fails immediately).
+        let result = connect(
+            "nonexistent-host",
+            Path::new("/tmp/__purple_test_nonexistent_config__"),
+            None,
+            None,
+            false,
+        );
+        // SSH should exit with a non-zero status (config file not found)
+        assert!(result.is_ok()); // spawn succeeds, SSH exits with error
+        let r = result.unwrap();
+        assert!(!r.status.success());
     }
 
     #[test]
-    fn askpass_some_triggers_env() {
-        let askpass: Option<&str> = Some("keychain");
-        assert!(askpass.is_some());
+    fn connect_with_tunnel_flag_does_not_panic() {
+        // Verify has_active_tunnel=true adds the ClearAllForwardings arg without panic
+        let result = connect(
+            "nonexistent-host",
+            Path::new("/tmp/__purple_test_nonexistent_config__"),
+            None,
+            None,
+            true,
+        );
+        assert!(result.is_ok());
+        assert!(!result.unwrap().status.success());
     }
 
     #[test]
-    fn askpass_env_var_names() {
-        // Document the expected env var names
-        let vars = ["SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "PURPLE_ASKPASS_MODE", "PURPLE_HOST_ALIAS", "PURPLE_CONFIG_PATH"];
-        assert_eq!(vars.len(), 5);
-        assert_eq!(vars[0], "SSH_ASKPASS");
-        assert_eq!(vars[1], "SSH_ASKPASS_REQUIRE");
-        assert_eq!(vars[2], "PURPLE_ASKPASS_MODE");
-    }
-
-    #[test]
-    fn ssh_askpass_require_value_is_prefer() {
-        // "prefer" tells SSH to use ASKPASS even when a terminal is available
-        let value = "prefer";
-        assert_eq!(value, "prefer");
-    }
-
-    #[test]
-    fn purple_askpass_mode_value_is_one() {
-        // "1" signals to the purple binary that it's in askpass mode
-        let value = "1";
-        assert_eq!(value, "1");
-    }
-
-    #[test]
-    fn bw_session_env_not_set_when_none() {
-        let bw_session: Option<&str> = None;
-        assert!(bw_session.is_none());
-    }
-
-    #[test]
-    fn bw_session_env_set_when_some() {
-        let bw_session = "session-token-abc123";
-        assert!(!bw_session.is_empty());
-    }
-
-    #[test]
-    fn askpass_and_bw_session_both_set() {
-        // When using bw: source, both askpass and bw_session should be set
-        let askpass: Option<&str> = Some("bw:my-item");
-        let bw_session: Option<&str> = Some("token");
-        assert!(askpass.is_some());
-        assert!(bw_session.is_some());
-    }
-
-    #[test]
-    fn askpass_without_bw_session() {
-        // Non-BW sources don't need BW_SESSION
-        let askpass: Option<&str> = Some("keychain");
-        let bw_session: Option<&str> = None;
-        assert!(askpass.is_some());
-        assert!(bw_session.is_none());
-    }
-
-    #[test]
-    fn connection_env_vars_include_config_path() {
-        // PURPLE_CONFIG_PATH is set so askpass subprocess can find the config
-        let vars = ["SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "PURPLE_ASKPASS_MODE", "PURPLE_HOST_ALIAS", "PURPLE_CONFIG_PATH"];
-        assert!(vars.contains(&"PURPLE_CONFIG_PATH"));
-    }
-
-    #[test]
-    fn connection_uses_double_dash_before_alias() {
-        // `--` separates options from the alias to prevent alias starting with `-` from being
-        // interpreted as a flag
-        let args = ["-F", "/path/to/config", "--", "myserver"];
-        assert_eq!(args[2], "--");
-        assert_eq!(args[3], "myserver");
-    }
-
-    #[test]
-    fn connection_inherits_stdin_and_stdout() {
-        // SSH needs interactive terminal: stdin, stdout inherited, stderr piped for capture
-        let modes = ["inherit", "inherit", "piped"];
-        assert_eq!(modes.len(), 3);
-        assert_eq!(modes[0], "inherit");
-        assert_eq!(modes[1], "inherit");
-        assert_eq!(modes[2], "piped");
-    }
-
-    #[test]
-    fn connection_all_askpass_source_types_trigger_env() {
-        // Every non-None askpass source should trigger env var setup
-        let sources = ["keychain", "op://V/I/p", "bw:item", "pass:ssh/srv", "vault:kv#pw", "my-cmd"];
-        for source in &sources {
-            let askpass: Option<&str> = Some(source);
-            assert!(askpass.is_some(), "Source '{}' should trigger env setup", source);
-        }
-    }
-
-    #[test]
-    fn connection_exe_fallback_chain() {
-        // current_exe() -> env::args().next() -> "purple"
-        let fallback = "purple";
-        assert_eq!(fallback, "purple");
-    }
-
-    #[test]
-    fn active_tunnel_adds_clear_all_forwardings() {
-        // When has_active_tunnel is true, SSH should get -o ClearAllForwardings=yes
-        // to avoid "Address already in use" bind conflicts
-        let has_active_tunnel = true;
-        let option = "ClearAllForwardings=yes";
-        assert!(has_active_tunnel);
-        assert_eq!(option, "ClearAllForwardings=yes");
-    }
-
-    #[test]
-    fn no_tunnel_omits_clear_all_forwardings() {
-        // When has_active_tunnel is false, no forwarding override is added
-        let has_active_tunnel = false;
-        assert!(!has_active_tunnel);
+    fn connect_captures_stderr() {
+        // SSH should produce some stderr output when failing
+        let result = connect(
+            "nonexistent-host",
+            Path::new("/tmp/__purple_test_nonexistent_config__"),
+            None,
+            None,
+            false,
+        );
+        assert!(result.is_ok());
+        // SSH writes errors to stderr; we should have captured something
+        // (either "Can't open user config file" or a connection error)
+        let r = result.unwrap();
+        assert!(
+            !r.stderr_output.is_empty() || !r.status.success(),
+            "SSH should produce stderr or fail"
+        );
     }
 
     // --- parse_host_key_error tests ---

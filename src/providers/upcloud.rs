@@ -171,10 +171,11 @@ impl Provider for UpCloud {
             );
             let resp: ServerListResponse = agent
                 .get(&url)
-                .set("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &format!("Bearer {}", token))
                 .call()
                 .map_err(map_ureq_error)?
-                .into_json()
+                .body_mut()
+                .read_json()
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
             let count = resp.servers.server.len();
@@ -203,20 +204,20 @@ impl Provider for UpCloud {
             let url = format!("https://api.upcloud.com/1.3/server/{}", server.uuid);
             let detail: ServerDetailResponse = match agent
                 .get(&url)
-                .set("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &format!("Bearer {}", token))
                 .call()
             {
-                Ok(resp) => match resp.into_json() {
+                Ok(mut resp) => match resp.body_mut().read_json() {
                     Ok(d) => d,
                     Err(_) => {
                         fetch_failures += 1;
                         continue;
                     }
                 },
-                Err(ureq::Error::Status(401, _) | ureq::Error::Status(403, _)) => {
+                Err(ureq::Error::StatusCode(401 | 403)) => {
                     return Err(ProviderError::AuthFailed);
                 }
-                Err(ureq::Error::Status(429, _)) => {
+                Err(ureq::Error::StatusCode(429)) => {
                     return Err(ProviderError::RateLimited);
                 }
                 Err(_) => {
@@ -238,12 +239,7 @@ impl Provider for UpCloud {
             };
 
             // Tags: UpCloud tags (lowercased) + labels as key=value, sorted
-            let mut tags: Vec<String> = server
-                .tags
-                .tag
-                .iter()
-                .map(|t| t.to_lowercase())
-                .collect();
+            let mut tags: Vec<String> = server.tags.tag.iter().map(|t| t.to_lowercase()).collect();
             for label in &server.labels.label {
                 if label.value.is_empty() {
                     tags.push(label.key.clone());
@@ -289,7 +285,8 @@ impl Provider for UpCloud {
             let total = all_servers.len();
             if all_hosts.is_empty() {
                 return Err(ProviderError::Http(format!(
-                    "Failed to fetch details for all {} servers", total
+                    "Failed to fetch details for all {} servers",
+                    total
                 )));
             }
             return Err(ProviderError::PartialResult {
@@ -379,7 +376,10 @@ mod tests {
         let interfaces = &resp.server.networking.interfaces.interface;
         assert_eq!(interfaces.len(), 3);
         assert_eq!(interfaces[1].iface_type, "public");
-        assert_eq!(interfaces[1].ip_addresses.ip_address[0].address, "94.237.1.1");
+        assert_eq!(
+            interfaces[1].ip_addresses.ip_address[0].address,
+            "94.237.1.1"
+        );
     }
 
     #[test]
@@ -388,17 +388,24 @@ mod tests {
             NetworkInterface {
                 iface_type: "private".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "10.0.0.1".into(), family: "IPv4".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "10.0.0.1".into(),
+                        family: "IPv4".into(),
+                    }],
                 },
             },
             NetworkInterface {
                 iface_type: "public".into(),
                 ip_addresses: IpAddressesWrapper {
                     ip_address: vec![
-                        IpAddress { address: "94.237.1.1".into(), family: "IPv4".into() },
-                        IpAddress { address: "2a04::1".into(), family: "IPv6".into() },
+                        IpAddress {
+                            address: "94.237.1.1".into(),
+                            family: "IPv4".into(),
+                        },
+                        IpAddress {
+                            address: "2a04::1".into(),
+                            family: "IPv6".into(),
+                        },
                     ],
                 },
             },
@@ -408,92 +415,91 @@ mod tests {
 
     #[test]
     fn test_select_ip_public_ipv6_fallback() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "public".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "2a04::1".into(), family: "IPv6".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "public".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![IpAddress {
+                    address: "2a04::1".into(),
+                    family: "IPv6".into(),
+                }],
             },
-        ];
+        }];
         assert_eq!(select_ip(&interfaces), Some("2a04::1".to_string()));
     }
 
     #[test]
     fn test_select_ip_skips_placeholder_ipv4() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "public".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "0.0.0.0".into(), family: "IPv4".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "public".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![IpAddress {
+                    address: "0.0.0.0".into(),
+                    family: "IPv4".into(),
+                }],
             },
-        ];
+        }];
         assert_eq!(select_ip(&interfaces), None);
     }
 
     #[test]
     fn test_select_ip_placeholder_ipv4_falls_through_to_ipv6() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "public".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "0.0.0.0".into(), family: "IPv4".into() },
-                        IpAddress { address: "2a04::1".into(), family: "IPv6".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "public".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![
+                    IpAddress {
+                        address: "0.0.0.0".into(),
+                        family: "IPv4".into(),
+                    },
+                    IpAddress {
+                        address: "2a04::1".into(),
+                        family: "IPv6".into(),
+                    },
+                ],
             },
-        ];
+        }];
         assert_eq!(select_ip(&interfaces), Some("2a04::1".to_string()));
     }
 
     #[test]
     fn test_select_ip_skips_placeholder_ipv6() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "public".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "::".into(), family: "IPv6".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "public".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![IpAddress {
+                    address: "::".into(),
+                    family: "IPv6".into(),
+                }],
             },
-        ];
+        }];
         assert_eq!(select_ip(&interfaces), None);
     }
 
     #[test]
     fn test_select_ip_utility_skipped() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "utility".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "10.3.0.1".into(), family: "IPv4".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "utility".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![IpAddress {
+                    address: "10.3.0.1".into(),
+                    family: "IPv4".into(),
+                }],
             },
-        ];
+        }];
         assert_eq!(select_ip(&interfaces), None);
     }
 
     #[test]
     fn test_select_ip_private_only() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "private".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "10.0.0.1".into(), family: "IPv4".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "private".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![IpAddress {
+                    address: "10.0.0.1".into(),
+                    family: "IPv4".into(),
+                }],
             },
-        ];
+        }];
         assert_eq!(select_ip(&interfaces), None);
     }
 
@@ -509,10 +515,15 @@ mod tests {
             uuid: "uuid-1".into(),
             title: "test".into(),
             hostname: "test.example.com".into(),
-            tags: TagWrapper { tag: vec!["ZEBRA".into(), "ALPHA".into()] },
-            labels: LabelWrapper { label: vec![
-                Label { key: "env".into(), value: "prod".into() },
-            ]},
+            tags: TagWrapper {
+                tag: vec!["ZEBRA".into(), "ALPHA".into()],
+            },
+            labels: LabelWrapper {
+                label: vec![Label {
+                    key: "env".into(),
+                    value: "prod".into(),
+                }],
+            },
             zone: String::new(),
             plan: String::new(),
             state: String::new(),
@@ -603,25 +614,28 @@ mod tests {
             NetworkInterface {
                 iface_type: "public".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "94.237.1.1".into(), family: "IPv4".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "94.237.1.1".into(),
+                        family: "IPv4".into(),
+                    }],
                 },
             },
             NetworkInterface {
                 iface_type: "private".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "10.0.0.1".into(), family: "IPv4".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "10.0.0.1".into(),
+                        family: "IPv4".into(),
+                    }],
                 },
             },
             NetworkInterface {
                 iface_type: "utility".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "10.3.0.1".into(), family: "IPv4".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "10.3.0.1".into(),
+                        family: "IPv4".into(),
+                    }],
                 },
             },
         ];
@@ -646,33 +660,39 @@ mod tests {
 
     #[test]
     fn test_collect_ips_no_matching_type() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "private".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "10.0.0.1".into(), family: "IPv4".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "private".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![IpAddress {
+                    address: "10.0.0.1".into(),
+                    family: "IPv4".into(),
+                }],
             },
-        ];
+        }];
         assert!(collect_ips(&interfaces, "public").is_empty());
     }
 
     #[test]
     fn test_collect_ips_multiple_addresses_on_same_interface() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "public".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "94.237.1.1".into(), family: "IPv4".into() },
-                        IpAddress { address: "94.237.1.2".into(), family: "IPv4".into() },
-                        IpAddress { address: "2a04::1".into(), family: "IPv6".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "public".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![
+                    IpAddress {
+                        address: "94.237.1.1".into(),
+                        family: "IPv4".into(),
+                    },
+                    IpAddress {
+                        address: "94.237.1.2".into(),
+                        family: "IPv4".into(),
+                    },
+                    IpAddress {
+                        address: "2a04::1".into(),
+                        family: "IPv6".into(),
+                    },
+                ],
             },
-        ];
+        }];
         let public = collect_ips(&interfaces, "public");
         assert_eq!(public.len(), 3);
     }
@@ -681,17 +701,21 @@ mod tests {
 
     #[test]
     fn test_select_ip_multiple_public_v4_uses_first() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "public".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "94.237.1.1".into(), family: "IPv4".into() },
-                        IpAddress { address: "94.237.1.2".into(), family: "IPv4".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "public".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![
+                    IpAddress {
+                        address: "94.237.1.1".into(),
+                        family: "IPv4".into(),
+                    },
+                    IpAddress {
+                        address: "94.237.1.2".into(),
+                        family: "IPv4".into(),
+                    },
+                ],
             },
-        ];
+        }];
         assert_eq!(select_ip(&interfaces), Some("94.237.1.1".to_string()));
     }
 
@@ -699,17 +723,21 @@ mod tests {
 
     #[test]
     fn test_select_ip_both_placeholders() {
-        let interfaces = vec![
-            NetworkInterface {
-                iface_type: "public".into(),
-                ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "0.0.0.0".into(), family: "IPv4".into() },
-                        IpAddress { address: "::".into(), family: "IPv6".into() },
-                    ],
-                },
+        let interfaces = vec![NetworkInterface {
+            iface_type: "public".into(),
+            ip_addresses: IpAddressesWrapper {
+                ip_address: vec![
+                    IpAddress {
+                        address: "0.0.0.0".into(),
+                        family: "IPv4".into(),
+                    },
+                    IpAddress {
+                        address: "::".into(),
+                        family: "IPv6".into(),
+                    },
+                ],
             },
-        ];
+        }];
         assert_eq!(select_ip(&interfaces), None);
     }
 
@@ -722,9 +750,12 @@ mod tests {
             title: "t".into(),
             hostname: "h".into(),
             tags: TagWrapper::default(),
-            labels: LabelWrapper { label: vec![
-                Label { key: "managed".into(), value: "".into() },
-            ]},
+            labels: LabelWrapper {
+                label: vec![Label {
+                    key: "managed".into(),
+                    value: "".into(),
+                }],
+            },
             zone: String::new(),
             plan: String::new(),
             state: String::new(),
@@ -747,7 +778,9 @@ mod tests {
             uuid: "u".into(),
             title: "t".into(),
             hostname: "h".into(),
-            tags: TagWrapper { tag: vec!["WEB".into(), "PROD".into()] },
+            tags: TagWrapper {
+                tag: vec!["WEB".into(), "PROD".into()],
+            },
             labels: LabelWrapper::default(),
             zone: String::new(),
             plan: String::new(),
@@ -765,10 +798,18 @@ mod tests {
             title: "t".into(),
             hostname: "h".into(),
             tags: TagWrapper::default(),
-            labels: LabelWrapper { label: vec![
-                Label { key: "env".into(), value: "staging".into() },
-                Label { key: "team".into(), value: "backend".into() },
-            ]},
+            labels: LabelWrapper {
+                label: vec![
+                    Label {
+                        key: "env".into(),
+                        value: "staging".into(),
+                    },
+                    Label {
+                        key: "team".into(),
+                        value: "backend".into(),
+                    },
+                ],
+            },
             zone: String::new(),
             plan: String::new(),
             state: String::new(),
@@ -824,7 +865,10 @@ mod tests {
             }
         }"#;
         let resp: ServerListResponse = serde_json::from_str(json).unwrap();
-        assert_eq!(resp.servers.server[0].uuid, "00c148cb-ef71-46cb-a76f-1bb53e791e8a");
+        assert_eq!(
+            resp.servers.server[0].uuid,
+            "00c148cb-ef71-46cb-a76f-1bb53e791e8a"
+        );
     }
 
     // --- empty server list ---
@@ -843,7 +887,10 @@ mod tests {
         let json = r#"{"server": {"networking": {"interfaces": {"interface": []}}}}"#;
         let resp: ServerDetailResponse = serde_json::from_str(json).unwrap();
         assert!(resp.server.networking.interfaces.interface.is_empty());
-        assert_eq!(select_ip(&resp.server.networking.interfaces.interface), None);
+        assert_eq!(
+            select_ip(&resp.server.networking.interfaces.interface),
+            None
+        );
     }
 
     // --- mixed public interfaces: IPv4 on one, IPv6 on another ---
@@ -854,17 +901,19 @@ mod tests {
             NetworkInterface {
                 iface_type: "public".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "2a04::1".into(), family: "IPv6".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "2a04::1".into(),
+                        family: "IPv6".into(),
+                    }],
                 },
             },
             NetworkInterface {
                 iface_type: "public".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "94.237.1.1".into(), family: "IPv4".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "94.237.1.1".into(),
+                        family: "IPv4".into(),
+                    }],
                 },
             },
         ];
@@ -880,17 +929,19 @@ mod tests {
             NetworkInterface {
                 iface_type: "public".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "94.1.1.1".into(), family: "IPv4".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "94.1.1.1".into(),
+                        family: "IPv4".into(),
+                    }],
                 },
             },
             NetworkInterface {
                 iface_type: "public".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "94.2.2.2".into(), family: "IPv4".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "94.2.2.2".into(),
+                        family: "IPv4".into(),
+                    }],
                 },
             },
         ];
@@ -920,9 +971,10 @@ mod tests {
         let interfaces = vec![NetworkInterface {
             iface_type: "utility".into(),
             ip_addresses: IpAddressesWrapper {
-                ip_address: vec![
-                    IpAddress { address: "10.0.0.1".into(), family: "IPv4".into() },
-                ],
+                ip_address: vec![IpAddress {
+                    address: "10.0.0.1".into(),
+                    family: "IPv4".into(),
+                }],
             },
         }];
         assert_eq!(select_ip(&interfaces), None);
@@ -936,17 +988,19 @@ mod tests {
             NetworkInterface {
                 iface_type: "private".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "10.0.0.1".into(), family: "IPv4".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "10.0.0.1".into(),
+                        family: "IPv4".into(),
+                    }],
                 },
             },
             NetworkInterface {
                 iface_type: "public".into(),
                 ip_addresses: IpAddressesWrapper {
-                    ip_address: vec![
-                        IpAddress { address: "94.1.1.1".into(), family: "IPv4".into() },
-                    ],
+                    ip_address: vec![IpAddress {
+                        address: "94.1.1.1".into(),
+                        family: "IPv4".into(),
+                    }],
                 },
             },
         ];
@@ -1022,7 +1076,10 @@ mod tests {
             ]}}}"#;
         let resp: ServerDetailResponse = serde_json::from_str(json).unwrap();
         let sd = resp.server.storage_devices.unwrap();
-        assert_eq!(sd.storage_device[0].storage_title, "Ubuntu Server 24.04 LTS");
+        assert_eq!(
+            sd.storage_device[0].storage_title,
+            "Ubuntu Server 24.04 LTS"
+        );
     }
 
     #[test]
@@ -1084,5 +1141,278 @@ mod tests {
         let resp: ServerDetailResponse = serde_json::from_str(json).unwrap();
         let sd = resp.server.storage_devices.unwrap();
         assert!(sd.storage_device.is_empty());
+    }
+
+    // =========================================================================
+    // ureq v3 error pattern tests
+    // =========================================================================
+
+    #[test]
+    fn test_ureq_status_401_matches_auth_pattern() {
+        // Verify the StatusCode(401 | 403) pattern used in fetch_hosts_cancellable
+        let err = ureq::Error::StatusCode(401);
+        assert!(matches!(err, ureq::Error::StatusCode(401 | 403)));
+    }
+
+    #[test]
+    fn test_ureq_status_403_matches_auth_pattern() {
+        let err = ureq::Error::StatusCode(403);
+        assert!(matches!(err, ureq::Error::StatusCode(401 | 403)));
+    }
+
+    #[test]
+    fn test_ureq_status_429_matches_rate_limit_pattern() {
+        let err = ureq::Error::StatusCode(429);
+        assert!(matches!(err, ureq::Error::StatusCode(429)));
+    }
+
+    #[test]
+    fn test_ureq_status_500_does_not_match_auth_pattern() {
+        let err = ureq::Error::StatusCode(500);
+        assert!(!matches!(err, ureq::Error::StatusCode(401 | 403)));
+        assert!(!matches!(err, ureq::Error::StatusCode(429)));
+    }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_list_servers_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/1.3/server")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("limit".into(), "100".into()),
+                mockito::Matcher::UrlEncoded("offset".into(), "0".into()),
+            ]))
+            .match_header("Authorization", "Bearer uc-test-token-123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": {
+                        "server": [
+                            {
+                                "uuid": "00c148cb-ef71-46cb-a76f-1bb53e791e8a",
+                                "title": "Web Frontend",
+                                "hostname": "web-frontend.example.com",
+                                "tags": {"tag": ["PRODUCTION", "WEB"]},
+                                "labels": {"label": [{"key": "env", "value": "prod"}]},
+                                "zone": "fi-hel1",
+                                "plan": "2xCPU-4GB",
+                                "state": "started"
+                            }
+                        ]
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/1.3/server?limit=100&offset=0", server.url());
+        let resp: ServerListResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer uc-test-token-123")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.servers.server.len(), 1);
+        let s = &resp.servers.server[0];
+        assert_eq!(s.uuid, "00c148cb-ef71-46cb-a76f-1bb53e791e8a");
+        assert_eq!(s.title, "Web Frontend");
+        assert_eq!(s.hostname, "web-frontend.example.com");
+        assert_eq!(s.tags.tag, vec!["PRODUCTION", "WEB"]);
+        assert_eq!(s.zone, "fi-hel1");
+        assert_eq!(s.plan, "2xCPU-4GB");
+        assert_eq!(s.state, "started");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_server_detail_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/1.3/server/00c148cb-ef71-46cb-a76f-1bb53e791e8a")
+            .match_header("Authorization", "Bearer uc-test-token-123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "server": {
+                        "networking": {
+                            "interfaces": {
+                                "interface": [
+                                    {
+                                        "type": "public",
+                                        "ip_addresses": {
+                                            "ip_address": [
+                                                {"address": "94.237.42.10", "family": "IPv4"},
+                                                {"address": "2a04:3540:1000::1", "family": "IPv6"}
+                                            ]
+                                        }
+                                    },
+                                    {
+                                        "type": "utility",
+                                        "ip_addresses": {
+                                            "ip_address": [
+                                                {"address": "10.3.0.5", "family": "IPv4"}
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        "storage_devices": {
+                            "storage_device": [
+                                {"storage_title": "Ubuntu Server 24.04 LTS", "boot_disk": "1"},
+                                {"storage_title": "Data volume", "boot_disk": "0"}
+                            ]
+                        }
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/1.3/server/00c148cb-ef71-46cb-a76f-1bb53e791e8a",
+            server.url()
+        );
+        let resp: ServerDetailResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer uc-test-token-123")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        let interfaces = &resp.server.networking.interfaces.interface;
+        assert_eq!(interfaces.len(), 2);
+        assert_eq!(select_ip(interfaces), Some("94.237.42.10".to_string()));
+
+        let sd = resp.server.storage_devices.unwrap();
+        let boot = sd
+            .storage_device
+            .iter()
+            .find(|d| d.boot_disk == "1")
+            .unwrap();
+        assert_eq!(boot.storage_title, "Ubuntu Server 24.04 LTS");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_servers_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/1.3/server")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("limit".into(), "100".into()),
+                mockito::Matcher::UrlEncoded("offset".into(), "0".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": {
+                        "server": [{"uuid": "u1", "title": "a", "hostname": "a.example.com"}]
+                    }
+                }"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/1.3/server")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("limit".into(), "100".into()),
+                mockito::Matcher::UrlEncoded("offset".into(), "100".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": {
+                        "server": [{"uuid": "u2", "title": "b", "hostname": "b.example.com"}]
+                    }
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let r1: ServerListResponse = agent
+            .get(&format!("{}/1.3/server?limit=100&offset=0", server.url()))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.servers.server.len(), 1);
+        assert_eq!(r1.servers.server[0].uuid, "u1");
+
+        let r2: ServerListResponse = agent
+            .get(&format!("{}/1.3/server?limit=100&offset=100", server.url()))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r2.servers.server.len(), 1);
+        assert_eq!(r2.servers.server[0].uuid, "u2");
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_list_servers_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/1.3/server")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(
+                r#"{"error": {"error_code": "AUTHENTICATION_FAILED", "error_message": "Authentication failed."}}"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!("{}/1.3/server?limit=100&offset=0", server.url()))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_server_detail_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/1.3/server/some-uuid")
+            .with_status(401)
+            .with_body(
+                r#"{"error": {"error_code": "AUTHENTICATION_FAILED", "error_message": "Authentication failed."}}"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!("{}/1.3/server/some-uuid", server.url()))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
     }
 }

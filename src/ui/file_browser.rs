@@ -38,41 +38,39 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(overlay);
     frame.render_widget(block, overlay);
 
-    // Layout: path headers + divider + file lists + footer
+    // Layout: path headers + divider + file lists + spacer + footer
     let rows = Layout::vertical([
         Constraint::Length(1), // path headers
         Constraint::Length(1), // divider
-        Constraint::Min(1),   // file lists
+        Constraint::Min(0),    // file lists
+        Constraint::Length(1), // spacer
         Constraint::Length(1), // footer
     ])
     .split(inner);
 
     // Split into two panes
-    let pane_cols = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
-    .split(rows[2]);
+    let pane_cols =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[2]);
 
-    let path_cols = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
-    .split(rows[0]);
+    let path_cols =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[0]);
 
-    let div_cols = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
-    .split(rows[1]);
+    let div_cols =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).split(rows[1]);
 
     // Path headers
     let local_path_str = fb.local_path.to_string_lossy().to_string();
-    let local_path_display = truncate_left(&local_path_str, (path_cols[0].width as usize).saturating_sub(1));
+    let local_path_display = truncate_left(
+        &local_path_str,
+        (path_cols[0].width as usize).saturating_sub(1),
+    );
     let remote_path_display = if fb.remote_path.is_empty() {
         "...".to_string()
     } else {
-        truncate_left(&fb.remote_path, (path_cols[1].width as usize).saturating_sub(1))
+        truncate_left(
+            &fb.remote_path,
+            (path_cols[1].width as usize).saturating_sub(1),
+        )
     };
 
     let local_path_style = if fb.active_pane == BrowserPane::Local {
@@ -87,11 +85,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     frame.render_widget(
-        Paragraph::new(Span::styled(format!(" {}", local_path_display), local_path_style)),
+        Paragraph::new(Span::styled(
+            format!(" {}", local_path_display),
+            local_path_style,
+        )),
         path_cols[0],
     );
     frame.render_widget(
-        Paragraph::new(Span::styled(format!(" {}", remote_path_display), remote_path_style)),
+        Paragraph::new(Span::styled(
+            format!(" {}", remote_path_display),
+            remote_path_style,
+        )),
         path_cols[1],
     );
 
@@ -182,7 +186,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ));
     }
 
-    super::render_footer_with_status(frame, rows[3], footer_spans, app);
+    super::render_footer_with_status(frame, rows[4], footer_spans, app);
 }
 
 fn render_local_pane(frame: &mut Frame, fb: &mut FileBrowserState, area: Rect) {
@@ -198,19 +202,13 @@ fn render_local_pane(frame: &mut Frame, fb: &mut FileBrowserState, area: Rect) {
 
     let pane_width = area.width as usize;
     let show_date = matches!(fb.sort, BrowserSort::Date | BrowserSort::DateAsc);
-    let items = build_file_list_items(
-        &fb.local_entries,
-        &fb.local_selected,
-        pane_width,
-        show_date,
-    );
+    let items = build_file_list_items(&fb.local_entries, &fb.local_selected, pane_width, show_date);
 
-    let list = List::new(items)
-        .highlight_style(if fb.active_pane == BrowserPane::Local {
-            theme::selected_row()
-        } else {
-            Style::default()
-        });
+    let list = List::new(items).highlight_style(if fb.active_pane == BrowserPane::Local {
+        theme::selected_row()
+    } else {
+        Style::default()
+    });
 
     StatefulWidget::render(list, area, frame.buffer_mut(), &mut fb.local_list_state);
 }
@@ -223,10 +221,7 @@ fn render_remote_pane(frame: &mut Frame, fb: &mut FileBrowserState, area: Rect) 
             fb.remote_path.clone()
         };
         let msg = format!(" Loading {} ...", path);
-        frame.render_widget(
-            Paragraph::new(Span::styled(msg, theme::muted())),
-            area,
-        );
+        frame.render_widget(Paragraph::new(Span::styled(msg, theme::muted())), area);
         return;
     }
 
@@ -249,12 +244,11 @@ fn render_remote_pane(frame: &mut Frame, fb: &mut FileBrowserState, area: Rect) 
         show_date,
     );
 
-    let list = List::new(items)
-        .highlight_style(if fb.active_pane == BrowserPane::Remote {
-            theme::selected_row()
-        } else {
-            Style::default()
-        });
+    let list = List::new(items).highlight_style(if fb.active_pane == BrowserPane::Remote {
+        theme::selected_row()
+    } else {
+        Style::default()
+    });
 
     StatefulWidget::render(list, area, frame.buffer_mut(), &mut fb.remote_list_state);
 }
@@ -315,7 +309,14 @@ fn build_file_list_items<'a>(
         };
 
         let mut spans = vec![
-            Span::styled(prefix.to_string(), if is_selected { theme::accent_bold() } else { Style::default() }),
+            Span::styled(
+                prefix.to_string(),
+                if is_selected {
+                    theme::accent_bold()
+                } else {
+                    Style::default()
+                },
+            ),
             Span::styled(name_padded, name_style),
             Span::styled(size_str, theme::muted()),
         ];
@@ -372,7 +373,8 @@ fn render_confirm_dialog(
     }
 
     // Calculate width from content (+ 4 for border + padding)
-    let max_content: usize = content_lines.iter()
+    let max_content: usize = content_lines
+        .iter()
         .map(|l| unicode_width::UnicodeWidthStr::width(l.as_str()))
         .max()
         .unwrap_or(30);
@@ -391,7 +393,10 @@ fn render_confirm_dialog(
         for name in req.sources.iter().take(4) {
             lines.push(Line::from(format!("    {} -> {}/", name, dest_path)));
         }
-        lines.push(Line::from(format!("    ... and {} more", req.sources.len() - 4)));
+        lines.push(Line::from(format!(
+            "    ... and {} more",
+            req.sources.len() - 4
+        )));
     }
     lines.push(Line::from(""));
 
@@ -408,7 +413,8 @@ fn render_confirm_dialog(
     frame.render_widget(block, dialog_area);
 
     let rows = Layout::vertical([
-        Constraint::Min(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
         Constraint::Length(1),
     ])
     .split(inner);
@@ -422,7 +428,7 @@ fn render_confirm_dialog(
         Span::styled("Esc", theme::accent_bold()),
         Span::styled(" cancel", theme::muted()),
     ];
-    frame.render_widget(Paragraph::new(Line::from(footer)), rows[1]);
+    frame.render_widget(Paragraph::new(Line::from(footer)), rows[2]);
 }
 
 fn render_transfer_dialog(frame: &mut Frame, label: &str, area: Rect) {
@@ -459,7 +465,8 @@ fn render_error_dialog(frame: &mut Frame, message: &str, area: Rect) {
         content_lines.push("  Copy failed.".to_string());
     }
 
-    let max_content: usize = content_lines.iter()
+    let max_content: usize = content_lines
+        .iter()
         .map(|l| unicode_width::UnicodeWidthStr::width(l.as_str()))
         .max()
         .unwrap_or(20);
@@ -487,7 +494,8 @@ fn render_error_dialog(frame: &mut Frame, message: &str, area: Rect) {
     frame.render_widget(block, dialog_area);
 
     let rows = Layout::vertical([
-        Constraint::Min(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
         Constraint::Length(1),
     ])
     .split(inner);
@@ -498,7 +506,7 @@ fn render_error_dialog(frame: &mut Frame, message: &str, area: Rect) {
         Span::styled(" Esc", theme::accent_bold()),
         Span::styled(" dismiss", theme::muted()),
     ];
-    frame.render_widget(Paragraph::new(Line::from(footer)), rows[1]);
+    frame.render_widget(Paragraph::new(Line::from(footer)), rows[2]);
 }
 
 /// Truncate a string from the LEFT, prefixing with `\u{2026}` if truncated.
@@ -526,4 +534,52 @@ pub(crate) fn truncate_left(s: &str, max_cols: usize) -> String {
     }
     let suffix: String = chars[start_idx..].iter().collect();
     format!("\u{2026}{}", suffix)
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn main_layout_has_spacer_between_filelist_and_footer() {
+        let area = Rect::new(0, 0, 80, 30);
+        let rows = Layout::vertical([
+            Constraint::Length(1), // path headers
+            Constraint::Length(1), // divider
+            Constraint::Min(0),    // file lists
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+        assert_eq!(rows[3].height, 1);
+        assert_eq!(rows[4].height, 1);
+        assert!(
+            rows[4].y > rows[2].y + rows[2].height,
+            "footer should be below file list end"
+        );
+    }
+
+    #[test]
+    fn confirm_dialog_layout_has_spacer() {
+        let area = Rect::new(0, 0, 50, 10);
+        let rows = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        assert!(rows[2].y > rows[0].y + rows[0].height);
+    }
+
+    #[test]
+    fn error_dialog_layout_has_spacer() {
+        let area = Rect::new(0, 0, 40, 10);
+        let rows = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        assert!(rows[2].y > rows[0].y + rows[0].height);
+    }
 }

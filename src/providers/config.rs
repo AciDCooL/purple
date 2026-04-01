@@ -17,6 +17,7 @@ pub struct ProviderSection {
     pub profile: String,
     pub regions: String,
     pub project: String,
+    pub compartment: String,
 }
 
 /// Default for auto_sync: false for proxmox (N+1 API calls), true for all others.
@@ -69,7 +70,10 @@ impl ProviderConfig {
             }
             if trimmed.starts_with('[') && trimmed.ends_with(']') {
                 if let Some(section) = current.take() {
-                    if !sections.iter().any(|s: &ProviderSection| s.provider == section.provider) {
+                    if !sections
+                        .iter()
+                        .any(|s: &ProviderSection| s.provider == section.provider)
+                    {
                         sections.push(section);
                     }
                 }
@@ -94,6 +98,7 @@ impl ProviderConfig {
                     profile: String::new(),
                     regions: String::new(),
                     project: String::new(),
+                    compartment: String::new(),
                 });
             } else if let Some(ref mut section) = current {
                 if let Some((key, value)) = trimmed.split_once('=') {
@@ -105,15 +110,18 @@ impl ProviderConfig {
                         "user" => section.user = value,
                         "key" => section.identity_file = value,
                         "url" => section.url = value,
-                        "verify_tls" => section.verify_tls = !matches!(
-                            value.to_lowercase().as_str(), "false" | "0" | "no"
-                        ),
-                        "auto_sync" => section.auto_sync = !matches!(
-                            value.to_lowercase().as_str(), "false" | "0" | "no"
-                        ),
+                        "verify_tls" => {
+                            section.verify_tls =
+                                !matches!(value.to_lowercase().as_str(), "false" | "0" | "no")
+                        }
+                        "auto_sync" => {
+                            section.auto_sync =
+                                !matches!(value.to_lowercase().as_str(), "false" | "0" | "no")
+                        }
                         "profile" => section.profile = value,
                         "regions" => section.regions = value,
                         "project" => section.project = value,
+                        "compartment" => section.compartment = value,
                         _ => {}
                     }
                 }
@@ -124,7 +132,16 @@ impl ProviderConfig {
                 sections.push(section);
             }
         }
-        Self { sections, path_override: None }
+        Self {
+            sections,
+            path_override: None,
+        }
+    }
+
+    /// Strip control characters (newlines, tabs, etc.) from a config value
+    /// to prevent INI format corruption from paste errors.
+    fn sanitize_value(s: &str) -> String {
+        s.chars().filter(|c| !c.is_control()).collect()
     }
 
     /// Save provider config to ~/.purple/providers (atomic write, chmod 600).
@@ -138,7 +155,7 @@ impl ProviderConfig {
                     return Err(io::Error::new(
                         io::ErrorKind::NotFound,
                         "Could not determine home directory",
-                    ))
+                    ));
                 }
             },
         };
@@ -148,30 +165,55 @@ impl ProviderConfig {
             if i > 0 {
                 content.push('\n');
             }
-            content.push_str(&format!("[{}]\n", section.provider));
-            content.push_str(&format!("token={}\n", section.token));
-            content.push_str(&format!("alias_prefix={}\n", section.alias_prefix));
-            content.push_str(&format!("user={}\n", section.user));
+            content.push_str(&format!("[{}]\n", Self::sanitize_value(&section.provider)));
+            content.push_str(&format!("token={}\n", Self::sanitize_value(&section.token)));
+            content.push_str(&format!(
+                "alias_prefix={}\n",
+                Self::sanitize_value(&section.alias_prefix)
+            ));
+            content.push_str(&format!("user={}\n", Self::sanitize_value(&section.user)));
             if !section.identity_file.is_empty() {
-                content.push_str(&format!("key={}\n", section.identity_file));
+                content.push_str(&format!(
+                    "key={}\n",
+                    Self::sanitize_value(&section.identity_file)
+                ));
             }
             if !section.url.is_empty() {
-                content.push_str(&format!("url={}\n", section.url));
+                content.push_str(&format!("url={}\n", Self::sanitize_value(&section.url)));
             }
             if !section.verify_tls {
                 content.push_str("verify_tls=false\n");
             }
             if !section.profile.is_empty() {
-                content.push_str(&format!("profile={}\n", section.profile));
+                content.push_str(&format!(
+                    "profile={}\n",
+                    Self::sanitize_value(&section.profile)
+                ));
             }
             if !section.regions.is_empty() {
-                content.push_str(&format!("regions={}\n", section.regions));
+                content.push_str(&format!(
+                    "regions={}\n",
+                    Self::sanitize_value(&section.regions)
+                ));
             }
             if !section.project.is_empty() {
-                content.push_str(&format!("project={}\n", section.project));
+                content.push_str(&format!(
+                    "project={}\n",
+                    Self::sanitize_value(&section.project)
+                ));
+            }
+            if !section.compartment.is_empty() {
+                content.push_str(&format!(
+                    "compartment={}\n",
+                    Self::sanitize_value(&section.compartment)
+                ));
             }
             if section.auto_sync != default_auto_sync(&section.provider) {
-                content.push_str(if section.auto_sync { "auto_sync=true\n" } else { "auto_sync=false\n" });
+                content.push_str(if section.auto_sync {
+                    "auto_sync=true\n"
+                } else {
+                    "auto_sync=false\n"
+                });
             }
         }
 
@@ -185,7 +227,11 @@ impl ProviderConfig {
 
     /// Add or replace a provider section.
     pub fn set_section(&mut self, section: ProviderSection) {
-        if let Some(existing) = self.sections.iter_mut().find(|s| s.provider == section.provider) {
+        if let Some(existing) = self
+            .sections
+            .iter_mut()
+            .find(|s| s.provider == section.provider)
+        {
             *existing = section;
         } else {
             self.sections.push(section);
@@ -278,6 +324,7 @@ token=mytoken
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         assert_eq!(config.sections.len(), 1);
     }
@@ -297,6 +344,7 @@ token=mytoken
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         assert_eq!(config.sections.len(), 1);
         assert_eq!(config.sections[0].token, "new");
@@ -403,18 +451,32 @@ verify_tls=false
     #[test]
     fn test_verify_tls_false_variants() {
         for value in &["false", "False", "FALSE", "0", "no", "No", "NO"] {
-            let content = format!("[proxmox]\ntoken=abc\nurl=https://pve:8006\nverify_tls={}\n", value);
+            let content = format!(
+                "[proxmox]\ntoken=abc\nurl=https://pve:8006\nverify_tls={}\n",
+                value
+            );
             let config = ProviderConfig::parse(&content);
-            assert!(!config.sections[0].verify_tls, "verify_tls={} should be false", value);
+            assert!(
+                !config.sections[0].verify_tls,
+                "verify_tls={} should be false",
+                value
+            );
         }
     }
 
     #[test]
     fn test_verify_tls_true_variants() {
         for value in &["true", "True", "1", "yes"] {
-            let content = format!("[proxmox]\ntoken=abc\nurl=https://pve:8006\nverify_tls={}\n", value);
+            let content = format!(
+                "[proxmox]\ntoken=abc\nurl=https://pve:8006\nverify_tls={}\n",
+                value
+            );
             let config = ProviderConfig::parse(&content);
-            assert!(config.sections[0].verify_tls, "verify_tls={} should be true", value);
+            assert!(
+                config.sections[0].verify_tls,
+                "verify_tls={} should be true",
+                value
+            );
         }
     }
 
@@ -427,12 +489,13 @@ verify_tls=false
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
             identity_file: String::new(),
-            url: String::new(),     // empty: not written
-            verify_tls: true,       // default: not written
-            auto_sync: true,        // default for non-proxmox: not written
+            url: String::new(), // empty: not written
+            verify_tls: true,   // default: not written
+            auto_sync: true,    // default for non-proxmox: not written
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
         let mut config = ProviderConfig::default();
         config.set_section(section);
@@ -448,7 +511,10 @@ verify_tls=false
         let existing = ProviderConfig::parse(
             "[proxmox]\ntoken=old\nalias_prefix=pve\nuser=root\nurl=https://pve.local:8006\n",
         );
-        let existing_url = existing.section("proxmox").map(|s| s.url.clone()).unwrap_or_default();
+        let existing_url = existing
+            .section("proxmox")
+            .map(|s| s.url.clone())
+            .unwrap_or_default();
         assert_eq!(existing_url, "https://pve.local:8006");
 
         let mut config = existing;
@@ -464,6 +530,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         assert_eq!(config.sections[0].token, "new");
         assert_eq!(config.sections[0].url, "https://pve.local:8006");
@@ -483,7 +550,8 @@ verify_tls=false
 
     #[test]
     fn test_auto_sync_explicit_true() {
-        let config = ProviderConfig::parse("[proxmox]\ntoken=abc\nurl=https://pve:8006\nauto_sync=true\n");
+        let config =
+            ProviderConfig::parse("[proxmox]\ntoken=abc\nurl=https://pve:8006\nauto_sync=true\n");
         assert!(config.sections[0].auto_sync);
     }
 
@@ -509,6 +577,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         // Re-parse: auto_sync should still be true (default)
         assert!(config.sections[0].auto_sync);
@@ -527,6 +596,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         assert!(!config2.sections[0].auto_sync);
     }
@@ -536,7 +606,11 @@ verify_tls=false
         for value in &["false", "False", "FALSE", "0", "no"] {
             let content = format!("[digitalocean]\ntoken=abc\nauto_sync={}\n", value);
             let config = ProviderConfig::parse(&content);
-            assert!(!config.sections[0].auto_sync, "auto_sync={} should be false", value);
+            assert!(
+                !config.sections[0].auto_sync,
+                "auto_sync={} should be false",
+                value
+            );
         }
     }
 
@@ -544,16 +618,24 @@ verify_tls=false
     fn test_auto_sync_true_variants() {
         for value in &["true", "True", "TRUE", "1", "yes"] {
             // Start from proxmox default=false, override to true via explicit value
-            let content = format!("[proxmox]\ntoken=abc\nurl=https://pve:8006\nauto_sync={}\n", value);
+            let content = format!(
+                "[proxmox]\ntoken=abc\nurl=https://pve:8006\nauto_sync={}\n",
+                value
+            );
             let config = ProviderConfig::parse(&content);
-            assert!(config.sections[0].auto_sync, "auto_sync={} should be true", value);
+            assert!(
+                config.sections[0].auto_sync,
+                "auto_sync={} should be true",
+                value
+            );
         }
     }
 
     #[test]
     fn test_auto_sync_malformed_value_treated_as_true() {
         // Unrecognised value is not "false"/"0"/"no", so treated as true (like verify_tls)
-        let config = ProviderConfig::parse("[proxmox]\ntoken=abc\nurl=https://pve:8006\nauto_sync=maybe\n");
+        let config =
+            ProviderConfig::parse("[proxmox]\ntoken=abc\nurl=https://pve:8006\nauto_sync=maybe\n");
         assert!(config.sections[0].auto_sync);
     }
 
@@ -573,6 +655,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         });
         // Simulate save by rebuilding content string (same logic as save())
         let content =
@@ -763,10 +846,27 @@ verify_tls=false
 
     #[test]
     fn test_auto_sync_default_all_others_true() {
-        for provider in &["digitalocean", "vultr", "linode", "hetzner", "upcloud", "aws", "scaleway", "gcp", "azure", "tailscale"] {
+        for provider in &[
+            "digitalocean",
+            "vultr",
+            "linode",
+            "hetzner",
+            "upcloud",
+            "aws",
+            "scaleway",
+            "gcp",
+            "azure",
+            "tailscale",
+            "oracle",
+            "ovh",
+        ] {
             let content = format!("[{}]\ntoken=abc\n", provider);
             let config = ProviderConfig::parse(&content);
-            assert!(config.sections[0].auto_sync, "auto_sync should default to true for {}", provider);
+            assert!(
+                config.sections[0].auto_sync,
+                "auto_sync should default to true for {}",
+                provider
+            );
         }
     }
 
@@ -801,6 +901,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
         config.set_section(section);
         assert_eq!(config.sections.len(), 1);
@@ -823,6 +924,7 @@ verify_tls=false
             profile: String::new(),
             regions: String::new(),
             project: String::new(),
+            compartment: String::new(),
         };
         config.set_section(section);
         assert_eq!(config.sections.len(), 1);
@@ -922,9 +1024,17 @@ verify_tls=false
     #[test]
     fn test_verify_tls_values() {
         for (val, expected) in [
-            ("false", false), ("False", false), ("FALSE", false),
-            ("0", false), ("no", false), ("No", false), ("NO", false),
-            ("true", true), ("True", true), ("1", true), ("yes", true),
+            ("false", false),
+            ("False", false),
+            ("FALSE", false),
+            ("0", false),
+            ("no", false),
+            ("No", false),
+            ("NO", false),
+            ("true", true),
+            ("True", true),
+            ("1", true),
+            ("yes", true),
             ("anything", true), // any unrecognized value defaults to true
         ] {
             let content = format!("[digitalocean]\ntoken=t\nverify_tls={}\n", val);
@@ -944,9 +1054,15 @@ verify_tls=false
     #[test]
     fn test_auto_sync_values() {
         for (val, expected) in [
-            ("false", false), ("False", false), ("FALSE", false),
-            ("0", false), ("no", false), ("No", false),
-            ("true", true), ("1", true), ("yes", true),
+            ("false", false),
+            ("False", false),
+            ("FALSE", false),
+            ("0", false),
+            ("no", false),
+            ("No", false),
+            ("true", true),
+            ("1", true),
+            ("yes", true),
         ] {
             let content = format!("[digitalocean]\ntoken=t\nauto_sync={}\n", val);
             let config = ProviderConfig::parse(&content);
@@ -1024,9 +1140,7 @@ verify_tls=false
         // Re-serialize and parse
         let serialized = format!(
             "[gcp]\ntoken={}\nproject={}\nregions={}\n",
-            config.sections[0].token,
-            config.sections[0].project,
-            config.sections[0].regions,
+            config.sections[0].token, config.sections[0].project, config.sections[0].regions,
         );
         let reparsed = ProviderConfig::parse(&serialized);
         assert_eq!(reparsed.sections[0].project, "my-project");
@@ -1125,6 +1239,7 @@ verify_tls=false
                 profile: String::new(),
                 regions: String::new(),
                 project: String::new(),
+                compartment: String::new(),
             });
         }
         assert_eq!(config.sections.len(), 3);
@@ -1137,5 +1252,83 @@ verify_tls=false
         config.remove_section("digitalocean");
         config.remove_section("vultr");
         assert!(config.sections.is_empty());
+    }
+
+    // =========================================================================
+    // Oracle / compartment field
+    // =========================================================================
+
+    #[test]
+    fn test_compartment_field_round_trip() {
+        use std::path::PathBuf;
+        let content = "[oracle]\ntoken=~/.oci/config\ncompartment=ocid1.compartment.oc1..example\n";
+        let config = ProviderConfig::parse(content);
+        assert_eq!(
+            config.sections[0].compartment,
+            "ocid1.compartment.oc1..example"
+        );
+
+        // Save to a temp file and re-parse
+        let tmp = std::env::temp_dir().join("purple_test_compartment_round_trip");
+        let mut cfg = config;
+        cfg.path_override = Some(PathBuf::from(&tmp));
+        cfg.save().expect("save failed");
+        let saved = std::fs::read_to_string(&tmp).expect("read failed");
+        let _ = std::fs::remove_file(&tmp);
+        let reparsed = ProviderConfig::parse(&saved);
+        assert_eq!(
+            reparsed.sections[0].compartment,
+            "ocid1.compartment.oc1..example"
+        );
+    }
+
+    #[test]
+    fn test_auto_sync_default_true_for_oracle() {
+        let config = ProviderConfig::parse("[oracle]\ntoken=~/.oci/config\n");
+        assert!(config.sections[0].auto_sync);
+    }
+
+    #[test]
+    fn test_sanitize_value_strips_control_chars() {
+        assert_eq!(ProviderConfig::sanitize_value("clean"), "clean");
+        assert_eq!(ProviderConfig::sanitize_value("has\nnewline"), "hasnewline");
+        assert_eq!(ProviderConfig::sanitize_value("has\ttab"), "hastab");
+        assert_eq!(
+            ProviderConfig::sanitize_value("has\rcarriage"),
+            "hascarriage"
+        );
+        assert_eq!(ProviderConfig::sanitize_value("has\x00null"), "hasnull");
+        assert_eq!(ProviderConfig::sanitize_value(""), "");
+    }
+
+    #[test]
+    fn test_save_sanitizes_token_with_newline() {
+        let path = std::env::temp_dir().join(format!(
+            "__purple_test_config_sanitize_{}.ini",
+            std::process::id()
+        ));
+        let config = ProviderConfig {
+            sections: vec![ProviderSection {
+                provider: "digitalocean".to_string(),
+                token: "abc\ndef".to_string(),
+                alias_prefix: "do".to_string(),
+                user: "root".to_string(),
+                identity_file: String::new(),
+                url: String::new(),
+                verify_tls: true,
+                auto_sync: true,
+                profile: String::new(),
+                regions: String::new(),
+                project: String::new(),
+                compartment: String::new(),
+            }],
+            path_override: Some(path.clone()),
+        };
+        config.save().unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        // Token should be on a single line with newline stripped
+        assert!(content.contains("token=abcdef\n"));
+        assert!(!content.contains("token=abc\ndef"));
     }
 }

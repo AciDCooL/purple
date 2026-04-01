@@ -190,9 +190,10 @@ pub fn is_valid_subscription_id(id: &str) -> bool {
         return false;
     }
     let expected_lens = [8, 4, 4, 4, 12];
-    parts.iter().zip(expected_lens.iter()).all(|(part, &len)| {
-        part.len() == len && part.chars().all(|c| c.is_ascii_hexdigit())
-    })
+    parts
+        .iter()
+        .zip(expected_lens.iter())
+        .all(|(part, &len)| part.len() == len && part.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
 /// Detect whether a token string is a path to a service principal JSON file.
@@ -214,18 +215,19 @@ fn resolve_sp_token(path: &str) -> Result<String, ProviderError> {
         "https://login.microsoftonline.com/{}/oauth2/v2.0/token",
         sp.tenant_id
     );
-    let resp = agent
+    let mut resp = agent
         .post(&url)
-        .send_form(&[
+        .send_form([
             ("grant_type", "client_credentials"),
-            ("client_id", &sp.client_id),
-            ("client_secret", &sp.client_secret),
+            ("client_id", sp.client_id.as_str()),
+            ("client_secret", sp.client_secret.as_str()),
             ("scope", "https://management.azure.com/.default"),
         ])
         .map_err(map_ureq_error)?;
 
     let token_resp: TokenResponse = resp
-        .into_json()
+        .body_mut()
+        .read_json()
         .map_err(|e| ProviderError::Parse(format!("Token response: {}", e)))?;
 
     Ok(token_resp.access_token)
@@ -261,7 +263,12 @@ fn select_ip(
     let nic_ref = net_profile
         .network_interfaces
         .iter()
-        .find(|n| n.properties.as_ref().and_then(|p| p.primary).unwrap_or(false))
+        .find(|n| {
+            n.properties
+                .as_ref()
+                .and_then(|p| p.primary)
+                .unwrap_or(false)
+        })
         .or_else(|| net_profile.network_interfaces.first())?;
 
     let nic_id_lower = nic_ref.id.to_ascii_lowercase();
@@ -381,11 +388,15 @@ fn fetch_paginated<T: serde::de::DeserializeOwned>(
             None => break,
         };
 
-        progress(&format!("Fetching {} ({} so far)...", resource_name, all_items.len()));
+        progress(&format!(
+            "Fetching {} ({} so far)...",
+            resource_name,
+            all_items.len()
+        ));
 
-        let response = match agent
+        let mut response = match agent
             .get(&url)
-            .set("Authorization", &format!("Bearer {}", access_token))
+            .header("Authorization", &format!("Bearer {}", access_token))
             .call()
         {
             Ok(r) => r,
@@ -403,13 +414,16 @@ fn fetch_paginated<T: serde::de::DeserializeOwned>(
             }
         };
 
-        let body: serde_json::Value = match response.into_json() {
+        let body: serde_json::Value = match response.body_mut().read_json() {
             Ok(v) => v,
             Err(e) => {
                 if !all_items.is_empty() {
                     break;
                 }
-                return Err(ProviderError::Parse(format!("{} response: {}", resource_name, e)));
+                return Err(ProviderError::Parse(format!(
+                    "{} response: {}",
+                    resource_name, e
+                )));
             }
         };
 
@@ -489,12 +503,7 @@ impl Provider for Azure {
                 return Err(ProviderError::Cancelled);
             }
 
-            progress(&format!(
-                "Subscription {}/{} ({})...",
-                i + 1,
-                total,
-                sub
-            ));
+            progress(&format!("Subscription {}/{} ({})...", i + 1, total, sub));
 
             match self.fetch_subscription(&agent, &access_token, sub, cancel, progress) {
                 Ok(hosts) => all_hosts.extend(hosts),
@@ -564,8 +573,14 @@ impl Azure {
             "https://management.azure.com/subscriptions/{}/providers/Microsoft.Network/publicIPAddresses?api-version=2024-05-01",
             subscription_id
         );
-        let public_ips: Vec<PublicIp> =
-            fetch_paginated(agent, &pip_url, access_token, cancel, "public IPs", progress)?;
+        let public_ips: Vec<PublicIp> = fetch_paginated(
+            agent,
+            &pip_url,
+            access_token,
+            cancel,
+            "public IPs",
+            progress,
+        )?;
 
         // Build lookup maps (case-insensitive Azure resource IDs)
         let nic_map: HashMap<String, &Nic> = nics
@@ -619,19 +634,33 @@ mod tests {
 
     #[test]
     fn test_valid_subscription_id() {
-        assert!(is_valid_subscription_id("12345678-1234-1234-1234-123456789012"));
-        assert!(is_valid_subscription_id("abcdef00-1234-5678-9abc-def012345678"));
-        assert!(is_valid_subscription_id("ABCDEF00-1234-5678-9ABC-DEF012345678"));
+        assert!(is_valid_subscription_id(
+            "12345678-1234-1234-1234-123456789012"
+        ));
+        assert!(is_valid_subscription_id(
+            "abcdef00-1234-5678-9abc-def012345678"
+        ));
+        assert!(is_valid_subscription_id(
+            "ABCDEF00-1234-5678-9ABC-DEF012345678"
+        ));
     }
 
     #[test]
     fn test_invalid_subscription_id() {
         assert!(!is_valid_subscription_id(""));
         assert!(!is_valid_subscription_id("not-a-uuid"));
-        assert!(!is_valid_subscription_id("12345678-1234-1234-1234-12345678901")); // too short last segment
-        assert!(!is_valid_subscription_id("12345678-1234-1234-1234-1234567890123")); // too long
-        assert!(!is_valid_subscription_id("1234567g-1234-1234-1234-123456789012")); // 'g' not hex
-        assert!(!is_valid_subscription_id("12345678123412341234123456789012")); // no dashes
+        assert!(!is_valid_subscription_id(
+            "12345678-1234-1234-1234-12345678901"
+        )); // too short last segment
+        assert!(!is_valid_subscription_id(
+            "12345678-1234-1234-1234-1234567890123"
+        )); // too long
+        assert!(!is_valid_subscription_id(
+            "1234567g-1234-1234-1234-123456789012"
+        )); // 'g' not hex
+        assert!(!is_valid_subscription_id(
+            "12345678123412341234123456789012"
+        )); // no dashes
     }
 
     #[test]
@@ -705,7 +734,10 @@ mod tests {
     #[test]
     fn test_sp_file_missing_fields() {
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("purple_test_sp_incomplete_{}.json", std::process::id()));
+        let path = dir.join(format!(
+            "purple_test_sp_incomplete_{}.json",
+            std::process::id()
+        ));
         std::fs::write(&path, r#"{"tenantId":"t"}"#).unwrap();
         let result = resolve_sp_token(path.to_str().unwrap());
         std::fs::remove_file(&path).ok();
@@ -720,7 +752,10 @@ mod tests {
     #[test]
     fn test_sp_file_invalid_json() {
         let dir = std::env::temp_dir();
-        let path = dir.join(format!("purple_test_sp_invalid_{}.json", std::process::id()));
+        let path = dir.join(format!(
+            "purple_test_sp_invalid_{}.json",
+            std::process::id()
+        ));
         std::fs::write(&path, "not json at all").unwrap();
         let result = resolve_sp_token(path.to_str().unwrap());
         std::fs::remove_file(&path).ok();
@@ -894,25 +929,28 @@ mod tests {
     fn test_select_ip_prefers_public() {
         let vm = make_vm(vec![("/nic1", true)]);
         let nic = make_nic("/nic1", "10.0.0.4", Some("/pip1"));
-        let nic_map: HashMap<String, &Nic> =
-            [("/nic1".to_string(), &nic)].into_iter().collect();
-        let pip_map: HashMap<String, String> =
-            [("/pip1".to_string(), "52.168.1.1".to_string())]
-                .into_iter()
-                .collect();
+        let nic_map: HashMap<String, &Nic> = [("/nic1".to_string(), &nic)].into_iter().collect();
+        let pip_map: HashMap<String, String> = [("/pip1".to_string(), "52.168.1.1".to_string())]
+            .into_iter()
+            .collect();
 
-        assert_eq!(select_ip(&vm, &nic_map, &pip_map), Some("52.168.1.1".to_string()));
+        assert_eq!(
+            select_ip(&vm, &nic_map, &pip_map),
+            Some("52.168.1.1".to_string())
+        );
     }
 
     #[test]
     fn test_select_ip_falls_back_to_private() {
         let vm = make_vm(vec![("/nic1", true)]);
         let nic = make_nic("/nic1", "10.0.0.4", None);
-        let nic_map: HashMap<String, &Nic> =
-            [("/nic1".to_string(), &nic)].into_iter().collect();
+        let nic_map: HashMap<String, &Nic> = [("/nic1".to_string(), &nic)].into_iter().collect();
         let pip_map: HashMap<String, String> = HashMap::new();
 
-        assert_eq!(select_ip(&vm, &nic_map, &pip_map), Some("10.0.0.4".to_string()));
+        assert_eq!(
+            select_ip(&vm, &nic_map, &pip_map),
+            Some("10.0.0.4".to_string())
+        );
     }
 
     #[test]
@@ -945,28 +983,38 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let pip_map: HashMap<String, String> =
-            [("/pip1".to_string(), "52.168.1.1".to_string())]
-                .into_iter()
-                .collect();
+        let pip_map: HashMap<String, String> = [("/pip1".to_string(), "52.168.1.1".to_string())]
+            .into_iter()
+            .collect();
 
-        assert_eq!(select_ip(&vm, &nic_map, &pip_map), Some("52.168.1.1".to_string()));
+        assert_eq!(
+            select_ip(&vm, &nic_map, &pip_map),
+            Some("52.168.1.1".to_string())
+        );
     }
 
     #[test]
     fn test_select_ip_case_insensitive_ids() {
         let vm = make_vm(vec![("/Subscriptions/Sub/NIC1", true)]);
-        let nic = make_nic("/subscriptions/sub/nic1", "10.0.0.4", Some("/Subscriptions/Sub/PIP1"));
-        let nic_map: HashMap<String, &Nic> =
-            [("/subscriptions/sub/nic1".to_string(), &nic)]
-                .into_iter()
-                .collect();
-        let pip_map: HashMap<String, String> =
-            [("/subscriptions/sub/pip1".to_string(), "52.168.1.1".to_string())]
-                .into_iter()
-                .collect();
+        let nic = make_nic(
+            "/subscriptions/sub/nic1",
+            "10.0.0.4",
+            Some("/Subscriptions/Sub/PIP1"),
+        );
+        let nic_map: HashMap<String, &Nic> = [("/subscriptions/sub/nic1".to_string(), &nic)]
+            .into_iter()
+            .collect();
+        let pip_map: HashMap<String, String> = [(
+            "/subscriptions/sub/pip1".to_string(),
+            "52.168.1.1".to_string(),
+        )]
+        .into_iter()
+        .collect();
 
-        assert_eq!(select_ip(&vm, &nic_map, &pip_map), Some("52.168.1.1".to_string()));
+        assert_eq!(
+            select_ip(&vm, &nic_map, &pip_map),
+            Some("52.168.1.1".to_string())
+        );
     }
 
     // =========================================================================
@@ -1024,7 +1072,10 @@ mod tests {
             sku: Some("22_04-lts".to_string()),
             id: None,
         });
-        assert_eq!(build_os_string(&img), Some("UbuntuServer-22_04-lts".to_string()));
+        assert_eq!(
+            build_os_string(&img),
+            Some("UbuntuServer-22_04-lts".to_string())
+        );
     }
 
     #[test]
@@ -1164,10 +1215,12 @@ mod tests {
     fn test_select_ip_pip_not_in_map_falls_back_to_private() {
         let vm = make_vm(vec![("/nic1", true)]);
         let nic = make_nic("/nic1", "10.0.0.4", Some("/pip-missing"));
-        let nic_map: HashMap<String, &Nic> =
-            [("/nic1".to_string(), &nic)].into_iter().collect();
+        let nic_map: HashMap<String, &Nic> = [("/nic1".to_string(), &nic)].into_iter().collect();
         let pip_map: HashMap<String, String> = HashMap::new();
-        assert_eq!(select_ip(&vm, &nic_map, &pip_map), Some("10.0.0.4".to_string()));
+        assert_eq!(
+            select_ip(&vm, &nic_map, &pip_map),
+            Some("10.0.0.4".to_string())
+        );
     }
 
     #[test]
@@ -1196,15 +1249,16 @@ mod tests {
         let vm = make_vm(vec![("/nic1", false), ("/nic2", false)]);
         let nic1 = make_nic("/nic1", "10.0.0.4", None);
         let nic2 = make_nic("/nic2", "10.0.0.5", None);
-        let nic_map: HashMap<String, &Nic> = [
-            ("/nic1".to_string(), &nic1),
-            ("/nic2".to_string(), &nic2),
-        ]
-        .into_iter()
-        .collect();
+        let nic_map: HashMap<String, &Nic> =
+            [("/nic1".to_string(), &nic1), ("/nic2".to_string(), &nic2)]
+                .into_iter()
+                .collect();
         let pip_map: HashMap<String, String> = HashMap::new();
         // No primary NIC, should fall back to first
-        assert_eq!(select_ip(&vm, &nic_map, &pip_map), Some("10.0.0.4".to_string()));
+        assert_eq!(
+            select_ip(&vm, &nic_map, &pip_map),
+            Some("10.0.0.4".to_string())
+        );
     }
 
     #[test]
@@ -1287,7 +1341,10 @@ mod tests {
             tags: None,
             properties: VmProperties::default(),
         };
-        assert!(vm.properties.vm_id.is_empty(), "Default VmProperties should have empty vm_id");
+        assert!(
+            vm.properties.vm_id.is_empty(),
+            "Default VmProperties should have empty vm_id"
+        );
         // The actual skip happens in fetch_subscription:
         // if vm.properties.vm_id.is_empty() { continue; }
         // We verify the condition that triggers it.
@@ -1345,14 +1402,14 @@ mod tests {
     fn test_select_ip_pip_empty_address_falls_back_to_private() {
         let vm = make_vm(vec![("/nic1", true)]);
         let nic = make_nic("/nic1", "10.0.0.4", Some("/pip1"));
-        let nic_map: HashMap<String, &Nic> =
-            [("/nic1".to_string(), &nic)].into_iter().collect();
+        let nic_map: HashMap<String, &Nic> = [("/nic1".to_string(), &nic)].into_iter().collect();
         // Public IP exists in map but has empty address
         let pip_map: HashMap<String, String> =
-            [("/pip1".to_string(), String::new())]
-                .into_iter()
-                .collect();
-        assert_eq!(select_ip(&vm, &nic_map, &pip_map), Some("10.0.0.4".to_string()));
+            [("/pip1".to_string(), String::new())].into_iter().collect();
+        assert_eq!(
+            select_ip(&vm, &nic_map, &pip_map),
+            Some("10.0.0.4".to_string())
+        );
     }
 
     #[test]
@@ -1364,8 +1421,7 @@ mod tests {
                 ip_configurations: vec![],
             },
         };
-        let nic_map: HashMap<String, &Nic> =
-            [("/nic1".to_string(), &nic)].into_iter().collect();
+        let nic_map: HashMap<String, &Nic> = [("/nic1".to_string(), &nic)].into_iter().collect();
         let pip_map: HashMap<String, String> = HashMap::new();
         assert_eq!(select_ip(&vm, &nic_map, &pip_map), None);
     }
@@ -1394,11 +1450,13 @@ mod tests {
                 ],
             },
         };
-        let nic_map: HashMap<String, &Nic> =
-            [("/nic1".to_string(), &nic)].into_iter().collect();
+        let nic_map: HashMap<String, &Nic> = [("/nic1".to_string(), &nic)].into_iter().collect();
         let pip_map: HashMap<String, String> = HashMap::new();
         // No primary IP config, should fall back to first
-        assert_eq!(select_ip(&vm, &nic_map, &pip_map), Some("10.0.0.4".to_string()));
+        assert_eq!(
+            select_ip(&vm, &nic_map, &pip_map),
+            Some("10.0.0.4".to_string())
+        );
     }
 
     // =========================================================================
@@ -1424,5 +1482,390 @@ mod tests {
             Err(ProviderError::Http(msg)) => assert!(msg.contains("No Azure subscriptions")),
             other => panic!("Expected Http error, got: {:?}", other),
         }
+    }
+
+    // =========================================================================
+    // Token response deserialization (simulates read_json for OAuth2 exchange)
+    // =========================================================================
+
+    #[test]
+    fn test_azure_token_response_deserialize() {
+        let json =
+            r#"{"access_token": "eyJ0eXAi.abc.def", "token_type": "Bearer", "expires_in": 3599}"#;
+        let resp: TokenResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.access_token, "eyJ0eXAi.abc.def");
+    }
+
+    #[test]
+    fn test_azure_token_response_missing_token_fails() {
+        let json = r#"{"token_type": "Bearer", "expires_in": 3599}"#;
+        assert!(serde_json::from_str::<TokenResponse>(json).is_err());
+    }
+
+    // =========================================================================
+    // ureq v3 send_form API pattern test
+    // =========================================================================
+
+    #[test]
+    fn test_send_form_array_syntax_with_owned_strings() {
+        // Verify the v3 send_form([...]) syntax with .as_str() on owned Strings
+        let client_id = "app-id-123".to_string();
+        let client_secret = "secret-456".to_string();
+        let form_data: [(&str, &str); 4] = [
+            ("grant_type", "client_credentials"),
+            ("client_id", client_id.as_str()),
+            ("client_secret", client_secret.as_str()),
+            ("scope", "https://management.azure.com/.default"),
+        ];
+        assert_eq!(form_data.len(), 4);
+        assert_eq!(form_data[1].1, "app-id-123");
+        assert_eq!(form_data[2].1, "secret-456");
+    }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_oauth2_token_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/test-tenant/oauth2/v2.0/token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"access_token": "test-token-abc", "token_type": "Bearer", "expires_in": 3600}"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/test-tenant/oauth2/v2.0/token", server.url());
+        let mut resp = agent
+            .post(&url)
+            .send_form([
+                ("grant_type", "client_credentials"),
+                ("client_id", "app-id"),
+                ("client_secret", "secret"),
+                ("scope", "https://management.azure.com/.default"),
+            ])
+            .unwrap();
+        let token_resp: TokenResponse = resp.body_mut().read_json().unwrap();
+
+        assert_eq!(token_resp.access_token, "test-token-abc");
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_oauth2_token_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/test-tenant/oauth2/v2.0/token")
+            .with_status(401)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"error": "invalid_client"}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/test-tenant/oauth2/v2.0/token", server.url());
+        let result = agent.post(&url).send_form([
+            ("grant_type", "client_credentials"),
+            ("client_id", "bad-id"),
+            ("client_secret", "bad-secret"),
+            ("scope", "https://management.azure.com/.default"),
+        ]);
+
+        assert!(result.is_err());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_vms_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines",
+            )
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api-version".into(), "2024-07-01".into()),
+                mockito::Matcher::UrlEncoded("$expand".into(), "instanceView".into()),
+            ]))
+            .match_header("Authorization", "Bearer test-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [
+                        {
+                            "name": "web-01",
+                            "location": "eastus",
+                            "tags": {"env": "prod"},
+                            "properties": {
+                                "vmId": "abc-123",
+                                "hardwareProfile": {"vmSize": "Standard_B1s"},
+                                "storageProfile": {
+                                    "imageReference": {
+                                        "offer": "UbuntuServer",
+                                        "sku": "22_04-lts"
+                                    }
+                                },
+                                "networkProfile": {
+                                    "networkInterfaces": [
+                                        {"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic1"}
+                                    ]
+                                },
+                                "instanceView": {
+                                    "statuses": [
+                                        {"code": "ProvisioningState/succeeded"},
+                                        {"code": "PowerState/running"}
+                                    ]
+                                }
+                            }
+                        }
+                    ],
+                    "nextLink": null
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01&$expand=instanceView",
+            server.url()
+        );
+        let resp: VmListResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.value.len(), 1);
+        let vm = &resp.value[0];
+        assert_eq!(vm.name, "web-01");
+        assert_eq!(vm.location, "eastus");
+        assert_eq!(vm.properties.vm_id, "abc-123");
+        assert_eq!(
+            vm.properties.hardware_profile.as_ref().unwrap().vm_size,
+            "Standard_B1s"
+        );
+        assert_eq!(
+            vm.properties
+                .storage_profile
+                .as_ref()
+                .unwrap()
+                .image_reference
+                .as_ref()
+                .unwrap()
+                .offer
+                .as_deref(),
+            Some("UbuntuServer")
+        );
+        assert!(resp.next_link.is_none());
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_vms_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines",
+            )
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("api-version".into(), "2024-07-01".into()),
+                mockito::Matcher::UrlEncoded("$expand".into(), "instanceView".into()),
+            ]))
+            .match_header("Authorization", "Bearer tk")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [{"name": "vm-a", "properties": {"vmId": "id-a"}}],
+                    "nextLink": "NEXT_URL_PLACEHOLDER"
+                }"#,
+            )
+            .create();
+
+        let page2 = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines",
+            )
+            .match_query(mockito::Matcher::AllOf(vec![mockito::Matcher::UrlEncoded(
+                "page".into(),
+                "2".into(),
+            )]))
+            .match_header("Authorization", "Bearer tk")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [{"name": "vm-b", "properties": {"vmId": "id-b"}}]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        // Page 1
+        let r1: VmListResponse = agent
+            .get(&format!(
+                "{}/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01&$expand=instanceView",
+                server.url()
+            ))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r1.value.len(), 1);
+        assert_eq!(r1.value[0].name, "vm-a");
+        assert!(r1.next_link.is_some());
+
+        // Page 2
+        let r2: VmListResponse = agent
+            .get(&format!(
+                "{}/subscriptions/sub-123/providers/Microsoft.Compute/virtualMachines?page=2",
+                server.url()
+            ))
+            .header("Authorization", "Bearer tk")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+        assert_eq!(r2.value.len(), 1);
+        assert_eq!(r2.value[0].name, "vm-b");
+        assert!(r2.next_link.is_none());
+
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn test_http_list_nics_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Network/networkInterfaces",
+            )
+            .match_query(mockito::Matcher::UrlEncoded(
+                "api-version".into(),
+                "2024-05-01".into(),
+            ))
+            .match_header("Authorization", "Bearer test-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [
+                        {
+                            "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic1",
+                            "properties": {
+                                "ipConfigurations": [
+                                    {
+                                        "properties": {
+                                            "privateIPAddress": "10.0.0.4",
+                                            "publicIPAddress": {
+                                                "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip1"
+                                            },
+                                            "primary": true
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/subscriptions/sub-123/providers/Microsoft.Network/networkInterfaces?api-version=2024-05-01",
+            server.url()
+        );
+        let resp: NicListResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.value.len(), 1);
+        let nic = &resp.value[0];
+        assert!(nic.id.contains("nic1"));
+        let ip_config = &nic.properties.ip_configurations[0];
+        assert_eq!(
+            ip_config.properties.private_ip_address,
+            Some("10.0.0.4".to_string())
+        );
+        assert!(ip_config.properties.public_ip_address.is_some());
+        assert_eq!(ip_config.properties.primary, Some(true));
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_list_public_ips_roundtrip() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock(
+                "GET",
+                "/subscriptions/sub-123/providers/Microsoft.Network/publicIPAddresses",
+            )
+            .match_query(mockito::Matcher::UrlEncoded(
+                "api-version".into(),
+                "2024-05-01".into(),
+            ))
+            .match_header("Authorization", "Bearer test-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "value": [
+                        {
+                            "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip1",
+                            "properties": {"ipAddress": "52.168.1.1"}
+                        },
+                        {
+                            "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/publicIPAddresses/pip2",
+                            "properties": {"ipAddress": "52.168.1.2"}
+                        }
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!(
+            "{}/subscriptions/sub-123/providers/Microsoft.Network/publicIPAddresses?api-version=2024-05-01",
+            server.url()
+        );
+        let resp: PublicIpListResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer test-token")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.value.len(), 2);
+        assert_eq!(
+            resp.value[0].properties.ip_address,
+            Some("52.168.1.1".to_string())
+        );
+        assert_eq!(
+            resp.value[1].properties.ip_address,
+            Some("52.168.1.2".to_string())
+        );
+        mock.assert();
     }
 }

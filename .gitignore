@@ -10,13 +10,6 @@
 .Trashes
 Icon?
 
-# Claude Code
-CLAUDE.md
-.claude/
-
-# Codex
-.codex/
-
 # VHS
 demo.tape
 
@@ -27,6 +20,20 @@ demo.tape
 *.swo
 *~
 
+# Fuzz
+fuzz/artifacts/
+fuzz/corpus/
+fuzz/target/
+
+# Proptest
+proptest-regressions/
+*.proptest-regressions
+
 # Environment
 .env
 .env.*
+
+# Claude Code
+CLAUDE.md
+.claude/
+docs/

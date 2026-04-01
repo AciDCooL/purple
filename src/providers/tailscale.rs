@@ -161,10 +161,7 @@ impl Provider for Tailscale {
 }
 
 impl Tailscale {
-    fn fetch_from_cli(
-        &self,
-        cancel: &AtomicBool,
-    ) -> Result<Vec<ProviderHost>, ProviderError> {
+    fn fetch_from_cli(&self, cancel: &AtomicBool) -> Result<Vec<ProviderHost>, ProviderError> {
         let binary = find_tailscale_binary()?;
 
         let mut child = std::process::Command::new(&binary)
@@ -253,8 +250,9 @@ impl Tailscale {
             .map_err(|_| ProviderError::Parse("stdout reader thread panicked".to_string()))?
             .map_err(ProviderError::Parse)?;
 
-        let status: CliStatus = serde_json::from_str(&stdout_data)
-            .map_err(|e| ProviderError::Parse(format!("Failed to parse tailscale output: {}", e)))?;
+        let status: CliStatus = serde_json::from_str(&stdout_data).map_err(|e| {
+            ProviderError::Parse(format!("Failed to parse tailscale output: {}", e))
+        })?;
 
         Self::hosts_from_cli(status)
     }
@@ -306,7 +304,8 @@ impl Tailscale {
         // Validate token prefix
         if token.starts_with("tskey-auth-") {
             return Err(ProviderError::Execute(
-                "This is a device auth key, not an API key. Use a key starting with tskey-api-.".to_string(),
+                "This is a device auth key, not an API key. Use a key starting with tskey-api-."
+                    .to_string(),
             ));
         }
 
@@ -319,8 +318,7 @@ impl Tailscale {
         // Tailscale API keys (tskey-api-*) use HTTP Basic auth (key as username,
         // empty password). OAuth access tokens use Bearer auth.
         let auth_header = if token.starts_with("tskey-") {
-            let encoded = base64::engine::general_purpose::STANDARD
-                .encode(format!("{}:", token));
+            let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:", token));
             format!("Basic {}", encoded)
         } else {
             format!("Bearer {}", token)
@@ -328,10 +326,11 @@ impl Tailscale {
 
         let resp: ApiResponse = agent
             .get("https://api.tailscale.com/api/v2/tailnet/-/devices?fields=all")
-            .set("Authorization", &auth_header)
+            .header("Authorization", &auth_header)
             .call()
             .map_err(map_ureq_error)?
-            .into_json()
+            .body_mut()
+            .read_json()
             .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
         Self::hosts_from_api(resp)
@@ -353,7 +352,12 @@ impl Tailscale {
 
             // Use hostname, or strip FQDN from name if hostname is empty
             let name = if device.hostname.is_empty() {
-                device.name.split('.').next().unwrap_or(&device.name).to_string()
+                device
+                    .name
+                    .split('.')
+                    .next()
+                    .unwrap_or(&device.name)
+                    .to_string()
             } else {
                 device.hostname.clone()
             };
@@ -364,7 +368,11 @@ impl Tailscale {
             if !device.os.is_empty() {
                 metadata.push(("os".to_string(), device.os.clone()));
             }
-            let status_str = if device.connected_to_control { "online" } else { "offline" };
+            let status_str = if device.connected_to_control {
+                "online"
+            } else {
+                "offline"
+            };
             metadata.push(("status".to_string(), status_str.to_string()));
 
             hosts.push(ProviderHost {
@@ -409,8 +417,18 @@ mod tests {
         assert_eq!(hosts[0].name, "web-server");
         assert_eq!(hosts[0].ip, "100.64.0.1");
         assert_eq!(hosts[0].tags, vec!["server"]);
-        assert!(hosts[0].metadata.iter().any(|(k, v)| k == "os" && v == "linux"));
-        assert!(hosts[0].metadata.iter().any(|(k, v)| k == "status" && v == "online"));
+        assert!(
+            hosts[0]
+                .metadata
+                .iter()
+                .any(|(k, v)| k == "os" && v == "linux")
+        );
+        assert!(
+            hosts[0]
+                .metadata
+                .iter()
+                .any(|(k, v)| k == "status" && v == "online")
+        );
     }
 
     #[test]
@@ -521,7 +539,12 @@ mod tests {
         }"#;
         let status: CliStatus = serde_json::from_str(json).unwrap();
         let hosts = Tailscale::hosts_from_cli(status).unwrap();
-        assert!(hosts[0].metadata.iter().any(|(k, v)| k == "status" && v == "unknown"));
+        assert!(
+            hosts[0]
+                .metadata
+                .iter()
+                .any(|(k, v)| k == "status" && v == "unknown")
+        );
     }
 
     #[test]
@@ -575,8 +598,18 @@ mod tests {
         assert_eq!(hosts[0].name, "api-server");
         assert_eq!(hosts[0].ip, "100.64.0.10");
         assert_eq!(hosts[0].tags, vec!["web"]);
-        assert!(hosts[0].metadata.iter().any(|(k, v)| k == "os" && v == "linux"));
-        assert!(hosts[0].metadata.iter().any(|(k, v)| k == "status" && v == "online"));
+        assert!(
+            hosts[0]
+                .metadata
+                .iter()
+                .any(|(k, v)| k == "os" && v == "linux")
+        );
+        assert!(
+            hosts[0]
+                .metadata
+                .iter()
+                .any(|(k, v)| k == "status" && v == "online")
+        );
     }
 
     #[test]
@@ -598,7 +631,12 @@ mod tests {
         let resp: ApiResponse = serde_json::from_str(json).unwrap();
         let hosts = Tailscale::hosts_from_api(resp).unwrap();
         assert_eq!(hosts.len(), 1);
-        assert!(hosts[0].metadata.iter().any(|(k, v)| k == "status" && v == "offline"));
+        assert!(
+            hosts[0]
+                .metadata
+                .iter()
+                .any(|(k, v)| k == "status" && v == "offline")
+        );
     }
 
     #[test]
@@ -770,7 +808,12 @@ mod tests {
         let status: CliStatus = serde_json::from_str(json).unwrap();
         let hosts = Tailscale::hosts_from_cli(status).unwrap();
         assert_eq!(hosts.len(), 1);
-        assert!(hosts[0].metadata.iter().any(|(k, v)| k == "status" && v == "offline"));
+        assert!(
+            hosts[0]
+                .metadata
+                .iter()
+                .any(|(k, v)| k == "status" && v == "offline")
+        );
     }
 
     #[test]
@@ -906,6 +949,155 @@ mod tests {
         let result = ts.fetch_hosts_cancellable("tskey-auth-abc123", &cancel);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("device auth key"), "Error should mention device auth key: {}", err);
+        assert!(
+            err.contains("device auth key"),
+            "Error should mention device auth key: {}",
+            err
+        );
+    }
+
+    // =========================================================================
+    // HTTP roundtrip tests (mockito)
+    // =========================================================================
+
+    #[test]
+    fn test_http_devices_roundtrip_bearer() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/v2/tailnet/-/devices")
+            .match_query(mockito::Matcher::UrlEncoded("fields".into(), "all".into()))
+            .match_header("Authorization", "Bearer oauth-token-abc123")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "devices": [
+                        {
+                            "nodeId": "nDEV123456",
+                            "hostname": "web-prod-1",
+                            "name": "web-prod-1.tailnet-abc.ts.net",
+                            "addresses": ["100.64.0.10", "fd7a:115c:a1e0::a"],
+                            "os": "linux",
+                            "authorized": true,
+                            "connectedToControl": true,
+                            "tags": ["tag:server", "tag:production"]
+                        }
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/api/v2/tailnet/-/devices?fields=all", server.url());
+        let resp: ApiResponse = agent
+            .get(&url)
+            .header("Authorization", "Bearer oauth-token-abc123")
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.devices.len(), 1);
+        let d = &resp.devices[0];
+        assert_eq!(d.node_id, "nDEV123456");
+        assert_eq!(d.hostname, "web-prod-1");
+        assert_eq!(d.os, "linux");
+        assert!(d.authorized);
+        assert!(d.connected_to_control);
+        assert_eq!(d.addresses, vec!["100.64.0.10", "fd7a:115c:a1e0::a"]);
+        assert_eq!(d.tags, vec!["tag:server", "tag:production"]);
+
+        let hosts = Tailscale::hosts_from_api(resp).unwrap();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].server_id, "nDEV123456");
+        assert_eq!(hosts[0].name, "web-prod-1");
+        assert_eq!(hosts[0].ip, "100.64.0.10");
+        assert_eq!(hosts[0].tags, vec!["server", "production"]);
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_devices_roundtrip_basic_auth() {
+        let mut server = mockito::Server::new();
+        let api_key = "tskey-api-kABC123-CNTRL";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:", api_key));
+        let expected_auth = format!("Basic {}", encoded);
+
+        let mock = server
+            .mock("GET", "/api/v2/tailnet/-/devices")
+            .match_query(mockito::Matcher::UrlEncoded("fields".into(), "all".into()))
+            .match_header("Authorization", expected_auth.as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "devices": [
+                        {
+                            "nodeId": "nBASIC789",
+                            "hostname": "db-replica",
+                            "name": "db-replica.ts.net",
+                            "addresses": ["100.64.1.20"],
+                            "os": "linux",
+                            "authorized": true,
+                            "connectedToControl": false,
+                            "tags": []
+                        }
+                    ]
+                }"#,
+            )
+            .create();
+
+        let agent = super::super::http_agent();
+        let url = format!("{}/api/v2/tailnet/-/devices?fields=all", server.url());
+        let resp: ApiResponse = agent
+            .get(&url)
+            .header("Authorization", &expected_auth)
+            .call()
+            .unwrap()
+            .body_mut()
+            .read_json()
+            .unwrap();
+
+        assert_eq!(resp.devices.len(), 1);
+        assert_eq!(resp.devices[0].node_id, "nBASIC789");
+        assert_eq!(resp.devices[0].hostname, "db-replica");
+        assert!(!resp.devices[0].connected_to_control);
+
+        let hosts = Tailscale::hosts_from_api(resp).unwrap();
+        assert_eq!(hosts[0].ip, "100.64.1.20");
+        assert!(
+            hosts[0]
+                .metadata
+                .iter()
+                .any(|(k, v)| k == "status" && v == "offline")
+        );
+        mock.assert();
+    }
+
+    #[test]
+    fn test_http_devices_auth_failure() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/api/v2/tailnet/-/devices")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"message": "Unauthorized"}"#)
+            .create();
+
+        let agent = super::super::http_agent();
+        let result = agent
+            .get(&format!(
+                "{}/api/v2/tailnet/-/devices?fields=all",
+                server.url()
+            ))
+            .header("Authorization", "Bearer bad-token")
+            .call();
+
+        match result {
+            Err(ureq::Error::StatusCode(401)) => {} // expected
+            other => panic!("expected 401 error, got {:?}", other),
+        }
+        mock.assert();
     }
 }

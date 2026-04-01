@@ -14,9 +14,10 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
         .any(|h| h.alias == alias && h.source_file.is_some());
 
     // Title
-    let mut title_spans = vec![
-        Span::styled(format!(" Tunnels for {} ", alias), theme::brand()),
-    ];
+    let mut title_spans = vec![Span::styled(
+        format!(" Tunnels for {} ", alias),
+        theme::brand(),
+    )];
     if is_active {
         title_spans.push(Span::styled("[running] ", theme::success()));
     }
@@ -24,7 +25,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
 
     // Overlay: percentage-based width, height fits content
     let item_count = app.tunnel_list.len().max(1);
-    let height = (item_count as u16 + 5).min(frame.area().height.saturating_sub(4));
+    let height = (item_count as u16 + 6).min(frame.area().height.saturating_sub(4));
     let area = {
         let r = super::centered_rect(70, 80, frame.area());
         super::centered_rect_fixed(r.width, height, frame.area())
@@ -40,7 +41,8 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     frame.render_widget(block, area);
 
     let chunks = Layout::vertical([
-        Constraint::Min(1),
+        Constraint::Min(0),
+        Constraint::Length(1),
         Constraint::Length(1),
     ])
     .split(inner);
@@ -51,10 +53,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
         } else {
             "  No tunnels. Press 'a' to add one."
         };
-        frame.render_widget(
-            Paragraph::new(msg).style(theme::muted()),
-            chunks[0],
-        );
+        frame.render_widget(Paragraph::new(msg).style(theme::muted()), chunks[0]);
     } else {
         let items: Vec<ListItem> = app
             .tunnel_list
@@ -97,43 +96,75 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
 
     // Footer
     if app.pending_tunnel_delete.is_some() {
-        super::render_footer_with_status(frame, chunks[1], vec![
-            Span::styled(" Remove tunnel? ", theme::bold()),
-            Span::styled("y", theme::accent_bold()),
-            Span::styled(" yes ", theme::muted()),
-            Span::styled("\u{2502} ", theme::muted()),
-            Span::styled("Esc", theme::accent_bold()),
-            Span::styled(" no", theme::muted()),
-        ], app);
+        super::render_footer_with_status(
+            frame,
+            chunks[2],
+            vec![
+                Span::styled(" Remove tunnel? ", theme::bold()),
+                Span::styled("y", theme::accent_bold()),
+                Span::styled(" yes ", theme::muted()),
+                Span::styled("\u{2502} ", theme::muted()),
+                Span::styled("Esc", theme::accent_bold()),
+                Span::styled(" no", theme::muted()),
+            ],
+            app,
+        );
     } else {
         let mut spans: Vec<Span<'_>> = Vec::new();
         if is_active {
-            spans.push(Span::styled(" Enter", theme::primary_action()));
-            spans.push(Span::styled(" stop ", theme::muted()));
+            let [k, l] = super::footer_primary(" Enter", " stop ");
+            spans.extend([k, l]);
         } else if !app.tunnel_list.is_empty() {
-            spans.push(Span::styled(" Enter", theme::primary_action()));
-            spans.push(Span::styled(" start ", theme::muted()));
+            let [k, l] = super::footer_primary(" Enter", " start ");
+            spans.extend([k, l]);
         }
         if !is_readonly {
             if !spans.is_empty() {
-                spans.push(Span::styled("\u{2502} ", theme::muted()));
+                spans.push(super::footer_sep());
             }
-            spans.push(Span::styled("a", theme::accent_bold()));
-            spans.push(Span::styled(" add ", theme::muted()));
+            let [k, l] = super::footer_action("a", " add ");
+            spans.extend([k, l]);
             if !app.tunnel_list.is_empty() {
-                spans.push(Span::styled("e", theme::accent_bold()));
-                spans.push(Span::styled(" edit ", theme::muted()));
-                spans.push(Span::styled("d", theme::accent_bold()));
-                spans.push(Span::styled(" delete ", theme::muted()));
+                spans.push(super::footer_sep());
+                let [k, l] = super::footer_action("e", " edit ");
+                spans.extend([k, l, super::footer_sep()]);
+                let [k, l] = super::footer_action("d", " del ");
+                spans.extend([k, l]);
             }
         }
         if spans.is_empty() {
-            spans.push(Span::styled(" Esc", theme::accent_bold()));
+            let [k, l] = super::footer_action(" Esc", " back");
+            spans.extend([k, l]);
         } else {
-            spans.push(Span::styled("\u{2502} ", theme::muted()));
-            spans.push(Span::styled("Esc", theme::accent_bold()));
+            spans.push(super::footer_sep());
+            let [k, l] = super::footer_action("Esc", " back");
+            spans.extend([k, l]);
         }
-        spans.push(Span::styled(" back", theme::muted()));
-        super::render_footer_with_status(frame, chunks[1], spans, app);
+        super::render_footer_with_status(frame, chunks[2], spans, app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::layout::{Constraint, Layout, Rect};
+
+    #[test]
+    fn layout_has_spacer_between_content_and_footer() {
+        let area = Rect::new(0, 0, 60, 20);
+        let chunks = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        // chunks[0] = content, chunks[1] = spacer, chunks[2] = footer
+        assert_eq!(chunks[1].height, 1, "spacer row should be 1 tall");
+        assert_eq!(chunks[2].height, 1, "footer row should be 1 tall");
+        assert!(
+            chunks[2].y > chunks[0].y + chunks[0].height,
+            "footer (y={}) should be below content end (y={})",
+            chunks[2].y,
+            chunks[0].y + chunks[0].height
+        );
     }
 }

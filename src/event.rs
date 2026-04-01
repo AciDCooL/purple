@@ -10,7 +10,11 @@ use crossterm::event::{self, Event as CrosstermEvent, KeyEvent, KeyEventKind};
 pub enum AppEvent {
     Key(KeyEvent),
     Tick,
-    PingResult { alias: String, reachable: bool },
+    PingResult {
+        alias: String,
+        reachable: bool,
+        generation: u64,
+    },
     SyncComplete {
         provider: String,
         hosts: Vec<crate::providers::ProviderHost>,
@@ -25,8 +29,14 @@ pub enum AppEvent {
         provider: String,
         message: String,
     },
-    SyncProgress { provider: String, message: String },
-    UpdateAvailable { version: String, headline: Option<String> },
+    SyncProgress {
+        provider: String,
+        message: String,
+    },
+    UpdateAvailable {
+        version: String,
+        headline: Option<String>,
+    },
     FileBrowserListing {
         alias: String,
         path: String,
@@ -51,6 +61,21 @@ pub enum AppEvent {
         run_id: u64,
         completed: usize,
         total: usize,
+    },
+    ContainerListing {
+        alias: String,
+        result: Result<
+            (
+                crate::containers::ContainerRuntime,
+                Vec<crate::containers::ContainerInfo>,
+            ),
+            crate::containers::ContainerError,
+        >,
+    },
+    ContainerActionComplete {
+        alias: String,
+        action: crate::containers::ContainerAction,
+        result: Result<(), String>,
     },
     PollError,
 }
@@ -91,9 +116,7 @@ impl EventHandler {
                     Ok(true) => {
                         if let Ok(evt) = event::read() {
                             match evt {
-                                CrosstermEvent::Key(key)
-                                    if key.kind == KeyEventKind::Press =>
-                                {
+                                CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
                                     if event_tx.send(AppEvent::Key(key)).is_err() {
                                         return;
                                     }
@@ -138,6 +161,17 @@ impl EventHandler {
         Ok(self.rx.recv()?)
     }
 
+    /// Try to get the next event with a timeout.
+    pub fn next_timeout(&self, timeout: Duration) -> Result<Option<AppEvent>> {
+        match self.rx.recv_timeout(timeout) {
+            Ok(event) => Ok(Some(event)),
+            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(anyhow::anyhow!("event channel disconnected"))
+            }
+        }
+    }
+
     /// Get a clone of the sender for sending events from other threads.
     pub fn sender(&self) -> mpsc::Sender<AppEvent> {
         self.tx.clone()
@@ -164,7 +198,9 @@ impl EventHandler {
                 | AppEvent::ScpComplete { .. }
                 | AppEvent::SnippetHostDone { .. }
                 | AppEvent::SnippetAllDone { .. }
-                | AppEvent::SnippetProgress { .. } => preserved.push(event),
+                | AppEvent::SnippetProgress { .. }
+                | AppEvent::ContainerListing { .. }
+                | AppEvent::ContainerActionComplete { .. } => preserved.push(event),
                 _ => {}
             }
         }

@@ -17,6 +17,11 @@ pub fn init() {
     }
 }
 
+/// Current color mode: 0 = NO_COLOR, 1 = ANSI 16, 2 = truecolor.
+pub fn color_mode() -> u8 {
+    COLOR_MODE.load(Ordering::Acquire)
+}
+
 /// Brand badge: purple background with white text. The single splash of color.
 /// Truecolor: #9333EA purple bg. ANSI 16: Magenta bg. NO_COLOR: REVERSED.
 /// Removes DIM so border_style doesn't leak through ratatui's Style::patch().
@@ -73,7 +78,6 @@ pub fn section_header() -> Style {
     Style::default().add_modifier(Modifier::BOLD)
 }
 
-
 /// Error message. Red when color is available.
 pub fn error() -> Style {
     match COLOR_MODE.load(Ordering::Acquire) {
@@ -81,9 +85,7 @@ pub fn error() -> Style {
         2 => Style::default()
             .fg(Color::Rgb(239, 68, 68))
             .add_modifier(Modifier::BOLD),
-        _ => Style::default()
-            .fg(Color::Red)
-            .add_modifier(Modifier::BOLD),
+        _ => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     }
 }
 
@@ -107,9 +109,7 @@ pub fn danger() -> Style {
         2 => Style::default()
             .fg(Color::Rgb(239, 68, 68))
             .add_modifier(Modifier::BOLD),
-        _ => Style::default()
-            .fg(Color::Red)
-            .add_modifier(Modifier::BOLD),
+        _ => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     }
 }
 
@@ -162,9 +162,7 @@ pub fn border_danger() -> Style {
         2 => Style::default()
             .fg(Color::Rgb(239, 68, 68))
             .add_modifier(Modifier::BOLD),
-        _ => Style::default()
-            .fg(Color::Red)
-            .add_modifier(Modifier::BOLD),
+        _ => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
     }
 }
 

@@ -14,8 +14,30 @@ permissions:
   contents: write
 
 jobs:
+  check:
+    name: Pre-release checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install Linux dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Run tests
+        run: cargo test --locked
+
+      - name: Run clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
   build:
     name: Build ${{ matrix.target }}
+    needs: check
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -31,7 +53,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
@@ -61,7 +83,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
 
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --locked --release --target ${{ matrix.target }}
 
       - name: Package binary
         shell: bash
@@ -84,7 +106,7 @@ jobs:
           cat "${{ env.ARCHIVE }}.sha256"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: purple-${{ matrix.target }}
           path: |
@@ -97,7 +119,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
@@ -125,7 +147,7 @@ jobs:
           printf '%s' "$NOTES" > /tmp/release_notes.md
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -158,7 +180,7 @@ jobs:
           echo "sha256_x86_64=$(sha256sum x86_64.tar.gz | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew-purple tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: erickochen/homebrew-purple
           token: ${{ secrets.HOMEBREW_PURPLE_TAP_TOKEN }}
@@ -172,7 +194,7 @@ jobs:
           mkdir -p Formula
           cat > Formula/purple.rb << EOF
           class Purple < Formula
-            desc "Fast, friendly TUI for managing SSH hosts"
+            desc "Terminal SSH client with file transfer and cloud sync"
             homepage "https://github.com/erickochen/purple"
             version "${VERSION}"
             license "MIT"

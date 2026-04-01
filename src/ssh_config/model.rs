@@ -15,6 +15,7 @@ fn provider_group_display_name(name: &str) -> &str {
         "gcp" => "GCP",
         "azure" => "Azure",
         "tailscale" => "Tailscale",
+        "oracle" => "Oracle Cloud",
         other => other,
     }
 }
@@ -93,8 +94,12 @@ pub struct HostEntry {
     pub proxy_jump: String,
     /// If this host comes from an included file, the file path.
     pub source_file: Option<PathBuf>,
-    /// Tags from purple:tags comment.
+    /// User-added tags from purple:tags comment.
     pub tags: Vec<String>,
+    /// Provider-synced tags from purple:provider_tags comment.
+    pub provider_tags: Vec<String>,
+    /// Whether a purple:provider_tags comment exists (distinguishes "never migrated" from "empty").
+    pub has_provider_tags: bool,
     /// Cloud provider label from purple:provider comment (e.g. "do", "vultr").
     pub provider: Option<String>,
     /// Number of tunnel forwarding directives.
@@ -103,6 +108,8 @@ pub struct HostEntry {
     pub askpass: Option<String>,
     /// Provider metadata from purple:meta comment (region, plan, etc.).
     pub provider_meta: Vec<(String, String)>,
+    /// Unix timestamp when the host was marked stale (disappeared from provider sync).
+    pub stale: Option<u64>,
 }
 
 impl Default for HostEntry {
@@ -116,10 +123,13 @@ impl Default for HostEntry {
             proxy_jump: String::new(),
             source_file: None,
             tags: Vec::new(),
+            provider_tags: Vec::new(),
+            has_provider_tags: false,
             provider: None,
             tunnel_count: 0,
             askpass: None,
             provider_meta: Vec::new(),
+            stale: None,
         }
     }
 }
@@ -143,6 +153,22 @@ impl HostEntry {
     }
 }
 
+/// Convenience view for pattern Host blocks in the TUI.
+#[derive(Debug, Clone, Default)]
+pub struct PatternEntry {
+    pub pattern: String,
+    pub hostname: String,
+    pub user: String,
+    pub port: u16,
+    pub identity_file: String,
+    pub proxy_jump: String,
+    pub tags: Vec<String>,
+    pub askpass: Option<String>,
+    pub source_file: Option<PathBuf>,
+    /// All non-comment directives as key-value pairs for display.
+    pub directives: Vec<(String, String)>,
+}
+
 /// Returns true if the host pattern contains wildcards, character classes,
 /// negation or whitespace-separated multi-patterns (*, ?, [], !, space/tab).
 /// These are SSH match patterns, not concrete hosts.
@@ -153,6 +179,144 @@ pub fn is_host_pattern(pattern: &str) -> bool {
         || pattern.starts_with('!')
         || pattern.contains(' ')
         || pattern.contains('\t')
+}
+
+/// Match a text string against an SSH host pattern.
+/// Supports `*` (any sequence), `?` (single char), `[charset]` (character class),
+/// `[!charset]`/`[^charset]` (negated class), `[a-z]` (ranges) and `!pattern` (negation).
+pub fn ssh_pattern_match(pattern: &str, text: &str) -> bool {
+    if let Some(rest) = pattern.strip_prefix('!') {
+        return !match_glob(rest, text);
+    }
+    match_glob(pattern, text)
+}
+
+/// Core glob matcher without negation prefix handling.
+/// Empty text only matches empty pattern.
+fn match_glob(pattern: &str, text: &str) -> bool {
+    if text.is_empty() {
+        return pattern.is_empty();
+    }
+    if pattern.is_empty() {
+        return false;
+    }
+    let pat: Vec<char> = pattern.chars().collect();
+    let txt: Vec<char> = text.chars().collect();
+    glob_match(&pat, &txt)
+}
+
+/// Iterative glob matching with star-backtracking.
+fn glob_match(pat: &[char], txt: &[char]) -> bool {
+    let mut pi = 0;
+    let mut ti = 0;
+    let mut star: Option<(usize, usize)> = None; // (pattern_pos, text_pos)
+
+    while ti < txt.len() {
+        if pi < pat.len() && pat[pi] == '?' {
+            pi += 1;
+            ti += 1;
+        } else if pi < pat.len() && pat[pi] == '*' {
+            star = Some((pi + 1, ti));
+            pi += 1;
+        } else if pi < pat.len() && pat[pi] == '[' {
+            if let Some((matches, end)) = match_char_class(pat, pi, txt[ti]) {
+                if matches {
+                    pi = end;
+                    ti += 1;
+                } else if let Some((spi, sti)) = star {
+                    let sti = sti + 1;
+                    star = Some((spi, sti));
+                    pi = spi;
+                    ti = sti;
+                } else {
+                    return false;
+                }
+            } else if let Some((spi, sti)) = star {
+                // Malformed class: backtrack
+                let sti = sti + 1;
+                star = Some((spi, sti));
+                pi = spi;
+                ti = sti;
+            } else {
+                return false;
+            }
+        } else if pi < pat.len() && pat[pi] == txt[ti] {
+            pi += 1;
+            ti += 1;
+        } else if let Some((spi, sti)) = star {
+            let sti = sti + 1;
+            star = Some((spi, sti));
+            pi = spi;
+            ti = sti;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < pat.len() && pat[pi] == '*' {
+        pi += 1;
+    }
+    pi == pat.len()
+}
+
+/// Parse and match a `[...]` character class starting at `pat[start]`.
+/// Returns `Some((matched, end_index))` where `end_index` is past `]`.
+/// Returns `None` if no closing `]` is found.
+fn match_char_class(pat: &[char], start: usize, ch: char) -> Option<(bool, usize)> {
+    let mut i = start + 1;
+    if i >= pat.len() {
+        return None;
+    }
+
+    let negate = pat[i] == '!' || pat[i] == '^';
+    if negate {
+        i += 1;
+    }
+
+    let mut matched = false;
+    while i < pat.len() && pat[i] != ']' {
+        if i + 2 < pat.len() && pat[i + 1] == '-' && pat[i + 2] != ']' {
+            let lo = pat[i];
+            let hi = pat[i + 2];
+            if ch >= lo && ch <= hi {
+                matched = true;
+            }
+            i += 3;
+        } else {
+            matched |= pat[i] == ch;
+            i += 1;
+        }
+    }
+
+    if i >= pat.len() {
+        return None;
+    }
+
+    let result = if negate { !matched } else { matched };
+    Some((result, i + 1))
+}
+
+/// Check whether a `Host` pattern matches a given alias.
+/// OpenSSH `Host` keyword matches only against the target alias typed on the
+/// command line, never against the resolved HostName.
+pub fn host_pattern_matches(host_pattern: &str, alias: &str) -> bool {
+    let patterns: Vec<&str> = host_pattern.split_whitespace().collect();
+    if patterns.is_empty() {
+        return false;
+    }
+
+    let mut any_positive_match = false;
+    for pat in &patterns {
+        if let Some(neg) = pat.strip_prefix('!') {
+            if match_glob(neg, alias) {
+                return false;
+            }
+        } else if ssh_pattern_match(pat, alias) {
+            any_positive_match = true;
+        }
+    }
+
+    any_positive_match
 }
 
 impl HostBlock {
@@ -219,6 +383,34 @@ impl HostBlock {
         Vec::new()
     }
 
+    /// Extract provider-synced tags from purple:provider_tags comment.
+    pub fn provider_tags(&self) -> Vec<String> {
+        for d in &self.directives {
+            if d.is_non_directive {
+                let trimmed = d.raw_line.trim();
+                if let Some(rest) = trimmed.strip_prefix("# purple:provider_tags ") {
+                    return rest
+                        .split(',')
+                        .map(|t| t.trim().to_string())
+                        .filter(|t| !t.is_empty())
+                        .collect();
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    /// Check if a purple:provider_tags comment exists (even if empty).
+    /// Used to distinguish "never migrated" from "migrated with no tags".
+    pub fn has_provider_tags_comment(&self) -> bool {
+        self.directives.iter().any(|d| {
+            d.is_non_directive && {
+                let t = d.raw_line.trim();
+                t == "# purple:provider_tags" || t.starts_with("# purple:provider_tags ")
+            }
+        })
+    }
+
     /// Extract provider info from purple:provider comment in directives.
     /// Returns (provider_name, server_id), e.g. ("digitalocean", "412345678").
     pub fn provider(&self) -> Option<(String, String)> {
@@ -239,7 +431,7 @@ impl HostBlock {
     pub fn set_provider(&mut self, provider_name: &str, server_id: &str) {
         let indent = self.detect_indent();
         self.directives.retain(|d| {
-            !(d.is_non_directive && d.raw_line.trim().starts_with("# purple:provider"))
+            !(d.is_non_directive && d.raw_line.trim().starts_with("# purple:provider "))
         });
         let pos = self.content_end();
         self.directives.insert(
@@ -247,7 +439,10 @@ impl HostBlock {
             Directive {
                 key: String::new(),
                 value: String::new(),
-                raw_line: format!("{}# purple:provider {}:{}", indent, provider_name, server_id),
+                raw_line: format!(
+                    "{}# purple:provider {}:{}",
+                    indent, provider_name, server_id
+                ),
                 is_non_directive: true,
             },
         );
@@ -274,7 +469,10 @@ impl HostBlock {
     pub fn set_askpass(&mut self, source: &str) {
         let indent = self.detect_indent();
         self.directives.retain(|d| {
-            !(d.is_non_directive && d.raw_line.trim().starts_with("# purple:askpass"))
+            !(d.is_non_directive && {
+                let t = d.raw_line.trim();
+                t == "# purple:askpass" || t.starts_with("# purple:askpass ")
+            })
         });
         if !source.is_empty() {
             let pos = self.content_end();
@@ -321,14 +519,17 @@ impl HostBlock {
     pub fn set_meta(&mut self, meta: &[(String, String)]) {
         let indent = self.detect_indent();
         self.directives.retain(|d| {
-            !(d.is_non_directive && d.raw_line.trim().starts_with("# purple:meta"))
+            !(d.is_non_directive && {
+                let t = d.raw_line.trim();
+                t == "# purple:meta" || t.starts_with("# purple:meta ")
+            })
         });
         if !meta.is_empty() {
             let encoded: Vec<String> = meta
                 .iter()
                 .map(|(k, v)| {
-                    let clean_k = k.replace([',', '='], "");
-                    let clean_v = v.replace(',', "");
+                    let clean_k = Self::sanitize_tag(&k.replace([',', '='], ""));
+                    let clean_v = Self::sanitize_tag(&v.replace(',', ""));
                     format!("{}={}", clean_k, clean_v)
                 })
                 .collect();
@@ -345,24 +546,121 @@ impl HostBlock {
         }
     }
 
-    /// Set tags on a host block. Replaces existing purple:tags comment or adds one.
+    /// Extract stale timestamp from purple:stale comment in directives.
+    /// Returns `None` if absent or malformed.
+    pub fn stale(&self) -> Option<u64> {
+        for d in &self.directives {
+            if d.is_non_directive {
+                let trimmed = d.raw_line.trim();
+                if let Some(rest) = trimmed.strip_prefix("# purple:stale ") {
+                    return rest.trim().parse::<u64>().ok();
+                }
+            }
+        }
+        None
+    }
+
+    /// Mark a host block as stale with a unix timestamp.
+    /// Replaces existing purple:stale comment or adds one.
+    pub fn set_stale(&mut self, timestamp: u64) {
+        let indent = self.detect_indent();
+        self.clear_stale();
+        let pos = self.content_end();
+        self.directives.insert(
+            pos,
+            Directive {
+                key: String::new(),
+                value: String::new(),
+                raw_line: format!("{}# purple:stale {}", indent, timestamp),
+                is_non_directive: true,
+            },
+        );
+    }
+
+    /// Remove stale marking from a host block.
+    pub fn clear_stale(&mut self) {
+        self.directives.retain(|d| {
+            !(d.is_non_directive && {
+                let t = d.raw_line.trim();
+                t == "# purple:stale" || t.starts_with("# purple:stale ")
+            })
+        });
+    }
+
+    /// Sanitize a tag value: strip control characters, commas (delimiter),
+    /// and Unicode format/bidi override characters. Truncate to 128 chars.
+    fn sanitize_tag(tag: &str) -> String {
+        tag.chars()
+            .filter(|c| {
+                !c.is_control()
+                    && *c != ','
+                    && !('\u{200B}'..='\u{200F}').contains(c) // zero-width, bidi marks
+                    && !('\u{202A}'..='\u{202E}').contains(c) // bidi embedding/override
+                    && !('\u{2066}'..='\u{2069}').contains(c) // bidi isolate
+                    && *c != '\u{FEFF}' // BOM/zero-width no-break space
+            })
+            .take(128)
+            .collect()
+    }
+
+    /// Set user tags on a host block. Replaces existing purple:tags comment or adds one.
     pub fn set_tags(&mut self, tags: &[String]) {
         let indent = self.detect_indent();
         self.directives.retain(|d| {
-            !(d.is_non_directive && d.raw_line.trim().starts_with("# purple:tags"))
+            !(d.is_non_directive && {
+                let t = d.raw_line.trim();
+                t == "# purple:tags" || t.starts_with("# purple:tags ")
+            })
         });
-        if !tags.is_empty() {
+        let sanitized: Vec<String> = tags
+            .iter()
+            .map(|t| Self::sanitize_tag(t))
+            .filter(|t| !t.is_empty())
+            .collect();
+        if !sanitized.is_empty() {
             let pos = self.content_end();
             self.directives.insert(
                 pos,
                 Directive {
                     key: String::new(),
                     value: String::new(),
-                    raw_line: format!("{}# purple:tags {}", indent, tags.join(",")),
+                    raw_line: format!("{}# purple:tags {}", indent, sanitized.join(",")),
                     is_non_directive: true,
                 },
             );
         }
+    }
+
+    /// Set provider-synced tags. Replaces existing purple:provider_tags comment.
+    /// Always writes the comment (even when empty) as a migration sentinel.
+    pub fn set_provider_tags(&mut self, tags: &[String]) {
+        let indent = self.detect_indent();
+        self.directives.retain(|d| {
+            !(d.is_non_directive && {
+                let t = d.raw_line.trim();
+                t == "# purple:provider_tags" || t.starts_with("# purple:provider_tags ")
+            })
+        });
+        let sanitized: Vec<String> = tags
+            .iter()
+            .map(|t| Self::sanitize_tag(t))
+            .filter(|t| !t.is_empty())
+            .collect();
+        let raw = if sanitized.is_empty() {
+            format!("{}# purple:provider_tags", indent)
+        } else {
+            format!("{}# purple:provider_tags {}", indent, sanitized.join(","))
+        };
+        let pos = self.content_end();
+        self.directives.insert(
+            pos,
+            Directive {
+                key: String::new(),
+                value: String::new(),
+                raw_line: raw,
+                is_non_directive: true,
+            },
+        );
     }
 
     /// Extract a convenience HostEntry view from this block.
@@ -391,10 +689,48 @@ impl HostBlock {
             }
         }
         entry.tags = self.tags();
+        entry.provider_tags = self.provider_tags();
+        entry.has_provider_tags = self.has_provider_tags_comment();
         entry.provider = self.provider().map(|(name, _)| name);
         entry.tunnel_count = self.tunnel_count();
         entry.askpass = self.askpass();
         entry.provider_meta = self.meta();
+        entry.stale = self.stale();
+        entry
+    }
+
+    /// Extract a convenience PatternEntry view from this block.
+    pub fn to_pattern_entry(&self) -> PatternEntry {
+        let mut entry = PatternEntry {
+            pattern: self.host_pattern.clone(),
+            hostname: String::new(),
+            user: String::new(),
+            port: 22,
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            tags: self.tags(),
+            askpass: self.askpass(),
+            source_file: None,
+            directives: Vec::new(),
+        };
+        for d in &self.directives {
+            if d.is_non_directive {
+                continue;
+            }
+            match d.key.to_ascii_lowercase().as_str() {
+                "hostname" => entry.hostname = d.value.clone(),
+                "user" => entry.user = d.value.clone(),
+                "port" => entry.port = d.value.parse().unwrap_or(22),
+                "identityfile" => {
+                    if entry.identity_file.is_empty() {
+                        entry.identity_file = d.value.clone();
+                    }
+                }
+                "proxyjump" => entry.proxy_jump = d.value.clone(),
+                _ => {}
+            }
+            entry.directives.push((d.key.clone(), d.value.clone()));
+        }
         entry
     }
 
@@ -440,6 +776,77 @@ impl SshConfigFile {
         let mut entries = Vec::new();
         Self::collect_host_entries(&self.elements, &mut entries);
         entries
+    }
+
+    /// Get all pattern entries as convenience views (including from Include files).
+    pub fn pattern_entries(&self) -> Vec<PatternEntry> {
+        let mut entries = Vec::new();
+        Self::collect_pattern_entries(&self.elements, &mut entries);
+        entries
+    }
+
+    fn collect_pattern_entries(elements: &[ConfigElement], entries: &mut Vec<PatternEntry>) {
+        for e in elements {
+            match e {
+                ConfigElement::HostBlock(block) => {
+                    if !is_host_pattern(&block.host_pattern) {
+                        continue;
+                    }
+                    entries.push(block.to_pattern_entry());
+                }
+                ConfigElement::Include(include) => {
+                    for file in &include.resolved_files {
+                        let start = entries.len();
+                        Self::collect_pattern_entries(&file.elements, entries);
+                        for entry in &mut entries[start..] {
+                            if entry.source_file.is_none() {
+                                entry.source_file = Some(file.path.clone());
+                            }
+                        }
+                    }
+                }
+                ConfigElement::GlobalLine(_) => {}
+            }
+        }
+    }
+
+    /// Find all pattern blocks that match a given host alias and hostname.
+    /// Returns entries in config order (first match first).
+    pub fn matching_patterns(&self, alias: &str) -> Vec<PatternEntry> {
+        let mut matches = Vec::new();
+        Self::collect_matching_patterns(&self.elements, alias, &mut matches);
+        matches
+    }
+
+    fn collect_matching_patterns(
+        elements: &[ConfigElement],
+        alias: &str,
+        matches: &mut Vec<PatternEntry>,
+    ) {
+        for e in elements {
+            match e {
+                ConfigElement::HostBlock(block) => {
+                    if !is_host_pattern(&block.host_pattern) {
+                        continue;
+                    }
+                    if host_pattern_matches(&block.host_pattern, alias) {
+                        matches.push(block.to_pattern_entry());
+                    }
+                }
+                ConfigElement::Include(include) => {
+                    for file in &include.resolved_files {
+                        let start = matches.len();
+                        Self::collect_matching_patterns(&file.elements, alias, matches);
+                        for entry in &mut matches[start..] {
+                            if entry.source_file.is_none() {
+                                entry.source_file = Some(file.path.clone());
+                            }
+                        }
+                    }
+                }
+                ConfigElement::GlobalLine(_) => {}
+            }
+        }
     }
 
     /// Collect all resolved Include file paths (recursively).
@@ -497,12 +904,7 @@ impl SshConfigFile {
                 }
                 // Recurse into resolved files
                 for file in &include.resolved_files {
-                    Self::collect_include_glob_dirs(
-                        &file.elements,
-                        file.path.parent(),
-                        seen,
-                        dirs,
-                    );
+                    Self::collect_include_glob_dirs(&file.elements, file.path.parent(), seen, dirs);
                 }
             }
         }
@@ -549,10 +951,10 @@ impl SshConfigFile {
         let mut idx = 0;
         while idx < self.elements.len() {
             let needs_repair = if let ConfigElement::HostBlock(block) = &self.elements[idx] {
-                block.directives.iter().any(|d| {
-                    d.is_non_directive
-                        && d.raw_line.trim().starts_with("# purple:group ")
-                })
+                block
+                    .directives
+                    .iter()
+                    .any(|d| d.is_non_directive && d.raw_line.trim().starts_with("# purple:group "))
             } else {
                 false
             };
@@ -573,8 +975,7 @@ impl SshConfigFile {
                 .directives
                 .iter()
                 .position(|d| {
-                    d.is_non_directive
-                        && d.raw_line.trim().starts_with("# purple:group ")
+                    d.is_non_directive && d.raw_line.trim().starts_with("# purple:group ")
                 })
                 .unwrap();
 
@@ -727,8 +1128,7 @@ impl SshConfigFile {
         } else {
             // No trailing patterns: append at end
             if !self.elements.is_empty() && !self.last_element_has_trailing_blank() {
-                self.elements
-                    .push(ConfigElement::GlobalLine(String::new()));
+                self.elements.push(ConfigElement::GlobalLine(String::new()));
             }
             self.elements.push(ConfigElement::HostBlock(block));
         }
@@ -837,8 +1237,7 @@ impl SshConfigFile {
                     };
                     // Preserve inline comment from original raw_line (e.g. "# production")
                     let comment_suffix = Self::extract_inline_comment(&d.raw_line, &d.key);
-                    d.raw_line =
-                        format!("{}{}{}{}{}", indent, d.key, sep, value, comment_suffix);
+                    d.raw_line = format!("{}{}{}{}{}", indent, d.key, sep, value, comment_suffix);
                 }
                 return;
             }
@@ -1073,6 +1472,18 @@ impl SshConfigFile {
         }
     }
 
+    /// Set provider-synced tags on a host block by alias.
+    pub fn set_host_provider_tags(&mut self, alias: &str, tags: &[String]) {
+        for element in &mut self.elements {
+            if let ConfigElement::HostBlock(block) = element {
+                if block.host_pattern == alias {
+                    block.set_provider_tags(tags);
+                    return;
+                }
+            }
+        }
+    }
+
     /// Set askpass source on a host block by alias.
     pub fn set_host_askpass(&mut self, alias: &str, source: &str) {
         for element in &mut self.elements {
@@ -1095,6 +1506,43 @@ impl SshConfigFile {
                 }
             }
         }
+    }
+
+    /// Mark a host as stale by alias.
+    pub fn set_host_stale(&mut self, alias: &str, timestamp: u64) {
+        for element in &mut self.elements {
+            if let ConfigElement::HostBlock(block) = element {
+                if block.host_pattern == alias {
+                    block.set_stale(timestamp);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Clear stale marking from a host by alias.
+    pub fn clear_host_stale(&mut self, alias: &str) {
+        for element in &mut self.elements {
+            if let ConfigElement::HostBlock(block) = element {
+                if block.host_pattern == alias {
+                    block.clear_stale();
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Collect all stale hosts with their timestamps.
+    pub fn stale_hosts(&self) -> Vec<(String, u64)> {
+        let mut result = Vec::new();
+        for element in &self.elements {
+            if let ConfigElement::HostBlock(block) = element {
+                if let Some(ts) = block.stale() {
+                    result.push((block.host_pattern.clone(), ts));
+                }
+            }
+        }
+        result
     }
 
     /// Delete a host entry by alias.
@@ -1136,9 +1584,10 @@ impl SshConfigFile {
     /// stays valid for re-insertion via `insert_host_at()`.
     /// Orphaned group headers (if any) are cleaned up at next startup.
     pub fn delete_host_undoable(&mut self, alias: &str) -> Option<(ConfigElement, usize)> {
-        let pos = self.elements.iter().position(|e| {
-            matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == alias)
-        })?;
+        let pos = self
+            .elements
+            .iter()
+            .position(|e| matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == alias))?;
         let element = self.elements.remove(pos);
         Some((element, pos))
     }
@@ -1191,12 +1640,14 @@ impl SshConfigFile {
     /// Swap two host blocks in the config by alias. Returns true if swap was performed.
     #[allow(dead_code)]
     pub fn swap_hosts(&mut self, alias_a: &str, alias_b: &str) -> bool {
-        let pos_a = self.elements.iter().position(|e| {
-            matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == alias_a)
-        });
-        let pos_b = self.elements.iter().position(|e| {
-            matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == alias_b)
-        });
+        let pos_a = self
+            .elements
+            .iter()
+            .position(|e| matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == alias_a));
+        let pos_b = self
+            .elements
+            .iter()
+            .position(|e| matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == alias_b));
         if let (Some(a), Some(b)) = (pos_a, pos_b) {
             if a == b {
                 return false;
@@ -1419,17 +1870,15 @@ mod tests {
 
     #[test]
     fn remove_forward_returns_true_on_match() {
-        let mut config = parse_str(
-            "Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n",
-        );
+        let mut config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n");
         assert!(config.remove_forward("myserver", "LocalForward", "8080 localhost:80"));
     }
 
     #[test]
     fn remove_forward_returns_false_on_no_match() {
-        let mut config = parse_str(
-            "Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n",
-        );
+        let mut config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n");
         assert!(!config.remove_forward("myserver", "LocalForward", "9999 localhost:99"));
     }
 
@@ -1441,26 +1890,23 @@ mod tests {
 
     #[test]
     fn has_forward_finds_match() {
-        let config = parse_str(
-            "Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n",
-        );
+        let config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n");
         assert!(config.has_forward("myserver", "LocalForward", "8080 localhost:80"));
     }
 
     #[test]
     fn has_forward_no_match() {
-        let config = parse_str(
-            "Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n",
-        );
+        let config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n");
         assert!(!config.has_forward("myserver", "LocalForward", "9999 localhost:99"));
         assert!(!config.has_forward("nohost", "LocalForward", "8080 localhost:80"));
     }
 
     #[test]
     fn has_forward_case_insensitive_key() {
-        let config = parse_str(
-            "Host myserver\n  HostName 10.0.0.1\n  localforward 8080 localhost:80\n",
-        );
+        let config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  localforward 8080 localhost:80\n");
         assert!(config.has_forward("myserver", "LocalForward", "8080 localhost:80"));
     }
 
@@ -1474,9 +1920,8 @@ mod tests {
 
     #[test]
     fn remove_forward_case_insensitive_key_match() {
-        let mut config = parse_str(
-            "Host myserver\n  HostName 10.0.0.1\n  localforward 8080 localhost:80\n",
-        );
+        let mut config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  localforward 8080 localhost:80\n");
         assert!(config.remove_forward("myserver", "LocalForward", "8080 localhost:80"));
         assert!(!config.serialize().contains("localforward"));
     }
@@ -1511,9 +1956,7 @@ mod tests {
 
     #[test]
     fn tunnel_directives_skips_malformed() {
-        let config = parse_str(
-            "Host myserver\n  LocalForward not_valid\n  DynamicForward 1080\n",
-        );
+        let config = parse_str("Host myserver\n  LocalForward not_valid\n  DynamicForward 1080\n");
         if let Some(ConfigElement::HostBlock(block)) = config.elements.first() {
             let rules = block.tunnel_directives();
             assert_eq!(rules.len(), 1);
@@ -1525,9 +1968,8 @@ mod tests {
 
     #[test]
     fn find_tunnel_directives_multi_pattern_host() {
-        let config = parse_str(
-            "Host prod staging\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n",
-        );
+        let config =
+            parse_str("Host prod staging\n  HostName 10.0.0.1\n  LocalForward 8080 localhost:80\n");
         let rules = config.find_tunnel_directives("prod");
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].bind_port, 8080);
@@ -1537,18 +1979,14 @@ mod tests {
 
     #[test]
     fn find_tunnel_directives_no_match() {
-        let config = parse_str(
-            "Host myserver\n  LocalForward 8080 localhost:80\n",
-        );
+        let config = parse_str("Host myserver\n  LocalForward 8080 localhost:80\n");
         let rules = config.find_tunnel_directives("nohost");
         assert!(rules.is_empty());
     }
 
     #[test]
     fn has_forward_exact_match() {
-        let config = parse_str(
-            "Host myserver\n  LocalForward 8080 localhost:80\n",
-        );
+        let config = parse_str("Host myserver\n  LocalForward 8080 localhost:80\n");
         assert!(config.has_forward("myserver", "LocalForward", "8080 localhost:80"));
         assert!(!config.has_forward("myserver", "LocalForward", "9090 localhost:80"));
         assert!(!config.has_forward("myserver", "RemoteForward", "8080 localhost:80"));
@@ -1557,27 +1995,21 @@ mod tests {
 
     #[test]
     fn has_forward_whitespace_normalized() {
-        let config = parse_str(
-            "Host myserver\n  LocalForward 8080  localhost:80\n",
-        );
+        let config = parse_str("Host myserver\n  LocalForward 8080  localhost:80\n");
         // Extra space in config value vs single space in query — should still match
         assert!(config.has_forward("myserver", "LocalForward", "8080 localhost:80"));
     }
 
     #[test]
     fn has_forward_multi_pattern_host() {
-        let config = parse_str(
-            "Host prod staging\n  LocalForward 8080 localhost:80\n",
-        );
+        let config = parse_str("Host prod staging\n  LocalForward 8080 localhost:80\n");
         assert!(config.has_forward("prod", "LocalForward", "8080 localhost:80"));
         assert!(config.has_forward("staging", "LocalForward", "8080 localhost:80"));
     }
 
     #[test]
     fn add_forward_multi_pattern_host() {
-        let mut config = parse_str(
-            "Host prod staging\n  HostName 10.0.0.1\n",
-        );
+        let mut config = parse_str("Host prod staging\n  HostName 10.0.0.1\n");
         config.add_forward("prod", "LocalForward", "8080 localhost:80");
         assert!(config.has_forward("prod", "LocalForward", "8080 localhost:80"));
         assert!(config.has_forward("staging", "LocalForward", "8080 localhost:80"));
@@ -1608,18 +2040,14 @@ mod tests {
 
     #[test]
     fn has_forward_tab_whitespace_normalized() {
-        let config = parse_str(
-            "Host myserver\n  LocalForward 8080\tlocalhost:80\n",
-        );
+        let config = parse_str("Host myserver\n  LocalForward 8080\tlocalhost:80\n");
         // Tab in config value vs space in query — should match via values_match
         assert!(config.has_forward("myserver", "LocalForward", "8080 localhost:80"));
     }
 
     #[test]
     fn remove_forward_tab_whitespace_normalized() {
-        let mut config = parse_str(
-            "Host myserver\n  LocalForward 8080\tlocalhost:80\n",
-        );
+        let mut config = parse_str("Host myserver\n  LocalForward 8080\tlocalhost:80\n");
         // Remove with single space should match tab-separated value
         assert!(config.remove_forward("myserver", "LocalForward", "8080 localhost:80"));
         assert!(!config.has_forward("myserver", "LocalForward", "8080 localhost:80"));
@@ -1627,9 +2055,7 @@ mod tests {
 
     #[test]
     fn upsert_preserves_space_separator_when_value_contains_equals() {
-        let mut config = parse_str(
-            "Host myserver\n  IdentityFile ~/.ssh/id=prod\n",
-        );
+        let mut config = parse_str("Host myserver\n  IdentityFile ~/.ssh/id=prod\n");
         let entry = HostEntry {
             alias: "myserver".to_string(),
             hostname: "10.0.0.1".to_string(),
@@ -1640,15 +2066,17 @@ mod tests {
         config.update_host("myserver", &entry);
         let output = config.serialize();
         // Separator should remain a space, not pick up the = from the value
-        assert!(output.contains("  IdentityFile ~/.ssh/id=staging"), "got: {}", output);
+        assert!(
+            output.contains("  IdentityFile ~/.ssh/id=staging"),
+            "got: {}",
+            output
+        );
         assert!(!output.contains("IdentityFile="), "got: {}", output);
     }
 
     #[test]
     fn upsert_preserves_equals_separator() {
-        let mut config = parse_str(
-            "Host myserver\n  IdentityFile=~/.ssh/id_rsa\n",
-        );
+        let mut config = parse_str("Host myserver\n  IdentityFile=~/.ssh/id_rsa\n");
         let entry = HostEntry {
             alias: "myserver".to_string(),
             hostname: "10.0.0.1".to_string(),
@@ -1658,14 +2086,16 @@ mod tests {
         };
         config.update_host("myserver", &entry);
         let output = config.serialize();
-        assert!(output.contains("IdentityFile=~/.ssh/id_ed25519"), "got: {}", output);
+        assert!(
+            output.contains("IdentityFile=~/.ssh/id_ed25519"),
+            "got: {}",
+            output
+        );
     }
 
     #[test]
     fn upsert_preserves_spaced_equals_separator() {
-        let mut config = parse_str(
-            "Host myserver\n  IdentityFile = ~/.ssh/id_rsa\n",
-        );
+        let mut config = parse_str("Host myserver\n  IdentityFile = ~/.ssh/id_rsa\n");
         let entry = HostEntry {
             alias: "myserver".to_string(),
             hostname: "10.0.0.1".to_string(),
@@ -1675,30 +2105,28 @@ mod tests {
         };
         config.update_host("myserver", &entry);
         let output = config.serialize();
-        assert!(output.contains("IdentityFile = ~/.ssh/id_ed25519"), "got: {}", output);
+        assert!(
+            output.contains("IdentityFile = ~/.ssh/id_ed25519"),
+            "got: {}",
+            output
+        );
     }
 
     #[test]
     fn is_included_host_false_for_main_config() {
-        let config = parse_str(
-            "Host myserver\n  HostName 10.0.0.1\n",
-        );
+        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
         assert!(!config.is_included_host("myserver"));
     }
 
     #[test]
     fn is_included_host_false_for_nonexistent() {
-        let config = parse_str(
-            "Host myserver\n  HostName 10.0.0.1\n",
-        );
+        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
         assert!(!config.is_included_host("nohost"));
     }
 
     #[test]
     fn is_included_host_multi_pattern_main_config() {
-        let config = parse_str(
-            "Host prod staging\n  HostName 10.0.0.1\n",
-        );
+        let config = parse_str("Host prod staging\n  HostName 10.0.0.1\n");
         assert!(!config.is_included_host("prod"));
         assert!(!config.is_included_host("staging"));
     }
@@ -1709,6 +2137,13 @@ mod tests {
 
     fn first_block(config: &SshConfigFile) -> &HostBlock {
         match config.elements.first().unwrap() {
+            ConfigElement::HostBlock(b) => b,
+            _ => panic!("Expected HostBlock"),
+        }
+    }
+
+    fn first_block_mut(config: &mut SshConfigFile) -> &mut HostBlock {
+        match config.elements.first_mut().unwrap() {
             ConfigElement::HostBlock(b) => b,
             _ => panic!("Expected HostBlock"),
         }
@@ -1741,32 +2176,54 @@ mod tests {
 
     #[test]
     fn askpass_returns_op_uri() {
-        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass op://Vault/Item/field\n");
-        assert_eq!(first_block(&config).askpass(), Some("op://Vault/Item/field".to_string()));
+        let config = parse_str(
+            "Host myserver\n  HostName 10.0.0.1\n  # purple:askpass op://Vault/Item/field\n",
+        );
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("op://Vault/Item/field".to_string())
+        );
     }
 
     #[test]
     fn askpass_returns_vault_with_field() {
-        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass vault:secret/ssh#password\n");
-        assert_eq!(first_block(&config).askpass(), Some("vault:secret/ssh#password".to_string()));
+        let config = parse_str(
+            "Host myserver\n  HostName 10.0.0.1\n  # purple:askpass vault:secret/ssh#password\n",
+        );
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("vault:secret/ssh#password".to_string())
+        );
     }
 
     #[test]
     fn askpass_returns_bw_source() {
-        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass bw:my-item\n");
-        assert_eq!(first_block(&config).askpass(), Some("bw:my-item".to_string()));
+        let config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass bw:my-item\n");
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("bw:my-item".to_string())
+        );
     }
 
     #[test]
     fn askpass_returns_pass_source() {
-        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass pass:ssh/prod\n");
-        assert_eq!(first_block(&config).askpass(), Some("pass:ssh/prod".to_string()));
+        let config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass pass:ssh/prod\n");
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("pass:ssh/prod".to_string())
+        );
     }
 
     #[test]
     fn askpass_returns_custom_command() {
-        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass get-pass %a %h\n");
-        assert_eq!(first_block(&config).askpass(), Some("get-pass %a %h".to_string()));
+        let config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass get-pass %a %h\n");
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("get-pass %a %h".to_string())
+        );
     }
 
     #[test]
@@ -1790,23 +2247,32 @@ mod tests {
 
     #[test]
     fn set_askpass_replaces_existing() {
-        let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
+        let mut config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
         config.set_host_askpass("myserver", "op://V/I/p");
-        assert_eq!(first_block(&config).askpass(), Some("op://V/I/p".to_string()));
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("op://V/I/p".to_string())
+        );
     }
 
     #[test]
     fn set_askpass_empty_removes_comment() {
-        let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
+        let mut config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
         config.set_host_askpass("myserver", "");
         assert_eq!(first_block(&config).askpass(), None);
     }
 
     #[test]
     fn set_askpass_preserves_other_directives() {
-        let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n  User admin\n  # purple:tags prod\n");
+        let mut config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  User admin\n  # purple:tags prod\n");
         config.set_host_askpass("myserver", "vault:secret/ssh");
-        assert_eq!(first_block(&config).askpass(), Some("vault:secret/ssh".to_string()));
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("vault:secret/ssh".to_string())
+        );
         let entry = first_block(&config).to_host_entry();
         assert_eq!(entry.user, "admin");
         assert!(entry.tags.contains(&"prod".to_string()));
@@ -1816,10 +2282,16 @@ mod tests {
     fn set_askpass_preserves_indent() {
         let mut config = parse_str("Host myserver\n    HostName 10.0.0.1\n");
         config.set_host_askpass("myserver", "keychain");
-        let raw = first_block(&config).directives.iter()
+        let raw = first_block(&config)
+            .directives
+            .iter()
             .find(|d| d.raw_line.contains("purple:askpass"))
             .unwrap();
-        assert!(raw.raw_line.starts_with("    "), "Expected 4-space indent, got: {:?}", raw.raw_line);
+        assert!(
+            raw.raw_line.starts_with("    "),
+            "Expected 4-space indent, got: {:?}",
+            raw.raw_line
+        );
     }
 
     #[test]
@@ -1849,14 +2321,20 @@ mod tests {
     fn set_askpass_vault_with_hash_field() {
         let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
         config.set_host_askpass("myserver", "vault:secret/data/team#api_key");
-        assert_eq!(first_block(&config).askpass(), Some("vault:secret/data/team#api_key".to_string()));
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("vault:secret/data/team#api_key".to_string())
+        );
     }
 
     #[test]
     fn set_askpass_custom_command_with_percent() {
         let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
         config.set_host_askpass("myserver", "get-pass %a %h");
-        assert_eq!(first_block(&config).askpass(), Some("get-pass %a %h".to_string()));
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("get-pass %a %h".to_string())
+        );
     }
 
     #[test]
@@ -1864,8 +2342,14 @@ mod tests {
         let mut config = parse_str("Host alpha\n  HostName a.com\n\nHost beta\n  HostName b.com\n");
         config.set_host_askpass("alpha", "keychain");
         config.set_host_askpass("beta", "vault:secret/ssh");
-        assert_eq!(block_by_index(&config, 0).askpass(), Some("keychain".to_string()));
-        assert_eq!(block_by_index(&config, 1).askpass(), Some("vault:secret/ssh".to_string()));
+        assert_eq!(
+            block_by_index(&config, 0).askpass(),
+            Some("keychain".to_string())
+        );
+        assert_eq!(
+            block_by_index(&config, 1).askpass(),
+            Some("vault:secret/ssh".to_string())
+        );
     }
 
     #[test]
@@ -1876,22 +2360,33 @@ mod tests {
         config.set_host_askpass("myserver", "");
         assert_eq!(first_block(&config).askpass(), None);
         config.set_host_askpass("myserver", "op://V/I/p");
-        assert_eq!(first_block(&config).askpass(), Some("op://V/I/p".to_string()));
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("op://V/I/p".to_string())
+        );
     }
 
     #[test]
     fn askpass_tab_indent_preserved() {
         let mut config = parse_str("Host myserver\n\tHostName 10.0.0.1\n");
         config.set_host_askpass("myserver", "pass:ssh/prod");
-        let raw = first_block(&config).directives.iter()
+        let raw = first_block(&config)
+            .directives
+            .iter()
             .find(|d| d.raw_line.contains("purple:askpass"))
             .unwrap();
-        assert!(raw.raw_line.starts_with("\t"), "Expected tab indent, got: {:?}", raw.raw_line);
+        assert!(
+            raw.raw_line.starts_with("\t"),
+            "Expected tab indent, got: {:?}",
+            raw.raw_line
+        );
     }
 
     #[test]
     fn askpass_coexists_with_provider_comment() {
-        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:provider do:123\n  # purple:askpass keychain\n");
+        let config = parse_str(
+            "Host myserver\n  HostName 10.0.0.1\n  # purple:provider do:123\n  # purple:askpass keychain\n",
+        );
         let block = first_block(&config);
         assert_eq!(block.askpass(), Some("keychain".to_string()));
         assert!(block.provider().is_some());
@@ -1899,7 +2394,8 @@ mod tests {
 
     #[test]
     fn set_askpass_does_not_remove_tags() {
-        let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:tags prod,staging\n");
+        let mut config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:tags prod,staging\n");
         config.set_host_askpass("myserver", "keychain");
         let entry = first_block(&config).to_host_entry();
         assert_eq!(entry.askpass, Some("keychain".to_string()));
@@ -1909,24 +2405,36 @@ mod tests {
 
     #[test]
     fn askpass_idempotent_set_same_value() {
-        let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
+        let mut config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
         config.set_host_askpass("myserver", "keychain");
         assert_eq!(first_block(&config).askpass(), Some("keychain".to_string()));
         let serialized = config.serialize();
-        assert_eq!(serialized.matches("purple:askpass").count(), 1, "Should have exactly one askpass comment");
+        assert_eq!(
+            serialized.matches("purple:askpass").count(),
+            1,
+            "Should have exactly one askpass comment"
+        );
     }
 
     #[test]
     fn askpass_with_value_containing_equals() {
         let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
         config.set_host_askpass("myserver", "cmd --opt=val %h");
-        assert_eq!(first_block(&config).askpass(), Some("cmd --opt=val %h".to_string()));
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("cmd --opt=val %h".to_string())
+        );
     }
 
     #[test]
     fn askpass_with_value_containing_hash() {
-        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass vault:a/b#c\n");
-        assert_eq!(first_block(&config).askpass(), Some("vault:a/b#c".to_string()));
+        let config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass vault:a/b#c\n");
+        assert_eq!(
+            first_block(&config).askpass(),
+            Some("vault:a/b#c".to_string())
+        );
     }
 
     #[test]
@@ -1940,7 +2448,9 @@ mod tests {
     #[test]
     fn askpass_does_not_interfere_with_host_matching() {
         // askpass is stored as a non-directive comment; it shouldn't affect SSH matching
-        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n  User root\n  # purple:askpass keychain\n");
+        let config = parse_str(
+            "Host myserver\n  HostName 10.0.0.1\n  User root\n  # purple:askpass keychain\n",
+        );
         let entry = first_block(&config).to_host_entry();
         assert_eq!(entry.user, "root");
         assert_eq!(entry.hostname, "10.0.0.1");
@@ -1969,14 +2479,17 @@ Host myserver
 
     #[test]
     fn askpass_with_crlf_line_endings() {
-        let config = parse_str("Host myserver\r\n  HostName 10.0.0.1\r\n  # purple:askpass keychain\r\n");
+        let config =
+            parse_str("Host myserver\r\n  HostName 10.0.0.1\r\n  # purple:askpass keychain\r\n");
         assert_eq!(first_block(&config).askpass(), Some("keychain".to_string()));
     }
 
     #[test]
     fn askpass_only_on_first_matching_host() {
         // If two Host blocks have the same alias (unusual), askpass comes from first
-        let config = parse_str("Host dup\n  HostName a.com\n  # purple:askpass keychain\n\nHost dup\n  HostName b.com\n  # purple:askpass vault:x\n");
+        let config = parse_str(
+            "Host dup\n  HostName a.com\n  # purple:askpass keychain\n\nHost dup\n  HostName b.com\n  # purple:askpass vault:x\n",
+        );
         let entries = config.host_entries();
         // First match
         assert_eq!(entries[0].askpass, Some("keychain".to_string()));
@@ -2037,7 +2550,10 @@ Host myserver
         let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
         config.set_host_askpass("myserver", "vault:secret/data#field");
         let entries = config.host_entries();
-        assert_eq!(entries[0].askpass, Some("vault:secret/data#field".to_string()));
+        assert_eq!(
+            entries[0].askpass,
+            Some("vault:secret/data#field".to_string())
+        );
     }
 
     #[test]
@@ -2136,10 +2652,7 @@ Host myhost
   # purple:meta region=old
 ";
         let mut config = parse_str(config_str);
-        config.set_host_meta(
-            "myhost",
-            &[("region".to_string(), "new".to_string())],
-        );
+        config.set_host_meta("myhost", &[("region".to_string(), "new".to_string())]);
         let output = config.serialize();
         assert!(!output.contains("region=old"));
         assert!(output.contains("region=new"));
@@ -2286,9 +2799,8 @@ Host myhost
 
     #[test]
     fn repair_clean_config_returns_zero() {
-        let mut config = parse_str(
-            "# purple:group Production\nHost myserver\n  HostName 10.0.0.1\n",
-        );
+        let mut config =
+            parse_str("# purple:group Production\nHost myserver\n  HostName 10.0.0.1\n");
         let count = config.repair_absorbed_group_comments();
         assert_eq!(count, 0);
     }
@@ -2366,10 +2878,14 @@ Host do-web
 ";
         let mut config = parse_str(config_str);
         config.delete_host("do-web");
-        let has_header = config.elements.iter().any(|e| {
-            matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group"))
-        });
-        assert!(!has_header, "Group header should be removed when last provider host is deleted");
+        let has_header = config
+            .elements
+            .iter()
+            .any(|e| matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group")));
+        assert!(
+            !has_header,
+            "Group header should be removed when last provider host is deleted"
+        );
     }
 
     #[test]
@@ -2389,7 +2905,10 @@ Host do-db
         let has_header = config.elements.iter().any(|e| {
             matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group DigitalOcean"))
         });
-        assert!(has_header, "Group header should be preserved when other provider hosts remain");
+        assert!(
+            has_header,
+            "Group header should be preserved when other provider hosts remain"
+        );
         assert_eq!(config.host_entries().len(), 1);
     }
 
@@ -2409,7 +2928,10 @@ Host do-web
         let has_header = config.elements.iter().any(|e| {
             matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group DigitalOcean"))
         });
-        assert!(has_header, "Group header should not be affected by deleting a non-provider host");
+        assert!(
+            has_header,
+            "Group header should not be affected by deleting a non-provider host"
+        );
         assert_eq!(config.host_entries().len(), 1);
     }
 
@@ -2427,9 +2949,10 @@ Host vultr-web
         let mut config = parse_str(config_str);
         let result = config.delete_host_undoable("vultr-web");
         assert!(result.is_some());
-        let has_header = config.elements.iter().any(|e| {
-            matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group"))
-        });
+        let has_header = config
+            .elements
+            .iter()
+            .any(|e| matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group")));
         assert!(has_header, "Group header should be kept for undo");
     }
 
@@ -2448,10 +2971,13 @@ Host aws-db
         let mut config = parse_str(config_str);
         let result = config.delete_host_undoable("aws-web");
         assert!(result.is_some());
-        let has_header = config.elements.iter().any(|e| {
-            matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group AWS EC2"))
-        });
-        assert!(has_header, "Group header preserved when other provider hosts remain (undoable)");
+        let has_header = config.elements.iter().any(
+            |e| matches!(e, ConfigElement::GlobalLine(l) if l.contains("purple:group AWS EC2")),
+        );
+        assert!(
+            has_header,
+            "Group header preserved when other provider hosts remain (undoable)"
+        );
     }
 
     #[test]
@@ -2475,7 +3001,10 @@ Host manual
         config.insert_host_at(element, pos);
         // The host should be back, group header intact, manual host accessible
         let output = config.serialize();
-        assert!(output.contains("# purple:group Vultr"), "Group header should be present");
+        assert!(
+            output.contains("# purple:group Vultr"),
+            "Group header should be present"
+        );
         assert!(output.contains("Host vultr-web"), "Host should be restored");
         assert!(output.contains("Host manual"), "Manual host should survive");
         assert_eq!(config_str, output);
@@ -2621,8 +3150,18 @@ Host *
         // cleanup (remove_orphaned_group_header) will fail to match headers
         // written by the sync engine.
         let providers = [
-            "digitalocean", "vultr", "linode", "hetzner", "upcloud",
-            "proxmox", "aws", "scaleway", "gcp", "azure", "tailscale",
+            "digitalocean",
+            "vultr",
+            "linode",
+            "hetzner",
+            "upcloud",
+            "proxmox",
+            "aws",
+            "scaleway",
+            "gcp",
+            "azure",
+            "tailscale",
+            "oracle",
         ];
         for name in &providers {
             assert_eq!(
@@ -2636,4 +3175,1091 @@ Host *
         }
     }
 
+    #[test]
+    fn test_sanitize_tag_strips_control_chars() {
+        assert_eq!(HostBlock::sanitize_tag("prod"), "prod");
+        assert_eq!(HostBlock::sanitize_tag("prod\n"), "prod");
+        assert_eq!(HostBlock::sanitize_tag("pr\x00od"), "prod");
+        assert_eq!(HostBlock::sanitize_tag("\t\r\n"), "");
+    }
+
+    #[test]
+    fn test_sanitize_tag_strips_commas() {
+        assert_eq!(HostBlock::sanitize_tag("prod,staging"), "prodstaging");
+        assert_eq!(HostBlock::sanitize_tag(",,,"), "");
+    }
+
+    #[test]
+    fn test_sanitize_tag_strips_bidi() {
+        assert_eq!(HostBlock::sanitize_tag("prod\u{202E}tset"), "prodtset");
+        assert_eq!(HostBlock::sanitize_tag("\u{200B}zero\u{FEFF}"), "zero");
+    }
+
+    #[test]
+    fn test_sanitize_tag_truncates_long() {
+        let long = "a".repeat(200);
+        assert_eq!(HostBlock::sanitize_tag(&long).len(), 128);
+    }
+
+    #[test]
+    fn test_sanitize_tag_preserves_unicode() {
+        assert_eq!(HostBlock::sanitize_tag("日本語"), "日本語");
+        assert_eq!(HostBlock::sanitize_tag("café"), "café");
+    }
+
+    // =========================================================================
+    // provider_tags parsing and has_provider_tags_comment tests
+    // =========================================================================
+
+    #[test]
+    fn test_provider_tags_parsing() {
+        let config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:provider_tags a,b,c\n");
+        let entry = first_block(&config).to_host_entry();
+        assert_eq!(entry.provider_tags, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_provider_tags_empty() {
+        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
+        let entry = first_block(&config).to_host_entry();
+        assert!(entry.provider_tags.is_empty());
+    }
+
+    #[test]
+    fn test_has_provider_tags_comment_present() {
+        let config =
+            parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:provider_tags prod\n");
+        assert!(first_block(&config).has_provider_tags_comment());
+        assert!(first_block(&config).to_host_entry().has_provider_tags);
+    }
+
+    #[test]
+    fn test_has_provider_tags_comment_sentinel() {
+        // Bare sentinel (no tags) still counts as "has provider_tags"
+        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:provider_tags\n");
+        assert!(first_block(&config).has_provider_tags_comment());
+        assert!(first_block(&config).to_host_entry().has_provider_tags);
+        assert!(
+            first_block(&config)
+                .to_host_entry()
+                .provider_tags
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn test_has_provider_tags_comment_absent() {
+        let config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
+        assert!(!first_block(&config).has_provider_tags_comment());
+        assert!(!first_block(&config).to_host_entry().has_provider_tags);
+    }
+
+    #[test]
+    fn test_set_tags_does_not_delete_provider_tags() {
+        let mut config = parse_str(
+            "Host myserver\n  HostName 10.0.0.1\n  # purple:tags user1\n  # purple:provider_tags cloud1,cloud2\n",
+        );
+        config.set_host_tags("myserver", &["newuser".to_string()]);
+        let entry = first_block(&config).to_host_entry();
+        assert_eq!(entry.tags, vec!["newuser"]);
+        assert_eq!(entry.provider_tags, vec!["cloud1", "cloud2"]);
+    }
+
+    #[test]
+    fn test_set_provider_tags_does_not_delete_user_tags() {
+        let mut config = parse_str(
+            "Host myserver\n  HostName 10.0.0.1\n  # purple:tags user1,user2\n  # purple:provider_tags old\n",
+        );
+        config.set_host_provider_tags("myserver", &["new1".to_string(), "new2".to_string()]);
+        let entry = first_block(&config).to_host_entry();
+        assert_eq!(entry.tags, vec!["user1", "user2"]);
+        assert_eq!(entry.provider_tags, vec!["new1", "new2"]);
+    }
+
+    #[test]
+    fn test_set_askpass_does_not_delete_similar_comments() {
+        // A hypothetical "# purple:askpass_backup test" should NOT be deleted by set_askpass
+        let mut config = parse_str(
+            "Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n  # purple:askpass_backup test\n",
+        );
+        config.set_host_askpass("myserver", "op://vault/item/pass");
+        let entry = first_block(&config).to_host_entry();
+        assert_eq!(entry.askpass, Some("op://vault/item/pass".to_string()));
+        // The similar-but-different comment survives
+        let serialized = config.serialize();
+        assert!(serialized.contains("purple:askpass_backup test"));
+    }
+
+    #[test]
+    fn test_set_meta_does_not_delete_similar_comments() {
+        // A hypothetical "# purple:metadata foo" should NOT be deleted by set_meta
+        let mut config = parse_str(
+            "Host myserver\n  HostName 10.0.0.1\n  # purple:meta region=us-east\n  # purple:metadata foo\n",
+        );
+        config.set_host_meta("myserver", &[("region".to_string(), "eu-west".to_string())]);
+        let serialized = config.serialize();
+        assert!(serialized.contains("purple:meta region=eu-west"));
+        assert!(serialized.contains("purple:metadata foo"));
+    }
+
+    #[test]
+    fn test_set_meta_sanitizes_control_chars() {
+        let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
+        config.set_host_meta(
+            "myserver",
+            &[
+                ("region".to_string(), "us\x00east".to_string()),
+                ("zone".to_string(), "a\u{202E}b".to_string()),
+            ],
+        );
+        let serialized = config.serialize();
+        // Control chars and bidi should be stripped from values
+        assert!(serialized.contains("region=useast"));
+        assert!(serialized.contains("zone=ab"));
+        assert!(!serialized.contains('\x00'));
+        assert!(!serialized.contains('\u{202E}'));
+    }
+
+    // ── stale tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn stale_returns_timestamp() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale 1711900000
+";
+        let config = parse_str(config_str);
+        assert_eq!(first_block(&config).stale(), Some(1711900000));
+    }
+
+    #[test]
+    fn stale_returns_none_when_absent() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n";
+        let config = parse_str(config_str);
+        assert_eq!(first_block(&config).stale(), None);
+    }
+
+    #[test]
+    fn stale_returns_none_for_malformed() {
+        for bad in &[
+            "Host w\n  HostName 1.2.3.4\n  # purple:stale abc\n",
+            "Host w\n  HostName 1.2.3.4\n  # purple:stale\n",
+            "Host w\n  HostName 1.2.3.4\n  # purple:stale -1\n",
+        ] {
+            let config = parse_str(bad);
+            assert_eq!(first_block(&config).stale(), None, "input: {bad}");
+        }
+    }
+
+    #[test]
+    fn set_stale_adds_comment() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n";
+        let mut config = parse_str(config_str);
+        first_block_mut(&mut config).set_stale(1711900000);
+        assert_eq!(first_block(&config).stale(), Some(1711900000));
+        assert!(config.serialize().contains("# purple:stale 1711900000"));
+    }
+
+    #[test]
+    fn set_stale_replaces_existing() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale 1000
+";
+        let mut config = parse_str(config_str);
+        first_block_mut(&mut config).set_stale(2000);
+        assert_eq!(first_block(&config).stale(), Some(2000));
+        let output = config.serialize();
+        assert!(!output.contains("1000"));
+        assert!(output.contains("# purple:stale 2000"));
+    }
+
+    #[test]
+    fn clear_stale_removes_comment() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale 1711900000
+";
+        let mut config = parse_str(config_str);
+        first_block_mut(&mut config).clear_stale();
+        assert_eq!(first_block(&config).stale(), None);
+        assert!(!config.serialize().contains("purple:stale"));
+    }
+
+    #[test]
+    fn clear_stale_when_absent_is_noop() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n";
+        let mut config = parse_str(config_str);
+        let before = config.serialize();
+        first_block_mut(&mut config).clear_stale();
+        assert_eq!(config.serialize(), before);
+    }
+
+    #[test]
+    fn stale_roundtrip() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale 1711900000
+";
+        let config = parse_str(config_str);
+        let output = config.serialize();
+        let config2 = parse_str(&output);
+        assert_eq!(first_block(&config2).stale(), Some(1711900000));
+    }
+
+    #[test]
+    fn stale_in_host_entry() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale 1711900000
+";
+        let config = parse_str(config_str);
+        let entry = first_block(&config).to_host_entry();
+        assert_eq!(entry.stale, Some(1711900000));
+    }
+
+    #[test]
+    fn stale_coexists_with_other_annotations() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:tags prod
+  # purple:provider do:12345
+  # purple:askpass keychain
+  # purple:meta region=nyc3
+  # purple:stale 1711900000
+";
+        let config = parse_str(config_str);
+        let entry = first_block(&config).to_host_entry();
+        assert_eq!(entry.stale, Some(1711900000));
+        assert!(entry.tags.contains(&"prod".to_string()));
+        assert_eq!(entry.provider, Some("do".to_string()));
+        assert_eq!(entry.askpass, Some("keychain".to_string()));
+        assert_eq!(entry.provider_meta[0].0, "region");
+    }
+
+    #[test]
+    fn set_host_stale_delegates() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+
+Host db
+  HostName 5.6.7.8
+";
+        let mut config = parse_str(config_str);
+        config.set_host_stale("db", 1234567890);
+        assert_eq!(config.host_entries()[1].stale, Some(1234567890));
+        assert_eq!(config.host_entries()[0].stale, None);
+    }
+
+    #[test]
+    fn clear_host_stale_delegates() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale 1711900000
+";
+        let mut config = parse_str(config_str);
+        config.clear_host_stale("web");
+        assert_eq!(first_block(&config).stale(), None);
+    }
+
+    #[test]
+    fn stale_hosts_collects_all() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale 1000
+
+Host db
+  HostName 5.6.7.8
+
+Host app
+  HostName 9.10.11.12
+  # purple:stale 2000
+";
+        let config = parse_str(config_str);
+        let stale = config.stale_hosts();
+        assert_eq!(stale.len(), 2);
+        assert_eq!(stale[0], ("web".to_string(), 1000));
+        assert_eq!(stale[1], ("app".to_string(), 2000));
+    }
+
+    #[test]
+    fn set_stale_preserves_indent() {
+        let config_str = "Host web\n\tHostName 1.2.3.4\n";
+        let mut config = parse_str(config_str);
+        first_block_mut(&mut config).set_stale(1711900000);
+        assert!(config.serialize().contains("\t# purple:stale 1711900000"));
+    }
+
+    #[test]
+    fn stale_does_not_match_similar_comments() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale_backup 999
+";
+        let config = parse_str(config_str);
+        assert_eq!(first_block(&config).stale(), None);
+    }
+
+    #[test]
+    fn stale_with_whitespace_in_timestamp() {
+        let config_str = "Host w\n  HostName 1.2.3.4\n  # purple:stale  1711900000 \n";
+        let config = parse_str(config_str);
+        assert_eq!(first_block(&config).stale(), Some(1711900000));
+    }
+
+    #[test]
+    fn stale_with_u64_max() {
+        let ts = u64::MAX;
+        let config_str = format!("Host w\n  HostName 1.2.3.4\n  # purple:stale {}\n", ts);
+        let config = parse_str(&config_str);
+        assert_eq!(first_block(&config).stale(), Some(ts));
+        // Round-trip
+        let output = config.serialize();
+        let config2 = parse_str(&output);
+        assert_eq!(first_block(&config2).stale(), Some(ts));
+    }
+
+    #[test]
+    fn stale_with_u64_overflow() {
+        let config_str = "Host w\n  HostName 1.2.3.4\n  # purple:stale 18446744073709551616\n";
+        let config = parse_str(config_str);
+        assert_eq!(first_block(&config).stale(), None);
+    }
+
+    #[test]
+    fn stale_timestamp_zero() {
+        let config_str = "Host w\n  HostName 1.2.3.4\n  # purple:stale 0\n";
+        let config = parse_str(config_str);
+        assert_eq!(first_block(&config).stale(), Some(0));
+    }
+
+    #[test]
+    fn set_host_stale_nonexistent_alias_is_noop() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n";
+        let mut config = parse_str(config_str);
+        let before = config.serialize();
+        config.set_host_stale("nonexistent", 12345);
+        assert_eq!(config.serialize(), before);
+    }
+
+    #[test]
+    fn clear_host_stale_nonexistent_alias_is_noop() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n";
+        let mut config = parse_str(config_str);
+        let before = config.serialize();
+        config.clear_host_stale("nonexistent");
+        assert_eq!(config.serialize(), before);
+    }
+
+    #[test]
+    fn stale_hosts_empty_config() {
+        let config_str = "";
+        let config = parse_str(config_str);
+        assert!(config.stale_hosts().is_empty());
+    }
+
+    #[test]
+    fn stale_hosts_no_stale() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n\nHost db\n  HostName 5.6.7.8\n";
+        let config = parse_str(config_str);
+        assert!(config.stale_hosts().is_empty());
+    }
+
+    #[test]
+    fn clear_stale_preserves_other_purple_comments() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:tags prod
+  # purple:provider do:123
+  # purple:askpass keychain
+  # purple:meta region=nyc3
+  # purple:stale 1711900000
+";
+        let mut config = parse_str(config_str);
+        config.clear_host_stale("web");
+        let entry = first_block(&config).to_host_entry();
+        assert_eq!(entry.stale, None);
+        assert!(entry.tags.contains(&"prod".to_string()));
+        assert_eq!(entry.provider, Some("do".to_string()));
+        assert_eq!(entry.askpass, Some("keychain".to_string()));
+        assert_eq!(entry.provider_meta[0].0, "region");
+    }
+
+    #[test]
+    fn set_stale_preserves_other_purple_comments() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:tags prod
+  # purple:provider do:123
+  # purple:askpass keychain
+  # purple:meta region=nyc3
+";
+        let mut config = parse_str(config_str);
+        config.set_host_stale("web", 1711900000);
+        let entry = first_block(&config).to_host_entry();
+        assert_eq!(entry.stale, Some(1711900000));
+        assert!(entry.tags.contains(&"prod".to_string()));
+        assert_eq!(entry.provider, Some("do".to_string()));
+        assert_eq!(entry.askpass, Some("keychain".to_string()));
+        assert_eq!(entry.provider_meta[0].0, "region");
+    }
+
+    #[test]
+    fn stale_multiple_comments_first_wins() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale 1000
+  # purple:stale 2000
+";
+        let config = parse_str(config_str);
+        assert_eq!(first_block(&config).stale(), Some(1000));
+    }
+
+    #[test]
+    fn set_stale_removes_multiple_stale_comments() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+  # purple:stale 1000
+  # purple:stale 2000
+";
+        let mut config = parse_str(config_str);
+        first_block_mut(&mut config).set_stale(3000);
+        assert_eq!(first_block(&config).stale(), Some(3000));
+        let output = config.serialize();
+        assert_eq!(output.matches("purple:stale").count(), 1);
+    }
+
+    #[test]
+    fn stale_absent_in_host_entry() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n";
+        let config = parse_str(config_str);
+        assert_eq!(first_block(&config).to_host_entry().stale, None);
+    }
+
+    #[test]
+    fn set_stale_four_space_indent() {
+        let config_str = "Host web\n    HostName 1.2.3.4\n";
+        let mut config = parse_str(config_str);
+        first_block_mut(&mut config).set_stale(1711900000);
+        assert!(config.serialize().contains("    # purple:stale 1711900000"));
+    }
+
+    #[test]
+    fn clear_stale_removes_bare_comment() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n  # purple:stale\n";
+        let mut config = parse_str(config_str);
+        first_block_mut(&mut config).clear_stale();
+        assert!(!config.serialize().contains("purple:stale"));
+    }
+
+    // ── SSH config integrity tests for stale operations ──────────────
+
+    #[test]
+    fn stale_preserves_blank_line_between_hosts() {
+        let config_str = "\
+Host web
+  HostName 1.2.3.4
+
+Host db
+  HostName 5.6.7.8
+";
+        let mut config = parse_str(config_str);
+        config.set_host_stale("web", 1711900000);
+        let output = config.serialize();
+        // There must still be a blank line between hosts
+        assert!(
+            output.contains("# purple:stale 1711900000\n\nHost db"),
+            "blank line between hosts lost after set_stale:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn stale_preserves_blank_line_before_group_header() {
+        let config_str = "\
+Host do-web
+  HostName 1.2.3.4
+  # purple:provider digitalocean:111
+
+# purple:group Hetzner
+
+Host hz-cache
+  HostName 9.10.11.12
+  # purple:provider hetzner:333
+";
+        let mut config = parse_str(config_str);
+        config.set_host_stale("do-web", 1711900000);
+        let output = config.serialize();
+        // There must still be a blank line before the Hetzner group header
+        assert!(
+            output.contains("\n\n# purple:group Hetzner"),
+            "blank line before group header lost after set_stale:\n{}",
+            output
+        );
+    }
+
+    #[test]
+    fn stale_set_and_clear_is_byte_identical() {
+        let config_str = "\
+Host manual
+  HostName 10.0.0.1
+  User admin
+
+# purple:group DigitalOcean
+
+Host do-web
+  HostName 1.2.3.4
+  User root
+  # purple:provider digitalocean:111
+  # purple:tags prod
+
+Host do-db
+  HostName 5.6.7.8
+  User root
+  # purple:provider digitalocean:222
+  # purple:meta region=nyc3
+
+# purple:group Hetzner
+
+Host hz-cache
+  HostName 9.10.11.12
+  User root
+  # purple:provider hetzner:333
+";
+        let original = config_str.to_string();
+        let mut config = parse_str(config_str);
+
+        // Mark stale
+        config.set_host_stale("do-db", 1711900000);
+        let after_stale = config.serialize();
+        assert_ne!(after_stale, original, "stale should change the config");
+
+        // Clear stale
+        config.clear_host_stale("do-db");
+        let after_clear = config.serialize();
+        assert_eq!(
+            after_clear, original,
+            "clearing stale must restore byte-identical config"
+        );
+    }
+
+    #[test]
+    fn stale_does_not_accumulate_blank_lines() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n\nHost db\n  HostName 5.6.7.8\n";
+        let mut config = parse_str(config_str);
+
+        // Set and clear stale 10 times
+        for _ in 0..10 {
+            config.set_host_stale("web", 1711900000);
+            config.clear_host_stale("web");
+        }
+
+        let output = config.serialize();
+        assert_eq!(
+            output, config_str,
+            "repeated set/clear must not accumulate blank lines"
+        );
+    }
+
+    #[test]
+    fn stale_preserves_all_directives_and_comments() {
+        let config_str = "\
+Host complex
+  HostName 1.2.3.4
+  User deploy
+  Port 2222
+  IdentityFile ~/.ssh/id_ed25519
+  ProxyJump bastion
+  LocalForward 8080 localhost:80
+  # purple:provider digitalocean:999
+  # purple:tags prod,us-east
+  # purple:provider_tags web-tier
+  # purple:askpass keychain
+  # purple:meta region=nyc3,plan=s-1vcpu-1gb
+  # This is a user comment
+";
+        let mut config = parse_str(config_str);
+        let entry_before = first_block(&config).to_host_entry();
+
+        config.set_host_stale("complex", 1711900000);
+        let entry_after = first_block(&config).to_host_entry();
+
+        // Every field must survive stale marking
+        assert_eq!(entry_after.hostname, entry_before.hostname);
+        assert_eq!(entry_after.user, entry_before.user);
+        assert_eq!(entry_after.port, entry_before.port);
+        assert_eq!(entry_after.identity_file, entry_before.identity_file);
+        assert_eq!(entry_after.proxy_jump, entry_before.proxy_jump);
+        assert_eq!(entry_after.tags, entry_before.tags);
+        assert_eq!(entry_after.provider_tags, entry_before.provider_tags);
+        assert_eq!(entry_after.provider, entry_before.provider);
+        assert_eq!(entry_after.askpass, entry_before.askpass);
+        assert_eq!(entry_after.provider_meta, entry_before.provider_meta);
+        assert_eq!(entry_after.tunnel_count, entry_before.tunnel_count);
+        assert_eq!(entry_after.stale, Some(1711900000));
+
+        // Clear stale and verify everything still intact
+        config.clear_host_stale("complex");
+        let entry_cleared = first_block(&config).to_host_entry();
+        assert_eq!(entry_cleared.stale, None);
+        assert_eq!(entry_cleared.hostname, entry_before.hostname);
+        assert_eq!(entry_cleared.tags, entry_before.tags);
+        assert_eq!(entry_cleared.provider, entry_before.provider);
+        assert_eq!(entry_cleared.askpass, entry_before.askpass);
+        assert_eq!(entry_cleared.provider_meta, entry_before.provider_meta);
+
+        // User comment must survive
+        assert!(config.serialize().contains("# This is a user comment"));
+    }
+
+    #[test]
+    fn stale_on_last_host_preserves_trailing_newline() {
+        let config_str = "Host web\n  HostName 1.2.3.4\n";
+        let mut config = parse_str(config_str);
+        config.set_host_stale("web", 1711900000);
+        let output = config.serialize();
+        assert!(output.ends_with('\n'), "config must end with newline");
+
+        config.clear_host_stale("web");
+        let output2 = config.serialize();
+        assert_eq!(output2, config_str);
+    }
+
+    #[test]
+    fn stale_with_crlf_preserves_line_endings() {
+        let config_str = "Host web\r\n  HostName 1.2.3.4\r\n";
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content(config_str),
+            path: std::path::PathBuf::from("/tmp/test"),
+            crlf: true,
+            bom: false,
+        };
+        let mut config = config;
+        config.set_host_stale("web", 1711900000);
+        let output = config.serialize();
+        // All lines must use CRLF
+        for line in output.split('\n') {
+            if !line.is_empty() {
+                assert!(
+                    line.ends_with('\r'),
+                    "CRLF lost after set_stale. Line: {:?}",
+                    line
+                );
+            }
+        }
+
+        config.clear_host_stale("web");
+        assert_eq!(config.serialize(), config_str);
+    }
+
+    #[test]
+    fn pattern_match_star_wildcard() {
+        assert!(ssh_pattern_match("*", "anything"));
+        assert!(ssh_pattern_match("10.30.0.*", "10.30.0.5"));
+        assert!(ssh_pattern_match("10.30.0.*", "10.30.0.100"));
+        assert!(!ssh_pattern_match("10.30.0.*", "10.30.1.5"));
+        assert!(ssh_pattern_match("*.example.com", "web.example.com"));
+        assert!(!ssh_pattern_match("*.example.com", "example.com"));
+        assert!(ssh_pattern_match("prod-*-web", "prod-us-web"));
+        assert!(!ssh_pattern_match("prod-*-web", "prod-us-api"));
+    }
+
+    #[test]
+    fn pattern_match_question_mark() {
+        assert!(ssh_pattern_match("server-?", "server-1"));
+        assert!(ssh_pattern_match("server-?", "server-a"));
+        assert!(!ssh_pattern_match("server-?", "server-10"));
+        assert!(!ssh_pattern_match("server-?", "server-"));
+    }
+
+    #[test]
+    fn pattern_match_character_class() {
+        assert!(ssh_pattern_match("server-[abc]", "server-a"));
+        assert!(ssh_pattern_match("server-[abc]", "server-c"));
+        assert!(!ssh_pattern_match("server-[abc]", "server-d"));
+        assert!(ssh_pattern_match("server-[0-9]", "server-5"));
+        assert!(!ssh_pattern_match("server-[0-9]", "server-a"));
+        assert!(ssh_pattern_match("server-[!abc]", "server-d"));
+        assert!(!ssh_pattern_match("server-[!abc]", "server-a"));
+        assert!(ssh_pattern_match("server-[^abc]", "server-d"));
+        assert!(!ssh_pattern_match("server-[^abc]", "server-a"));
+    }
+
+    #[test]
+    fn pattern_match_negation() {
+        assert!(!ssh_pattern_match("!prod-*", "prod-web"));
+        assert!(ssh_pattern_match("!prod-*", "staging-web"));
+    }
+
+    #[test]
+    fn pattern_match_exact() {
+        assert!(ssh_pattern_match("myserver", "myserver"));
+        assert!(!ssh_pattern_match("myserver", "myserver2"));
+        assert!(!ssh_pattern_match("myserver", "other"));
+    }
+
+    #[test]
+    fn pattern_match_empty() {
+        assert!(!ssh_pattern_match("", "anything"));
+        assert!(!ssh_pattern_match("*", ""));
+        assert!(ssh_pattern_match("", ""));
+    }
+
+    #[test]
+    fn host_pattern_matches_multi_pattern() {
+        assert!(host_pattern_matches("prod staging", "prod"));
+        assert!(host_pattern_matches("prod staging", "staging"));
+        assert!(!host_pattern_matches("prod staging", "dev"));
+    }
+
+    #[test]
+    fn host_pattern_matches_with_negation() {
+        assert!(host_pattern_matches(
+            "*.example.com !internal.example.com",
+            "web.example.com",
+        ));
+        assert!(!host_pattern_matches(
+            "*.example.com !internal.example.com",
+            "internal.example.com",
+        ));
+    }
+
+    #[test]
+    fn host_pattern_matches_alias_only() {
+        // OpenSSH Host keyword matches only against alias, not HostName
+        assert!(!host_pattern_matches("10.30.0.*", "production"));
+        assert!(host_pattern_matches("prod*", "production"));
+        assert!(!host_pattern_matches("staging*", "production"));
+    }
+
+    #[test]
+    fn pattern_entries_collects_wildcards() {
+        let config = parse_str(
+            "Host myserver\n  Hostname 10.0.0.1\n\nHost 10.30.0.*\n  User debian\n  ProxyJump bastion\n\nHost *\n  ServerAliveInterval 60\n",
+        );
+        let patterns = config.pattern_entries();
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0].pattern, "10.30.0.*");
+        assert_eq!(patterns[0].user, "debian");
+        assert_eq!(patterns[0].proxy_jump, "bastion");
+        assert_eq!(patterns[1].pattern, "*");
+        assert!(
+            patterns[1]
+                .directives
+                .iter()
+                .any(|(k, v)| k == "ServerAliveInterval" && v == "60")
+        );
+    }
+
+    #[test]
+    fn pattern_entries_empty_when_no_patterns() {
+        let config = parse_str("Host myserver\n  Hostname 10.0.0.1\n");
+        let patterns = config.pattern_entries();
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn matching_patterns_returns_in_config_order() {
+        let config = parse_str(
+            "Host 10.30.0.*\n  User debian\n\nHost myserver\n  Hostname 10.30.0.5\n\nHost *\n  ServerAliveInterval 60\n",
+        );
+        // "myserver" matches "*" but not "10.30.0.*" (alias-only matching)
+        let matches = config.matching_patterns("myserver");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].pattern, "*");
+    }
+
+    #[test]
+    fn matching_patterns_negation_excludes() {
+        let config = parse_str(
+            "Host * !bastion\n  ServerAliveInterval 60\n\nHost bastion\n  Hostname 10.0.0.1\n",
+        );
+        let matches = config.matching_patterns("bastion");
+        assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn pattern_entries_and_host_entries_are_disjoint() {
+        let config = parse_str(
+            "Host myserver\n  Hostname 10.0.0.1\n\nHost 10.30.0.*\n  User debian\n\nHost *\n  ServerAliveInterval 60\n",
+        );
+        let hosts = config.host_entries();
+        let patterns = config.pattern_entries();
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].alias, "myserver");
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0].pattern, "10.30.0.*");
+        assert_eq!(patterns[1].pattern, "*");
+    }
+
+    #[test]
+    fn pattern_crud_round_trip() {
+        let mut config = parse_str("Host myserver\n  Hostname 10.0.0.1\n");
+        // Add a pattern via HostEntry (the form uses HostEntry for submission)
+        let entry = HostEntry {
+            alias: "10.30.0.*".to_string(),
+            user: "debian".to_string(),
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        assert!(output.contains("Host 10.30.0.*"));
+        assert!(output.contains("User debian"));
+        // Verify it appears in pattern_entries, not host_entries
+        let reparsed = parse_str(&output);
+        assert_eq!(reparsed.host_entries().len(), 1);
+        assert_eq!(reparsed.pattern_entries().len(), 1);
+        assert_eq!(reparsed.pattern_entries()[0].pattern, "10.30.0.*");
+    }
+
+    #[test]
+    fn matching_patterns_full_ssh_semantics() {
+        let config = parse_str(
+            "Host 10.30.0.*\n  User debian\n  IdentityFile ~/.ssh/id_bootstrap\n  ProxyJump bastion\n\n\
+             Host *.internal !secret.internal\n  ForwardAgent yes\n\n\
+             Host myserver\n  Hostname 10.30.0.5\n\n\
+             Host *\n  ServerAliveInterval 60\n",
+        );
+        // "myserver" only matches "*" (alias-only, not hostname)
+        let matches = config.matching_patterns("myserver");
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].pattern, "*");
+        assert!(
+            matches[0]
+                .directives
+                .iter()
+                .any(|(k, v)| k == "ServerAliveInterval" && v == "60")
+        );
+    }
+
+    #[test]
+    fn pattern_entries_preserve_all_directives() {
+        let config = parse_str(
+            "Host *.example.com\n  User admin\n  Port 2222\n  IdentityFile ~/.ssh/id_example\n  ProxyJump gateway\n  ServerAliveInterval 30\n  ForwardAgent yes\n",
+        );
+        let patterns = config.pattern_entries();
+        assert_eq!(patterns.len(), 1);
+        let p = &patterns[0];
+        assert_eq!(p.pattern, "*.example.com");
+        assert_eq!(p.user, "admin");
+        assert_eq!(p.port, 2222);
+        assert_eq!(p.identity_file, "~/.ssh/id_example");
+        assert_eq!(p.proxy_jump, "gateway");
+        // All directives should be in the directives vec
+        assert_eq!(p.directives.len(), 6);
+        assert!(
+            p.directives
+                .iter()
+                .any(|(k, v)| k == "ForwardAgent" && v == "yes")
+        );
+        assert!(
+            p.directives
+                .iter()
+                .any(|(k, v)| k == "ServerAliveInterval" && v == "30")
+        );
+    }
+
+    // --- Pattern visibility tests ---
+
+    #[test]
+    fn roundtrip_pattern_blocks_preserved() {
+        let input = "Host myserver\n  Hostname 10.0.0.1\n  User root\n\nHost 10.30.0.*\n  User debian\n  IdentityFile ~/.ssh/id_bootstrap\n  ProxyJump bastion\n\nHost *\n  ServerAliveInterval 60\n  AddKeysToAgent yes\n";
+        let config = parse_str(input);
+        let output = config.serialize();
+        assert_eq!(
+            input, output,
+            "Pattern blocks must survive round-trip exactly"
+        );
+    }
+
+    #[test]
+    fn add_pattern_preserves_existing_config() {
+        let input = "Host myserver\n  Hostname 10.0.0.1\n\nHost otherserver\n  Hostname 10.0.0.2\n\nHost *\n  ServerAliveInterval 60\n";
+        let mut config = parse_str(input);
+        let entry = HostEntry {
+            alias: "10.30.0.*".to_string(),
+            user: "debian".to_string(),
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        // Original hosts must still be there
+        assert!(output.contains("Host myserver"));
+        assert!(output.contains("Hostname 10.0.0.1"));
+        assert!(output.contains("Host otherserver"));
+        assert!(output.contains("Hostname 10.0.0.2"));
+        // New pattern must be present
+        assert!(output.contains("Host 10.30.0.*"));
+        assert!(output.contains("User debian"));
+        // Host * must still be at the end
+        assert!(output.contains("Host *"));
+        // New pattern must be BEFORE Host * (SSH first-match-wins)
+        let new_pos = output.find("Host 10.30.0.*").unwrap();
+        let star_pos = output.find("Host *").unwrap();
+        assert!(new_pos < star_pos, "New pattern must be before Host *");
+        // Reparse and verify counts
+        let reparsed = parse_str(&output);
+        assert_eq!(reparsed.host_entries().len(), 2);
+        assert_eq!(reparsed.pattern_entries().len(), 2); // 10.30.0.* and *
+    }
+
+    #[test]
+    fn update_pattern_preserves_other_blocks() {
+        let input = "Host myserver\n  Hostname 10.0.0.1\n\nHost 10.30.0.*\n  User debian\n\nHost *\n  ServerAliveInterval 60\n";
+        let mut config = parse_str(input);
+        let updated = HostEntry {
+            alias: "10.30.0.*".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        };
+        config.update_host("10.30.0.*", &updated);
+        let output = config.serialize();
+        // Pattern updated
+        assert!(output.contains("User admin"));
+        assert!(!output.contains("User debian"));
+        // Other blocks unchanged
+        assert!(output.contains("Host myserver"));
+        assert!(output.contains("Hostname 10.0.0.1"));
+        assert!(output.contains("Host *"));
+        assert!(output.contains("ServerAliveInterval 60"));
+    }
+
+    #[test]
+    fn delete_pattern_preserves_other_blocks() {
+        let input = "Host myserver\n  Hostname 10.0.0.1\n\nHost 10.30.0.*\n  User debian\n\nHost *\n  ServerAliveInterval 60\n";
+        let mut config = parse_str(input);
+        config.delete_host("10.30.0.*");
+        let output = config.serialize();
+        assert!(!output.contains("Host 10.30.0.*"));
+        assert!(!output.contains("User debian"));
+        assert!(output.contains("Host myserver"));
+        assert!(output.contains("Hostname 10.0.0.1"));
+        assert!(output.contains("Host *"));
+        assert!(output.contains("ServerAliveInterval 60"));
+        let reparsed = parse_str(&output);
+        assert_eq!(reparsed.host_entries().len(), 1);
+        assert_eq!(reparsed.pattern_entries().len(), 1); // only Host *
+    }
+
+    #[test]
+    fn update_pattern_rename() {
+        let input = "Host *.example.com\n  User admin\n\nHost myserver\n  Hostname 10.0.0.1\n";
+        let mut config = parse_str(input);
+        let renamed = HostEntry {
+            alias: "*.prod.example.com".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        };
+        config.update_host("*.example.com", &renamed);
+        let output = config.serialize();
+        assert!(
+            !output.contains("Host *.example.com\n"),
+            "Old pattern removed"
+        );
+        assert!(
+            output.contains("Host *.prod.example.com"),
+            "New pattern present"
+        );
+        assert!(output.contains("Host myserver"), "Other host preserved");
+    }
+
+    #[test]
+    fn config_with_only_patterns() {
+        let input = "Host *.example.com\n  User admin\n\nHost *\n  ServerAliveInterval 60\n";
+        let config = parse_str(input);
+        assert!(config.host_entries().is_empty());
+        assert_eq!(config.pattern_entries().len(), 2);
+        // Round-trip
+        let output = config.serialize();
+        assert_eq!(input, output);
+    }
+
+    #[test]
+    fn host_pattern_matches_all_negative_returns_false() {
+        assert!(!host_pattern_matches("!prod !staging", "anything"));
+        assert!(!host_pattern_matches("!prod !staging", "dev"));
+    }
+
+    #[test]
+    fn host_pattern_matches_negation_only_checks_alias() {
+        // Negation matches against alias only
+        assert!(host_pattern_matches("* !10.0.0.1", "myserver"));
+        assert!(!host_pattern_matches("* !myserver", "myserver"));
+    }
+
+    #[test]
+    fn pattern_match_malformed_char_class() {
+        // Unmatched bracket: should not panic, treat as no-match
+        assert!(!ssh_pattern_match("[abc", "a"));
+        assert!(!ssh_pattern_match("[", "a"));
+        // Empty class body before ]
+        assert!(!ssh_pattern_match("[]", "a"));
+    }
+
+    #[test]
+    fn host_pattern_matches_whitespace_edge_cases() {
+        assert!(host_pattern_matches("prod  staging", "prod"));
+        assert!(host_pattern_matches("  prod  ", "prod"));
+        assert!(host_pattern_matches("prod\tstaging", "prod"));
+        assert!(!host_pattern_matches("   ", "anything"));
+        assert!(!host_pattern_matches("", "anything"));
+    }
+
+    #[test]
+    fn pattern_with_metadata_roundtrip() {
+        let input = "Host 10.30.0.*\n  User debian\n  # purple:tags internal,vpn\n  # purple:askpass keychain\n\nHost myserver\n  Hostname 10.0.0.1\n";
+        let config = parse_str(input);
+        let patterns = config.pattern_entries();
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].tags, vec!["internal", "vpn"]);
+        assert_eq!(patterns[0].askpass.as_deref(), Some("keychain"));
+        // Round-trip
+        let output = config.serialize();
+        assert_eq!(input, output);
+    }
+
+    #[test]
+    fn matching_patterns_multiple_in_config_order() {
+        // Use alias-based patterns that match the alias "my-10-server"
+        let input = "Host my-*\n  User fallback\n\nHost my-10*\n  User team\n\nHost my-10-*\n  User specific\n\nHost other\n  Hostname 10.30.0.5\n\nHost *\n  ServerAliveInterval 60\n";
+        let config = parse_str(input);
+        let matches = config.matching_patterns("my-10-server");
+        assert_eq!(matches.len(), 4);
+        assert_eq!(matches[0].pattern, "my-*");
+        assert_eq!(matches[1].pattern, "my-10*");
+        assert_eq!(matches[2].pattern, "my-10-*");
+        assert_eq!(matches[3].pattern, "*");
+    }
+
+    #[test]
+    fn add_pattern_to_empty_config() {
+        let mut config = parse_str("");
+        let entry = HostEntry {
+            alias: "*.example.com".to_string(),
+            user: "admin".to_string(),
+            ..Default::default()
+        };
+        config.add_host(&entry);
+        let output = config.serialize();
+        assert!(output.contains("Host *.example.com"));
+        assert!(output.contains("User admin"));
+        let reparsed = parse_str(&output);
+        assert!(reparsed.host_entries().is_empty());
+        assert_eq!(reparsed.pattern_entries().len(), 1);
+    }
 }

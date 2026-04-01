@@ -1,0 +1,18 @@
+Host web-1
+    HostName 10.0.1.5
+    User deploy
+    Port 22
+    IdentityFile ~/.ssh/id_ed25519
+    # purple:tags prod,us-east
+    # purple:provider aws:i-abc123
+    # purple:meta region=us-east-1,instance=t3.micro
+
+Host db-1
+    HostName 10.0.2.10
+    User admin
+    Port 5432
+    # purple:tags prod,database
+
+Host dev-*
+    HostName 10.0.3.%h
+    User dev

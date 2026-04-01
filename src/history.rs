@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::fs_util;
 
 /// Timestamps older than this are pruned on load and after each record().
-const RETENTION_SECS: u64 = 90 * 86400;
+const RETENTION_SECS: u64 = 365 * 86400;
 
 /// Hard cap on stored timestamps per host to bound memory and serialisation cost.
 const MAX_TIMESTAMPS: usize = 10_000;
@@ -17,7 +17,7 @@ pub struct HistoryEntry {
     pub alias: String,
     pub last_connected: u64,
     pub count: u32,
-    /// Individual connection timestamps (last 90 days) for activity charts.
+    /// Individual connection timestamps (last 365 days) for activity charts.
     pub timestamps: Vec<u64>,
 }
 
@@ -140,15 +140,15 @@ impl ConnectionHistory {
             .as_secs();
         let diff = now.saturating_sub(timestamp);
         if diff < 60 {
-            "<1m ago".to_string()
+            "<1m".to_string()
         } else if diff < 3600 {
-            format!("{}m ago", diff / 60)
+            format!("{}m", diff / 60)
         } else if diff < 86400 {
-            format!("{}h ago", diff / 3600)
+            format!("{}h", diff / 3600)
         } else if diff < 604800 {
-            format!("{}d ago", diff / 86400)
+            format!("{}d", diff / 86400)
         } else {
-            format!("{}w ago", diff / 604800)
+            format!("{}w", diff / 604800)
         }
     }
 
@@ -168,8 +168,7 @@ impl ConnectionHistory {
             content.push_str(&e.count.to_string());
             if !e.timestamps.is_empty() {
                 content.push('\t');
-                let ts_strs: Vec<String> =
-                    e.timestamps.iter().map(|t| t.to_string()).collect();
+                let ts_strs: Vec<String> = e.timestamps.iter().map(|t| t.to_string()).collect();
                 content.push_str(&ts_strs.join(","));
             }
         }
@@ -205,7 +204,13 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let tsv = format!("myhost\t{}\t5\t{},{},{}", now, now - 100, now - 200, now - 300);
+        let tsv = format!(
+            "myhost\t{}\t5\t{},{},{}",
+            now,
+            now - 100,
+            now - 200,
+            now - 300
+        );
         let dir = std::env::temp_dir().join(format!(
             "purple_test_history_{:?}",
             std::thread::current().id()
@@ -224,7 +229,10 @@ mod tests {
             if parts.len() >= 3 {
                 if let (Ok(ts), Ok(count)) = (parts[1].parse::<u64>(), parts[2].parse::<u32>()) {
                     let timestamps = if parts.len() == 4 && !parts[3].is_empty() {
-                        parts[3].split(',').filter_map(|s| s.parse::<u64>().ok()).collect()
+                        parts[3]
+                            .split(',')
+                            .filter_map(|s| s.parse::<u64>().ok())
+                            .collect()
                     } else {
                         Vec::new()
                     };
@@ -261,7 +269,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let old = now - 100 * 86400; // 100 days ago — beyond 90-day retention
+        let old = now - 400 * 86400; // 400 days ago — beyond 365-day retention
         let recent = now - 10 * 86400; // 10 days ago — within retention
 
         let dir = std::env::temp_dir().join(format!(
@@ -320,6 +328,45 @@ mod tests {
     }
 
     #[test]
+    fn test_retention_keeps_nine_months() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let nine_months = now - 270 * 86400;
+        let six_months = now - 180 * 86400;
+        let recent = now - 86400;
+
+        let cutoff = now.saturating_sub(RETENTION_SECS);
+        let mut timestamps = vec![nine_months, six_months, recent];
+        timestamps.retain(|&t| t >= cutoff);
+
+        assert_eq!(
+            timestamps.len(),
+            3,
+            "9-month-old timestamps must be retained"
+        );
+        assert_eq!(timestamps[0], nine_months);
+    }
+
+    #[test]
+    fn test_retention_prunes_beyond_one_year() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let thirteen_months = now - 400 * 86400;
+        let recent = now - 86400;
+
+        let cutoff = now.saturating_sub(RETENTION_SECS);
+        let mut timestamps = vec![thirteen_months, recent];
+        timestamps.retain(|&t| t >= cutoff);
+
+        assert_eq!(timestamps.len(), 1, "13-month-old timestamp must be pruned");
+        assert_eq!(timestamps[0], recent);
+    }
+
+    #[test]
     fn test_timestamps_empty_fourth_column() {
         // A 3-column line (no timestamps) should parse with empty timestamps
         let now = SystemTime::now()
@@ -330,7 +377,10 @@ mod tests {
         let parts: Vec<&str> = line.splitn(4, '\t').collect();
         assert_eq!(parts.len(), 3);
         let timestamps: Vec<u64> = if parts.len() == 4 && !parts[3].is_empty() {
-            parts[3].split(',').filter_map(|s| s.parse::<u64>().ok()).collect()
+            parts[3]
+                .split(',')
+                .filter_map(|s| s.parse::<u64>().ok())
+                .collect()
         } else {
             Vec::new()
         };
@@ -343,18 +393,9 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        assert_eq!(ConnectionHistory::format_time_ago(now), "<1m ago");
-        assert_eq!(
-            ConnectionHistory::format_time_ago(now - 300),
-            "5m ago"
-        );
-        assert_eq!(
-            ConnectionHistory::format_time_ago(now - 7200),
-            "2h ago"
-        );
-        assert_eq!(
-            ConnectionHistory::format_time_ago(now - 172800),
-            "2d ago"
-        );
+        assert_eq!(ConnectionHistory::format_time_ago(now), "<1m");
+        assert_eq!(ConnectionHistory::format_time_ago(now - 300), "5m");
+        assert_eq!(ConnectionHistory::format_time_ago(now - 7200), "2h");
+        assert_eq!(ConnectionHistory::format_time_ago(now - 172800), "2d");
     }
 }

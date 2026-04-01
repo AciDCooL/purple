@@ -35,14 +35,6 @@ impl TunnelType {
         }
     }
 
-    pub fn prev(self) -> Self {
-        match self {
-            TunnelType::Local => TunnelType::Dynamic,
-            TunnelType::Remote => TunnelType::Local,
-            TunnelType::Dynamic => TunnelType::Remote,
-        }
-    }
-
     pub fn from_directive_key(key: &str) -> Option<Self> {
         if key.eq_ignore_ascii_case("localforward") {
             Some(TunnelType::Local)
@@ -77,9 +69,7 @@ impl TunnelRule {
         let value = value.trim();
 
         match tunnel_type {
-            TunnelType::Local | TunnelType::Remote => {
-                Self::parse_forward_value(tunnel_type, value)
-            }
+            TunnelType::Local | TunnelType::Remote => Self::parse_forward_value(tunnel_type, value),
             TunnelType::Dynamic => Self::parse_dynamic_value(value),
         }
     }
@@ -194,12 +184,7 @@ impl TunnelRule {
         match self.tunnel_type {
             TunnelType::Local | TunnelType::Remote => {
                 let remote = Self::format_addr_port(&self.remote_host, self.remote_port);
-                format!(
-                    "{:<8} {:<6} {}",
-                    self.tunnel_type.label(),
-                    bind,
-                    remote
-                )
+                format!("{:<8} {:<6} {}", self.tunnel_type.label(), bind, remote)
             }
             TunnelType::Dynamic => {
                 format!("{:<8} {:<6} (SOCKS proxy)", self.tunnel_type.label(), bind)
@@ -210,17 +195,26 @@ impl TunnelRule {
     /// Parse a CLI spec: L:port:host:port, R:port:host:port, D:port
     /// Supports bracketed IPv6: L:8080:[::1]:80
     pub fn from_cli_spec(spec: &str) -> Result<Self, String> {
-        let (type_char, rest) = spec.split_once(':').ok_or("Invalid format. Use L:port:host:port or D:port.")?;
+        let (type_char, rest) = spec
+            .split_once(':')
+            .ok_or("Invalid format. Use L:port:host:port or D:port.")?;
         let tunnel_type = match type_char {
             "L" | "l" => TunnelType::Local,
             "R" | "r" => TunnelType::Remote,
             "D" | "d" => TunnelType::Dynamic,
-            _ => return Err(format!("Unknown tunnel type '{}'. Use L (local), R (remote) or D (dynamic).", type_char)),
+            _ => {
+                return Err(format!(
+                    "Unknown tunnel type '{}'. Use L (local), R (remote) or D (dynamic).",
+                    type_char
+                ));
+            }
         };
 
         match tunnel_type {
             TunnelType::Dynamic => {
-                let port: u16 = rest.parse().map_err(|_| "Invalid port for dynamic forward.")?;
+                let port: u16 = rest
+                    .parse()
+                    .map_err(|_| "Invalid port for dynamic forward.")?;
                 if port == 0 {
                     return Err("Bind port can't be 0.".to_string());
                 }
@@ -234,7 +228,8 @@ impl TunnelRule {
             }
             TunnelType::Local | TunnelType::Remote => {
                 // bind_port:remote_host:remote_port (remote_host may be [IPv6])
-                let (bind_str, host_port) = rest.split_once(':')
+                let (bind_str, host_port) = rest
+                    .split_once(':')
                     .ok_or("Invalid format. Use L:bind_port:host:port.")?;
                 let bind_port: u16 = bind_str.parse().map_err(|_| "Invalid bind port.")?;
                 if bind_port == 0 {
@@ -274,7 +269,12 @@ pub struct ActiveTunnel {
 /// stderr is piped so poll_tunnels() can capture error messages on exit.
 /// When `askpass` is Some, sets SSH_ASKPASS environment variables. This is essential
 /// for tunnels since stdin is null and interactive password entry is impossible.
-pub fn start_tunnel(alias: &str, config_path: &std::path::Path, askpass: Option<&str>, bw_session: Option<&str>) -> Result<Child> {
+pub fn start_tunnel(
+    alias: &str,
+    config_path: &std::path::Path,
+    askpass: Option<&str>,
+    bw_session: Option<&str>,
+) -> Result<Child> {
     let mut cmd = Command::new("ssh");
     cmd.arg("-F")
         .arg(config_path)
@@ -302,6 +302,16 @@ pub fn start_tunnel(alias: &str, config_path: &std::path::Path, askpass: Option<
         cmd.env("BW_SESSION", token);
     }
 
+    // Own process group so tunnel doesn't receive purple's signals.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            libc::setpgid(0, 0);
+            Ok(())
+        });
+    }
+
     cmd.spawn()
         .map_err(|e| anyhow::anyhow!("Failed to start tunnel: {}", e))
 }
@@ -314,10 +324,22 @@ mod tests {
 
     #[test]
     fn tunnel_type_from_directive_key() {
-        assert_eq!(TunnelType::from_directive_key("LocalForward"), Some(TunnelType::Local));
-        assert_eq!(TunnelType::from_directive_key("localforward"), Some(TunnelType::Local));
-        assert_eq!(TunnelType::from_directive_key("RemoteForward"), Some(TunnelType::Remote));
-        assert_eq!(TunnelType::from_directive_key("DynamicForward"), Some(TunnelType::Dynamic));
+        assert_eq!(
+            TunnelType::from_directive_key("LocalForward"),
+            Some(TunnelType::Local)
+        );
+        assert_eq!(
+            TunnelType::from_directive_key("localforward"),
+            Some(TunnelType::Local)
+        );
+        assert_eq!(
+            TunnelType::from_directive_key("RemoteForward"),
+            Some(TunnelType::Remote)
+        );
+        assert_eq!(
+            TunnelType::from_directive_key("DynamicForward"),
+            Some(TunnelType::Dynamic)
+        );
         assert_eq!(TunnelType::from_directive_key("HostName"), None);
     }
 
@@ -326,7 +348,7 @@ mod tests {
         assert_eq!(TunnelType::Local.next(), TunnelType::Remote);
         assert_eq!(TunnelType::Remote.next(), TunnelType::Dynamic);
         assert_eq!(TunnelType::Dynamic.next(), TunnelType::Local);
-        assert_eq!(TunnelType::Local.prev(), TunnelType::Dynamic);
+        // prev() removed: Space cycles forward only via next()
     }
 
     // --- Parse tests ---
@@ -910,19 +932,32 @@ mod tests {
     #[test]
     fn start_tunnel_askpass_all_source_types_trigger() {
         let sources = [
-            "keychain", "op://Vault/Item/pw", "bw:my-item",
-            "pass:ssh/server", "vault:secret/ssh#pw", "my-script %h",
+            "keychain",
+            "op://Vault/Item/pw",
+            "bw:my-item",
+            "pass:ssh/server",
+            "vault:secret/ssh#pw",
+            "my-script %h",
         ];
         for source in &sources {
             let askpass: Option<&str> = Some(source);
-            assert!(askpass.is_some(), "askpass '{}' should trigger env setup", source);
+            assert!(
+                askpass.is_some(),
+                "askpass '{}' should trigger env setup",
+                source
+            );
         }
     }
 
     #[test]
     fn start_tunnel_env_var_names_match_connection() {
         // Tunnel and connection must use the same env var names
-        let expected = ["SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "PURPLE_ASKPASS_MODE", "PURPLE_HOST_ALIAS"];
+        let expected = [
+            "SSH_ASKPASS",
+            "SSH_ASKPASS_REQUIRE",
+            "PURPLE_ASKPASS_MODE",
+            "PURPLE_HOST_ALIAS",
+        ];
         assert_eq!(expected.len(), 4);
         assert_eq!(expected[2], "PURPLE_ASKPASS_MODE");
     }
@@ -942,8 +977,13 @@ mod tests {
     #[test]
     fn start_tunnel_sets_config_path_env() {
         // PURPLE_CONFIG_PATH must be set so the askpass subprocess can find the config
-        let env_vars = ["SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "PURPLE_ASKPASS_MODE",
-                        "PURPLE_HOST_ALIAS", "PURPLE_CONFIG_PATH"];
+        let env_vars = [
+            "SSH_ASKPASS",
+            "SSH_ASKPASS_REQUIRE",
+            "PURPLE_ASKPASS_MODE",
+            "PURPLE_HOST_ALIAS",
+            "PURPLE_CONFIG_PATH",
+        ];
         assert!(env_vars.contains(&"PURPLE_CONFIG_PATH"));
     }
 
@@ -952,8 +992,13 @@ mod tests {
         // Unlike connection.rs, start_tunnel does NOT pass BW_SESSION.
         // The askpass subprocess reads from env inherited from the parent process.
         // This is correct because BW_SESSION should be in the parent env already.
-        let tunnel_env_vars = ["SSH_ASKPASS", "SSH_ASKPASS_REQUIRE", "PURPLE_ASKPASS_MODE",
-                               "PURPLE_HOST_ALIAS", "PURPLE_CONFIG_PATH"];
+        let tunnel_env_vars = [
+            "SSH_ASKPASS",
+            "SSH_ASKPASS_REQUIRE",
+            "PURPLE_ASKPASS_MODE",
+            "PURPLE_HOST_ALIAS",
+            "PURPLE_CONFIG_PATH",
+        ];
         assert!(!tunnel_env_vars.contains(&"BW_SESSION"));
     }
 
