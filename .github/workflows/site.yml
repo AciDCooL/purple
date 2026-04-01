@@ -115,8 +115,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: BunnyWay/actions/deploy-script@main
-        with:
-          script_id: ${{ vars.BUNNY_SCRIPT_ID }}
-          deploy_key: ${{ secrets.BUNNY_DEPLOY_KEY }}
-          file: site/worker.ts
+#      - uses: #BunnyWay/actions/deploy-script@main
+#        with:
+#          script_id: ${{ vars.BUNNY_SCRIPT_ID }}
+#          deploy_key: 
+#${{ secrets.BUNNY_DEPLOY_KEY }}
+#          file: site/worker.ts
