@@ -1,15 +1,12 @@
-name: Build and Release Static RHEL 8 Binary
+name: Build and Auto-Release on Merge
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag_name:
-        description: 'Tag for the release (e.g., v1.0.0)'
-        required: true
-        default: 'v1.0.0'
+  push:
+    branches:
+      - main  # This triggers whenever code (or a PR) is merged into main
 
 permissions:
-  contents: write  # This is required to create a release
+  contents: write
 
 jobs:
   build:
@@ -17,6 +14,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # 1. THE VERSION GRABBER
+      # This looks for the line starting with 'version' in Cargo.toml and extracts the value
+      - name: Extract version from Cargo.toml
+        id: get_version
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | awk -F '"' '{print $2}')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Detected version: $VERSION"
 
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross
@@ -27,24 +33,21 @@ jobs:
       - name: Build static binary using cross
         run: cross build --release --target x86_64-unknown-linux-musl
 
-      # Rename the binary so it's clear what it is in the release
       - name: Prepare Release Asset
         run: |
           mkdir -p release_assets
           cp target/x86_64-unknown-linux-musl/release/purple release_assets/purple-linux-x86_64-static
 
-      - name: Upload Artifact (Internal)
-        uses: actions/upload-artifact@v4
-        with:
-          name: purple-static-linux
-          path: release_assets/purple-linux-x86_64-static
-
+      # 2. THE AUTO-RELEASE
+      # It uses the VERSION variable we grabbed in step 1
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag_name }}
-          name: Release ${{ github.event.inputs.tag_name }}
-          body: "Static RHEL 8 compatible binary generated via manual workflow."
+          tag_name: v${{ env.VERSION }}
+          name: Release v${{ env.VERSION }}
+          body: "Automatic build of version ${{ env.VERSION }} merged into main."
           files: release_assets/purple-linux-x86_64-static
           draft: false
           prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
