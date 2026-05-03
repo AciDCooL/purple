@@ -530,6 +530,699 @@ pub fn build_demo_app() -> App {
     app
 }
 
+/// Seed deterministic tunnel-live snapshots for `--demo` and visual
+/// regression tests. The detail panel reads these instead of the
+/// runtime mpsc state when `App.demo_mode == true`, so the LIVE,
+/// CLIENTS and EVENTS cards render byte-stably across runs.
+///
+/// Currently seeds one host (`bastion-ams`) with a representative
+/// active state: a fresh open, two clients, a small history bump.
+pub fn seed_tunnel_live_snapshots(app: &mut App) {
+    use crate::tunnel_live::{
+        ChannelEventKind, ChannelKind, DisplayClient, DisplayEvent, HISTORY_BUCKETS,
+        PEER_VIZ_BUCKETS, TunnelLiveSnapshot,
+    };
+
+    // Receive-heavy profile: a Postgres replication-like read pattern
+    // with bursty tx (queries) and sustained rx (rows). Numbers are
+    // bytes-per-second; the renderer scales them for the sparkline.
+    let mut rx_history = [0u64; HISTORY_BUCKETS];
+    let mut tx_history = [0u64; HISTORY_BUCKETS];
+    // Spread the bursts across recent history (right side of the
+    // 150-bucket window) so the rendered mountain shows the activity
+    // approaching "now" — three peaks at increasing intensity, with
+    // quiet gaps between them so decay trails are visible.
+    for (i, slot) in rx_history.iter_mut().enumerate() {
+        *slot = match i {
+            70..=79 => 96_000,
+            80..=84 => 256_000,
+            85..=89 => 64_000,
+            105..=114 => 384_000,
+            115..=119 => 192_000,
+            135..=139 => 512_000,
+            140..=144 => 768_000,
+            145..=149 => 384_000,
+            _ => 0,
+        };
+    }
+    for (i, slot) in tx_history.iter_mut().enumerate() {
+        *slot = match i {
+            70..=79 => 6_000,
+            80..=84 => 16_000,
+            85..=89 => 4_000,
+            105..=114 => 24_000,
+            115..=119 => 12_000,
+            135..=139 => 32_000,
+            140..=144 => 48_000,
+            145..=149 => 24_000,
+            _ => 0,
+        };
+    }
+    let snapshot = TunnelLiveSnapshot {
+        uptime_secs: 12 * 60 + 47,
+        active_channels: 2,
+        peak_concurrent: 7,
+        total_opens: 23,
+        idle_secs: 4,
+        rx_history,
+        tx_history,
+        current_rx_bps: 768_000,
+        current_tx_bps: 48_000,
+        peak_rx_bps: 768_000,
+        peak_tx_bps: 48_000,
+        throughput_ready: true,
+        clients: {
+            // Synthesize realistic 12-cell histories per client. Cells
+            // are ~2s each, so the window covers the last ~24 seconds.
+            let psql_history = [
+                12_000u64, 16_000, 32_000, 96_000, 128_000, 256_000, 384_000, 512_000, 384_000,
+                256_000, 384_000, 512_000,
+            ];
+            let ssh_history = [
+                4_000u64, 8_000, 8_000, 12_000, 8_000, 12_000, 16_000, 12_000, 8_000, 12_000,
+                16_000, 24_000,
+            ];
+            let safari_history = [
+                0u64, 0, 4_000, 8_000, 16_000, 24_000, 16_000, 8_000, 4_000, 8_000, 12_000, 32_000,
+            ];
+            let curl_history = [0u64, 0, 0, 0, 0, 0, 0, 0, 0, 8_000, 96_000, 220_000];
+            vec![
+                DisplayClient {
+                    src: "127.0.0.1:54321".into(),
+                    process: "psql".into(),
+                    age_secs: 4,
+                    pid: 8123,
+                    responsible_app: Some("Ghostty".into()),
+                    current_rx_bps: 480_000,
+                    current_tx_bps: 32_000,
+                    viz_history: psql_history,
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:54398".into(),
+                    process: "ssh".into(),
+                    age_secs: 12,
+                    pid: 8200,
+                    responsible_app: Some("Ghostty".into()),
+                    current_rx_bps: 20_000,
+                    current_tx_bps: 4_000,
+                    viz_history: ssh_history,
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:54390".into(),
+                    process: "WebKit.Networking".into(),
+                    age_secs: 38,
+                    pid: 8456,
+                    responsible_app: Some("Safari".into()),
+                    current_rx_bps: 28_000,
+                    current_tx_bps: 4_000,
+                    viz_history: safari_history,
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:54392".into(),
+                    process: "WebKit.Networking".into(),
+                    age_secs: 62,
+                    pid: 8457,
+                    responsible_app: Some("Safari".into()),
+                    current_rx_bps: 0,
+                    current_tx_bps: 0,
+                    viz_history: [0u64; PEER_VIZ_BUCKETS],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:51209".into(),
+                    process: "curl".into(),
+                    age_secs: 3,
+                    pid: 9412,
+                    responsible_app: None,
+                    current_rx_bps: 220_000,
+                    current_tx_bps: 0,
+                    viz_history: curl_history,
+                    throughput_ready: true,
+                },
+            ]
+        },
+        events: vec![
+            DisplayEvent {
+                age_secs: 4,
+                channel_id: 25,
+                kind: ChannelEventKind::Open,
+                channel_kind: ChannelKind::Dynamic,
+                duration_secs: None,
+                count: 1,
+            },
+            DisplayEvent {
+                age_secs: 18,
+                channel_id: 24,
+                kind: ChannelEventKind::Close,
+                channel_kind: ChannelKind::Dynamic,
+                duration_secs: Some(8),
+                count: 1,
+            },
+            DisplayEvent {
+                age_secs: 38,
+                channel_id: 23,
+                kind: ChannelEventKind::Open,
+                channel_kind: ChannelKind::Dynamic,
+                duration_secs: None,
+                count: 1,
+            },
+            DisplayEvent {
+                age_secs: 47,
+                channel_id: 22,
+                kind: ChannelEventKind::Close,
+                channel_kind: ChannelKind::Dynamic,
+                duration_secs: Some(13),
+                count: 1,
+            },
+            DisplayEvent {
+                age_secs: 55,
+                channel_id: 21,
+                kind: ChannelEventKind::Close,
+                channel_kind: ChannelKind::Direct,
+                duration_secs: Some(40),
+                count: 1,
+            },
+        ],
+        // Three channels still open at snapshot time. Combined with the
+        // closed events above, the swimlane shows 5 lanes total in the
+        // 60-second window: ch#21, ch#22, ch#23, ch#24, ch#25 plus one
+        // long-running direct channel (ch#20) that started before the
+        // window.
+        currently_open: vec![
+            (20, 95, ChannelKind::Direct),
+            (23, 38, ChannelKind::Dynamic),
+            (25, 4, ChannelKind::Dynamic),
+        ],
+        conflict: None,
+        last_exit: None,
+    };
+    app.tunnels
+        .demo_live_snapshots
+        .insert("bastion-ams".to_string(), snapshot);
+
+    // db-primary: sustained OLTP workload through a Postgres tunnel.
+    // Four concurrent client processes, four open channels, ~47 minutes
+    // of uptime — the canonical "this tunnel has been carrying real
+    // production traffic for a while" snapshot. Profile contrasts with
+    // bastion-ams (which is a fresher, burstier replication-style host).
+    app.tunnels.demo_live_snapshots.insert(
+        "db-primary".to_string(),
+        TunnelLiveSnapshot {
+            uptime_secs: 47 * 60 + 12,
+            active_channels: 4,
+            peak_concurrent: 5,
+            total_opens: 38,
+            idle_secs: 1,
+            rx_history: [0u64; HISTORY_BUCKETS],
+            tx_history: [0u64; HISTORY_BUCKETS],
+            current_rx_bps: 320_000,
+            current_tx_bps: 24_000,
+            peak_rx_bps: 540_000,
+            peak_tx_bps: 64_000,
+            throughput_ready: true,
+            clients: vec![
+                DisplayClient {
+                    src: "127.0.0.1:48201".into(),
+                    process: "psql".into(),
+                    age_secs: 12,
+                    pid: 4421,
+                    responsible_app: Some("Ghostty".into()),
+                    current_rx_bps: 168_000,
+                    current_tx_bps: 12_000,
+                    viz_history: [
+                        96_000u64, 128_000, 144_000, 160_000, 152_000, 176_000, 168_000, 184_000,
+                        160_000, 144_000, 168_000, 168_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:48312".into(),
+                    process: "psql".into(),
+                    age_secs: 89,
+                    pid: 4488,
+                    responsible_app: Some("Ghostty".into()),
+                    current_rx_bps: 88_000,
+                    current_tx_bps: 8_000,
+                    viz_history: [
+                        72_000u64, 80_000, 96_000, 104_000, 88_000, 96_000, 88_000, 96_000,
+                        104_000, 88_000, 80_000, 88_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:48450".into(),
+                    process: "pg_dump".into(),
+                    age_secs: 142,
+                    pid: 4612,
+                    responsible_app: None,
+                    current_rx_bps: 56_000,
+                    current_tx_bps: 2_000,
+                    viz_history: [
+                        24_000u64, 32_000, 48_000, 64_000, 72_000, 88_000, 96_000, 80_000, 64_000,
+                        56_000, 48_000, 56_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:48601".into(),
+                    process: "prometheus".into(),
+                    age_secs: 305,
+                    pid: 4701,
+                    responsible_app: None,
+                    current_rx_bps: 8_000,
+                    current_tx_bps: 2_000,
+                    viz_history: [
+                        4_000u64, 8_000, 8_000, 8_000, 4_000, 8_000, 8_000, 8_000, 8_000, 8_000,
+                        8_000, 8_000,
+                    ],
+                    throughput_ready: true,
+                },
+            ],
+            events: vec![
+                DisplayEvent {
+                    age_secs: 12,
+                    channel_id: 18,
+                    kind: ChannelEventKind::Open,
+                    channel_kind: ChannelKind::Direct,
+                    duration_secs: None,
+                    count: 1,
+                },
+                DisplayEvent {
+                    age_secs: 32,
+                    channel_id: 17,
+                    kind: ChannelEventKind::Close,
+                    channel_kind: ChannelKind::Direct,
+                    duration_secs: Some(45),
+                    count: 1,
+                },
+            ],
+            currently_open: vec![
+                (15, 305, ChannelKind::Direct),
+                (16, 142, ChannelKind::Direct),
+                (18, 12, ChannelKind::Direct),
+                (19, 89, ChannelKind::Direct),
+            ],
+            conflict: None,
+            last_exit: None,
+        },
+    );
+
+    // pve-redis: bursty cache access from a few short-lived clients.
+    // Just-started tunnel (8m), one of the clients still in the
+    // "sampling…" warmup window so the renderer exercises the
+    // not-yet-throughput-ready branch alongside live ones.
+    app.tunnels.demo_live_snapshots.insert(
+        "pve-redis".to_string(),
+        TunnelLiveSnapshot {
+            uptime_secs: 8 * 60 + 33,
+            active_channels: 3,
+            peak_concurrent: 4,
+            total_opens: 14,
+            idle_secs: 0,
+            rx_history: [0u64; HISTORY_BUCKETS],
+            tx_history: [0u64; HISTORY_BUCKETS],
+            current_rx_bps: 88_000,
+            current_tx_bps: 56_000,
+            peak_rx_bps: 256_000,
+            peak_tx_bps: 192_000,
+            throughput_ready: true,
+            clients: vec![
+                DisplayClient {
+                    src: "127.0.0.1:55102".into(),
+                    process: "redis-cli".into(),
+                    age_secs: 6,
+                    pid: 7821,
+                    responsible_app: Some("Ghostty".into()),
+                    current_rx_bps: 72_000,
+                    current_tx_bps: 48_000,
+                    viz_history: [
+                        4_000u64, 8_000, 32_000, 96_000, 4_000, 8_000, 64_000, 128_000, 16_000,
+                        4_000, 96_000, 120_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:55245".into(),
+                    process: "node".into(),
+                    age_secs: 24,
+                    pid: 7905,
+                    responsible_app: None,
+                    current_rx_bps: 16_000,
+                    current_tx_bps: 8_000,
+                    viz_history: [
+                        8_000u64, 12_000, 16_000, 24_000, 16_000, 12_000, 16_000, 24_000, 16_000,
+                        12_000, 20_000, 24_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:55401".into(),
+                    process: "python3".into(),
+                    age_secs: 2,
+                    pid: 8002,
+                    responsible_app: None,
+                    current_rx_bps: 0,
+                    current_tx_bps: 0,
+                    viz_history: [0u64; PEER_VIZ_BUCKETS],
+                    throughput_ready: false,
+                },
+            ],
+            events: vec![
+                DisplayEvent {
+                    age_secs: 2,
+                    channel_id: 12,
+                    kind: ChannelEventKind::Open,
+                    channel_kind: ChannelKind::Direct,
+                    duration_secs: None,
+                    count: 1,
+                },
+                DisplayEvent {
+                    age_secs: 6,
+                    channel_id: 11,
+                    kind: ChannelEventKind::Open,
+                    channel_kind: ChannelKind::Direct,
+                    duration_secs: None,
+                    count: 1,
+                },
+                DisplayEvent {
+                    age_secs: 18,
+                    channel_id: 9,
+                    kind: ChannelEventKind::Close,
+                    channel_kind: ChannelKind::Direct,
+                    duration_secs: Some(34),
+                    count: 1,
+                },
+            ],
+            currently_open: vec![
+                (10, 24, ChannelKind::Direct),
+                (11, 6, ChannelKind::Direct),
+                (12, 2, ChannelKind::Direct),
+            ],
+            conflict: None,
+            last_exit: None,
+        },
+    );
+
+    // monitoring: a long-running, mostly-idle tunnel. Single grafana
+    // dashboard tab keeping a steady ~5 KB/s of websocket chatter. The
+    // detail panel exercises the "active but quiet" rendering — bps
+    // values muted, single open channel, hours of uptime.
+    app.tunnels.demo_live_snapshots.insert(
+        "monitoring".to_string(),
+        TunnelLiveSnapshot {
+            uptime_secs: 2 * 3600 + 14 * 60 + 8,
+            active_channels: 1,
+            peak_concurrent: 2,
+            total_opens: 11,
+            idle_secs: 38,
+            rx_history: [0u64; HISTORY_BUCKETS],
+            tx_history: [0u64; HISTORY_BUCKETS],
+            current_rx_bps: 4_800,
+            current_tx_bps: 1_200,
+            peak_rx_bps: 96_000,
+            peak_tx_bps: 24_000,
+            throughput_ready: true,
+            clients: vec![DisplayClient {
+                src: "127.0.0.1:39112".into(),
+                process: "Chrome".into(),
+                age_secs: 8 * 60 + 12,
+                pid: 612,
+                responsible_app: Some("Google Chrome".into()),
+                current_rx_bps: 4_800,
+                current_tx_bps: 1_200,
+                viz_history: [
+                    3_200u64, 4_800, 4_800, 5_600, 4_800, 4_800, 6_400, 4_800, 4_800, 5_600, 4_800,
+                    4_800,
+                ],
+                throughput_ready: true,
+            }],
+            events: vec![DisplayEvent {
+                age_secs: 8 * 60 + 12,
+                channel_id: 7,
+                kind: ChannelEventKind::Open,
+                channel_kind: ChannelKind::Direct,
+                duration_secs: None,
+                count: 1,
+            }],
+            currently_open: vec![(7, (8 * 60 + 12) as u64, ChannelKind::Direct)],
+            conflict: None,
+            last_exit: None,
+        },
+    );
+
+    // do-staging-ams: just-opened staging Postgres tunnel. CI just pushed
+    // a migration, so the panel exercises the "fresh tunnel + active
+    // psql session" combination. Lower throughput than db-primary, fewer
+    // clients, no decay trail yet (uptime < 1 channel rotation).
+    app.tunnels.demo_live_snapshots.insert(
+        "do-staging-ams".to_string(),
+        TunnelLiveSnapshot {
+            uptime_secs: 5 * 60 + 22,
+            active_channels: 2,
+            peak_concurrent: 2,
+            total_opens: 4,
+            idle_secs: 1,
+            rx_history: [0u64; HISTORY_BUCKETS],
+            tx_history: [0u64; HISTORY_BUCKETS],
+            current_rx_bps: 96_000,
+            current_tx_bps: 12_000,
+            peak_rx_bps: 256_000,
+            peak_tx_bps: 32_000,
+            throughput_ready: true,
+            clients: vec![
+                DisplayClient {
+                    src: "127.0.0.1:62013".into(),
+                    process: "psql".into(),
+                    age_secs: 18,
+                    pid: 11_204,
+                    responsible_app: Some("Ghostty".into()),
+                    current_rx_bps: 80_000,
+                    current_tx_bps: 10_000,
+                    viz_history: [
+                        16_000u64, 32_000, 64_000, 128_000, 96_000, 64_000, 96_000, 128_000,
+                        80_000, 64_000, 96_000, 80_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:62041".into(),
+                    process: "node".into(),
+                    age_secs: 92,
+                    pid: 11_310,
+                    responsible_app: None,
+                    current_rx_bps: 16_000,
+                    current_tx_bps: 2_000,
+                    viz_history: [
+                        8_000u64, 12_000, 16_000, 16_000, 12_000, 16_000, 20_000, 16_000, 16_000,
+                        12_000, 16_000, 16_000,
+                    ],
+                    throughput_ready: true,
+                },
+            ],
+            events: vec![
+                DisplayEvent {
+                    age_secs: 18,
+                    channel_id: 4,
+                    kind: ChannelEventKind::Open,
+                    channel_kind: ChannelKind::Direct,
+                    duration_secs: None,
+                    count: 1,
+                },
+                DisplayEvent {
+                    age_secs: 92,
+                    channel_id: 3,
+                    kind: ChannelEventKind::Open,
+                    channel_kind: ChannelKind::Direct,
+                    duration_secs: None,
+                    count: 1,
+                },
+            ],
+            currently_open: vec![
+                (3, 92, ChannelKind::Direct),
+                (4, 18, ChannelKind::Direct),
+            ],
+            conflict: None,
+            last_exit: None,
+        },
+    );
+
+    // pve-db-01: self-hosted Postgres on Proxmox. Mid-traffic profile —
+    // an Elixir/BEAM application server holds a persistent pool while a
+    // human is poking around in DataGrip. Showcases mixed long-lived
+    // (BEAM) and short-lived (DataGrip) channel patterns.
+    app.tunnels.demo_live_snapshots.insert(
+        "pve-db-01".to_string(),
+        TunnelLiveSnapshot {
+            uptime_secs: 22 * 60 + 4,
+            active_channels: 3,
+            peak_concurrent: 4,
+            total_opens: 19,
+            idle_secs: 0,
+            rx_history: [0u64; HISTORY_BUCKETS],
+            tx_history: [0u64; HISTORY_BUCKETS],
+            current_rx_bps: 248_000,
+            current_tx_bps: 18_000,
+            peak_rx_bps: 412_000,
+            peak_tx_bps: 36_000,
+            throughput_ready: true,
+            clients: vec![
+                DisplayClient {
+                    src: "127.0.0.1:51012".into(),
+                    process: "beam.smp".into(),
+                    age_secs: 21 * 60 + 48,
+                    pid: 5_013,
+                    responsible_app: None,
+                    current_rx_bps: 168_000,
+                    current_tx_bps: 12_000,
+                    viz_history: [
+                        140_000u64, 152_000, 168_000, 144_000, 160_000, 172_000, 168_000, 156_000,
+                        168_000, 160_000, 168_000, 168_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:51208".into(),
+                    process: "datagrip".into(),
+                    age_secs: 14,
+                    pid: 5_904,
+                    responsible_app: Some("DataGrip".into()),
+                    current_rx_bps: 64_000,
+                    current_tx_bps: 4_000,
+                    viz_history: [
+                        4_000u64, 8_000, 16_000, 96_000, 128_000, 64_000, 32_000, 48_000, 96_000,
+                        64_000, 48_000, 64_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:51310".into(),
+                    process: "psql".into(),
+                    age_secs: 47,
+                    pid: 6_001,
+                    responsible_app: Some("Ghostty".into()),
+                    current_rx_bps: 16_000,
+                    current_tx_bps: 2_000,
+                    viz_history: [
+                        8_000u64, 12_000, 16_000, 16_000, 12_000, 16_000, 16_000, 12_000, 16_000,
+                        16_000, 12_000, 16_000,
+                    ],
+                    throughput_ready: true,
+                },
+            ],
+            events: vec![
+                DisplayEvent {
+                    age_secs: 14,
+                    channel_id: 31,
+                    kind: ChannelEventKind::Open,
+                    channel_kind: ChannelKind::Direct,
+                    duration_secs: None,
+                    count: 1,
+                },
+                DisplayEvent {
+                    age_secs: 28,
+                    channel_id: 30,
+                    kind: ChannelEventKind::Close,
+                    channel_kind: ChannelKind::Direct,
+                    duration_secs: Some(74),
+                    count: 1,
+                },
+            ],
+            currently_open: vec![
+                (29, 21 * 60 + 48, ChannelKind::Direct),
+                (31, 14, ChannelKind::Direct),
+                (32, 47, ChannelKind::Direct),
+            ],
+            conflict: None,
+            last_exit: None,
+        },
+    );
+
+    // pve-monitor: Grafana + Prometheus combo. Two browser dashboards
+    // pulling websocket updates plus a remote Prometheus scraper hitting
+    // the federation endpoint every 15s. Demonstrates a forward used by
+    // multiple humans simultaneously, with periodic spikes when panels
+    // refresh. Both directives (3000, 9090) share this one snapshot.
+    app.tunnels.demo_live_snapshots.insert(
+        "pve-monitor".to_string(),
+        TunnelLiveSnapshot {
+            uptime_secs: 18 * 60 + 41,
+            active_channels: 3,
+            peak_concurrent: 3,
+            total_opens: 24,
+            idle_secs: 2,
+            rx_history: [0u64; HISTORY_BUCKETS],
+            tx_history: [0u64; HISTORY_BUCKETS],
+            current_rx_bps: 56_000,
+            current_tx_bps: 8_000,
+            peak_rx_bps: 192_000,
+            peak_tx_bps: 24_000,
+            throughput_ready: true,
+            clients: vec![
+                DisplayClient {
+                    src: "127.0.0.1:43210".into(),
+                    process: "Chrome".into(),
+                    age_secs: 12 * 60 + 4,
+                    pid: 3_311,
+                    responsible_app: Some("Google Chrome".into()),
+                    current_rx_bps: 32_000,
+                    current_tx_bps: 4_000,
+                    viz_history: [
+                        12_000u64, 16_000, 96_000, 32_000, 16_000, 24_000, 128_000, 32_000, 16_000,
+                        24_000, 96_000, 32_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:43298".into(),
+                    process: "Chrome".into(),
+                    age_secs: 4 * 60 + 18,
+                    pid: 3_312,
+                    responsible_app: Some("Google Chrome".into()),
+                    current_rx_bps: 16_000,
+                    current_tx_bps: 2_000,
+                    viz_history: [
+                        8_000u64, 12_000, 64_000, 16_000, 12_000, 16_000, 96_000, 16_000, 12_000,
+                        16_000, 64_000, 16_000,
+                    ],
+                    throughput_ready: true,
+                },
+                DisplayClient {
+                    src: "127.0.0.1:43501".into(),
+                    process: "prometheus".into(),
+                    age_secs: 18 * 60 + 11,
+                    pid: 3_888,
+                    responsible_app: None,
+                    current_rx_bps: 8_000,
+                    current_tx_bps: 2_000,
+                    viz_history: [
+                        4_000u64, 4_000, 24_000, 4_000, 4_000, 4_000, 24_000, 4_000, 4_000, 4_000,
+                        24_000, 4_000,
+                    ],
+                    throughput_ready: true,
+                },
+            ],
+            events: vec![DisplayEvent {
+                age_secs: 4 * 60 + 18,
+                channel_id: 22,
+                kind: ChannelEventKind::Open,
+                channel_kind: ChannelKind::Direct,
+                duration_secs: None,
+                count: 1,
+            }],
+            currently_open: vec![
+                (20, 18 * 60 + 11, ChannelKind::Direct),
+                (21, 12 * 60 + 4, ChannelKind::Direct),
+                (22, 4 * 60 + 18, ChannelKind::Direct),
+            ],
+            conflict: None,
+            last_exit: None,
+        },
+    );
+}
+
 /// Seed the upgrade toast so `--demo` always demonstrates the what's new flow.
 /// Kept out of `build_demo_app` so visual regression tests get a stable baseline.
 pub fn seed_whats_new_toast(app: &mut App) {

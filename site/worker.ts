@@ -177,9 +177,9 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "2.45.2",
+  "softwareVersion": "3.0.0",
   "datePublished": "2024-10-01",
-  "dateModified": "2026-04-25",
+  "dateModified": "2026-05-03",
   "softwareRequirements": "macOS or Linux",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
@@ -200,7 +200,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
     "SSH config round-trip fidelity",
     "Fuzzy search across hosts",
     "Host tagging and filtering",
-    "SSH tunnel management",
+    "Live SSH tunnel monitoring with throughput, channel events and per-client process roster",
     "Container management via SSH (Docker and Podman) with start, stop and restart",
     "Command snippets with multi-host and parallel execution",
     "Remote file explorer with dual-pane local/remote browsing and scp transfer",
@@ -997,7 +997,7 @@ footer .sep { margin: 0 0.3em; }
           <button class="copy-btn copy-inline" id="copy-btn" onclick="copy(this)" style="display:none">copy</button>
         </div>
         <div class="install-output" id="install-output" style="display:none">
-          <div>Downloading purple v2.45.2 for darwin-arm64...</div>
+          <div>Downloading purple v3.0.0 for darwin-arm64...</div>
           <div>Installing to /usr/local/bin/purple... <span class="success">done.</span></div>
         </div>
         <div class="alt-installs" id="alt-installs" style="display:none">
@@ -1040,6 +1040,10 @@ footer .sep { margin: 0 0.3em; }
     <div class="feat">
       <span class="feat-icon">🐳</span>
       <span class="feat-text"><strong>See and control containers remotely.</strong> Docker and Podman over plain SSH. Start, stop, restart without installing anything on the remote.</span>
+    </div>
+    <div class="feat">
+      <span class="feat-icon">🚇</span>
+      <span class="feat-text"><strong>Watch your SSH tunnels in real time.</strong> Dedicated Tunnels page with live throughput, channel events and the apps moving bytes. Local, Remote and Dynamic SOCKS, all in one sortable view. <code>Tab</code> from the Hosts page.</span>
     </div>
     <div class="feat">
       <span class="feat-icon">📂</span>
@@ -1119,7 +1123,7 @@ footer .sep { margin: 0 0.3em; }
         <summary>How do I troubleshoot connection problems?</summary>
         <div class="answer">Run with <code>--verbose</code> to enable debug logging, then <code>purple logs --tail</code> in another terminal. Logs are written to <code>~/.purple/purple.log</code> with fault domain prefixes: <code>[external]</code> for remote/tool errors, <code>[config]</code> for local config issues. Set <code>PURPLE_LOG=trace</code> for maximum detail.</div>
       </details>
-      <div class="man-foot"><span>purple v2.45.2</span><span>2026-04-25</span><span>PURPLE(1)</span></div>
+      <div class="man-foot"><span>purple v3.0.0</span><span>2026-05-03</span><span>PURPLE(1)</span></div>
     </div>
   </div>
 
@@ -1133,7 +1137,7 @@ footer .sep { margin: 0 0.3em; }
 </main>
 
 <footer>
-  <a href="https://github.com/erickochen/purple" rel="noopener">GitHub</a> &middot; <a href="https://github.com/erickochen/purple/wiki" rel="noopener">Docs</a> &middot; <a href="https://crates.io/crates/purple-ssh" rel="noopener">crates.io</a> &middot; MIT License &middot; Rust &middot; 6500+ tests
+  <a href="https://github.com/erickochen/purple" rel="noopener">GitHub</a> &middot; <a href="https://github.com/erickochen/purple/wiki" rel="noopener">Docs</a> &middot; <a href="https://crates.io/crates/purple-ssh" rel="noopener">crates.io</a> &middot; MIT License &middot; Rust &middot; 6800+ tests
 </footer>
 
 <script>
@@ -1295,7 +1299,7 @@ purple is an open-source terminal SSH manager and SSH config editor written in R
 - Password management: OS Keychain, 1Password (op://), Bitwarden (bw:), pass (pass:), HashiCorp Vault KV secrets engine (vault:), custom command. Automatic SSH_ASKPASS integration
 - Short-lived SSH certificates via the HashiCorp Vault SSH secrets engine. Per-host or per-provider role configuration (# purple:vault-ssh). Bulk sign with V key. Cert cache under ~/.purple/certs/ with TTL tracking and renewal. Vault SSH address resolved from CLI flag > per-host \`# purple:vault-addr\` > provider \`vault_addr\` > parent shell \`VAULT_ADDR\` env, so users no longer need to export \`VAULT_ADDR\` before launching purple. Distinct from the Vault KV password source above
 - Container management via SSH (Docker and Podman). View, start, stop and restart containers. Auto-detected runtime. No agent. No web UI. No extra ports. Works with both Docker and Podman
-- SSH tunnel management: LocalForward, RemoteForward, DynamicForward. Start/stop from TUI or CLI
+- SSH tunnel management: dedicated Tunnels page reachable with Tab from the Host List, listing every tunnel directive across all hosts. Live detail panel shows throughput per client process (with PID, source port, age and sparkline), a 60-second swimlane of channel opens and closes (Direct and Dynamic SOCKS), and uptime/peak counters. Add tunnels from the Tunnels page with \`a\` (host picker filters as you type) or per-host with \`T\`. LocalForward, RemoteForward, DynamicForward. Start/stop from TUI or CLI
 - Host tagging via SSH config comments. User tags in # purple:tags, provider tags in # purple:provider_tags (exact mirror of remote). Tag picker, fuzzy and exact tag filtering. Bulk tag editor: select hosts with Space, press t to add or remove tags across all selected hosts at once with tri-state checkboxes. Undoable with u
 - Bulk import from hosts files or ~/.ssh/known_hosts
 - SSH key browsing with metadata (type, bits, fingerprint) and host linking
@@ -1320,7 +1324,7 @@ cargo install purple-ssh
 
 ## Usage
 
-The primary interface is the TUI. Run purple to launch it. Press ? for the full keybindings cheat sheet. Press : to open the command palette with 24 searchable actions. Most actions are available from the TUI: S for provider management, r for snippets, T for tunnels, C for containers, F for file browser. The CLI subcommands below are alternatives for scripting and automation.
+The primary interface is the TUI. Run purple to launch it. Press ? for the full keybindings cheat sheet. Press : to open the command palette with 24 searchable actions. The TUI has two top-level pages: Hosts (default) and Tunnels (live overview of every SSH forward across all hosts). Press Tab to switch between them. Most actions are available from the TUI: S for provider management, r for snippets, T for the per-host tunnel overlay, C for containers, F for file browser. The CLI subcommands below are alternatives for scripting and automation.
 
 purple                              # Launch the TUI
 purple --config ~/other/ssh_config  # Use alternate config file
@@ -1469,7 +1473,11 @@ The client starts purple mcp automatically. No manual server process needed. Pur
 
 ## SSH tunnel management
 
-Press T on any host to open the tunnel overlay. Press a to add a tunnel rule (LocalForward, RemoteForward or DynamicForward), e to edit, d to delete and Enter to start or stop. Active tunnels run as ssh -N background processes and are cleaned up on exit. The CLI alternative is purple tunnel add/remove/start.
+There are two ways into tunnels in the TUI. Press Tab on the Host List to open the Tunnels page, which lists every tunnel directive across all your hosts in one sortable, searchable table. Active tunnels show a green dot, current bps and uptime; idle tunnels show their last-connected time. The detail panel on the right opens automatically when the cursor lands on an active tunnel, with a per-client process roster (PID, source port, age, current bps, sparkline of recent throughput, responsible app from the OS) and a 60-second channel swimlane of opens and closes (Direct channels for Local/Remote forwards, Dynamic channels for SOCKS). Press a on the Tunnels page to add a tunnel: a host picker filters editable hosts as you type, then opens the tunnel form. Press e to edit, d to delete, s to cycle sort (most recent / alphabetical), / to search by alias or forward, Enter to start or stop the selected tunnel.
+
+Press T on a host in the Host List to open the per-host tunnel overlay instead, which manages tunnel directives for that one host only. Press a to add a tunnel rule (LocalForward, RemoteForward or DynamicForward), e to edit, d to delete and Enter to start or stop.
+
+Active tunnels run as ssh -N background processes and are cleaned up on exit. The CLI alternative is purple tunnel add/remove/start.
 
 ## Tags
 
@@ -1616,9 +1624,9 @@ A: Press m in the host list to open the theme picker with live preview. 11 built
 
 ## Status
 
-- Current version: 2.45.2 (April 2026)
+- Current version: 3.0.0 (May 2026)
 - Release cadence: approximately bi-weekly
-- Test suite: 6500+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
+- Test suite: 6800+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
 - CI: fmt, clippy, build, test on macOS and Linux, cargo-deny, MSRV 1.86 check, rustdoc warnings, site sync, TUI smoke test, design system, message centralization, keybinding invariants and visual regression
 - Dependencies actively maintained
 

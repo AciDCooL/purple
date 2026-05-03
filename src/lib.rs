@@ -13,4 +13,5 @@ pub mod snippet;
 pub mod ssh_config;
 pub mod ssh_context;
 pub mod tunnel;
+pub mod tunnel_live;
 pub mod vault_ssh;

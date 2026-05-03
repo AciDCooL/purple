@@ -304,6 +304,52 @@ fn visual_tunnel_list() {
 }
 
 #[test]
+fn visual_tunnels_overview() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Tunnels;
+    let actual = render_screen(&mut app);
+    assert_golden("tunnels_overview", &actual);
+}
+
+#[test]
+fn visual_tunnels_overview_active() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Tunnels;
+    // Seed a deterministic live snapshot for the host the cursor lands
+    // on after `build_demo_app` (sorted alphabetically the first row is
+    // bastion-ams). The detail panel reads from `demo_live_snapshots`
+    // so the LIVE/CLIENTS/EVENTS cards render byte-stably.
+    demo::seed_tunnel_live_snapshots(&mut app);
+    app.ui.tunnels_overview_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("tunnels_overview_active", &actual);
+}
+
+#[test]
+fn visual_tunnels_overview_active_tall() {
+    // Verifies the adaptive layout: on a tall terminal the detail
+    // panel grows the sparkline (up to 6 rows) and surfaces more
+    // CLIENTS / EVENTS rows instead of leaving empty padding at the
+    // bottom of the panel.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Tunnels;
+    demo::seed_tunnel_live_snapshots(&mut app);
+    app.ui.tunnels_overview_state.select(Some(0));
+    let backend = TestBackend::new(120, 50);
+    let mut terminal = Terminal::new(backend).expect("create terminal");
+    let mut anim = AnimationState::default();
+    terminal
+        .draw(|frame| ui::render(frame, &mut app, &mut anim))
+        .expect("render frame");
+    let buf = terminal.backend().buffer().clone();
+    let actual = serialize_buffer(&buf);
+    assert_golden("tunnels_overview_active_tall", &actual);
+}
+
+#[test]
 fn visual_tunnel_form() {
     let _g = setup();
     let mut app = demo::build_demo_app();
@@ -313,6 +359,43 @@ fn visual_tunnel_form() {
     };
     let actual = render_screen(&mut app);
     assert_golden("tunnel_form", &actual);
+}
+
+#[test]
+fn visual_tunnel_host_picker() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("tunnel_host_picker", &actual);
+}
+
+#[test]
+fn visual_tunnel_host_picker_filtered() {
+    // Picker with an active fuzzy query — title should switch to the
+    // "X of Y" form and the list should shrink to matching hosts.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_query = "db".to_string();
+    app.ui.tunnel_host_picker_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("tunnel_host_picker_filtered", &actual);
+}
+
+#[test]
+fn visual_tunnels_overview_delete_confirm() {
+    // Pending-delete confirmation footer rendered over the overview.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.ui.tunnels_overview_state.select(Some(0));
+    app.tunnels.pending_delete = Some(0);
+    let actual = render_screen(&mut app);
+    assert_golden("tunnels_overview_delete_confirm", &actual);
 }
 
 #[test]

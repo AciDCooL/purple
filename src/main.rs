@@ -31,6 +31,7 @@ mod ssh_keys;
 mod tui;
 mod tui_loop;
 mod tunnel;
+mod tunnel_live;
 mod ui;
 mod update;
 mod vault_ssh;
@@ -123,6 +124,7 @@ fn main() -> Result<()> {
     if cli.demo {
         let mut app = demo::build_demo_app();
         demo::seed_whats_new_toast(&mut app);
+        demo::seed_tunnel_live_snapshots(&mut app);
         return run_tui(app);
     }
 

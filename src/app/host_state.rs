@@ -23,10 +23,8 @@ pub struct HostState {
     pub sort_mode: SortMode,
     pub group_by: GroupBy,
     pub view_mode: ViewMode,
-    /// Currently active group filter (tab navigation). None = show all groups.
+    /// Currently active group filter. None = show all groups.
     pub group_filter: Option<String>,
-    /// Index into group_tab_order for tab navigation.
-    pub group_tab_index: usize,
     /// Ordered list of group names from the current display list.
     pub group_tab_order: Vec<String>,
     /// Host/pattern counts per group (computed before group filtering).
@@ -53,7 +51,6 @@ impl HostState {
             group_by: GroupBy::None,
             view_mode: ViewMode::Compact,
             group_filter: None,
-            group_tab_index: 0,
             group_tab_order: Vec::new(),
             group_host_counts: HashMap::new(),
         }
@@ -80,7 +77,6 @@ impl Default for HostState {
             group_by: GroupBy::None,
             view_mode: ViewMode::Compact,
             group_filter: None,
-            group_tab_index: 0,
             group_tab_order: Vec::new(),
             group_host_counts: HashMap::new(),
         }

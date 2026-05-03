@@ -1475,6 +1475,24 @@ pub fn brand() -> Style {
         .remove_modifier(Modifier::DIM)
 }
 
+/// Active tab marker for the top navigation bar: bold white label with a
+/// purple underline. Letters stay white so the selected tab reads as a label,
+/// not as a second brand splash; only the underline carries the brand colour.
+pub fn nav_active() -> Style {
+    let mut style = bold().add_modifier(Modifier::UNDERLINED);
+    let m = mode();
+    if m == 2 {
+        if let Some(c) = active_theme().accent.truecolor {
+            style = style.underline_color(c);
+        }
+    } else if m == 1 {
+        if let Some(c) = active_theme().accent.ansi16 {
+            style = style.underline_color(c);
+        }
+    }
+    style
+}
+
 /// Structural elements (overlay borders, tags).
 pub fn accent() -> Style {
     active_theme().border.to_style(mode())

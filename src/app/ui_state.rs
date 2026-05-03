@@ -58,6 +58,15 @@ pub struct UiSelection {
     pub theme_picker: ThemePickerState,
     pub provider_list_state: ListState,
     pub tunnel_list_state: ListState,
+    pub tunnels_overview_state: ListState,
+    /// Cursor for the host picker reached from the tunnels overview when
+    /// adding a new tunnel. Indexes into the editable-hosts slice built at
+    /// render time (hosts from included files are excluded).
+    pub tunnel_host_picker_state: ListState,
+    /// Live fuzzy-search query for the tunnel host picker. Always-on input
+    /// mode: every printable keystroke appends to the query and shrinks the
+    /// candidate set. Empty string means "show all".
+    pub tunnel_host_picker_query: String,
     pub snippet_picker_state: ListState,
     pub snippet_search: Option<String>,
     pub region_picker: RegionPickerState,

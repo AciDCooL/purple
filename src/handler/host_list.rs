@@ -70,10 +70,12 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
             app.select_prev_skipping_headers();
         }
         KeyCode::Tab => {
-            app.next_group_tab();
+            app.top_page = app.top_page.next();
+            app.search.query = None;
         }
         KeyCode::BackTab => {
-            app.prev_group_tab();
+            app.top_page = app.top_page.prev();
+            app.search.query = None;
         }
         KeyCode::PageDown => {
             app.page_down_host();

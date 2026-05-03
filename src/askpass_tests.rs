@@ -1,5 +1,12 @@
 use super::*;
 
+/// Serialises tests that read or write files in `~/.purple/.askpass_*`.
+/// `cleanup_marker` indiscriminately removes every marker file in that
+/// directory, so two tests creating their own marker concurrently can
+/// erase each other's state mid-assert. Hold this lock around any test
+/// that touches that path.
+static MARKER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[test]
 fn describe_source_keychain() {
     assert_eq!(describe_source("keychain"), "OS Keychain");
@@ -544,6 +551,7 @@ fn is_recent_marker_returns_true_for_fresh_file() {
 
 #[test]
 fn cleanup_marker_removes_file() {
+    let _guard = MARKER_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     // Create a marker file manually
     let alias = "test_cleanup_marker";
     let path = marker_path(alias).unwrap();
@@ -556,6 +564,7 @@ fn cleanup_marker_removes_file() {
 
 #[test]
 fn cleanup_marker_noop_for_nonexistent() {
+    let _guard = MARKER_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     // Should not panic or error
     cleanup_marker("nonexistent_test_host_cleanup");
 }
@@ -1448,6 +1457,7 @@ fn password_command_remove_success_message_format() {
 
 #[test]
 fn retry_marker_lifecycle_create_then_detect() {
+    let _guard = MARKER_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let alias = "test_lifecycle_marker";
     let path = marker_path(alias).unwrap();
     let _ = std::fs::create_dir_all(path.parent().unwrap());

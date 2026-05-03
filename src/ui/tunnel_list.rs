@@ -23,7 +23,10 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
 
     let mut block = design::overlay_block(&format!("Tunnels for {}", alias));
     if is_active {
-        block = block.title_top(Line::from(Span::styled("[running] ", theme::success())));
+        // `[running]` is a live-state indicator — same semantic tier
+        // as the host-list online dot. Use `online_dot()` so the green
+        // shade matches the rest of the app.
+        block = block.title_top(Line::from(Span::styled("[running] ", theme::online_dot())));
     }
 
     let inner = block.inner(area);

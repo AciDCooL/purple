@@ -4962,158 +4962,6 @@ Host web3
     assert!(app.hosts_state.multi_select.is_empty());
 }
 
-// --- next_group_tab ---
-
-#[test]
-fn next_group_tab_from_all_goes_to_first_group() {
-    let content = "\
-Host do-web
-  HostName 1.1.1.1
-  # purple:provider digitalocean:1
-
-Host aws-db
-  HostName 2.2.2.2
-  # purple:provider aws:2
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Provider;
-    app.apply_sort();
-    assert!(app.hosts_state.group_filter.is_none());
-    assert_eq!(app.hosts_state.group_tab_index, 0);
-    assert!(!app.hosts_state.group_tab_order.is_empty());
-
-    let first_group = app.hosts_state.group_tab_order[0].clone();
-    app.next_group_tab();
-
-    assert_eq!(app.hosts_state.group_filter, Some(first_group));
-    assert_eq!(app.hosts_state.group_tab_index, 1);
-}
-
-#[test]
-fn next_group_tab_cycles_through_groups_and_back_to_all() {
-    let content = "\
-Host do-web
-  HostName 1.1.1.1
-  # purple:provider digitalocean:1
-
-Host aws-db
-  HostName 2.2.2.2
-  # purple:provider aws:2
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Provider;
-    app.apply_sort();
-    // Ensure exactly 2 groups
-    assert_eq!(app.hosts_state.group_tab_order.len(), 2);
-
-    // First call: All -> group1
-    app.next_group_tab();
-    assert!(app.hosts_state.group_filter.is_some());
-    assert_eq!(app.hosts_state.group_tab_index, 1);
-
-    // Second call: group1 -> group2
-    app.next_group_tab();
-    assert!(app.hosts_state.group_filter.is_some());
-    assert_eq!(app.hosts_state.group_tab_index, 2);
-
-    // Third call: group2 -> All
-    app.next_group_tab();
-    assert_eq!(app.hosts_state.group_filter, None);
-    assert_eq!(app.hosts_state.group_tab_index, 0);
-}
-
-#[test]
-fn next_group_tab_with_zero_groups_does_nothing() {
-    let content = "\
-Host web1
-  HostName 1.1.1.1
-";
-    let mut app = make_app(content);
-    // No grouping, so group_tab_order is empty
-    app.hosts_state.group_by = GroupBy::None;
-    app.apply_sort();
-    assert!(app.hosts_state.group_tab_order.is_empty());
-
-    app.next_group_tab();
-
-    assert_eq!(app.hosts_state.group_filter, None);
-    assert_eq!(app.hosts_state.group_tab_index, 0);
-}
-
-#[test]
-fn next_group_tab_with_one_group_toggles() {
-    let content = "\
-Host do-web
-  HostName 1.1.1.1
-  # purple:provider digitalocean:1
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Provider;
-    app.apply_sort();
-    assert_eq!(app.hosts_state.group_tab_order.len(), 1);
-
-    let only_group = app.hosts_state.group_tab_order[0].clone();
-
-    // First call: All -> the one group
-    app.next_group_tab();
-    assert_eq!(app.hosts_state.group_filter, Some(only_group));
-
-    // Second call: the one group -> All
-    app.next_group_tab();
-    assert_eq!(app.hosts_state.group_filter, None);
-    assert_eq!(app.hosts_state.group_tab_index, 0);
-}
-
-// --- prev_group_tab ---
-
-#[test]
-fn prev_group_tab_from_all_goes_to_last_group() {
-    let content = "\
-Host do-web
-  HostName 1.1.1.1
-  # purple:provider digitalocean:1
-
-Host aws-db
-  HostName 2.2.2.2
-  # purple:provider aws:2
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Provider;
-    app.apply_sort();
-    assert_eq!(app.hosts_state.group_tab_order.len(), 2);
-
-    let last_group = app.hosts_state.group_tab_order.last().unwrap().clone();
-    app.prev_group_tab();
-
-    assert_eq!(app.hosts_state.group_filter, Some(last_group));
-}
-
-#[test]
-fn prev_group_tab_wraps_to_all() {
-    let content = "\
-Host do-web
-  HostName 1.1.1.1
-  # purple:provider digitalocean:1
-
-Host aws-db
-  HostName 2.2.2.2
-  # purple:provider aws:2
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Provider;
-    app.apply_sort();
-
-    // Navigate to the first group using next_group_tab (reliable, deterministic)
-    app.next_group_tab();
-    assert!(app.hosts_state.group_filter.is_some());
-    assert_eq!(app.hosts_state.group_tab_index, 1);
-
-    // prev from first group should go back to All
-    app.prev_group_tab();
-    assert_eq!(app.hosts_state.group_filter, None);
-    assert_eq!(app.hosts_state.group_tab_index, 0);
-}
-
 // --- clear_group_filter ---
 
 #[test]
@@ -5131,14 +4979,14 @@ Host db1
     app.hosts_state.group_by = GroupBy::Provider;
     app.apply_sort();
 
-    // Navigate into a group
-    app.next_group_tab();
+    // Activate a group filter directly (Tab no longer wires this).
+    let first_group = app.hosts_state.group_tab_order[0].clone();
+    app.hosts_state.group_filter = Some(first_group);
     assert!(app.hosts_state.group_filter.is_some());
 
     app.clear_group_filter();
 
     assert_eq!(app.hosts_state.group_filter, None);
-    assert_eq!(app.hosts_state.group_tab_index, 0);
 }
 
 #[test]
@@ -5146,13 +4994,11 @@ fn clear_group_filter_noop_when_already_none() {
     let content = "Host web1\n  HostName 1.1.1.1\n";
     let mut app = make_app(content);
     assert_eq!(app.hosts_state.group_filter, None);
-    assert_eq!(app.hosts_state.group_tab_index, 0);
 
     // Should not panic or change state
     app.clear_group_filter();
 
     assert_eq!(app.hosts_state.group_filter, None);
-    assert_eq!(app.hosts_state.group_tab_index, 0);
 }
 
 // --- select_next_skipping_headers / select_prev_skipping_headers ---
@@ -5259,245 +5105,6 @@ Host web1
 
     // Should stay at the same position since there is no next host
     assert_eq!(app.ui.list_state.selected(), Some(host_pos));
-}
-
-// --- update_group_tab_follow ---
-
-#[test]
-fn tag_mode_tab_follows_selected_host() {
-    let content = "\
-Host web1
-  HostName 1.1.1.1
-  # purple:tags production
-
-Host web2
-  HostName 2.2.2.2
-  # purple:tags staging
-
-Host web3
-  HostName 3.3.3.3
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Tag("production".to_string());
-    app.apply_sort();
-
-    // Find a host with "staging" tag and select it
-    for (i, item) in app.hosts_state.display_list.iter().enumerate() {
-        if let HostListItem::Host { index } = item {
-            if app.hosts_state.list[*index].alias == "web2" {
-                app.ui.list_state.select(Some(i));
-                break;
-            }
-        }
-    }
-    app.update_group_tab_follow();
-    let staging_pos = app
-        .hosts_state
-        .group_tab_order
-        .iter()
-        .position(|t| t == "staging")
-        .unwrap();
-    assert_eq!(app.hosts_state.group_tab_index, staging_pos + 1);
-}
-
-#[test]
-fn tag_mode_tab_follows_first_tab_tag() {
-    let content = "\
-Host web1
-  HostName 1.1.1.1
-  # purple:tags production
-
-Host web2
-  HostName 2.2.2.2
-  # purple:tags staging
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Tag("production".to_string());
-    app.apply_sort();
-
-    // Select the "production" host
-    for (i, item) in app.hosts_state.display_list.iter().enumerate() {
-        if let HostListItem::Host { index } = item {
-            if app.hosts_state.list[*index].alias == "web1" {
-                app.ui.list_state.select(Some(i));
-                break;
-            }
-        }
-    }
-    app.update_group_tab_follow();
-    let prod_pos = app
-        .hosts_state
-        .group_tab_order
-        .iter()
-        .position(|t| t == "production")
-        .unwrap();
-    assert_eq!(app.hosts_state.group_tab_index, prod_pos + 1);
-}
-
-#[test]
-fn tag_mode_tab_fallback_for_untagged_host() {
-    let content = "\
-Host web1
-  HostName 1.1.1.1
-  # purple:tags production
-
-Host web2
-  HostName 2.2.2.2
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Tag("production".to_string());
-    app.apply_sort();
-
-    // Select the untagged host
-    for (i, item) in app.hosts_state.display_list.iter().enumerate() {
-        if let HostListItem::Host { index } = item {
-            if app.hosts_state.list[*index].alias == "web2" {
-                app.ui.list_state.select(Some(i));
-                break;
-            }
-        }
-    }
-    app.update_group_tab_follow();
-    assert_eq!(app.hosts_state.group_tab_index, 0);
-}
-
-#[test]
-fn tag_mode_tab_ignores_provider_tags() {
-    let content = "\
-Host do-web
-  HostName 1.1.1.1
-  # purple:provider_tags cloud
-  # purple:provider digitalocean:1
-
-Host manual
-  HostName 2.2.2.2
-  # purple:tags cloud
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Tag("cloud".to_string());
-    app.apply_sort();
-
-    // "cloud" should only appear once in tab order (from manual's user tag)
-    assert_eq!(
-        app.hosts_state
-            .group_host_counts
-            .get("cloud")
-            .copied()
-            .unwrap_or(0),
-        1,
-        "provider_tags should not count toward group tab"
-    );
-
-    // Select the provider-tagged host (do-web has no user tags)
-    for (i, item) in app.hosts_state.display_list.iter().enumerate() {
-        if let HostListItem::Host { index } = item {
-            if app.hosts_state.list[*index].alias == "do-web" {
-                app.ui.list_state.select(Some(i));
-                break;
-            }
-        }
-    }
-    app.update_group_tab_follow();
-    // do-web has no user tags matching the tab bar, should fall back to All
-    assert_eq!(app.hosts_state.group_tab_index, 0);
-}
-
-#[test]
-fn provider_mode_tab_follows_across_groups() {
-    let content = "\
-Host do-web
-  HostName 1.1.1.1
-  # purple:provider digitalocean:1
-
-Host aws-web
-  HostName 2.2.2.2
-  # purple:provider aws:2
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Provider;
-    app.apply_sort();
-
-    // Navigate to the last host
-    let last_host = app
-        .hosts_state
-        .display_list
-        .iter()
-        .enumerate()
-        .rfind(|(_, item)| matches!(item, HostListItem::Host { .. }))
-        .unwrap()
-        .0;
-    app.ui.list_state.select(Some(last_host));
-    app.update_group_tab_follow();
-
-    // Should be on the group that contains the last host (non-zero)
-    assert_ne!(app.hosts_state.group_tab_index, 0);
-
-    // Navigate to the first host
-    let first_host = app
-        .hosts_state
-        .display_list
-        .iter()
-        .enumerate()
-        .find(|(_, item)| matches!(item, HostListItem::Host { .. }))
-        .unwrap()
-        .0;
-    app.ui.list_state.select(Some(first_host));
-    app.update_group_tab_follow();
-
-    // First host has no provider header before it (non-provider hosts first)
-    // or is in the first provider group
-    let first_idx = app.hosts_state.group_tab_index;
-    assert_ne!(first_idx, app.hosts_state.group_tab_order.len() + 1);
-}
-
-#[test]
-fn group_filter_active_prevents_tab_follow() {
-    let content = "\
-Host web1
-  HostName 1.1.1.1
-  # purple:tags production
-
-Host web2
-  HostName 2.2.2.2
-  # purple:tags staging
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::Tag("production".to_string());
-    app.apply_sort();
-
-    // Set a filter and record the tab index
-    app.next_group_tab();
-    let fixed_index = app.hosts_state.group_tab_index;
-
-    // Navigate to a different host
-    for (i, item) in app.hosts_state.display_list.iter().enumerate() {
-        if matches!(item, HostListItem::Host { .. }) {
-            app.ui.list_state.select(Some(i));
-            break;
-        }
-    }
-    app.update_group_tab_follow();
-
-    // Tab index should not change when filter is active
-    assert_eq!(app.hosts_state.group_tab_index, fixed_index);
-}
-
-#[test]
-fn ungrouped_mode_tab_index_stays_zero() {
-    let content = "\
-Host web1
-  HostName 1.1.1.1
-
-Host web2
-  HostName 2.2.2.2
-";
-    let mut app = make_app(content);
-    app.hosts_state.group_by = GroupBy::None;
-    app.apply_sort();
-
-    app.ui.list_state.select(Some(1));
-    app.update_group_tab_follow();
-    assert_eq!(app.hosts_state.group_tab_index, 0);
 }
 
 // --- Scoped search ---
@@ -7012,6 +6619,20 @@ fn palette_commands_have_unique_keys() {
         commands.len() >= 20,
         "expected at least 20 palette commands"
     );
+}
+
+#[test]
+fn palette_tunnel_commands_have_unique_keys() {
+    let commands = PaletteCommand::for_mode(PaletteMode::Tunnels);
+    let mut seen = std::collections::HashSet::new();
+    for cmd in commands {
+        assert!(
+            seen.insert(cmd.key),
+            "duplicate tunnel palette key: '{}'",
+            cmd.key
+        );
+    }
+    assert!(!commands.is_empty(), "tunnel palette must not be empty");
 }
 
 #[test]

@@ -24,11 +24,15 @@ pub(crate) fn handle_tick(
     // Tick the spinner whenever something needs animation. Reachable hosts
     // drive the breathing online-dot pulse via `online_dot_pulsing(tick)`,
     // so they share the same monotonically-incrementing tick counter as
-    // the spinner — saves a parallel tick driver.
+    // the spinner — saves a parallel tick driver. Active tunnels also
+    // tick the spinner so the live chart wave has a continuous phase.
+    let tunnels_animating =
+        matches!(app.top_page, crate::app::TopPage::Tunnels) && !app.tunnels.active.is_empty();
     if anim.has_checking_hosts(app)
         || vault_signing
         || provider_syncing
         || anim.has_reachable_hosts(app)
+        || tunnels_animating
     {
         anim.tick_spinner();
     }

@@ -182,7 +182,6 @@ impl App {
             }
             if target != current {
                 self.ui.list_state.select(Some(target));
-                self.update_group_tab_follow();
             }
         }
     }
@@ -215,7 +214,6 @@ impl App {
             }
             if target != current {
                 self.ui.list_state.select(Some(target));
-                self.update_group_tab_follow();
             }
         }
     }
@@ -780,7 +778,6 @@ impl App {
                 HostListItem::GroupHeader(_)
             ) {
                 self.ui.list_state.select(Some(i));
-                self.update_group_tab_follow();
                 return;
             }
         }
@@ -795,7 +792,6 @@ impl App {
                 HostListItem::GroupHeader(_)
             ) {
                 self.ui.list_state.select(Some(i));
-                self.update_group_tab_follow();
                 return;
             }
         }

@@ -2,12 +2,12 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, Paragraph, Tabs};
+use ratatui::widgets::{List, ListItem, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::design;
 use super::theme;
-use crate::app::{self, App, GroupBy, HostListItem, PingStatus, ViewMode};
+use crate::app::{self, App, GroupBy, HostListItem, PingStatus, TopPage, ViewMode};
 
 /// Minimum terminal width to show the detail panel in detailed view mode.
 const DETAIL_MIN_WIDTH: u16 = 95;
@@ -25,7 +25,12 @@ pub(crate) fn format_rtt(ms: u32) -> String {
 
 /// Build the update badge label, truncating the headline with ellipsis if needed.
 /// `max_width` is the border area width (including border chars).
-fn build_update_label(ver: &str, headline: Option<&str>, hint: &str, max_width: u16) -> String {
+pub(super) fn build_update_label(
+    ver: &str,
+    headline: Option<&str>,
+    hint: &str,
+    max_width: u16,
+) -> String {
     // Budget: area width minus 2 border chars and 1 char padding on each side
     let budget = (max_width as usize).saturating_sub(4);
     match headline {
@@ -263,32 +268,29 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
 
     let is_searching = app.search.query.is_some();
     let is_tagging = app.tags.input.is_some();
-    // Group bar: bordered block with tabs (top + content + bottom = 3 rows).
-    // Only shown when grouping is active and there are groups to display.
-    let show_group_bar = !matches!(app.hosts_state.group_by, GroupBy::None);
-    let group_bar_height: u16 = if show_group_bar { 3 } else { 0 };
+    // Top navigation bar: always visible. Bordered block with three slots:
+    // [purple brand] [hosts (N)] [tunnels (M)]. Top + content + bottom = 3 rows.
+    let top_bar_height: u16 = 3;
 
-    // Layout: optional group bar + host list + optional input bar + footer/status
+    // Layout: top nav bar + host list + optional input bar + footer/status
     let chunks = if is_searching || is_tagging {
         Layout::vertical([
-            Constraint::Length(group_bar_height), // Group bar (0 when hidden)
-            Constraint::Min(5),                   // Host list (maximized)
-            Constraint::Length(1),                // Search/tag bar
-            Constraint::Length(1),                // Footer or status message
+            Constraint::Length(top_bar_height),
+            Constraint::Min(5),    // Host list (maximized)
+            Constraint::Length(1), // Search/tag bar
+            Constraint::Length(1), // Footer or status message
         ])
         .split(area)
     } else {
         Layout::vertical([
-            Constraint::Length(group_bar_height), // Group bar (0 when hidden)
-            Constraint::Min(5),                   // Host list (maximized)
-            Constraint::Length(1),                // Footer or status message
+            Constraint::Length(top_bar_height),
+            Constraint::Min(5),    // Host list (maximized)
+            Constraint::Length(1), // Footer or status message
         ])
         .split(area)
     };
 
-    if show_group_bar {
-        render_group_bar(frame, app, chunks[0]);
-    }
+    render_top_bar(frame, app, chunks[0]);
 
     let content_area = chunks[1];
     let target_detail =
@@ -360,64 +362,60 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
     }
 }
 
-fn render_group_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let total = app.hosts_state.list.len() + app.hosts_state.patterns.len();
+/// Gap between the brand badge and the first page tab, and between page
+/// tabs. Wide enough that the underline on the active tab cannot visually
+/// touch the brand badge or a neighbouring tab and the eye reads each item
+/// as a discrete entry rather than a run-on label.
+const TOP_BAR_GAP: &str = "      ";
 
-    let titles: Vec<Line> = match &app.hosts_state.group_by {
-        GroupBy::Tag(_) => std::iter::once(Line::from(vec![
-            Span::styled(" All ", theme::bold()),
-            Span::styled(format!("({})", total), theme::muted()),
-        ]))
-        .chain(app.hosts_state.group_tab_order.iter().map(|tag| {
-            let count = app
-                .hosts_state
-                .group_host_counts
-                .get(tag.as_str())
-                .copied()
-                .unwrap_or(0);
-            Line::from(vec![
-                Span::styled(format!(" {} ", tag), theme::bold()),
-                Span::styled(format!("({})", count), theme::muted()),
-            ])
-        }))
-        .collect(),
-        _ => std::iter::once(("All".to_string(), total))
-            .chain(app.hosts_state.group_tab_order.iter().map(|name| {
-                let count = app
-                    .hosts_state
-                    .group_host_counts
-                    .get(name.as_str())
-                    .copied()
-                    .unwrap_or(0);
-                (name.to_uppercase(), count)
-            }))
-            .map(|(name, count)| {
-                Line::from(vec![
-                    Span::styled(format!(" {} ", name), theme::bold()),
-                    Span::styled(format!("({})", count), theme::muted()),
-                ])
-            })
-            .collect(),
-    };
+/// Top navigation bar: always-visible block holding the brand badge plus
+/// page tabs. Layout: " purple "(brand_badge)      hosts      tunnels.
+/// Page labels render without surrounding spaces so the active-tab underline
+/// hugs the letters; the brand badge keeps its inner padding because it is
+/// a solid colour fill.
+pub(crate) fn top_bar_spans(app: &App) -> Vec<Span<'static>> {
+    let host_active = app.top_page == TopPage::Hosts;
+    let tunnel_active = app.top_page == TopPage::Tunnels;
 
-    let block = design::main_block("purple");
-
-    let tabs = Tabs::new(titles)
-        .select(app.hosts_state.group_tab_index)
-        .highlight_style(theme::brand_badge())
-        .divider(Span::raw("  "))
-        .block(block);
-
-    frame.render_widget(tabs, area);
+    vec![
+        Span::styled(" purple ", theme::brand_badge()),
+        Span::raw(TOP_BAR_GAP),
+        Span::styled(
+            "hosts",
+            if host_active {
+                theme::nav_active()
+            } else {
+                theme::bold()
+            },
+        ),
+        Span::raw(TOP_BAR_GAP),
+        Span::styled(
+            "tunnels",
+            if tunnel_active {
+                theme::nav_active()
+            } else {
+                theme::bold()
+            },
+        ),
+    ]
 }
 
-/// Returns "purple" branding when group bar is hidden, "hosts" when grouped.
-fn brand_label_for_group(group_by: &GroupBy) -> &'static str {
-    if matches!(group_by, GroupBy::None) {
-        " purple "
-    } else {
-        " HOSTS "
-    }
+fn render_top_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let block = design::main_block_line(Line::default());
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    // Single-line content offset by one column so the first slot does not
+    // butt against the rounded border. Matches the inset of the legacy Tabs
+    // widget that previously rendered here.
+    let content_area = ratatui::layout::Rect::new(
+        inner.x.saturating_add(1),
+        inner.y,
+        inner.width.saturating_sub(1),
+        1,
+    );
+    let line = Line::from(top_bar_spans(app));
+    frame.render_widget(Paragraph::new(line), content_area);
 }
 
 fn render_display_list(
@@ -426,25 +424,15 @@ fn render_display_list(
     area: ratatui::layout::Rect,
     spinner_tick: u64,
 ) {
-    // Build multi-span title: hosts count + optional state badges.
-    // Show "purple" branding when group bar is hidden, "hosts" otherwise.
+    // Brand badge moved to the top navigation bar. The block title now leads
+    // with just the visible host count, optionally followed by state badges.
     let visible_count = app
         .hosts_state
         .display_list
         .iter()
         .filter(|i| matches!(i, HostListItem::Host { .. } | HostListItem::Pattern { .. }))
         .count();
-    let brand_label = brand_label_for_group(&app.hosts_state.group_by);
-    let brand_style = if matches!(app.hosts_state.group_by, GroupBy::None) {
-        theme::brand_badge()
-    } else {
-        theme::brand()
-    };
-    let mut title_spans = vec![
-        Span::styled(brand_label, brand_style),
-        Span::styled("── ", theme::muted()),
-        Span::styled(format!("{} ", visible_count), theme::bold()),
-    ];
+    let mut title_spans = vec![Span::styled(format!(" {} ", visible_count), theme::bold())];
     if app.tags.input.is_some() {
         title_spans.push(Span::styled("── ", theme::muted()));
         title_spans.push(Span::styled(" TAGGING ", theme::brand_badge()));
@@ -736,14 +724,10 @@ fn render_search_list(
     let total_results =
         app.search.filtered_indices.len() + app.search.filtered_pattern_indices.len();
     let total = app.hosts_state.list.len() + app.hosts_state.patterns.len();
-    let title = Line::from(vec![
-        Span::styled(" HOSTS ", theme::brand()),
-        Span::styled("── ", theme::muted()),
-        Span::styled(
-            format!("search: {}/{} ", total_results, total),
-            theme::bold(),
-        ),
-    ]);
+    let title = Line::from(vec![Span::styled(
+        format!(" search: {}/{} ", total_results, total),
+        theme::bold(),
+    )]);
 
     let update_title = app.update.available.as_ref().map(|ver| {
         let label = build_update_label(

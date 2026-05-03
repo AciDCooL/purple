@@ -105,7 +105,7 @@ fi
 
 # 9. Golden file count matches expected screen count.
 GOLDEN_COUNT=$(ls tests/visual_golden/*.golden 2>/dev/null | wc -l | tr -d ' ')
-EXPECTED_GOLDEN=30
+EXPECTED_GOLDEN=36
 if [ "$GOLDEN_COUNT" != "$EXPECTED_GOLDEN" ]; then
     echo "ERROR: Expected $EXPECTED_GOLDEN golden files, found $GOLDEN_COUNT."
     echo "If you added a new Screen variant, add a visual regression test and update EXPECTED_GOLDEN."
@@ -148,6 +148,47 @@ if grep -rEn 'render_footer_with_status\(frame, (chunks|rows|inner_chunks)\[|ren
     echo "ERROR: Footer rendered to Layout chunk instead of design::render_overlay_footer."
     grep -rEn 'render_footer_with_status\(frame, (chunks|rows|inner_chunks)\[|render_with_status\(frame, (chunks|rows|inner_chunks)\[' \
         src/ui/ --include='*.rs' | grep -v 'host_list\.rs' | grep -v 'test'
+    exit 1
+fi
+
+# 14. theme::success() may not be used to colour live-state glyphs.
+#
+# Design system rule (CLAUDE.md): `online_dot()` / `online_dot_pulsing()`
+# encode "host or tunnel is live right now". `success()` encodes a
+# positive action outcome (a check-mark, a toast, "saved successfully").
+# Mixing them produces multiple shades of green for the same semantic
+# tier and breaks the cross-screen rhythm.
+#
+# Files allowed to call `theme::success()` for action-outcome surfaces:
+# - snippet_output.rs        — exit-code zero badge (one-shot outcome)
+# - provider_list.rs         — sync-completion check icon (one-shot outcome)
+# - bulk_tag_editor.rs       — tag-diff arrows (action outcome: "this tag was added")
+# - detail_panel.rs          — vault-cert `Signed` state (one-shot outcome). Mixed file:
+#                              live-state callers MUST use `online_dot()` (see lines
+#                              above where `running` and `online` were migrated).
+#                              When adding new green spans here, choose deliberately.
+if grep -rEn 'theme::success\(\)' src/ui/ --include='*.rs' \
+    | grep -v 'snippet_output\.rs' \
+    | grep -v 'provider_list\.rs' \
+    | grep -v 'bulk_tag_editor\.rs' \
+    | grep -v 'detail_panel\.rs' \
+    | grep -v 'design\.rs' \
+    | grep -v 'mod\.rs' \
+    | grep -v 'theme.*tests' \
+    | grep -q .; then
+    echo "ERROR: theme::success() used for what looks like a live-state indicator."
+    echo "       Use theme::online_dot() or theme::online_dot_pulsing(spinner_tick)"
+    echo "       for live-now signals. Reserve success() for action-outcome content"
+    echo "       (toast banners, completion icons). Add an exception above if your"
+    echo "       file is a new toast/outcome surface."
+    grep -rEn 'theme::success\(\)' src/ui/ --include='*.rs' \
+        | grep -v 'snippet_output\.rs' \
+        | grep -v 'provider_list\.rs' \
+        | grep -v 'bulk_tag_editor\.rs' \
+        | grep -v 'detail_panel\.rs' \
+        | grep -v 'design\.rs' \
+        | grep -v 'mod\.rs' \
+        | grep -v 'theme.*tests'
     exit 1
 fi
 

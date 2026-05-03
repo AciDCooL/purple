@@ -119,7 +119,7 @@ purple is an open-source terminal SSH manager and SSH config editor written in R
 - Password management: OS Keychain, 1Password (op://), Bitwarden (bw:), pass (pass:), HashiCorp Vault KV secrets engine (vault:), custom command. Automatic SSH_ASKPASS integration
 - Short-lived SSH certificates via the HashiCorp Vault SSH secrets engine. Per-host or per-provider role configuration (# purple:vault-ssh). Bulk sign with V key. Cert cache under ~/.purple/certs/ with TTL tracking and renewal. Vault SSH address resolved from CLI flag > per-host `# purple:vault-addr` > provider `vault_addr` > parent shell `VAULT_ADDR` env, so users no longer need to export `VAULT_ADDR` before launching purple. Distinct from the Vault KV password source above
 - Container management via SSH (Docker and Podman). View, start, stop and restart containers. Auto-detected runtime. No agent. No web UI. No extra ports. Works with both Docker and Podman
-- SSH tunnel management: LocalForward, RemoteForward, DynamicForward. Start/stop from TUI or CLI
+- SSH tunnel management: dedicated Tunnels page reachable with Tab from the Host List, listing every tunnel directive across all hosts. Live detail panel shows throughput per client process (with PID, source port, age and sparkline), a 60-second swimlane of channel opens and closes (Direct and Dynamic SOCKS), and uptime/peak counters. Add tunnels from the Tunnels page with `a` (host picker filters as you type) or per-host with `T`. LocalForward, RemoteForward, DynamicForward. Start/stop from TUI or CLI
 - Host tagging via SSH config comments. User tags in # purple:tags, provider tags in # purple:provider_tags (exact mirror of remote). Tag picker, fuzzy and exact tag filtering. Bulk tag editor: select hosts with Space, press t to add or remove tags across all selected hosts at once with tri-state checkboxes. Undoable with u
 - Bulk import from hosts files or ~/.ssh/known_hosts
 - SSH key browsing with metadata (type, bits, fingerprint) and host linking
@@ -144,7 +144,7 @@ cargo install purple-ssh
 
 ## Usage
 
-The primary interface is the TUI. Run purple to launch it. Press ? for the full keybindings cheat sheet. Press : to open the command palette with 24 searchable actions. Most actions are available from the TUI: S for provider management, r for snippets, T for tunnels, C for containers, F for file browser. The CLI subcommands below are alternatives for scripting and automation.
+The primary interface is the TUI. Run purple to launch it. Press ? for the full keybindings cheat sheet. Press : to open the command palette with 24 searchable actions. The TUI has two top-level pages: Hosts (default) and Tunnels (live overview of every SSH forward across all hosts). Press Tab to switch between them. Most actions are available from the TUI: S for provider management, r for snippets, T for the per-host tunnel overlay, C for containers, F for file browser. The CLI subcommands below are alternatives for scripting and automation.
 
 purple                              # Launch the TUI
 purple --config ~/other/ssh_config  # Use alternate config file
@@ -293,7 +293,11 @@ The client starts purple mcp automatically. No manual server process needed. Pur
 
 ## SSH tunnel management
 
-Press T on any host to open the tunnel overlay. Press a to add a tunnel rule (LocalForward, RemoteForward or DynamicForward), e to edit, d to delete and Enter to start or stop. Active tunnels run as ssh -N background processes and are cleaned up on exit. The CLI alternative is purple tunnel add/remove/start.
+There are two ways into tunnels in the TUI. Press Tab on the Host List to open the Tunnels page, which lists every tunnel directive across all your hosts in one sortable, searchable table. Active tunnels show a green dot, current bps and uptime; idle tunnels show their last-connected time. The detail panel on the right opens automatically when the cursor lands on an active tunnel, with a per-client process roster (PID, source port, age, current bps, sparkline of recent throughput, responsible app from the OS) and a 60-second channel swimlane of opens and closes (Direct channels for Local/Remote forwards, Dynamic channels for SOCKS). Press a on the Tunnels page to add a tunnel: a host picker filters editable hosts as you type, then opens the tunnel form. Press e to edit, d to delete, s to cycle sort (most recent / alphabetical), / to search by alias or forward, Enter to start or stop the selected tunnel.
+
+Press T on a host in the Host List to open the per-host tunnel overlay instead, which manages tunnel directives for that one host only. Press a to add a tunnel rule (LocalForward, RemoteForward or DynamicForward), e to edit, d to delete and Enter to start or stop.
+
+Active tunnels run as ssh -N background processes and are cleaned up on exit. The CLI alternative is purple tunnel add/remove/start.
 
 ## Tags
 
@@ -440,9 +444,9 @@ A: Press m in the host list to open the theme picker with live preview. 11 built
 
 ## Status
 
-- Current version: 2.45.2 (April 2026)
+- Current version: 3.0.0 (May 2026)
 - Release cadence: approximately bi-weekly
-- Test suite: 6500+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
+- Test suite: 6800+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
 - CI: fmt, clippy, build, test on macOS and Linux, cargo-deny, MSRV 1.86 check, rustdoc warnings, site sync, TUI smoke test, design system, message centralization, keybinding invariants and visual regression
 - Dependencies actively maintained
 

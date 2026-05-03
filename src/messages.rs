@@ -188,6 +188,8 @@ pub const TUNNEL_INCLUDED_READ_ONLY: &str = "Included host. Tunnels are read-onl
 pub const TUNNEL_ORIGINAL_NOT_FOUND: &str = "Original tunnel not found in config.";
 pub const TUNNEL_LIST_CHANGED: &str = "Tunnel list changed externally. Press Esc and re-open.";
 pub const TUNNEL_DUPLICATE: &str = "Duplicate tunnel already configured.";
+pub const TUNNEL_NO_EDITABLE_HOSTS: &str = "No editable hosts. Add a host first.";
+pub const TUNNEL_HOST_PICKER_NO_MATCH: &str = "No matches.";
 
 pub fn tunnel_stopped(alias: &str) -> String {
     format!("Tunnel for {} stopped.", alias)

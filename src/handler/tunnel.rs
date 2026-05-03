@@ -1,7 +1,22 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use log::{debug, info};
 
-use crate::app::{App, Screen};
+use crate::app::{App, Screen, TopPage};
+
+/// Where the tunnel form returns to on submit, cancel, or discard. When the
+/// user opened the form from the Tunnels-tab overview we hop back to that
+/// overview (Screen::HostList — the overview shares the screen variant with
+/// the host list and is selected by `top_page`); otherwise we return to the
+/// per-host TunnelList overlay.
+fn tunnel_form_return_screen(app: &App, alias: &str) -> Screen {
+    if matches!(app.top_page, TopPage::Tunnels) {
+        Screen::HostList
+    } else {
+        Screen::TunnelList {
+            alias: alias.to_string(),
+        }
+    }
+}
 
 pub(super) fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
     let alias = match &app.screen {
@@ -129,6 +144,8 @@ pub(super) fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
                         debug!("[external] Failed to kill tunnel process for {alias}: {e}");
                     }
                     let _ = tunnel.child.wait();
+                    drop(tunnel);
+                    app.refresh_tunnel_bind_ports();
                     app.notify(crate::messages::tunnel_stopped(&alias));
                 }
             } else if !app.tunnels.list.is_empty() {
@@ -159,9 +176,15 @@ pub(super) fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
                                 rule.remote_port
                             );
                         }
-                        app.tunnels
-                            .active
-                            .insert(alias.clone(), crate::tunnel::ActiveTunnel { child });
+                        app.tunnels.ensure_lsof_poller();
+                        let parser_tx = app.tunnels.parser_tx.clone();
+                        let active = crate::tunnel::ActiveTunnel::spawn(child, &alias, parser_tx);
+                        app.tunnels.active.insert(alias.clone(), active);
+                        app.refresh_tunnel_bind_ports();
+                        // Tunnel start spawns a real ssh session, same as a
+                        // shell connect, so record it in connection history.
+                        app.history.record(&alias);
+                        app.apply_sort();
                         app.notify(crate::messages::tunnel_started(&alias));
                     }
                     Err(e) => {
@@ -193,7 +216,8 @@ pub(super) fn handle_tunnel_form(app: &mut App, key: KeyEvent) {
                 app.forms.pending_discard_confirm = false;
                 app.clear_form_mtime();
                 app.tunnels.form_baseline = None;
-                app.set_screen(Screen::TunnelList { alias });
+                let return_to = tunnel_form_return_screen(app, &alias);
+                app.set_screen(return_to);
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 app.forms.pending_discard_confirm = false;
@@ -210,7 +234,8 @@ pub(super) fn handle_tunnel_form(app: &mut App, key: KeyEvent) {
             } else {
                 app.clear_form_mtime();
                 app.tunnels.form_baseline = None;
-                app.set_screen(Screen::TunnelList { alias });
+                let return_to = tunnel_form_return_screen(app, &alias);
+                app.set_screen(return_to);
             }
         }
         KeyCode::Tab | KeyCode::Down => {
@@ -343,7 +368,6 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
     app.clear_form_mtime();
     app.tunnels.form_baseline = None;
     app.notify(crate::messages::TUNNEL_SAVED);
-    app.set_screen(Screen::TunnelList {
-        alias: alias.to_string(),
-    });
+    let return_to = tunnel_form_return_screen(app, alias);
+    app.set_screen(return_to);
 }

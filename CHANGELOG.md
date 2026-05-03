@@ -1,3 +1,11 @@
+## 3.0.0 - 2026-05-03
+
+- feat: hosts and live tunnels in one cockpit, Tab between.
+- feat: tunnels page shows every SSH forward with live throughput, channel events and the apps moving bytes. Local, Remote and Dynamic SOCKS.
+- feat: detail panel reveals which client process owns each open channel, with a 60-second swimlane of opens and closes.
+- feat: add a tunnel from the tunnels page itself, with a fuzzy host picker that filters as you type.
+- change: Tab and Shift+Tab now switch between Hosts and Tunnels pages instead of cycling group tabs.
+
 ## 2.45.2 - 2026-04-25
 
 - feat: ProxyJump bastions get their own credentials.

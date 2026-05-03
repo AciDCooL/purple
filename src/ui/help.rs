@@ -5,7 +5,7 @@ use ratatui::widgets::{Clear, Paragraph};
 
 use super::design;
 use super::theme;
-use crate::app::{App, Screen};
+use crate::app::{App, Screen, TopPage};
 
 #[cfg(not(test))]
 fn build_date() -> &'static str {
@@ -23,12 +23,29 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         _ => return,
     };
 
-    let title_text = context_title(return_screen);
-    let is_host_list = matches!(return_screen, Screen::HostList | Screen::Welcome { .. });
-    let use_two_cols = is_host_list && frame.area().width >= 96;
+    // The tunnels tab shares `Screen::HostList` with the actual host
+    // list — the two are distinguished only by `app.top_page`. Detect
+    // that here so help dispatches to tunnel content instead of
+    // host-list content when the user opened help from the Tunnels tab.
+    let is_tunnels_tab =
+        matches!(return_screen, Screen::HostList) && matches!(app.top_page, TopPage::Tunnels);
+    let is_host_list =
+        !is_tunnels_tab && matches!(return_screen, Screen::HostList | Screen::Welcome { .. });
+    // Both top-level tabs share the same overlay chrome: logo, version,
+    // wiki/issues info block, two-column body. Sub-screens use a
+    // smaller compact layout.
+    let is_main_view = is_host_list || is_tunnels_tab;
+    let title_text = if is_tunnels_tab {
+        "Tunnels"
+    } else {
+        context_title(return_screen)
+    };
+    let use_two_cols = is_main_view && frame.area().width >= 96;
 
     let (col1, col2) = if is_host_list {
         host_list_columns()
+    } else if is_tunnels_tab {
+        tunnels_overview_columns()
     } else {
         let lines = match return_screen {
             Screen::FileBrowser { .. } => file_browser_lines(),
@@ -61,18 +78,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         (col1.len() + col2.len()) as u16
     };
 
-    let overlay_width = if is_host_list {
+    let overlay_width = if is_main_view {
         88u16.min(frame.area().width.saturating_sub(4))
     } else {
         50u16.min(frame.area().width.saturating_sub(4))
     };
 
     // chrome = non-content rows the overlay consumes regardless of content.
-    // Host list: 2 borders + top + logo(6) + gap(1) + 2 above info + 2 info + 1 bottom = 15.
-    // Others:   2 borders + top + 1 bottom breathing = 4.
+    // Main view: 2 borders + top + logo(6) + gap(1) + 2 above info + 2 info + 1 bottom = 15.
+    // Sub-screens: 2 borders + top + 1 bottom breathing = 4.
     // Footer renders BELOW the block via `design::form_footer`, so the
     // overlay reserves 1 row of vertical margin for it (saturating_sub(3)).
-    let chrome = if is_host_list { 15 } else { 4 };
+    let chrome = if is_main_view { 15 } else { 4 };
     let max_body = frame.area().height.saturating_sub(chrome);
     let height = (total_lines + chrome).min(frame.area().height.saturating_sub(3));
     let area = super::centered_rect_fixed(overlay_width, height, frame.area());
@@ -80,7 +97,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Clear, area);
 
     let mut block = design::overlay_block(title_text);
-    if is_host_list {
+    if is_main_view {
         let version = Line::from(vec![
             Span::styled(format!(" v{}", env!("CARGO_PKG_VERSION")), theme::version()),
             Span::styled(format!(" (built {}) ", build_date()), theme::muted()),
@@ -91,7 +108,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let rows = if is_host_list {
+    let rows = if is_main_view {
         Layout::vertical([
             Constraint::Length(1), // top breathing
             Constraint::Length(5), // logo
@@ -126,9 +143,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     const COL2_W: u16 = 24;
     const CONTENT_W: u16 = COL1_W + COL_GAP + COL2_W;
 
-    // Row indices: host-list layout reserves extra rows for the logo.
-    let content_row = if is_host_list { rows[3] } else { rows[1] };
-    if is_host_list {
+    // Row indices: main-view layout reserves extra rows for the logo.
+    let content_row = if is_main_view { rows[3] } else { rows[1] };
+    if is_main_view {
         let logo_lines: Vec<Line> = (0..design::LOGO.len())
             .map(|i| {
                 design::logo_line(i, theme::accent_bold(), theme::logo_dot())
@@ -164,9 +181,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // overlay shows basic commands and the wiki has them all, while the
     // issues line stays the bug-report prompt. Both lines share the same
     // left margin as the content columns so everything is left-aligned on a
-    // single imaginary vertical line. Host-list only (subscreen overlays
+    // single imaginary vertical line. Main-view only (subscreen overlays
     // are too narrow for the full URLs).
-    if is_host_list {
+    if is_main_view {
         let info_area = Layout::horizontal([
             Constraint::Fill(1),
             Constraint::Length(CONTENT_W),
@@ -396,6 +413,53 @@ fn tunnels_lines() -> Vec<Line<'static>> {
     lines.push(help_line("?", "help"));
     lines.push(help_line("q/Esc", "close"));
     lines
+}
+
+/// Two-column help content for the Tunnels tab. Mirrors the rhythm of
+/// `host_list_columns` so headers align across columns: NAVIGATE on
+/// row 1 ↔ MANAGE TUNNELS on row 1, ACTIONS on row 10 ↔ NAVIGATE TABS
+/// on row 10. The bottom-most row is a closing action (`:` / `q/Esc`)
+/// so each column ends on a leave-action verb.
+fn tunnels_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    let col1 = vec![
+        blank(),                    // row 0
+        section_header("NAVIGATE"), // row 1 ↔ col2 MANAGE TUNNELS
+        blank(),                    // row 2
+        help_line("j/k ↑↓", "up / down"),
+        help_line("PgDn/PgUp", "page down / up"),
+        help_line("g/G", "top / bottom"),
+        help_line("/", "search"),
+        help_line("Esc", "clear filter / quit"),
+        blank(),                   // row 8
+        blank(),                   // row 9 padding so headers align
+        section_header("ACTIONS"), // row 10 ↔ col2 NAVIGATE TABS
+        blank(),
+        help_line("Enter", "start / stop"),
+        help_line("s", "cycle sort"),
+        blank(),
+        help_line(":", "command palette"), // row 15 ↔ col2 q/Esc quit
+    ];
+
+    let col2 = vec![
+        blank(),                          // row 0
+        section_header("MANAGE TUNNELS"), // row 1 ↔ col1 NAVIGATE
+        blank(),
+        help_line_short("a", "add tunnel"),
+        help_line_short("e", "edit"),
+        help_line_short("d", "del"),
+        blank(),
+        blank(),
+        blank(),
+        blank(),                         // row 9 padding
+        section_header("NAVIGATE TABS"), // row 10 ↔ col1 ACTIONS
+        blank(),
+        help_line_short("Tab", "switch to hosts"),
+        help_line_short("n", "what's new"),
+        blank(),
+        help_line_short("q/Esc", "quit"), // row 15 ↔ col1 `:`
+    ];
+
+    (col1, col2)
 }
 
 fn key_list_lines() -> Vec<Line<'static>> {
@@ -844,6 +908,86 @@ mod tests {
         assert_eq!(
             app.ui.help_scroll, 0,
             "stale scroll must clamp to 0 when content fits"
+        );
+    }
+
+    #[test]
+    fn tunnels_overview_columns_cover_tab_specific_shortcuts() {
+        // Tunnels tab supports more than the per-host TunnelList — at
+        // minimum search, sort, command palette and tab switching.
+        let (col1, col2) = tunnels_overview_columns();
+        let text: String = col1
+            .iter()
+            .chain(col2.iter())
+            .map(|l| l.to_string())
+            .collect();
+        for desc in &[
+            "start / stop",
+            "add tunnel",
+            "edit",
+            "search",
+            "cycle sort",
+            "command palette",
+            "switch to hosts",
+        ] {
+            assert!(
+                text.contains(desc),
+                "tunnels-overview help missing '{desc}'"
+            );
+        }
+    }
+
+    #[test]
+    fn tunnels_overview_columns_share_section_header_rhythm_with_host_list() {
+        // Headers must land on the same row indices in both columns so
+        // the eye reads them as paired (NAVIGATE ↔ MANAGE TUNNELS,
+        // ACTIONS ↔ NAVIGATE TABS).
+        let (col1, col2) = tunnels_overview_columns();
+        let h1_a = col1[1].to_string();
+        let h1_b = col2[1].to_string();
+        assert!(h1_a.contains("NAVIGATE"), "col1 row 1 must be NAVIGATE");
+        assert!(
+            h1_b.contains("MANAGE TUNNELS"),
+            "col2 row 1 must be MANAGE TUNNELS"
+        );
+        let h2_a = col1[10].to_string();
+        let h2_b = col2[10].to_string();
+        assert!(h2_a.contains("ACTIONS"), "col1 row 10 must be ACTIONS");
+        assert!(
+            h2_b.contains("NAVIGATE TABS"),
+            "col2 row 10 must be NAVIGATE TABS"
+        );
+    }
+
+    #[test]
+    fn help_on_tunnels_tab_renders_logo_and_wiki_block_with_tab_columns() {
+        // Pressing ? from the Tunnels tab keeps `app.screen = Help` with
+        // `return_screen = HostList`; the dispatcher uses `app.top_page`
+        // to render tunnel-specific columns. Chrome (logo + wiki) stays
+        // identical to the host-list overlay so the two tabs feel like
+        // siblings.
+        let mut app = help_test_app(Screen::HostList);
+        app.top_page = TopPage::Tunnels;
+        let text = render_to_text(&mut app, 100, 40);
+        assert!(
+            text.contains("MANAGE TUNNELS"),
+            "tunnels-tab help must show tunnel section header"
+        );
+        assert!(
+            text.contains("start / stop"),
+            "tunnels-tab help should show Enter shortcut"
+        );
+        assert!(
+            !text.contains("MANAGE HOSTS"),
+            "tunnels-tab help must not show host-list section headers"
+        );
+        assert!(
+            text.contains("github.com/erickochen/purple/wiki"),
+            "tunnels-tab help must render wiki info block"
+        );
+        assert!(
+            text.contains("github.com/erickochen/purple/issues"),
+            "tunnels-tab help must render issues info block"
         );
     }
 

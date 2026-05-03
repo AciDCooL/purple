@@ -26,6 +26,8 @@ mod sync;
 mod tag_picker;
 mod theme_picker;
 mod tunnel;
+pub(crate) mod tunnel_host_picker;
+mod tunnels_overview;
 mod whats_new;
 
 pub(crate) use provider::zone_data_for;
@@ -118,7 +120,9 @@ pub fn handle_key_event(
 
     match &app.screen {
         Screen::HostList => {
-            if app.search.query.is_some() {
+            if matches!(app.top_page, crate::app::TopPage::Tunnels) {
+                tunnels_overview::handle_keys(app, key);
+            } else if app.search.query.is_some() {
                 host_list::handle_host_list_search(app, key, events_tx);
             } else {
                 host_list::handle_host_list(app, key, events_tx);
@@ -137,6 +141,7 @@ pub fn handle_key_event(
         Screen::ProviderForm { .. } => provider::handle_provider_form(app, key, events_tx),
         Screen::TunnelList { .. } => tunnel::handle_tunnel_list(app, key),
         Screen::TunnelForm { .. } => tunnel::handle_tunnel_form(app, key),
+        Screen::TunnelHostPicker => tunnel_host_picker::handle_keys(app, key),
         Screen::SnippetPicker { .. } => snippet::handle_snippet_picker(app, key, events_tx),
         Screen::SnippetForm { .. } => snippet::handle_snippet_form(app, key),
         Screen::SnippetOutput { .. } => snippet::handle_snippet_output(app, key),

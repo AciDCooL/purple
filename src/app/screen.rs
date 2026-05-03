@@ -2,6 +2,33 @@
 
 use std::path::PathBuf;
 
+/// Top-level page selected via the top navigation bar.
+///
+/// Orthogonal to [`Screen`]. `Screen` tracks overlays and modal forms,
+/// `TopPage` tracks which base view (hosts vs tunnels) renders behind them.
+/// Tab/Shift+Tab cycles through the variants when no overlay is active.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TopPage {
+    #[default]
+    Hosts,
+    Tunnels,
+}
+
+impl TopPage {
+    /// Cycle to the next page (Hosts -> Tunnels -> Hosts).
+    pub fn next(self) -> Self {
+        match self {
+            TopPage::Hosts => TopPage::Tunnels,
+            TopPage::Tunnels => TopPage::Hosts,
+        }
+    }
+
+    /// Cycle to the previous page. With two variants this is the same as `next`.
+    pub fn prev(self) -> Self {
+        self.next()
+    }
+}
+
 /// State for the What's New overlay.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct WhatsNewState {
@@ -42,6 +69,10 @@ pub enum Screen {
         alias: String,
         editing: Option<usize>,
     },
+    /// Host picker reached from the Tunnels overview when adding a new
+    /// tunnel: the user must choose a host before the tunnel form opens.
+    /// On confirm, transitions to `TunnelForm { alias, editing: None }`.
+    TunnelHostPicker,
     SnippetPicker {
         target_aliases: Vec<String>,
     },
@@ -119,6 +150,7 @@ impl Screen {
             Screen::ProviderForm { .. } => "ProviderForm",
             Screen::TunnelList { .. } => "TunnelList",
             Screen::TunnelForm { .. } => "TunnelForm",
+            Screen::TunnelHostPicker => "TunnelHostPicker",
             Screen::SnippetPicker { .. } => "SnippetPicker",
             Screen::SnippetForm { .. } => "SnippetForm",
             Screen::SnippetOutput { .. } => "SnippetOutput",

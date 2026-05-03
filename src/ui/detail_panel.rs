@@ -278,13 +278,16 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
         // Status line using dual-encoded glyphs (consistent with host list)
         let status_spans: Vec<Span<'static>> = match app.ping.status.get(&host.alias) {
             Some(status @ crate::app::PingStatus::Reachable { rtt_ms }) => {
+                // `online` is a live-state indicator — pulse it so it
+                // matches the host-list dot rhythm. `success()` would
+                // mis-tier this as an action outcome.
                 vec![Span::styled(
                     format!(
                         "{} online ({})",
                         crate::app::status_glyph(Some(status), spinner_tick),
                         format_rtt(*rtt_ms)
                     ),
-                    theme::success(),
+                    theme::online_dot_pulsing(spinner_tick),
                 )]
             }
             Some(status @ crate::app::PingStatus::Slow { rtt_ms }) => {
@@ -805,8 +808,11 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
             box_width,
         );
         for container in &cache_entry.containers {
+            // `running` is live-state, not an action outcome — use
+            // `online_dot()` so the green shade matches the rest of
+            // the live-state indicators across the app.
             let (icon, icon_style) = match container.state.as_str() {
-                "running" => (design::ICON_SUCCESS, theme::success()),
+                "running" => (design::ICON_SUCCESS, theme::online_dot()),
                 "dead" => ("\u{2717}", theme::error()),
                 "exited" => ("\u{2717}", theme::warning()),
                 _ => (design::ICON_ONLINE, theme::bold()),

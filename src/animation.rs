@@ -56,6 +56,17 @@ pub struct AnimationState {
     pub(crate) overlay_anim: Option<OverlayAnim>,
     /// Saved overlay state for close animation (captured once when overlay is stable).
     pub(crate) overlay_close: Option<OverlayCloseState>,
+    /// Tunnels detail panel height animation. Triggered when the
+    /// selected tunnel changes its active state (or the user navigates
+    /// to a tunnel with a different state). Mirrors the host_list
+    /// detail-panel anim with the same 200ms cubic ease-out, but
+    /// scales panel HEIGHT instead of width.
+    pub(crate) tunnel_panel_anim: Option<DetailAnim>,
+    /// Last-frame visibility used to detect open/close transitions.
+    /// `None` means we have not observed any frame yet — the first
+    /// call seeds it without triggering an animation so a fresh
+    /// `AnimationState` does not flicker the panel into existence.
+    pub(crate) prev_tunnel_panel_visible: Option<bool>,
 }
 
 impl AnimationState {
@@ -66,6 +77,8 @@ impl AnimationState {
             detail_anim: None,
             overlay_anim: None,
             overlay_close: None,
+            tunnel_panel_anim: None,
+            prev_tunnel_panel_visible: None,
         }
     }
 
@@ -74,7 +87,10 @@ impl AnimationState {
         let welcome_animating = app
             .welcome_opened
             .is_some_and(|t| t.elapsed().as_millis() < 3000);
-        self.detail_anim.is_some() || self.overlay_anim.is_some() || welcome_animating
+        self.detail_anim.is_some()
+            || self.tunnel_panel_anim.is_some()
+            || self.overlay_anim.is_some()
+            || welcome_animating
     }
 
     /// Whether any host has PingStatus::Checking (spinner needs ticking).
@@ -131,6 +147,51 @@ impl AnimationState {
         let elapsed = anim.start.elapsed().as_millis();
         if elapsed >= DETAIL_ANIM_DURATION_MS {
             self.detail_anim = None;
+            return None;
+        }
+        let t = elapsed as f32 / DETAIL_ANIM_DURATION_MS as f32;
+        let eased = 1.0 - (1.0 - t) * (1.0 - t) * (1.0 - t);
+        let progress = if anim.opening {
+            anim.start_progress + (1.0 - anim.start_progress) * eased
+        } else {
+            anim.start_progress * (1.0 - eased)
+        };
+        Some(progress)
+    }
+
+    /// Notify the animator that the tunnel detail panel target
+    /// visibility has been computed for this frame. Starts a slide
+    /// animation when the target flips, preserving the in-flight
+    /// progress so a flap mid-animation reverses smoothly.
+    pub fn note_tunnel_panel_target(&mut self, visible: bool) {
+        match self.prev_tunnel_panel_visible {
+            None => {
+                // First observation — no anim, just record state.
+                self.prev_tunnel_panel_visible = Some(visible);
+            }
+            Some(prev) if prev == visible => {}
+            Some(_) => {
+                let start_progress =
+                    self.tunnel_panel_anim_progress()
+                        .unwrap_or(if visible { 0.0 } else { 1.0 });
+                self.tunnel_panel_anim = Some(DetailAnim {
+                    start: Instant::now(),
+                    opening: visible,
+                    start_progress,
+                });
+                self.prev_tunnel_panel_visible = Some(visible);
+            }
+        }
+    }
+
+    /// Current tunnel-panel height animation progress
+    /// (0.0 = collapsed, 1.0 = full height). Returns `None` when no
+    /// animation is in flight.
+    pub fn tunnel_panel_anim_progress(&mut self) -> Option<f32> {
+        let anim = self.tunnel_panel_anim.as_ref()?;
+        let elapsed = anim.start.elapsed().as_millis();
+        if elapsed >= DETAIL_ANIM_DURATION_MS {
+            self.tunnel_panel_anim = None;
             return None;
         }
         let t = elapsed as f32 / DETAIL_ANIM_DURATION_MS as f32;

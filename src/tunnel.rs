@@ -1,4 +1,5 @@
 use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use log::debug;
@@ -262,6 +263,83 @@ impl TunnelRule {
 /// An active SSH tunnel process.
 pub struct ActiveTunnel {
     pub child: Child,
+    /// Monotonic start time. Used to render the UPTIME column in the
+    /// tunnels-overview screen. `Instant` is monotonic, so wall-clock
+    /// jumps (NTP, sleep/wake) cannot make uptime go backwards.
+    pub started_at: Instant,
+    /// Per-tunnel live counters fed by the stderr-parser worker.
+    pub live: crate::tunnel_live::TunnelLiveState,
+}
+
+impl Drop for ActiveTunnel {
+    fn drop(&mut self) {
+        // Signal the stderr parser thread and join it. The parser
+        // unblocks when ssh's stderr pipe closes, which happens once
+        // the caller has killed the ssh child.
+        self.live
+            .parser_stop
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        if let Some(handle) = self.live.parser_thread.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl ActiveTunnel {
+    /// Wrap a freshly-spawned ssh `Child` with live-state plumbing.
+    /// Takes ownership of `child.stderr` and hands it off to a parser
+    /// thread that emits `ChannelEvent`s on `parser_tx`. Throughput is
+    /// derived in `TunnelState::poll` from the per-peer lsof samples,
+    /// so no separate sampler thread is needed here.
+    pub fn spawn(
+        mut child: Child,
+        alias: &str,
+        parser_tx: std::sync::mpsc::Sender<crate::tunnel_live::ParserMessage>,
+    ) -> Self {
+        let started_at = Instant::now();
+        let mut live = crate::tunnel_live::TunnelLiveState::new(started_at);
+        if let Some(stderr) = child.stderr.take() {
+            let handle = crate::tunnel_live::spawn_parser_thread(
+                stderr,
+                alias.to_string(),
+                parser_tx,
+                live.stderr_buffer.clone(),
+                live.parser_stop.clone(),
+            );
+            live.parser_thread = Some(handle);
+        }
+        Self {
+            child,
+            started_at,
+            live,
+        }
+    }
+}
+
+/// Format a tunnel uptime for the UPTIME column.
+///
+/// Bands:
+/// - `< 60s`: `47s`
+/// - `< 1h`: `12m 47s`
+/// - `< 24h`: `2h 14m`
+/// - `>= 24h`: `3d 4h`
+pub fn format_uptime(elapsed: Duration) -> String {
+    let total = elapsed.as_secs();
+    if total < 60 {
+        format!("{}s", total)
+    } else if total < 3_600 {
+        let m = total / 60;
+        let s = total % 60;
+        format!("{}m {}s", m, s)
+    } else if total < 86_400 {
+        let h = total / 3_600;
+        let m = (total % 3_600) / 60;
+        format!("{}h {}m", h, m)
+    } else {
+        let d = total / 86_400;
+        let h = (total % 86_400) / 3_600;
+        format!("{}d {}h", d, h)
+    }
 }
 
 /// Start an SSH tunnel process for the given host alias.
@@ -279,6 +357,10 @@ pub fn start_tunnel(
     let mut cmd = Command::new("ssh");
     cmd.arg("-F")
         .arg(config_path)
+        // `-v` enables debug1: lines on stderr. The per-tunnel parser
+        // thread reads them to surface channel-open/-close events in
+        // the LIVE and EVENTS detail cards.
+        .arg("-v")
         .arg("-N")
         .arg("--")
         .arg(alias)
@@ -309,7 +391,7 @@ pub fn start_tunnel(
     }
 
     debug!(
-        "Tunnel SSH command: ssh -N -F {} -- {alias}",
+        "Tunnel SSH command: ssh -v -N -F {} -- {alias}",
         config_path.display()
     );
 
@@ -320,6 +402,60 @@ pub fn start_tunnel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- format_uptime tests ---
+
+    #[test]
+    fn format_uptime_seconds_only() {
+        assert_eq!(format_uptime(Duration::from_secs(0)), "0s");
+        assert_eq!(format_uptime(Duration::from_secs(1)), "1s");
+        assert_eq!(format_uptime(Duration::from_secs(47)), "47s");
+        assert_eq!(format_uptime(Duration::from_secs(59)), "59s");
+    }
+
+    #[test]
+    fn format_uptime_minutes_seconds() {
+        assert_eq!(format_uptime(Duration::from_secs(60)), "1m 0s");
+        assert_eq!(format_uptime(Duration::from_secs(60 + 47)), "1m 47s");
+        assert_eq!(format_uptime(Duration::from_secs(12 * 60 + 47)), "12m 47s");
+        assert_eq!(format_uptime(Duration::from_secs(59 * 60 + 59)), "59m 59s");
+    }
+
+    #[test]
+    fn format_uptime_hours_minutes() {
+        assert_eq!(format_uptime(Duration::from_secs(3_600)), "1h 0m");
+        assert_eq!(
+            format_uptime(Duration::from_secs(2 * 3_600 + 14 * 60)),
+            "2h 14m"
+        );
+        // Seconds within the hours band must NOT leak into the output.
+        assert_eq!(
+            format_uptime(Duration::from_secs(2 * 3_600 + 14 * 60 + 30)),
+            "2h 14m"
+        );
+        assert_eq!(
+            format_uptime(Duration::from_secs(23 * 3_600 + 59 * 60)),
+            "23h 59m"
+        );
+    }
+
+    #[test]
+    fn format_uptime_days_hours() {
+        assert_eq!(format_uptime(Duration::from_secs(86_400)), "1d 0h");
+        assert_eq!(
+            format_uptime(Duration::from_secs(3 * 86_400 + 4 * 3_600)),
+            "3d 4h"
+        );
+        // Minutes within the days band must NOT leak into the output.
+        assert_eq!(
+            format_uptime(Duration::from_secs(3 * 86_400 + 4 * 3_600 + 30 * 60)),
+            "3d 4h"
+        );
+        assert_eq!(
+            format_uptime(Duration::from_secs(365 * 86_400 + 12 * 3_600)),
+            "365d 12h"
+        );
+    }
 
     // --- TunnelType tests ---
 

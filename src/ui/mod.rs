@@ -20,7 +20,11 @@ mod tag_picker;
 pub mod theme;
 mod theme_picker;
 mod tunnel_form;
+mod tunnel_host_picker;
 mod tunnel_list;
+mod tunnels_detail;
+mod tunnels_format;
+pub(crate) mod tunnels_overview;
 mod whats_new;
 #[cfg(test)]
 mod whats_new_tests;
@@ -32,7 +36,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
-use crate::app::{App, Screen};
+use crate::app::{App, Screen, TopPage};
 
 const MIN_WIDTH: u16 = 50;
 const MIN_HEIGHT: u16 = 14;
@@ -63,7 +67,10 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         None
     };
     let detail_progress = anim.detail_anim_progress();
-    host_list::render(frame, app, anim.spinner_tick, detail_progress);
+    match app.top_page {
+        TopPage::Hosts => host_list::render(frame, app, anim.spinner_tick, detail_progress),
+        TopPage::Tunnels => tunnels_overview::render(frame, app, anim),
+    }
     if let Some(s) = status {
         app.status_center.status = Some(s);
     }
@@ -128,9 +135,17 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         Screen::TunnelForm { alias, .. } => {
             let alias = alias.clone();
             render_overlay(frame, app, anim, |frame, app| {
-                tunnel_list::render(frame, app, &alias);
+                // When the form is reached from the Tunnels overview the
+                // background is already the overview itself, so do not paint
+                // a per-host TunnelList behind it.
+                if !matches!(app.top_page, TopPage::Tunnels) {
+                    tunnel_list::render(frame, app, &alias);
+                }
                 tunnel_form::render(frame, app);
             });
+        }
+        Screen::TunnelHostPicker => {
+            render_overlay(frame, app, anim, tunnel_host_picker::render);
         }
         Screen::SnippetPicker { .. } => {
             render_overlay(frame, app, anim, snippet_picker::render);

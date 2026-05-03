@@ -209,17 +209,10 @@ pub fn danger_block_line(title: Line<'static>) -> Block<'static> {
         .title(title)
 }
 
-/// Main screen block: rounded border, brand title, dim border.
-pub fn main_block(title: &str) -> Block<'static> {
-    main_block_line(Line::from(Span::styled(
-        format!(" {title} "),
-        theme::brand(),
-    )))
-}
-
-/// Main block variant accepting a pre-built compound title `Line`.
-/// Use when the caller needs multi-span titles that `main_block(&str)`
-/// cannot express (e.g. the host list's `[ALL] hosts (42) + filter badges`).
+/// Main block accepting a pre-built compound title `Line`.
+/// All main-screen blocks (host list, top navigation bar) compose their
+/// title spans manually and pass them in here, so a string-only convenience
+/// constructor is intentionally absent.
 pub fn main_block_line(title: Line<'static>) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
@@ -636,11 +629,6 @@ mod tests {
     #[test]
     fn danger_block_title_is_padded() {
         assert!(render_block_title(danger_block("Delete"), " Delete "));
-    }
-
-    #[test]
-    fn main_block_title_is_padded() {
-        assert!(render_block_title(main_block("Hosts"), " Hosts "));
     }
 
     #[test]

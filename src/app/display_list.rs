@@ -379,18 +379,6 @@ impl App {
             }
         };
 
-        // Re-derive group_tab_index from group_filter after rebuild
-        self.hosts_state.group_tab_index = match &self.hosts_state.group_filter {
-            Some(name) => self
-                .hosts_state
-                .group_tab_order
-                .iter()
-                .position(|g| g == name)
-                .map(|i| i + 1)
-                .unwrap_or(0),
-            None => 0,
-        };
-
         // Filter by group if active
         if let Some(ref filter) = self.hosts_state.group_filter {
             let is_tag_mode = matches!(self.hosts_state.group_by, GroupBy::Tag(_));

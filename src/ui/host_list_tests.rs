@@ -323,17 +323,6 @@ fn footer_selection_active_replaces_view_hints_with_bulk_actions() {
 }
 
 #[test]
-fn brand_label_purple_when_ungrouped_hosts_when_grouped() {
-    use super::brand_label_for_group;
-    assert_eq!(brand_label_for_group(&GroupBy::None), " purple ");
-    assert_eq!(brand_label_for_group(&GroupBy::Provider), " HOSTS ");
-    assert_eq!(
-        brand_label_for_group(&GroupBy::Tag("env".to_string())),
-        " HOSTS "
-    );
-}
-
-#[test]
 fn pattern_footer_shows_core_actions() {
     let spans = pattern_footer_spans(false);
     let text: String = spans.iter().map(|s| s.content.to_string()).collect();
@@ -351,52 +340,34 @@ fn pattern_footer_detail_label_when_compact() {
 }
 
 #[test]
-fn layout_has_group_bar_and_footer() {
+fn layout_has_top_bar_and_footer() {
     use ratatui::layout::{Constraint, Layout, Rect};
     let area = Rect::new(0, 0, 120, 40);
-    // Matches render() layout when grouping is active and not searching
+    // Matches render() layout: top bar always visible, no search/tag bar.
     let chunks = Layout::vertical([
-        Constraint::Length(3), // Group bar
+        Constraint::Length(3), // Top navigation bar
         Constraint::Min(5),    // Host list
         Constraint::Length(1), // Footer
     ])
     .split(area);
-    assert_eq!(chunks[0].height, 3, "group bar should be 3 rows");
+    assert_eq!(chunks[0].height, 3, "top bar should be 3 rows");
     assert_eq!(chunks[2].height, 1, "footer should be 1 row");
     assert!(chunks[2].y > chunks[1].y + chunks[1].height - 1);
 }
 
 #[test]
-fn layout_no_group_bar_when_ungrouped() {
+fn layout_with_search_has_top_bar() {
     use ratatui::layout::{Constraint, Layout, Rect};
     let area = Rect::new(0, 0, 120, 40);
-    // Matches render() layout when GroupBy::None (group_bar_height = 0)
+    // Matches render() layout when searching: top bar still visible.
     let chunks = Layout::vertical([
-        Constraint::Length(0), // Group bar hidden
-        Constraint::Min(5),    // Host list
-        Constraint::Length(1), // Footer
-    ])
-    .split(area);
-    assert_eq!(chunks[0].height, 0, "group bar should be hidden");
-    assert_eq!(
-        chunks[1].height, 39,
-        "host list should get all remaining rows"
-    );
-}
-
-#[test]
-fn layout_with_search_has_group_bar() {
-    use ratatui::layout::{Constraint, Layout, Rect};
-    let area = Rect::new(0, 0, 120, 40);
-    // Matches render() layout when grouping is active and searching
-    let chunks = Layout::vertical([
-        Constraint::Length(3), // Group bar
+        Constraint::Length(3), // Top navigation bar
         Constraint::Min(5),    // Host list
         Constraint::Length(1), // Search bar
         Constraint::Length(1), // Footer
     ])
     .split(area);
-    assert_eq!(chunks[0].height, 3, "group bar should be 3 rows");
+    assert_eq!(chunks[0].height, 3, "top bar should be 3 rows");
     assert_eq!(chunks[2].height, 1, "search bar should be 1 row");
     assert_eq!(chunks[3].height, 1, "footer should be 1 row");
 }
@@ -873,4 +844,188 @@ fn non_detail_mode_indicators_in_address_column() {
         rendered.contains("10.0.0.1"),
         "hostname should appear in address column"
     );
+}
+
+// =========================================================================
+// Top navigation bar tests
+// =========================================================================
+
+mod top_bar {
+    use super::super::top_bar_spans;
+    use crate::app::{App, TopPage};
+    use crate::ssh_config::model::SshConfigFile;
+    use crate::tunnel::{TunnelRule, TunnelType};
+    use crate::ui::theme;
+
+    fn make_test_app(content: &str) -> App {
+        let scratch = tempfile::tempdir().expect("tempdir").keep();
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content(content),
+            path: scratch.join("test_config"),
+            crlf: false,
+            bom: false,
+        };
+        crate::preferences::set_path_override(scratch.join("preferences"));
+        App::new(config)
+    }
+
+    fn add_tunnel_rule(app: &mut App, bind_port: u16) {
+        app.tunnels.list.push(TunnelRule {
+            tunnel_type: TunnelType::Local,
+            bind_address: String::new(),
+            bind_port,
+            remote_host: "127.0.0.1".to_string(),
+            remote_port: bind_port,
+        });
+    }
+
+    #[test]
+    fn brand_slot_is_first_and_uses_brand_badge() {
+        let app = make_test_app("Host web1\n  HostName 1.1.1.1\n");
+        let spans = top_bar_spans(&app);
+        assert_eq!(
+            spans[0].content.as_ref(),
+            " purple ",
+            "first slot must be the brand label"
+        );
+        assert_eq!(
+            spans[0].style,
+            theme::brand_badge(),
+            "brand slot must use brand_badge style"
+        );
+    }
+
+    #[test]
+    fn labels_have_no_count_or_padding() {
+        let mut app =
+            make_test_app("Host web1\n  HostName 1.1.1.1\nHost web2\n  HostName 2.2.2.2\n");
+        add_tunnel_rule(&mut app, 8080);
+        add_tunnel_rule(&mut app, 8081);
+
+        let spans = top_bar_spans(&app);
+        let host_span = spans
+            .iter()
+            .find(|s| s.content.contains("hosts"))
+            .expect("hosts span");
+        let tunnels_span = spans
+            .iter()
+            .find(|s| s.content.contains("tunnels"))
+            .expect("tunnels span");
+
+        // Page labels are bare — no surrounding spaces, no parenthesised count.
+        assert_eq!(host_span.content.as_ref(), "hosts");
+        assert_eq!(tunnels_span.content.as_ref(), "tunnels");
+    }
+
+    #[test]
+    fn brand_and_first_tab_are_separated_by_a_visible_gap() {
+        let app = make_test_app("Host web1\n  HostName 1.1.1.1\n");
+        let spans = top_bar_spans(&app);
+
+        let brand_pos = spans
+            .iter()
+            .position(|s| s.content.contains("purple"))
+            .expect("brand span");
+        let host_pos = spans
+            .iter()
+            .position(|s| s.content.as_ref() == "hosts")
+            .expect("hosts span");
+
+        assert!(host_pos > brand_pos, "hosts must come after brand");
+        let between: usize = spans[brand_pos + 1..host_pos]
+            .iter()
+            .map(|s| s.content.len())
+            .sum();
+        assert!(
+            between >= 4,
+            "need a visible gap between brand badge and first tab; got {between}"
+        );
+    }
+
+    #[test]
+    fn active_page_uses_nav_active_inactive_uses_bold() {
+        let app = make_test_app("Host web1\n  HostName 1.1.1.1\n");
+        assert_eq!(app.top_page, TopPage::Hosts);
+        let spans = top_bar_spans(&app);
+
+        let host_span = spans
+            .iter()
+            .find(|s| s.content.contains("hosts"))
+            .expect("hosts span");
+        let tunnels_span = spans
+            .iter()
+            .find(|s| s.content.contains("tunnels"))
+            .expect("tunnels span");
+
+        assert_eq!(host_span.style, theme::nav_active());
+        assert_eq!(tunnels_span.style, theme::bold());
+    }
+
+    #[test]
+    fn switching_to_tunnels_swaps_active_style() {
+        let mut app = make_test_app("Host web1\n  HostName 1.1.1.1\n");
+        app.top_page = TopPage::Tunnels;
+        let spans = top_bar_spans(&app);
+
+        let host_span = spans
+            .iter()
+            .find(|s| s.content.contains("hosts"))
+            .expect("hosts span");
+        let tunnels_span = spans
+            .iter()
+            .find(|s| s.content.contains("tunnels"))
+            .expect("tunnels span");
+
+        assert_eq!(host_span.style, theme::bold());
+        assert_eq!(tunnels_span.style, theme::nav_active());
+    }
+
+    #[test]
+    fn nav_active_is_underlined_not_a_solid_badge() {
+        use ratatui::style::Modifier;
+        let style = theme::nav_active();
+        assert!(
+            style.add_modifier.contains(Modifier::UNDERLINED),
+            "active tab must underline"
+        );
+        assert_ne!(
+            style,
+            theme::brand_badge(),
+            "active tab must not use the brand badge style"
+        );
+    }
+
+    #[test]
+    fn no_provider_or_tag_labels_appear_in_top_bar() {
+        let content = "\
+Host aws-web
+  HostName 1.1.1.1
+  # purple:provider aws:i-1
+  # purple:tags production
+
+Host do-db
+  HostName 2.2.2.2
+  # purple:provider digitalocean:abc
+  # purple:tags staging
+";
+        let app = make_test_app(content);
+        let text: String = top_bar_spans(&app)
+            .into_iter()
+            .map(|s| s.content.into_owned())
+            .collect();
+
+        for legacy in [
+            "AWS",
+            "PROXMOX",
+            "DIGITALOCEAN",
+            "production",
+            "staging",
+            "All (",
+        ] {
+            assert!(
+                !text.contains(legacy),
+                "top bar must not contain legacy category {legacy:?}, got: {text}"
+            );
+        }
+    }
 }

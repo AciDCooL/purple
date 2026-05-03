@@ -61,14 +61,20 @@ pub(crate) fn run_tui(mut app: App) -> Result<()> {
         // Otherwise, block until the next event arrives.
         let vault_signing = app.vault.signing_cancel.is_some();
         let provider_syncing = !app.providers.syncing.is_empty();
-        let event = if anim.is_animating(&app) {
+        // Tunnels tab drives the live chart animation. While at least
+        // one tunnel is running we tick at 16ms (~60 fps) so the
+        // swimlane bars and sparklines drift smoothly. The tick also
+        // refreshes the uptime readout every frame.
+        let tunnels_anim_tick =
+            matches!(app.top_page, app::TopPage::Tunnels) && !app.tunnels.active.is_empty();
+        let event = if anim.is_animating(&app) || tunnels_anim_tick {
             events.next_timeout(std::time::Duration::from_millis(16))?
         } else if anim.has_checking_hosts(&app)
             || vault_signing
             || provider_syncing
             || anim.has_reachable_hosts(&app)
         {
-            events.next_timeout(std::time::Duration::from_millis(80))?
+            events.next_timeout(std::time::Duration::from_millis(60))?
         } else {
             Some(events.next()?)
         };

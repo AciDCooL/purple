@@ -155,8 +155,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .map(|c| {
                 let name_str = truncate_str(&c.names, name_w);
                 let image_str = truncate_str(&c.image, image_w);
+                // "running" is a live-state indicator (same tier as a
+                // reachable host). `success()` is reserved for action
+                // outcomes; live state takes `online_dot()`.
                 let state_style = match c.state.as_str() {
-                    "running" => theme::success(),
+                    "running" => theme::online_dot(),
                     "exited" | "dead" => theme::muted(),
                     _ => theme::bold(),
                 };

@@ -5458,12 +5458,74 @@ fn test_ctrl_a_in_search_mode_selects_filtered() {
 }
 
 // =========================================================================
-// Tab / Shift+Tab / Esc group-filter tests (HostList screen)
+// Tab / Shift+Tab top-page navigation tests (HostList screen)
 // =========================================================================
 
-/// Build an app with two provider-tagged hosts so that group_by=Provider
-/// produces a non-empty group_tab_order after apply_sort().
-fn make_provider_grouped_app() -> App {
+#[test]
+fn tab_on_host_list_switches_to_tunnels_page() {
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    assert_eq!(app.top_page, crate::app::TopPage::Hosts);
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+
+    assert_eq!(app.top_page, crate::app::TopPage::Tunnels);
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn shift_tab_on_host_list_switches_pages() {
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    assert_eq!(app.top_page, crate::app::TopPage::Hosts);
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+        &tx,
+    );
+
+    assert_eq!(app.top_page, crate::app::TopPage::Tunnels);
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn tab_twice_returns_to_hosts_page() {
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    assert_eq!(app.top_page, crate::app::TopPage::Hosts);
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+
+    assert_eq!(app.top_page, crate::app::TopPage::Hosts);
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn g_key_no_longer_affects_top_page() {
+    let content = "\
+Host aws-web1
+  HostName 1.1.1.1
+  # purple:provider aws:i-123
+
+Host do-web2
+  HostName 2.2.2.2
+  # purple:provider digitalocean:abc
+";
+    let mut app = make_app(content);
+    let starting_page = app.top_page;
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
+
+    // Grouping toggled internally, top page unchanged.
+    assert_eq!(app.top_page, starting_page);
+    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::Provider);
+}
+
+#[test]
+fn esc_clears_group_filter() {
     let content = "\
 Host aws-web1
   HostName 1.1.1.1
@@ -5476,80 +5538,6 @@ Host do-web2
     let mut app = make_app(content);
     app.hosts_state.group_by = crate::app::GroupBy::Provider;
     app.apply_sort();
-    app
-}
-
-#[test]
-fn tab_on_host_list_filters_to_first_group() {
-    let mut app = make_provider_grouped_app();
-    assert!(
-        !app.hosts_state.group_tab_order.is_empty(),
-        "expected non-empty group_tab_order after apply_sort with Provider grouping"
-    );
-    assert!(
-        app.hosts_state.group_filter.is_none(),
-        "filter should start as None"
-    );
-
-    let (tx, _rx) = mpsc::channel();
-    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-
-    assert!(
-        app.hosts_state.group_filter.is_some(),
-        "group_filter should be Some after Tab"
-    );
-    assert_eq!(
-        app.hosts_state.group_filter.as_deref(),
-        Some(app.hosts_state.group_tab_order[0].as_str())
-    );
-    assert!(matches!(app.screen, Screen::HostList));
-}
-
-#[test]
-fn shift_tab_on_host_list_filters_to_last_group() {
-    let mut app = make_provider_grouped_app();
-    let last_group = app.hosts_state.group_tab_order.last().unwrap().clone();
-    assert!(
-        app.hosts_state.group_filter.is_none(),
-        "filter should start as None"
-    );
-
-    let (tx, _rx) = mpsc::channel();
-    let _ = handle_key_event(
-        &mut app,
-        KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
-        &tx,
-    );
-
-    assert_eq!(
-        app.hosts_state.group_filter.as_deref(),
-        Some(last_group.as_str()),
-        "BackTab from All should land on the last group"
-    );
-    assert!(matches!(app.screen, Screen::HostList));
-}
-
-#[test]
-fn tab_cycles_back_to_all() {
-    let mut app = make_provider_grouped_app();
-    // There are exactly 2 groups (aws, digitalocean). Set filter to the last one.
-    let last_group = app.hosts_state.group_tab_order.last().unwrap().clone();
-    app.hosts_state.group_filter = Some(last_group);
-    app.apply_sort();
-
-    let (tx, _rx) = mpsc::channel();
-    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-
-    assert!(
-        app.hosts_state.group_filter.is_none(),
-        "Tab past the last group should wrap back to All (None)"
-    );
-    assert!(matches!(app.screen, Screen::HostList));
-}
-
-#[test]
-fn esc_clears_group_filter() {
-    let mut app = make_provider_grouped_app();
     let first_group = app.hosts_state.group_tab_order[0].clone();
     app.hosts_state.group_filter = Some(first_group);
     app.apply_sort();
@@ -7480,4 +7468,581 @@ fn host_list_n_types_into_search_when_active() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
     assert_eq!(app.search.query.as_deref(), Some("n"));
+}
+
+// =========================================================================
+// Tunnels overview: add/edit/delete via top-page Tunnels
+// =========================================================================
+
+/// Helper: build an app on the Tunnels top-page with one editable host that
+/// has a single LocalForward tunnel. Cursor is positioned on the tunnel.
+fn make_tunnels_overview_app() -> App {
+    let mut app = make_app("Host test\n  HostName test.com\n  LocalForward 8080 localhost:80\n");
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::HostList;
+    app.ui.tunnels_overview_state.select(Some(0));
+    app
+}
+
+#[test]
+fn tunnels_overview_a_with_no_editable_hosts_shows_warning() {
+    let mut app = make_app("");
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::HostList;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
+    let toast = app.status_center.toast.as_ref().expect("toast");
+    assert!(toast.text.contains("No editable hosts"));
+}
+
+#[test]
+fn tunnels_overview_a_opens_host_picker() {
+    let mut app = make_tunnels_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    assert!(matches!(app.screen, Screen::TunnelHostPicker));
+    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(0));
+}
+
+#[test]
+fn tunnel_host_picker_enter_opens_form_for_chosen_host() {
+    let mut app = make_app("Host alpha\n  HostName a.example\n\nHost beta\n  HostName b.example\n");
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_state.select(Some(1)); // beta
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    match &app.screen {
+        Screen::TunnelForm { alias, editing } => {
+            assert_eq!(alias, "beta");
+            assert!(editing.is_none());
+        }
+        other => panic!("expected TunnelForm, got {:?}", other.variant_name()),
+    }
+    // Picker cursor was reset so re-opening starts from the top.
+    assert_eq!(app.ui.tunnel_host_picker_state.selected(), None);
+}
+
+#[test]
+fn tunnel_host_picker_esc_returns_to_overview() {
+    let mut app = make_tunnels_overview_app();
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
+    assert_eq!(app.ui.tunnel_host_picker_state.selected(), None);
+}
+
+#[test]
+fn tunnel_host_picker_arrow_keys_clamp() {
+    // Mirrors command palette navigation: Down clamps at the last row,
+    // Up clamps at row 0. No wrap-around — predictable for "type to filter"
+    // overlays where the visible set changes between keystrokes.
+    let mut app = make_app("Host alpha\n  HostName a\n\nHost beta\n  HostName b\n");
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Down), &tx);
+    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(1));
+    let _ = handle_key_event(&mut app, key(KeyCode::Down), &tx);
+    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(1));
+    let _ = handle_key_event(&mut app, key(KeyCode::Up), &tx);
+    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(0));
+    let _ = handle_key_event(&mut app, key(KeyCode::Up), &tx);
+    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(0));
+}
+
+#[test]
+fn tunnel_host_picker_typing_filters_live() {
+    // Always-on fuzzy search: every printable keystroke appends to the
+    // query and the visible set shrinks accordingly.
+    let mut app = make_app(
+        "Host alpha\n  HostName a.example\n\n\
+         Host beta\n  HostName b.example\n\n\
+         Host db-primary\n  HostName 10.30.1.5\n",
+    );
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
+    assert_eq!(app.ui.tunnel_host_picker_query, "db");
+    let visible = crate::handler::tunnel_host_picker::filtered_hosts(&app);
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].0, "db-primary");
+    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(0));
+}
+
+#[test]
+fn tunnel_host_picker_backspace_pops_query_char() {
+    let mut app = make_app("Host alpha\n  HostName a\n\nHost beta\n  HostName b\n");
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_state.select(Some(0));
+    app.ui.tunnel_host_picker_query = "be".to_string();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
+    assert_eq!(app.ui.tunnel_host_picker_query, "b");
+    let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
+    assert_eq!(app.ui.tunnel_host_picker_query, "");
+    // Still on the picker; full list is restored.
+    assert!(matches!(app.screen, Screen::TunnelHostPicker));
+    let visible = crate::handler::tunnel_host_picker::filtered_hosts(&app);
+    assert_eq!(visible.len(), 2);
+}
+
+#[test]
+fn tunnel_host_picker_backspace_on_empty_query_closes() {
+    // Mirrors the command palette: Backspace on an empty buffer cancels
+    // the overlay so a single keystroke gets you out without reaching Esc.
+    let mut app = make_app("Host alpha\n  HostName a\n");
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
+}
+
+#[test]
+fn tunnel_host_picker_substring_match() {
+    // Substring (not subsequence) keeps semantics in lock-step with the
+    // command palette: a contiguous run of query chars must appear in
+    // either the alias or the hostname.
+    let mut app = make_app(
+        "Host db-primary\n  HostName a\n\
+         Host other\n  HostName db.internal\n\
+         Host nope\n  HostName 1.2.3.4\n",
+    );
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_query = "db".to_string();
+    let visible = crate::handler::tunnel_host_picker::filtered_hosts(&app);
+    let aliases: Vec<&str> = visible.iter().map(|(a, _)| a.as_str()).collect();
+    assert_eq!(aliases, vec!["db-primary", "other"]);
+}
+
+#[test]
+fn tunnel_host_picker_enter_uses_filtered_index() {
+    // Enter must select the host at the cursor's position within the
+    // filtered set, not the underlying full list.
+    let mut app = make_app(
+        "Host alpha\n  HostName a\n\n\
+         Host beta\n  HostName b\n\n\
+         Host db-primary\n  HostName 10.30.1.5\n",
+    );
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_query = "db".to_string();
+    app.ui.tunnel_host_picker_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    match &app.screen {
+        Screen::TunnelForm { alias, editing } => {
+            assert_eq!(alias, "db-primary");
+            assert!(editing.is_none());
+        }
+        other => panic!("expected TunnelForm, got {:?}", other.variant_name()),
+    }
+    assert!(app.ui.tunnel_host_picker_query.is_empty());
+}
+
+#[test]
+fn tunnel_host_picker_no_match_blocks_enter() {
+    // When the query filters out every host, the cursor is None and Enter
+    // must be a no-op (no panic, no transition).
+    let mut app = make_app("Host alpha\n  HostName a\n");
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('z')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('z')), &tx);
+    assert_eq!(app.ui.tunnel_host_picker_state.selected(), None);
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(matches!(app.screen, Screen::TunnelHostPicker));
+}
+
+#[test]
+fn tunnel_host_picker_query_matches_hostname_too() {
+    // Substring match runs on both alias and hostname so users can find a
+    // host by IP fragment when they don't remember the alias.
+    let mut app = make_app(
+        "Host bastion\n  HostName 140.82.121.3\n\n\
+         Host db\n  HostName 10.30.1.5\n",
+    );
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::TunnelHostPicker;
+    app.ui.tunnel_host_picker_query = "10.30".to_string();
+    let visible = crate::handler::tunnel_host_picker::filtered_hosts(&app);
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].0, "db");
+}
+
+#[test]
+fn tunnels_overview_e_opens_form_for_selected_row() {
+    let mut app = make_tunnels_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
+    match &app.screen {
+        Screen::TunnelForm { alias, editing } => {
+            assert_eq!(alias, "test");
+            assert_eq!(*editing, Some(0));
+        }
+        other => panic!("expected TunnelForm, got {:?}", other.variant_name()),
+    }
+    // Form should be pre-populated with the row's tunnel data.
+    assert_eq!(app.tunnels.form.bind_port, "8080");
+    assert_eq!(app.tunnels.form.remote_host, "localhost");
+    assert_eq!(app.tunnels.form.remote_port, "80");
+}
+
+#[test]
+fn tunnels_overview_d_sets_pending_delete() {
+    let mut app = make_tunnels_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
+    assert_eq!(app.tunnels.pending_delete, Some(0));
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn tunnels_overview_pending_delete_y_removes_tunnel_and_returns_to_overview() {
+    let mut app = make_tunnels_overview_app();
+    app.tunnels.pending_delete = Some(0);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    assert_eq!(app.tunnels.pending_delete, None);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
+    // Tunnel directive must be gone from the in-memory ssh_config.
+    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    assert!(rules.is_empty(), "tunnel should have been removed");
+}
+
+#[test]
+fn tunnels_overview_pending_delete_n_cancels() {
+    let mut app = make_tunnels_overview_app();
+    app.tunnels.pending_delete = Some(0);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
+    assert_eq!(app.tunnels.pending_delete, None);
+    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    assert_eq!(rules.len(), 1, "tunnel must still be present after cancel");
+}
+
+fn make_multi_tunnel_overview_app() -> App {
+    let mut app = make_app(
+        "Host alpha\n  HostName a.example\n  LocalForward 8080 localhost:80\n\
+         Host beta\n  HostName b.example\n  LocalForward 9090 localhost:90\n\
+         Host gamma\n  HostName c.example\n  LocalForward 7070 localhost:70\n",
+    );
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::HostList;
+    app.ui.tunnels_overview_state.select(Some(0));
+    app
+}
+
+#[test]
+fn tunnels_overview_search_down_navigates_filtered_list_without_leaving_input_mode() {
+    // While typing into the tunnels-tab search box, ↓/Tab must move the
+    // cursor through the filtered set without dismissing the input —
+    // mirroring host-list search ergonomics so the muscle memory is
+    // shared across tabs.
+    let mut app = make_multi_tunnel_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    assert!(app.search.query.is_some(), "/ enters search mode");
+    let _ = handle_key_event(&mut app, key(KeyCode::Down), &tx);
+    assert!(
+        app.search.query.is_some(),
+        "Down must NOT exit search input mode"
+    );
+    assert_eq!(app.ui.tunnels_overview_state.selected(), Some(1));
+}
+
+#[test]
+fn tunnels_overview_search_enter_acts_on_highlighted_row_and_dismisses_input() {
+    // Enter while searching should behave like Enter outside search:
+    // act on the highlighted tunnel (toggle start/stop) and clear the
+    // query so subsequent keys navigate normally. Demo mode would
+    // forbid the actual ssh spawn, so we just check the input was
+    // dismissed and the screen stayed put.
+    let mut app = make_tunnels_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(
+        app.search.query.is_none(),
+        "Enter must dismiss the search input"
+    );
+}
+
+#[test]
+fn tunnels_overview_search_esc_clears_query_and_resets_cursor() {
+    let mut app = make_multi_tunnel_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(app.search.query.is_none());
+    assert_eq!(app.ui.tunnels_overview_state.selected(), Some(0));
+}
+
+#[test]
+fn tunnels_overview_n_opens_whats_new() {
+    // The tunnels tab should reach the What's New overlay with the
+    // same single-key shortcut as the host list — discoverable from
+    // either main tab.
+    let mut app = make_tunnels_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
+    assert!(matches!(app.screen, Screen::WhatsNew(_)));
+}
+
+#[test]
+fn tunnels_overview_pending_delete_esc_cancels() {
+    let mut app = make_tunnels_overview_app();
+    app.tunnels.pending_delete = Some(0);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert_eq!(app.tunnels.pending_delete, None);
+    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    assert_eq!(rules.len(), 1);
+}
+
+#[test]
+fn tunnels_overview_pending_delete_other_key_ignored() {
+    let mut app = make_tunnels_overview_app();
+    app.tunnels.pending_delete = Some(0);
+    let (tx, _rx) = mpsc::channel();
+    // A stray character must not silently transition state — pending_delete
+    // stays armed, the tunnel stays in the config, and no toast fires.
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('t')), &tx);
+    assert_eq!(app.tunnels.pending_delete, Some(0));
+    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    assert_eq!(rules.len(), 1);
+}
+
+#[test]
+fn tunnel_form_esc_from_tunnels_overview_returns_to_overview() {
+    // When the form was opened from the Tunnels-tab overview the cancel
+    // path must hop back to the overview, not to the per-host TunnelList.
+    let mut app = make_tunnels_overview_app();
+    app.screen = Screen::TunnelForm {
+        alias: "test".to_string(),
+        editing: None,
+    };
+    app.tunnels.form = crate::app::TunnelForm::new();
+    app.capture_tunnel_form_baseline();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
+}
+
+#[test]
+fn tunnel_form_submit_from_tunnels_overview_returns_to_overview() {
+    let mut app = make_tunnels_overview_app();
+    app.screen = Screen::TunnelForm {
+        alias: "test".to_string(),
+        editing: None,
+    };
+    app.tunnels.form = crate::app::TunnelForm::new();
+    app.tunnels.form.bind_port = "9090".to_string();
+    app.tunnels.form.remote_host = "internal.corp".to_string();
+    app.tunnels.form.remote_port = "443".to_string();
+    app.capture_form_mtime();
+    app.capture_tunnel_form_baseline();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
+    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    assert_eq!(rules.len(), 2, "new tunnel should be persisted");
+}
+
+#[test]
+fn tunnel_form_esc_from_host_detail_still_returns_to_tunnel_list() {
+    // Regression guard: the existing host-detail flow must keep returning
+    // to TunnelList. Only top_page == Tunnels redirects to the overview.
+    let mut app = make_app("Host test\n  HostName test.com\n");
+    app.top_page = crate::app::TopPage::Hosts;
+    app.screen = Screen::TunnelForm {
+        alias: "test".to_string(),
+        editing: None,
+    };
+    app.tunnels.form = crate::app::TunnelForm::new();
+    app.capture_tunnel_form_baseline();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(matches!(app.screen, Screen::TunnelList { .. }));
+}
+
+// =========================================================================
+// Tunnels overview: sort cycling and command palette
+// =========================================================================
+
+#[test]
+fn tunnels_overview_s_cycles_sort_mode() {
+    use crate::app::TunnelSortMode;
+    let mut app = make_tunnels_overview_app();
+    assert_eq!(app.tunnels.sort_mode, TunnelSortMode::MostRecent);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
+    assert_eq!(app.tunnels.sort_mode, TunnelSortMode::AlphaHostname);
+    let toast = app.status_center.toast.as_ref().expect("toast");
+    assert!(toast.text.contains("A-Z hostname"));
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
+    assert_eq!(app.tunnels.sort_mode, TunnelSortMode::MostRecent);
+    let toast = app.status_center.toast.as_ref().expect("toast");
+    assert!(toast.text.contains("most recent"));
+}
+
+#[test]
+fn tunnels_overview_colon_opens_palette_in_tunnels_mode() {
+    let mut app = make_tunnels_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(':')), &tx);
+    let palette = app.palette.as_ref().expect("palette open");
+    assert_eq!(palette.mode, crate::app::PaletteMode::Tunnels);
+    let cmds = palette.filtered_commands();
+    assert!(
+        cmds.iter().any(|c| c.label == "sort"),
+        "tunnels palette must include sort"
+    );
+    assert!(
+        cmds.iter().all(|c| c.label != "ping"),
+        "tunnels palette must NOT include host-only actions like ping"
+    );
+}
+
+#[test]
+fn tunnels_overview_palette_enter_dispatches_sort() {
+    let mut app = make_tunnels_overview_app();
+    app.palette = Some(crate::app::CommandPaletteState::for_mode(
+        crate::app::PaletteMode::Tunnels,
+    ));
+    app.palette.as_mut().unwrap().push_query('s');
+    app.palette.as_mut().unwrap().push_query('o');
+    app.palette.as_mut().unwrap().push_query('r');
+    app.palette.as_mut().unwrap().push_query('t');
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.palette.is_none(), "palette should close after Enter");
+    assert_eq!(
+        app.tunnels.sort_mode,
+        crate::app::TunnelSortMode::AlphaHostname,
+        "sort cycled via palette dispatch"
+    );
+}
+
+#[test]
+fn tunnels_overview_palette_dispatches_to_tunnels_handler() {
+    // Sanity: 'a' in Tunnels-mode palette routes through the tunnels handler
+    // (which opens the host picker), not the host-list handler.
+    let mut app = make_tunnels_overview_app();
+    app.palette = Some(crate::app::CommandPaletteState::for_mode(
+        crate::app::PaletteMode::Tunnels,
+    ));
+    app.palette.as_mut().unwrap().push_query('a');
+    app.palette.as_mut().unwrap().push_query('d');
+    app.palette.as_mut().unwrap().push_query('d');
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(matches!(app.screen, Screen::TunnelHostPicker));
+}
+
+#[test]
+fn tunnels_overview_edit_after_sort_targets_visible_row() {
+    // Regression: with two hosts in storage order zzz, aaa and AlphaHostname
+    // sort active, the row at cursor 0 visually is `aaa`. Pressing 'e' must
+    // open the form for `aaa`, not `zzz`. Before the visible_pairs refactor
+    // the handler walked raw storage order and would target `zzz`.
+    let mut app = make_app(
+        "Host zzz\n  HostName z.example\n  LocalForward 9090 localhost:90\n\
+         Host aaa\n  HostName a.example\n  LocalForward 8080 localhost:80\n",
+    );
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::HostList;
+    app.tunnels.sort_mode = crate::app::TunnelSortMode::AlphaHostname;
+    app.ui.tunnels_overview_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
+    match &app.screen {
+        Screen::TunnelForm { alias, editing } => {
+            assert_eq!(
+                alias, "aaa",
+                "edit must target visible row, not storage row"
+            );
+            assert!(editing.is_some());
+        }
+        other => panic!("expected TunnelForm, got {:?}", other.variant_name()),
+    }
+}
+
+#[test]
+fn tunnels_overview_reposition_cursor_follows_row_to_new_index() {
+    // Regression: when MostRecent reorders rows after a tunnel toggle, the
+    // cursor must follow the row the user acted on, not stay at the old
+    // visual index (which would now point at a different host).
+    use crate::tunnel::{TunnelRule, TunnelType};
+    let mut app = make_app(
+        "Host aaa\n  HostName a.example\n  LocalForward 8080 localhost:80\n\
+         Host zzz\n  HostName z.example\n  LocalForward 9090 localhost:90\n",
+    );
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::HostList;
+    app.tunnels.sort_mode = crate::app::TunnelSortMode::MostRecent;
+    app.ui.tunnels_overview_state.select(Some(1));
+    let zzz_rule = TunnelRule {
+        tunnel_type: TunnelType::Local,
+        bind_address: String::new(),
+        bind_port: 9090,
+        remote_host: "localhost".to_string(),
+        remote_port: 90,
+    };
+    // Simulate the sort-key change a tunnel start would cause: zzz becomes
+    // the most-recently-connected host, jumping from index 1 to index 0.
+    app.history.record("zzz");
+    crate::handler::tunnels_overview::reposition_cursor_on(&mut app, "zzz", &zzz_rule);
+    let pairs = crate::ui::tunnels_overview::visible_pairs(&app);
+    let zzz_idx = pairs.iter().position(|(a, _)| a == "zzz").expect("zzz row");
+    assert_eq!(
+        app.ui.tunnels_overview_state.selected(),
+        Some(zzz_idx),
+        "cursor must follow zzz to its new sorted position"
+    );
+}
+
+#[test]
+fn tunnels_overview_delete_after_sort_targets_visible_row() {
+    // Regression: pending_delete index must resolve through the visible
+    // (filtered + sorted) sequence, not raw storage order.
+    let mut app = make_app(
+        "Host zzz\n  HostName z.example\n  LocalForward 9090 localhost:90\n\
+         Host aaa\n  HostName a.example\n  LocalForward 8080 localhost:80\n",
+    );
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.screen = Screen::HostList;
+    app.tunnels.sort_mode = crate::app::TunnelSortMode::AlphaHostname;
+    app.ui.tunnels_overview_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    // After deletion of `aaa`'s tunnel, only `zzz`'s tunnel should remain.
+    let aaa_rules = app.hosts_state.ssh_config.find_tunnel_directives("aaa");
+    let zzz_rules = app.hosts_state.ssh_config.find_tunnel_directives("zzz");
+    assert!(
+        aaa_rules.is_empty(),
+        "aaa's tunnel should have been removed"
+    );
+    assert_eq!(zzz_rules.len(), 1, "zzz's tunnel must be untouched");
 }

@@ -64,13 +64,17 @@ I wanted one place for all of that. So I built it.
 
 ![containers](screenshots/containers.png)
 
+🚇 **Live tunnel monitoring.** Every SSH forward with throughput, channels, clients and uptime. Local, Remote and Dynamic SOCKS. The detail panel reveals which app owns each open channel, in real time.
+
+![live tunnels](screenshots/tunnels.png)
+
 **And more.** Visual file transfer with split-pane explorer. Multi-host command execution with snippets. Automatic password retrieval from OS Keychain, 1Password, Bitwarden, pass and the HashiCorp Vault KV secrets engine. Short-lived SSH certificates signed via the HashiCorp Vault SSH secrets engine. Command palette (`:`) for quick access to all actions. MCP server for AI agents like Claude Code and Cursor. See the [wiki](https://github.com/erickochen/purple/wiki) for details.
 
 ## How it works
 
 purple reads `~/.ssh/config` directly. No database, no daemon, no account. Comments, indentation, Include files, unknown directives. All preserved.
 
-Written in Rust. Single binary. 6500+ tests. MIT license.
+Written in Rust. Single binary. 6800+ tests. MIT license.
 
 ## Links
 

@@ -77,7 +77,7 @@ pub use ping::{
 };
 pub use provider_state::{ProviderState, SyncRecord};
 pub use reload_state::{ConflictState, ReloadState};
-pub use screen::{Screen, WhatsNewState};
+pub use screen::{Screen, TopPage, WhatsNewState};
 pub use search::SearchState;
 pub use snippet_state::SnippetState;
 pub use status_state::{MessageClass, StatusCenter, StatusMessage};
@@ -85,7 +85,7 @@ pub use tag_state::{
     BulkTagAction, BulkTagApplyResult, BulkTagEditorState, BulkTagRow, TagState,
     select_display_tags,
 };
-pub use tunnel_state::TunnelState;
+pub use tunnel_state::{TunnelSortMode, TunnelState};
 pub use ui_state::UiSelection;
 pub use update::UpdateState;
 pub use vault::VaultState;
@@ -115,6 +115,9 @@ impl Drop for App {
 pub struct App {
     // Core
     pub screen: Screen,
+    /// Top-level page (Hosts vs Tunnels). Selected by Tab/Shift+Tab in
+    /// the navigation bar. Independent of `screen`, which tracks overlays.
+    pub top_page: TopPage,
     pub running: bool,
     pub hosts_state: HostState,
     pub pending_connect: Option<(String, Option<String>)>,
@@ -203,6 +206,7 @@ impl App {
 
         Self {
             screen: Screen::HostList,
+            top_page: TopPage::default(),
             running: true,
             hosts_state,
             pending_connect: None,
@@ -694,6 +698,21 @@ impl App {
     pub fn poll_tunnels(&mut self) -> Vec<(String, String, bool)> {
         self.tunnels.poll()
     }
+
+    /// Recompute the lsof poller's bind-port list from the current
+    /// `active` map plus each host's directives in the SSH config.
+    /// Called after every tunnel start/stop. The poller picks up the
+    /// new list on its next iteration.
+    pub fn refresh_tunnel_bind_ports(&mut self) {
+        let mut ports: Vec<(String, u16, u32)> = Vec::new();
+        for (alias, tunnel) in &self.tunnels.active {
+            let pid = tunnel.child.id();
+            for rule in self.hosts_state.ssh_config.find_tunnel_directives(alias) {
+                ports.push((alias.clone(), rule.bind_port, pid));
+            }
+        }
+        self.tunnels.set_lsof_ports(ports);
+    }
 }
 
 /// Cycle list selection forward or backward with wraparound.
@@ -874,9 +893,52 @@ static ALL_PALETTE_COMMANDS: &[PaletteCommand] = &[
     },
 ];
 
+/// Tunnel-screen palette commands. The tunnels overview only supports a
+/// subset of host actions, so the palette here is deliberately small.
+static TUNNELS_PALETTE_COMMANDS: &[PaletteCommand] = &[
+    PaletteCommand {
+        key: 'a',
+        label: "add tunnel",
+        section: "manage",
+    },
+    PaletteCommand {
+        key: 'e',
+        label: "edit tunnel",
+        section: "manage",
+    },
+    PaletteCommand {
+        key: 'd',
+        label: "del tunnel",
+        section: "manage",
+    },
+    PaletteCommand {
+        key: 's',
+        label: "sort",
+        section: "view",
+    },
+];
+
+/// Which command set the palette displays. Determined by the screen that
+/// opened the palette so the action list matches what the underlying
+/// handler can dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PaletteMode {
+    #[default]
+    Hosts,
+    Tunnels,
+}
+
 impl PaletteCommand {
+    #[cfg(test)]
     pub fn all() -> &'static [PaletteCommand] {
         ALL_PALETTE_COMMANDS
+    }
+
+    pub fn for_mode(mode: PaletteMode) -> &'static [PaletteCommand] {
+        match mode {
+            PaletteMode::Hosts => ALL_PALETTE_COMMANDS,
+            PaletteMode::Tunnels => TUNNELS_PALETTE_COMMANDS,
+        }
     }
 }
 
@@ -884,9 +946,17 @@ impl PaletteCommand {
 pub struct CommandPaletteState {
     pub query: String,
     pub selected: usize,
+    pub mode: PaletteMode,
 }
 
 impl CommandPaletteState {
+    pub fn for_mode(mode: PaletteMode) -> Self {
+        Self {
+            mode,
+            ..Self::default()
+        }
+    }
+
     pub fn push_query(&mut self, c: char) {
         if self.query.len() < 64 {
             self.query.push(c);
@@ -902,7 +972,7 @@ impl CommandPaletteState {
     /// Return commands filtered by the current query (substring match on label).
     /// Returns a borrowed static slice when the query is empty (no allocation).
     pub fn filtered_commands(&self) -> std::borrow::Cow<'static, [PaletteCommand]> {
-        let all = PaletteCommand::all();
+        let all = PaletteCommand::for_mode(self.mode);
         if self.query.is_empty() {
             return std::borrow::Cow::Borrowed(all);
         }
