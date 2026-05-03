@@ -537,8 +537,7 @@ mod tests {
     /// cap tests to build realistic batches without a kernel.
     fn serialize_inet_response(resp: InetResponse) -> Vec<u8> {
         let header = NetlinkHeader::default();
-        let payload =
-            NetlinkPayload::from(SockDiagMessage::InetResponse(Box::new(resp)));
+        let payload = NetlinkPayload::from(SockDiagMessage::InetResponse(Box::new(resp)));
         let mut packet = NetlinkMessage::new(header, payload);
         packet.finalize();
         let mut buf = vec![0u8; packet.buffer_len()];
