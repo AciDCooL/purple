@@ -1040,10 +1040,7 @@ pub fn seed_tunnel_live_snapshots(app: &mut App) {
                     count: 1,
                 },
             ],
-            currently_open: vec![
-                (3, 92, ChannelKind::Direct),
-                (4, 18, ChannelKind::Direct),
-            ],
+            currently_open: vec![(3, 92, ChannelKind::Direct), (4, 18, ChannelKind::Direct)],
             conflict: None,
             last_exit: None,
         },

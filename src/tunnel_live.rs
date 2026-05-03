@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Stdio;
 use std::process::{ChildStderr, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -757,6 +757,17 @@ fn annotate_peer_throughput(
     }
 
     cache.retain(|key, _| live.contains(key));
+}
+
+/// Parse `ss -H -t -i -n -p state established` output into per-socket
+/// cumulative byte counters keyed by `(pid, local_port)`. The full
+/// parser is not implemented yet, so this returns an empty map and the
+/// caller falls back to status-only display on Linux. The Linux
+/// throughput renderer therefore exercises the not-yet-throughput-ready
+/// branch until a real parser lands.
+#[cfg(target_os = "linux")]
+fn parse_ss_per_socket(_input: &str) -> HashMap<(u32, u16), (u64, u64)> {
+    HashMap::new()
 }
 
 /// Run the per-platform peer-throughput sampler. On Linux this calls
