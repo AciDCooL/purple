@@ -13,7 +13,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(target_os = "macos")]
 use std::process::Stdio;
 use std::process::{ChildStderr, Command};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -691,10 +691,13 @@ struct PeerSampleCache {
 /// delta sample. The annotator picks the right path per peer.
 #[derive(Debug, Default)]
 struct PerPeerSamples {
-    /// Cumulative byte counters per `(pid, local_port)` from `ss` on
-    /// Linux. Keyed precisely so each socket has its own row even when
-    /// a process owns several sockets through the tunnel.
-    per_socket_cumulative: HashMap<(u32, u16), (u64, u64)>,
+    /// Cumulative byte counters per client local port from
+    /// `NETLINK_SOCK_DIAG` on Linux (see `crate::tcp_diag`). Netlink
+    /// returns per-socket data without pid attribution, so we key on
+    /// the local port alone and rely on the lsof-driven join in
+    /// `annotate_peer_throughput` to attribute counters back to the
+    /// owning client process.
+    per_local_port_cumulative: HashMap<u16, (u64, u64)>,
     /// Bytes-per-second deltas per pid from `nettop` on macOS. The
     /// kernel does not expose per-socket counters here, so per-pid is
     /// the finest-grained truth available — adequate for the typical
@@ -726,7 +729,7 @@ fn annotate_peer_throughput(
 
             // Path A: Linux per-socket cumulative counters → diff against cache.
             let cumulative =
-                src_port.and_then(|p| samples.per_socket_cumulative.get(&(peer.pid, p)).copied());
+                src_port.and_then(|p| samples.per_local_port_cumulative.get(&p).copied());
             if let Some((rcvd, sent)) = cumulative {
                 if let Some(prev_at) = entry.last_at {
                     let dt = now.saturating_duration_since(prev_at).as_secs_f64();
@@ -759,38 +762,18 @@ fn annotate_peer_throughput(
     cache.retain(|key, _| live.contains(key));
 }
 
-/// Parse `ss -H -t -i -n -p state established` output into per-socket
-/// cumulative byte counters keyed by `(pid, local_port)`. The full
-/// parser is not implemented yet, so this returns an empty map and the
-/// caller falls back to status-only display on Linux. The Linux
-/// throughput renderer therefore exercises the not-yet-throughput-ready
-/// branch until a real parser lands.
-#[cfg(target_os = "linux")]
-fn parse_ss_per_socket(_input: &str) -> HashMap<(u32, u16), (u64, u64)> {
-    HashMap::new()
-}
-
-/// Run the per-platform peer-throughput sampler. On Linux this calls
-/// `ss` once and returns per-socket cumulative byte counters. On macOS
-/// it spawns a short `nettop` subprocess that yields one 1-second
-/// delta sample per pid. Returns an empty struct on unsupported
-/// platforms or when the underlying tool fails — the caller falls
-/// back to status-only display.
+/// Run the per-platform peer-throughput sampler. On Linux this talks
+/// directly to the kernel via `NETLINK_SOCK_DIAG` (see `crate::tcp_diag`)
+/// and returns per-socket cumulative byte counters. On macOS it spawns
+/// a short `nettop` subprocess that yields one 1-second delta sample
+/// per pid. Returns an empty struct on unsupported platforms or when
+/// the underlying mechanism fails — the caller falls back to
+/// status-only display.
 fn sample_peer_throughput() -> PerPeerSamples {
     let mut out = PerPeerSamples::default();
     #[cfg(target_os = "linux")]
     {
-        let output = Command::new("ss")
-            .args(["-H", "-t", "-i", "-n", "-p", "state", "established"])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output();
-        if let Ok(o) = output {
-            if o.status.success() {
-                out.per_socket_cumulative =
-                    parse_ss_per_socket(&String::from_utf8_lossy(&o.stdout));
-            }
-        }
+        out.per_local_port_cumulative = crate::tcp_diag::sample_per_local_port();
     }
     #[cfg(target_os = "macos")]
     {

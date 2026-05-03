@@ -228,6 +228,51 @@ fn wrap_tags<'a>(tags: &'a [String], max_width: usize) -> Vec<Vec<&'a str>> {
     rows
 }
 
+/// Split a space-separated SSH `Host` pattern string into a list of
+/// individual patterns that have each been truncated to fit in
+/// `max_width`. Used by the PATTERN MATCH card to render long pattern
+/// lists across multiple rows.
+fn split_patterns_truncated(pattern: &str, max_width: usize) -> Vec<String> {
+    pattern
+        .split_whitespace()
+        .map(|p| super::truncate(p, max_width))
+        .collect()
+}
+
+/// Pack space-separated items into rows that fit within `max_width`
+/// display columns. Each row joins its items with single-space
+/// separators when rendered. Returns an empty Vec if the input is
+/// empty or `max_width` is zero.
+fn wrap_space_separated(items: &[String], max_width: usize) -> Vec<Vec<String>> {
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    if max_width == 0 {
+        return rows;
+    }
+    let mut current_row: Vec<String> = Vec::new();
+    let mut current_width: usize = 0;
+    for item in items {
+        let item_width = UnicodeWidthStr::width(item.as_str());
+        let needed = if current_width == 0 {
+            item_width
+        } else {
+            item_width + 1 // single space separator
+        };
+        if current_width > 0 && current_width + needed > max_width {
+            rows.push(std::mem::take(&mut current_row));
+            current_width = 0;
+        }
+        if current_width > 0 {
+            current_width += 1; // space
+        }
+        current_row.push(item.clone());
+        current_width += item_width;
+    }
+    if !current_row.is_empty() {
+        rows.push(current_row);
+    }
+    rows
+}
+
 pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
     // Check if a pattern is selected — render pattern detail instead
     if let Some(pattern) = app.selected_pattern() {
@@ -528,7 +573,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 for (name, hostname, in_config) in chain.iter().rev() {
                     section_line(
                         &mut lines,
-                        vec![Span::styled("    \u{2502}", theme::muted())],
+                        vec![Span::styled("  \u{250A}", theme::muted())],
                         box_width,
                     );
                     let name_style = if *in_config {
@@ -558,7 +603,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 }
                 section_line(
                     &mut lines,
-                    vec![Span::styled("    \u{2502}", theme::muted())],
+                    vec![Span::styled("  \u{250A}", theme::muted())],
                     box_width,
                 );
                 let alias_trunc = super::truncate(&host.alias, hop_width);
@@ -571,10 +616,14 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 } else {
                     String::new()
                 };
+                // Target host uses the fisheye glyph (●  with a ring,
+                // U+25C9) so the destination is distinguishable from
+                // intermediate hops (plain ●) on terminals that don't
+                // honour our accent colour (NO_COLOR, dim displays).
                 section_line(
                     &mut lines,
                     vec![
-                        Span::styled(format!("  {} ", design::ICON_ONLINE), theme::accent()),
+                        Span::styled("  \u{25C9} ", theme::accent()),
                         Span::styled(alias_trunc, theme::bold()),
                         Span::styled(target_ip, theme::muted()),
                     ],
@@ -843,14 +892,19 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
     let inherited = app.hosts_state.ssh_config.matching_patterns(&host.alias);
     for pattern_entry in &inherited {
         section_open(&mut lines, "PATTERN MATCH", box_width);
-        section_line(
-            &mut lines,
-            vec![Span::styled(
-                super::truncate(&pattern_entry.pattern, box_width.saturating_sub(4)),
-                theme::bold(),
-            )],
-            box_width,
-        );
+        let inner = box_width.saturating_sub(4);
+        let parts = split_patterns_truncated(&pattern_entry.pattern, inner);
+        let pattern_rows = wrap_space_separated(&parts, inner);
+        for row in &pattern_rows {
+            let mut spans: Vec<Span<'static>> = Vec::new();
+            for (i, p) in row.iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::raw(" "));
+                }
+                spans.push(Span::styled(p.clone(), theme::bold()));
+            }
+            section_line(&mut lines, spans, box_width);
+        }
         for (key, value) in &pattern_entry.directives {
             section_field(&mut lines, key, value, max_value_width, box_width);
         }
@@ -913,13 +967,23 @@ fn render_pattern_detail(
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    // Header card: PATTERN MATCH with pattern on first line
+    // Header card: PATTERN MATCH with patterns wrapped over multiple
+    // rows so a long space-separated list never overflows the right
+    // border.
     section_open(&mut lines, "PATTERN MATCH", box_width);
-    section_line(
-        &mut lines,
-        vec![Span::styled(pattern.pattern.clone(), theme::bold())],
-        box_width,
-    );
+    let inner = box_width.saturating_sub(4);
+    let parts = split_patterns_truncated(&pattern.pattern, inner);
+    let pattern_rows = wrap_space_separated(&parts, inner);
+    for row in &pattern_rows {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for (i, p) in row.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw(" "));
+            }
+            spans.push(Span::styled(p.clone(), theme::bold()));
+        }
+        section_line(&mut lines, spans, box_width);
+    }
     section_close(&mut lines, box_width);
 
     // Directives section

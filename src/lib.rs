@@ -12,6 +12,8 @@ pub mod providers;
 pub mod snippet;
 pub mod ssh_config;
 pub mod ssh_context;
+#[cfg(target_os = "linux")]
+pub(crate) mod tcp_diag;
 pub mod tunnel;
 pub mod tunnel_live;
 pub mod vault_ssh;

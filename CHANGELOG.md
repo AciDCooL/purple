@@ -1,3 +1,10 @@
+## 3.1.0 - 2026-05-03
+
+- feat: live tunnel throughput on Linux, parity with macOS.
+- feat: detail panel on Linux now shows real bytes-per-second per client process via a direct kernel netlink call (NETLINK_SOCK_DIAG), alongside the channel-events swimlane and per-client roster you already had.
+- change: ROUTE card uses a dotted vertical connector and a fisheye marker on the destination so multi-hop chains read clearly without relying on colour.
+- fix: long PATTERN MATCH header lists wrap across multiple rows instead of overflowing the detail panel border.
+
 ## 3.0.0 - 2026-05-03
 
 - feat: hosts and live tunnels in one cockpit, Tab between.

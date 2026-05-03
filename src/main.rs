@@ -28,6 +28,8 @@ mod snippet;
 mod ssh_config;
 mod ssh_context;
 mod ssh_keys;
+#[cfg(target_os = "linux")]
+mod tcp_diag;
 mod tui;
 mod tui_loop;
 mod tunnel;
