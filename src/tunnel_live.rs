@@ -860,9 +860,10 @@ fn sample_nettop_per_pid_macos() -> HashMap<u32, (u64, u64)> {
 /// Parse one `nettop -P -d -x` CSV row into `(pid, rx_bytes, tx_bytes)`.
 /// Returns `None` for header rows, blanks, or rows with too few
 /// columns. Mirrors `parse_nettop_csv_row` but does not filter on a
-/// specific pid.
-#[cfg(any(target_os = "macos", test))]
-pub fn parse_nettop_csv_row_per_pid(line: &str) -> Option<(u32, u64, u64)> {
+/// specific pid. macOS-only because the only caller is the nettop
+/// sampler.
+#[cfg(target_os = "macos")]
+fn parse_nettop_csv_row_per_pid(line: &str) -> Option<(u32, u64, u64)> {
     let line = line.trim();
     if line.is_empty() || line.starts_with("time,") {
         return None;
