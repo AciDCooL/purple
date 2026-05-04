@@ -1,3 +1,10 @@
+## 3.3.0 - 2026-05-04
+
+- feat: Use SSH keys stored anywhere via symlinks.
+- feat: purple follows symlinks in ~/.ssh, so keys synced from password managers, secure storage or central key directories appear in the picker exactly like a regular file you placed there yourself.
+- change: Tunnels page mirrors the Hosts layout. Column titles line up with the rows below, getpurple.sh anchors the bottom-right corner, and the inactive tab fades to muted so your eye lands on the active page first.
+- Symlinked SSH keys reported by @Nab0y (#58).
+
 ## 3.2.0 - 2026-05-04
 
 - feat: Install purple on NixOS, or with Nix on Linux and macOS.

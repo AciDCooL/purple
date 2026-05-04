@@ -390,21 +390,23 @@ fn render_header(frame: &mut Frame, area: Rect, cols: &Columns, sort_mode: Tunne
     let recent_sort = matches!(sort_mode, TunnelSortMode::MostRecent);
 
     let alias_label = if alpha_sort { "NAME \u{25BE}" } else { "NAME" };
-    let last_label = if recent_sort { "LAST \u{25BE}" } else { "LAST" };
 
-    let leading_pad = " ".repeat(MARKER_W + STATUS_W);
+    // Include HIGHLIGHT_W so column titles line up with row content. The List
+    // widget reserves a column for highlight_symbol on each row but the header
+    // is rendered as a Paragraph and must compensate manually.
+    let leading_pad = " ".repeat(HIGHLIGHT_W + MARKER_W + STATUS_W);
     let mut spans = vec![
         Span::styled(leading_pad, style),
         Span::styled(
             format!("{:<width$}", alias_label, width = cols.alias),
             style,
         ),
-        Span::raw(gap.clone()),
-        Span::styled(
-            format!("{:<width$}", "FORWARD", width = cols.forward),
-            style,
-        ),
     ];
+    spans.push(Span::raw(gap.clone()));
+    spans.push(Span::styled(
+        format!("{:<width$}", "FORWARD", width = cols.forward),
+        style,
+    ));
     spans.push(Span::raw(flex));
     spans.push(Span::styled(
         format!("{:>width$}", "SPEED", width = SPEED_W),
@@ -416,10 +418,16 @@ fn render_header(frame: &mut Frame, area: Rect, cols: &Columns, sort_mode: Tunne
         style,
     ));
     spans.push(Span::raw(gap));
+    // Render LAST as separate span. The optional sort indicator is appended
+    // outside cols.last to avoid overflowing the column budget. Same pattern
+    // as host_list. Trailing slack on the row absorbs the extra char.
     spans.push(Span::styled(
-        format!("{:>width$}", last_label, width = cols.last),
+        format!("{:>width$}", "LAST", width = cols.last),
         style,
     ));
+    if recent_sort {
+        spans.push(Span::styled("\u{25BE}", style));
+    }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
@@ -553,6 +561,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
     // accent-coloured search border and surface a `search: N/total`
     // header — same visual cue the host-list uses, so the colour
     // change is tab-independent.
+    let url_label = Line::from(Span::styled(" getpurple.sh ", theme::muted()));
     let mut block = if search_active {
         let total: usize = app
             .hosts_state
@@ -569,9 +578,9 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
             format!(" search: {}/{} ", row_count, total),
             theme::bold(),
         )]);
-        design::search_block_line(title)
+        design::search_block_line(title).title_bottom(url_label.right_aligned())
     } else {
-        design::main_block_line(Line::default())
+        design::main_block_line(Line::default()).title_bottom(url_label.right_aligned())
     };
     if let Some(update) = update_title.as_ref() {
         block = block.title_top(update.clone().right_aligned());

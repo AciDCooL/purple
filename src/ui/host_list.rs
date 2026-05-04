@@ -385,7 +385,7 @@ pub(crate) fn top_bar_spans(app: &App) -> Vec<Span<'static>> {
             if host_active {
                 theme::nav_active()
             } else {
-                theme::bold()
+                theme::muted()
             },
         ),
         Span::raw(TOP_BAR_GAP),
@@ -394,7 +394,7 @@ pub(crate) fn top_bar_spans(app: &App) -> Vec<Span<'static>> {
             if tunnel_active {
                 theme::nav_active()
             } else {
-                theme::bold()
+                theme::muted()
             },
         ),
     ]

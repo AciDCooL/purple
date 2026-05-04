@@ -943,7 +943,7 @@ mod top_bar {
     }
 
     #[test]
-    fn active_page_uses_nav_active_inactive_uses_bold() {
+    fn active_page_uses_nav_active_inactive_is_muted() {
         let app = make_test_app("Host web1\n  HostName 1.1.1.1\n");
         assert_eq!(app.top_page, TopPage::Hosts);
         let spans = top_bar_spans(&app);
@@ -958,7 +958,7 @@ mod top_bar {
             .expect("tunnels span");
 
         assert_eq!(host_span.style, theme::nav_active());
-        assert_eq!(tunnels_span.style, theme::bold());
+        assert_eq!(tunnels_span.style, theme::muted());
     }
 
     #[test]
@@ -976,7 +976,7 @@ mod top_bar {
             .find(|s| s.content.contains("tunnels"))
             .expect("tunnels span");
 
-        assert_eq!(host_span.style, theme::bold());
+        assert_eq!(host_span.style, theme::muted());
         assert_eq!(tunnels_span.style, theme::nav_active());
     }
 

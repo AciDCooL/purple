@@ -9,7 +9,7 @@
 │   ● monitorin│                        ├─╯╰─╯╵  ├─╯╶┴╴╰─╴ ▪                        │          2h  │
 │   ● gateway-v│                        ╵        ╵                                  │          3h  │
 │   ● aws-api-p│                                                                    │          4h  │
-│   ● aws-api-s│                       welcome to purple 3.2.0                      │          5h  │
+│   ● aws-api-s│                       welcome to purple 3.3.0                      │          5h  │
 │   ● aws-worke│                                                                    │          6h  │
 │   ● aws-batch│                                                                    │          7h  │
 │   ● aws-ml-eu│  2.41.0  2026-04-15                                                │          8h  │
@@ -156,13 +156,13 @@
 (24,1) fg=DarkGray bg=Reset mod=DIM
 (25,1) fg=DarkGray bg=Reset mod=DIM
 (26,1) fg=DarkGray bg=Reset mod=DIM
-(27,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(28,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(29,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(30,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(31,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(32,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(33,1) fg=DarkGray bg=Reset mod=BOLD|DIM
+(27,1) fg=DarkGray bg=Reset mod=DIM
+(28,1) fg=DarkGray bg=Reset mod=DIM
+(29,1) fg=DarkGray bg=Reset mod=DIM
+(30,1) fg=DarkGray bg=Reset mod=DIM
+(31,1) fg=DarkGray bg=Reset mod=DIM
+(32,1) fg=DarkGray bg=Reset mod=DIM
+(33,1) fg=DarkGray bg=Reset mod=DIM
 (34,1) fg=DarkGray bg=Reset mod=DIM
 (35,1) fg=DarkGray bg=Reset mod=DIM
 (36,1) fg=DarkGray bg=Reset mod=DIM

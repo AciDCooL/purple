@@ -2,7 +2,7 @@
 │  purple       hosts      tunnels                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│    NAME              FORWARD                                          SPEED     UPTIME    LAST ▾ │
+│     NAME              FORWARD                                          SPEED     UPTIME    LAST▾ │
 │ ──────────────────────────────────────────────────────────────────────────────────────────────── │
 │ ▌ ○ bastion-ams       1080 → any                                           —                <1m  │
 │   ○ bastion-ams       8443 → internal.corp:443                             —                <1m  │
@@ -26,7 +26,7 @@
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  start    /  search    s  sort    :  cmds                                             ?  more
 ---STYLES---
 (0,0) fg=Reset bg=Reset mod=DIM
@@ -138,11 +138,11 @@
 (7,1) fg=White bg=Magenta mod=BOLD
 (8,1) fg=White bg=Magenta mod=BOLD
 (9,1) fg=White bg=Magenta mod=BOLD
-(16,1) fg=Reset bg=Reset mod=BOLD
-(17,1) fg=Reset bg=Reset mod=BOLD
-(18,1) fg=Reset bg=Reset mod=BOLD
-(19,1) fg=Reset bg=Reset mod=BOLD
-(20,1) fg=Reset bg=Reset mod=BOLD
+(16,1) fg=Reset bg=Reset mod=DIM
+(17,1) fg=Reset bg=Reset mod=DIM
+(18,1) fg=Reset bg=Reset mod=DIM
+(19,1) fg=Reset bg=Reset mod=DIM
+(20,1) fg=Reset bg=Reset mod=DIM
 (27,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (28,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (29,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
@@ -369,7 +369,7 @@
 (16,4) fg=Reset bg=Reset mod=BOLD
 (17,4) fg=Reset bg=Reset mod=BOLD
 (18,4) fg=Reset bg=Reset mod=BOLD
-(23,4) fg=Reset bg=Reset mod=BOLD
+(19,4) fg=Reset bg=Reset mod=BOLD
 (24,4) fg=Reset bg=Reset mod=BOLD
 (25,4) fg=Reset bg=Reset mod=BOLD
 (26,4) fg=Reset bg=Reset mod=BOLD
@@ -393,7 +393,7 @@
 (44,4) fg=Reset bg=Reset mod=BOLD
 (45,4) fg=Reset bg=Reset mod=BOLD
 (46,4) fg=Reset bg=Reset mod=BOLD
-(67,4) fg=Reset bg=Reset mod=BOLD
+(47,4) fg=Reset bg=Reset mod=BOLD
 (68,4) fg=Reset bg=Reset mod=BOLD
 (69,4) fg=Reset bg=Reset mod=BOLD
 (70,4) fg=Reset bg=Reset mod=BOLD
@@ -403,14 +403,14 @@
 (74,4) fg=Reset bg=Reset mod=BOLD
 (75,4) fg=Reset bg=Reset mod=BOLD
 (76,4) fg=Reset bg=Reset mod=BOLD
-(81,4) fg=Reset bg=Reset mod=BOLD
+(77,4) fg=Reset bg=Reset mod=BOLD
 (82,4) fg=Reset bg=Reset mod=BOLD
 (83,4) fg=Reset bg=Reset mod=BOLD
 (84,4) fg=Reset bg=Reset mod=BOLD
 (85,4) fg=Reset bg=Reset mod=BOLD
 (86,4) fg=Reset bg=Reset mod=BOLD
 (87,4) fg=Reset bg=Reset mod=BOLD
-(92,4) fg=Reset bg=Reset mod=BOLD
+(88,4) fg=Reset bg=Reset mod=BOLD
 (93,4) fg=Reset bg=Reset mod=BOLD
 (94,4) fg=Reset bg=Reset mod=BOLD
 (95,4) fg=Reset bg=Reset mod=BOLD

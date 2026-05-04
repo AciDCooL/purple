@@ -2,7 +2,7 @@
 │  purple       hosts      tunnels                                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│    NAME              FORWARD                                          SPEED     UPTIME    LAST ▾ │
+│     NAME              FORWARD                                          SPEED     UPTIME    LAST▾ │
 │ ──────────────────╭ Add Tunnel › Select Host (22) ───────────────────────────╮────────────────── │
 │ ▌ ○ bastion-ams   │  type to filter hosts...                                 │              <1m  │
 │   ○ bastion-ams   │ ─────────────────────────────────────────────────────────│              <1m  │
@@ -26,7 +26,7 @@
 │                    Enter  select    ↑↓  move    Esc  cancel                                      │
 │                                                                                                  │
 │                                                                                                  │
-╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  start    /  search    s  sort    :  cmds                                             ?  more
 ---STYLES---
 (0,0) fg=DarkGray bg=Reset mod=DIM
@@ -145,11 +145,11 @@
 (13,1) fg=DarkGray bg=Reset mod=DIM
 (14,1) fg=DarkGray bg=Reset mod=DIM
 (15,1) fg=DarkGray bg=Reset mod=DIM
-(16,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(17,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(18,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(19,1) fg=DarkGray bg=Reset mod=BOLD|DIM
-(20,1) fg=DarkGray bg=Reset mod=BOLD|DIM
+(16,1) fg=DarkGray bg=Reset mod=DIM
+(17,1) fg=DarkGray bg=Reset mod=DIM
+(18,1) fg=DarkGray bg=Reset mod=DIM
+(19,1) fg=DarkGray bg=Reset mod=DIM
+(20,1) fg=DarkGray bg=Reset mod=DIM
 (21,1) fg=DarkGray bg=Reset mod=DIM
 (22,1) fg=DarkGray bg=Reset mod=DIM
 (23,1) fg=DarkGray bg=Reset mod=DIM
@@ -448,11 +448,11 @@
 (16,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (17,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (18,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(19,4) fg=DarkGray bg=Reset mod=DIM
+(19,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (20,4) fg=DarkGray bg=Reset mod=DIM
 (21,4) fg=DarkGray bg=Reset mod=DIM
 (22,4) fg=DarkGray bg=Reset mod=DIM
-(23,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(23,4) fg=DarkGray bg=Reset mod=DIM
 (24,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (25,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (26,4) fg=DarkGray bg=Reset mod=BOLD|DIM
@@ -476,7 +476,7 @@
 (44,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (45,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (46,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(47,4) fg=DarkGray bg=Reset mod=DIM
+(47,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (48,4) fg=DarkGray bg=Reset mod=DIM
 (49,4) fg=DarkGray bg=Reset mod=DIM
 (50,4) fg=DarkGray bg=Reset mod=DIM
@@ -496,7 +496,7 @@
 (64,4) fg=DarkGray bg=Reset mod=DIM
 (65,4) fg=DarkGray bg=Reset mod=DIM
 (66,4) fg=DarkGray bg=Reset mod=DIM
-(67,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(67,4) fg=DarkGray bg=Reset mod=DIM
 (68,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (69,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (70,4) fg=DarkGray bg=Reset mod=BOLD|DIM
@@ -506,22 +506,22 @@
 (74,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (75,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (76,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(77,4) fg=DarkGray bg=Reset mod=DIM
+(77,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (78,4) fg=DarkGray bg=Reset mod=DIM
 (79,4) fg=DarkGray bg=Reset mod=DIM
 (80,4) fg=DarkGray bg=Reset mod=DIM
-(81,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(81,4) fg=DarkGray bg=Reset mod=DIM
 (82,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (83,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (84,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (85,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (86,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (87,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(88,4) fg=DarkGray bg=Reset mod=DIM
+(88,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (89,4) fg=DarkGray bg=Reset mod=DIM
 (90,4) fg=DarkGray bg=Reset mod=DIM
 (91,4) fg=DarkGray bg=Reset mod=DIM
-(92,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(92,4) fg=DarkGray bg=Reset mod=DIM
 (93,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (94,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (95,4) fg=DarkGray bg=Reset mod=BOLD|DIM

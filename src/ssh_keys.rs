@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use log::debug;
+
 use crate::ssh_config::model::HostEntry;
 
 /// Information about an SSH key found on disk.
@@ -49,6 +51,11 @@ pub fn discover_keys(ssh_dir: &Path, hosts: &[HostEntry]) -> Vec<SshKeyInfo> {
         .collect();
 
     keys.sort_by(|a, b| a.name.cmp(&b.name));
+    debug!(
+        "[purple] discover_keys: found {} key(s) in {}",
+        keys.len(),
+        ssh_dir.display()
+    );
     keys
 }
 
@@ -68,8 +75,12 @@ fn is_public_key_file(entry: &std::fs::DirEntry) -> bool {
         return false;
     }
 
-    // Must be a regular file
-    entry.file_type().map(|t| t.is_file()).unwrap_or(false)
+    // Use std::fs::metadata, not DirEntry::file_type or DirEntry::metadata:
+    // both of those use lstat and report the symlink itself (is_file = false).
+    // std::fs::metadata uses stat, follows the chain, and reports the target.
+    std::fs::metadata(entry.path())
+        .map(|m| m.is_file())
+        .unwrap_or(false)
 }
 
 /// Read key metadata using ssh-keygen -lf.
@@ -137,7 +148,7 @@ fn parse_keygen_output(line: &str) -> Option<(String, String, String, String)> {
     let bits = parts[0].to_string();
     let fingerprint = parts[1].to_string();
 
-    // The rest is "<comment> (<type>)" — extract type from the end
+    // The rest is "<comment> (<type>)". Extract type from the end.
     let rest = parts[2];
     let (comment, key_type) = if let Some(paren_start) = rest.rfind('(') {
         let comment = rest[..paren_start].trim().to_string();
@@ -157,7 +168,7 @@ fn find_linked_hosts(full_path: &Path, display_path: &str, hosts: &[HostEntry]) 
         .iter()
         .filter(|h| {
             if h.identity_file.is_empty() {
-                // No explicit IdentityFile — SSH tries all available keys
+                // No explicit IdentityFile. SSH tries all available keys.
                 return true;
             }
             // Match against both the display path (~/.ssh/...) and the full path
@@ -306,5 +317,62 @@ mod tests {
             ..key
         };
         assert_eq!(key2.type_display(), "ED25519");
+    }
+
+    #[cfg(unix)]
+    fn read_only_entry(dir: &Path, name: &str) -> std::fs::DirEntry {
+        std::fs::read_dir(dir)
+            .expect("read_dir")
+            .filter_map(Result::ok)
+            .find(|e| e.file_name() == name)
+            .expect("entry not found")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_is_public_key_file_accepts_regular_pub_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("id_ed25519.pub");
+        std::fs::write(&path, b"ssh-ed25519 AAAA").unwrap();
+        let entry = read_only_entry(dir.path(), "id_ed25519.pub");
+        assert!(is_public_key_file(&entry));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_is_public_key_file_accepts_symlink_to_regular_pub_file() {
+        use std::os::unix::fs::symlink;
+        let target_dir = tempfile::tempdir().unwrap();
+        let link_dir = tempfile::tempdir().unwrap();
+        let target = target_dir.path().join("id_ed25519.pub");
+        std::fs::write(&target, b"ssh-ed25519 AAAA").unwrap();
+        let link = link_dir.path().join("id_ed25519.pub");
+        symlink(&target, &link).unwrap();
+        let entry = read_only_entry(link_dir.path(), "id_ed25519.pub");
+        assert!(is_public_key_file(&entry));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_is_public_key_file_rejects_broken_symlink() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("id_ed25519.pub");
+        symlink(dir.path().join("does_not_exist.pub"), &link).unwrap();
+        let entry = read_only_entry(dir.path(), "id_ed25519.pub");
+        assert!(!is_public_key_file(&entry));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_is_public_key_file_rejects_symlink_to_directory() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let real_dir = dir.path().join("realdir");
+        std::fs::create_dir(&real_dir).unwrap();
+        let link = dir.path().join("id_ed25519.pub");
+        symlink(&real_dir, &link).unwrap();
+        let entry = read_only_entry(dir.path(), "id_ed25519.pub");
+        assert!(!is_public_key_file(&entry));
     }
 }
