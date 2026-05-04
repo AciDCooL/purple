@@ -48,3 +48,7 @@ tests/visual_golden/*.actual
 CLAUDE.md
 .claude/
 docs/
+
+# Nix
+result
+result-*

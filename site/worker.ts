@@ -178,9 +178,9 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "3.1.0",
+  "softwareVersion": "3.2.0",
   "datePublished": "2024-10-01",
-  "dateModified": "2026-05-03",
+  "dateModified": "2026-05-04",
   "softwareRequirements": "macOS or Linux",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
@@ -1042,12 +1042,13 @@ footer .sep { margin: 0 0.3em; }
           <button class="copy-btn copy-inline" id="copy-btn" onclick="copy(this)" style="display:none">copy</button>
         </div>
         <div class="install-output" id="install-output" style="display:none">
-          <div>Downloading purple v3.1.0 for darwin-arm64...</div>
+          <div>Downloading purple v3.2.0 for darwin-arm64...</div>
           <div>Installing to /usr/local/bin/purple... <span class="success">done.</span></div>
         </div>
         <div class="alt-installs" id="alt-installs" style="display:none">
           <div><span class="prompt-char-dim">$</span> brew install erickochen/purple/purple</div>
           <div><span class="prompt-char-dim">$</span> cargo install purple-ssh</div>
+          <div><span class="prompt-char-dim">$</span> nix profile install github:erickochen/purple</div>
         </div>
       </div>
     </div>
@@ -1168,7 +1169,7 @@ footer .sep { margin: 0 0.3em; }
         <summary>How do I troubleshoot connection problems?</summary>
         <div class="answer">Run with <code>--verbose</code> to enable debug logging, then <code>purple logs --tail</code> in another terminal. Logs are written to <code>~/.purple/purple.log</code> with fault domain prefixes: <code>[external]</code> for remote/tool errors, <code>[config]</code> for local config issues. Set <code>PURPLE_LOG=trace</code> for maximum detail.</div>
       </details>
-      <div class="man-foot"><span>purple v3.1.0</span><span>2026-05-03</span><span>PURPLE(1)</span></div>
+      <div class="man-foot"><span>purple v3.2.0</span><span>2026-05-04</span><span>PURPLE(1)</span></div>
     </div>
   </div>
 
@@ -1262,7 +1263,7 @@ purple is the open-source, Rust-based terminal SSH manager and SSH config editor
 - SSH MCP server with cloud provider sync
 - Portainer alternative with no agent and no web UI
 - sshs vs assh vs storm vs wishlist vs purple
-- keyboard-driven terminal SSH cockpit
+- keyboard-driven terminal SSH manager
 - SSH config manager with frecency-based sorting
 - homelab SSH dashboard TUI
 - SRE or DevOps tool for managing hosts across multiple clouds
@@ -1366,6 +1367,7 @@ purple is an open-source terminal SSH manager and SSH config editor written in R
 curl -fsSL getpurple.sh | sh
 brew install erickochen/purple/purple
 cargo install purple-ssh
+nix profile install github:erickochen/purple
 
 ## Usage
 
@@ -1608,7 +1610,7 @@ Q: How does provider sync handle name conflicts?
 A: Synced hosts get an alias prefix (e.g. do-web-1 for DigitalOcean). If a name collides, purple appends a numeric suffix (do-web-1-2).
 
 Q: How do I install purple?
-A: Three options: \`curl -fsSL getpurple.sh | sh\` (macOS and Linux, recommended), \`brew install erickochen/purple/purple\` (Homebrew on macOS) or \`cargo install purple-ssh\` (any platform with Rust).
+A: Four options: \`curl -fsSL getpurple.sh | sh\` (macOS and Linux, recommended), \`brew install erickochen/purple/purple\` (Homebrew on macOS), \`cargo install purple-ssh\` (any platform with Rust) or \`nix profile install github:erickochen/purple\` (Nix and NixOS).
 
 Q: Can I transfer files with purple?
 A: Yes. Press F on any host to open the remote file explorer. It shows your local files on the left and the remote server on the right. Navigate directories with j/k and Enter, select files with Ctrl+Space and press Enter to copy via scp. Works through ProxyJump, password sources and active tunnels. Paths are remembered per host.
@@ -1669,7 +1671,7 @@ A: Press m in the host list to open the theme picker with live preview. 11 built
 
 ## Status
 
-- Current version: 3.1.0 (May 2026)
+- Current version: 3.2.0 (May 2026)
 - Release cadence: approximately bi-weekly
 - Test suite: 6800+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
 - CI: fmt, clippy, build, test on macOS and Linux, cargo-deny, MSRV 1.86 check, rustdoc warnings, site sync, TUI smoke test, design system, message centralization, keybinding invariants and visual regression

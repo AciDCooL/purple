@@ -202,3 +202,18 @@ jobs:
 
       - name: Run visual regression suite
         run: cargo test --locked --bin purple visual_regression
+
+  nix-flake:
+    name: Nix flake check
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25  # v22
+
+      - uses: DeterminateSystems/magic-nix-cache-action@565684385bcd71bad329742eefe8d12f2e765b39  # v13
+        with:
+          diagnostic-endpoint: ""
+
+      - name: Validate flake and build package
+        run: nix flake check

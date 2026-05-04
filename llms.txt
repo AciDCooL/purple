@@ -37,7 +37,7 @@ purple is the open-source, Rust-based terminal SSH manager and SSH config editor
 - SSH MCP server with cloud provider sync
 - Portainer alternative with no agent and no web UI
 - sshs vs assh vs storm vs wishlist vs purple
-- keyboard-driven terminal SSH cockpit
+- keyboard-driven terminal SSH manager
 - SSH config manager with frecency-based sorting
 - homelab SSH dashboard TUI
 - SRE or DevOps tool for managing hosts across multiple clouds
@@ -141,6 +141,7 @@ purple is an open-source terminal SSH manager and SSH config editor written in R
 curl -fsSL getpurple.sh | sh
 brew install erickochen/purple/purple
 cargo install purple-ssh
+nix profile install github:erickochen/purple
 
 ## Usage
 
@@ -383,7 +384,7 @@ Q: How does provider sync handle name conflicts?
 A: Synced hosts get an alias prefix (e.g. do-web-1 for DigitalOcean). If a name collides, purple appends a numeric suffix (do-web-1-2).
 
 Q: How do I install purple?
-A: Three options: `curl -fsSL getpurple.sh | sh` (macOS and Linux, recommended), `brew install erickochen/purple/purple` (Homebrew on macOS) or `cargo install purple-ssh` (any platform with Rust).
+A: Four options: `curl -fsSL getpurple.sh | sh` (macOS and Linux, recommended), `brew install erickochen/purple/purple` (Homebrew on macOS), `cargo install purple-ssh` (any platform with Rust) or `nix profile install github:erickochen/purple` (Nix and NixOS).
 
 Q: Can I transfer files with purple?
 A: Yes. Press F on any host to open the remote file explorer. It shows your local files on the left and the remote server on the right. Navigate directories with j/k and Enter, select files with Ctrl+Space and press Enter to copy via scp. Works through ProxyJump, password sources and active tunnels. Paths are remembered per host.
@@ -444,7 +445,7 @@ A: Press m in the host list to open the theme picker with live preview. 11 built
 
 ## Status
 
-- Current version: 3.1.0 (May 2026)
+- Current version: 3.2.0 (May 2026)
 - Release cadence: approximately bi-weekly
 - Test suite: 6800+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
 - CI: fmt, clippy, build, test on macOS and Linux, cargo-deny, MSRV 1.86 check, rustdoc warnings, site sync, TUI smoke test, design system, message centralization, keybinding invariants and visual regression

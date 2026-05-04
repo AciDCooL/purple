@@ -1,3 +1,11 @@
+## 3.2.0 - 2026-05-04
+
+- feat: Install purple on NixOS, or with Nix on Linux and macOS.
+- feat: `nix profile install github:erickochen/purple` adds purple to your Nix profile in one command. Same single binary as every other channel.
+- feat: `nix develop github:erickochen/purple` drops you into a pinned Rust toolchain with cargo-audit and cargo-deny ready, so contributors get the exact same environment as CI.
+- feat: Hash-locked flake inputs for reproducible builds. NixOS users can embed purple as a flake input with the follows-pattern recipe in the wiki.
+- Initial flake foundation contributed by @ArisoN-ext (#54).
+
 ## 3.1.0 - 2026-05-03
 
 - feat: live tunnel throughput on Linux, parity with macOS.

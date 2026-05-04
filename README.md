@@ -17,13 +17,16 @@ curl -fsSL getpurple.sh | sh
 ```
 
 <details>
-<summary>brew, cargo or from source</summary>
+<summary>brew, cargo, nix or from source</summary>
 
 ```
 brew install erickochen/purple/purple
 ```
 ```
 cargo install purple-ssh
+```
+```
+nix profile install github:erickochen/purple
 ```
 ```
 git clone https://github.com/erickochen/purple.git

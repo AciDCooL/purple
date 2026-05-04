@@ -153,7 +153,7 @@ fi
 
 # 14. theme::success() may not be used to colour live-state glyphs.
 #
-# Design system rule (CLAUDE.md): `online_dot()` / `online_dot_pulsing()`
+# Design system rule: `online_dot()` / `online_dot_pulsing()`
 # encode "host or tunnel is live right now". `success()` encodes a
 # positive action outcome (a check-mark, a toast, "saved successfully").
 # Mixing them produces multiple shades of green for the same semantic
