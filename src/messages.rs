@@ -263,9 +263,126 @@ pub const ALIAS_PREFIX_INVALID: &str =
 pub const USER_NO_WHITESPACE: &str = "User can't contain whitespace.";
 pub const VAULT_ROLE_FORMAT: &str = "Vault SSH role must be in the form <mount>/sign/<role>.";
 
+pub const PROVIDER_CONFIG_CHANGED_EXTERNALLY: &str =
+    "Provider config changed externally. Press Esc and re-open to pick up changes.";
+pub const PROVIDER_URL_REQUIRES_HTTPS: &str =
+    "URL must start with https://. Toggle Verify TLS off for self-signed certificates.";
+pub const PROVIDER_TOKEN_REQUIRED_GCP: &str =
+    "Token can't be empty. Provide a service account JSON key file path or access token.";
+pub const PROVIDER_TOKEN_REQUIRED_ORACLE: &str =
+    "Token can't be empty. Provide the path to your OCI config file (e.g. ~/.oci/config).";
+
+pub fn provider_token_required(display_name: &str) -> String {
+    format!(
+        "Token can't be empty. Grab one from your {} dashboard.",
+        display_name
+    )
+}
+
+pub fn azure_subscription_id_invalid(sub: &str) -> String {
+    format!(
+        "Invalid subscription ID '{}'. Expected UUID format \
+         (e.g. 12345678-1234-1234-1234-123456789012).",
+        sub
+    )
+}
+
 // ── Vault SSH ───────────────────────────────────────────────────────
 
 pub const VAULT_SIGNING_CANCELLED: &str = "Vault SSH signing cancelled.";
+
+/// Sticky error shown when bulk signing hits 3 consecutive failures and
+/// gives up. `failed` is the running failure count; `last_error` carries
+/// the scrubbed Vault stderr so the user can act (run `vault login`,
+/// fix the address, etc.).
+pub fn vault_signing_aborted(failed: u32, last_error: Option<&str>) -> String {
+    format!(
+        "Vault SSH signing aborted after {} consecutive failures. Press V to retry. Last error: {}",
+        failed,
+        last_error.unwrap_or("unknown")
+    )
+}
+
+/// Status line shown after a bulk Vault SSH sign run completes. Combines
+/// signed/failed/skipped counters into one line, with the first error
+/// inlined when there's room. Single-host sign runs show only the error
+/// (no stats prefix) because the counter would just be noise.
+/// Status string shown after a successful bulk tag apply. Returns an
+/// empty string when nothing was changed and nothing was skipped, so the
+/// caller can detect a no-op and skip setting a status.
+pub fn bulk_tag_apply_status(
+    changed_hosts: usize,
+    added: usize,
+    removed: usize,
+    skipped_included: usize,
+) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if changed_hosts > 0 {
+        let host_word = if changed_hosts == 1 { "" } else { "s" };
+        let mut head = format!("Updated {} host{}", changed_hosts, host_word);
+        let mut delta = Vec::new();
+        if added > 0 {
+            delta.push(format!("+{}", added));
+        }
+        if removed > 0 {
+            delta.push(format!("-{}", removed));
+        }
+        if !delta.is_empty() {
+            head = format!("{} ({})", head, delta.join(" "));
+        }
+        parts.push(head);
+    }
+    if skipped_included > 0 {
+        let file_word = if skipped_included == 1 { "" } else { "s" };
+        parts.push(format!(
+            "skipped {} in include file{}",
+            skipped_included, file_word
+        ));
+    }
+    parts.join(". ")
+}
+
+pub fn vault_sign_summary(
+    signed: u32,
+    failed: u32,
+    skipped: u32,
+    first_error: Option<&str>,
+) -> String {
+    let total = signed + failed + skipped;
+    let cert_word = if total == 1 {
+        "certificate"
+    } else {
+        "certificates"
+    };
+    if failed > 0 {
+        if let Some(err) = first_error {
+            if total == 1 {
+                return err.to_string();
+            }
+            format!(
+                "Signed {} of {} {}. {} failed: {}",
+                signed, total, cert_word, failed, err
+            )
+        } else {
+            format!(
+                "Signed {} of {} {}. {} failed",
+                signed, total, cert_word, failed
+            )
+        }
+    } else if skipped > 0 && signed == 0 {
+        format!(
+            "All {} {} already valid. Nothing to sign.",
+            total, cert_word
+        )
+    } else if skipped > 0 {
+        format!(
+            "Signed {} of {} {}. {} already valid.",
+            signed, total, cert_word, skipped
+        )
+    } else {
+        format!("Signed {} of {} {}.", signed, total, cert_word)
+    }
+}
 pub const VAULT_NO_ROLE_CONFIGURED: &str = "No Vault SSH role configured. Set one in the host form \
      (Vault SSH role field) or on a provider for shared defaults.";
 pub const VAULT_NO_HOSTS_WITH_ROLE: &str = "No hosts with a Vault SSH role configured.";
@@ -312,6 +429,62 @@ pub fn vault_role_set(role: &str) -> String {
     format!("Vault SSH role set to {}.", role)
 }
 
+/// Toast shown after a successful pre-connect signing for a single host.
+/// Distinct from `vault_signed` (used by bulk sign and form-submit) so the
+/// connect path can mention that the cert was signed *as part of* connecting.
+pub fn vault_signed_pre_connect(alias: &str) -> String {
+    format!("Signed Vault SSH cert for {}.", alias)
+}
+
+/// Toast shown after a successful pre-connect signing covered multiple
+/// chained hosts (target + ProxyJump hops). The `count` includes only hosts
+/// that actually got a fresh cert; hosts whose cert was already valid are
+/// excluded.
+pub fn vault_signed_pre_connect_chain(target: &str, count: usize) -> String {
+    if count <= 1 {
+        format!("Signed Vault SSH cert for {}.", target)
+    } else {
+        format!("Signed Vault SSH certs for {} ({} hosts).", target, count)
+    }
+}
+
+/// Toast shown when pre-connect signing failed for a host. Includes the
+/// scrubbed Vault error so the user can act (run `vault login`, fix the
+/// address, etc.). Distinct from `vault_sign_failed` so the wording can
+/// reflect the connect context without breaking bulk-sign callers.
+pub fn vault_sign_failed_pre_connect(alias: &str, message: &str) -> String {
+    format!("Vault SSH signing failed for {}: {}", alias, message)
+}
+
+/// Toast shown when resolving the public key path for a Vault sign call
+/// failed (missing pubkey, non-UTF8 path, etc.). Surfaced at the connect
+/// step before any Vault round-trip happens.
+pub fn vault_cert_pubkey_resolve_failed(e: &impl std::fmt::Display) -> String {
+    format!("Vault SSH cert failed: {}", e)
+}
+
+/// Stderr warning emitted when a cert was signed but the matching host
+/// block is no longer present (renamed or deleted between the connect
+/// keypress and the signing call). The cert is still written to disk;
+/// the user just has no `CertificateFile` directive pointing at it.
+pub fn vault_cert_host_block_missing(alias: &str, cert_path: &std::path::Path) -> String {
+    format!(
+        "Warning: signed cert for {} but host block is no longer in ssh config; \
+         CertificateFile not written (cert saved to {})",
+        alias,
+        cert_path.display()
+    )
+}
+
+/// Stderr warning emitted when the cert was signed but writing the
+/// updated SSH config back to disk failed.
+pub fn vault_cert_config_write_failed(alias: &str, e: &impl std::fmt::Display) -> String {
+    format!(
+        "Warning: signed cert for {} but failed to update SSH config CertificateFile: {}",
+        alias, e
+    )
+}
+
 // ── Snippets ────────────────────────────────────────────────────────
 
 pub fn snippet_removed(name: &str) -> String {
@@ -336,10 +509,115 @@ pub fn copy_failed(e: &impl std::fmt::Display) -> String {
     format!("Copy failed: {}", e)
 }
 
+// ── Clipboard subprocess errors ─────────────────────────────────────
+//
+// Surfaced when `pbcopy`/`xclip`/`wl-copy` fails to spawn, write to its
+// stdin, or be reaped. The cmd name is the binary the platform picked.
+
+pub fn clipboard_run_failed(cmd: &str) -> String {
+    format!("Failed to run {}.", cmd)
+}
+
+pub fn clipboard_write_failed(cmd: &str) -> String {
+    format!("Failed to write to {}.", cmd)
+}
+
+pub fn clipboard_wait_failed(cmd: &str) -> String {
+    format!("Failed to wait for {}.", cmd)
+}
+
+pub fn clipboard_exited_error(cmd: &str) -> String {
+    format!("{} exited with error.", cmd)
+}
+
+// ── Import errors ───────────────────────────────────────────────────
+//
+// Bubble up to the CLI via `eprintln!("{}", e)` when the user runs
+// `purple import` against a missing or unreadable file.
+
+pub fn import_open_failed(path: &impl std::fmt::Display, e: &impl std::fmt::Display) -> String {
+    format!("Can't open {}: {}", path, e)
+}
+
+pub fn import_known_hosts_open_failed(e: &impl std::fmt::Display) -> String {
+    format!("Can't open known_hosts: {}", e)
+}
+
+pub const IMPORT_HOME_DIR_UNKNOWN: &str = "Could not determine home directory.";
+pub const IMPORT_KNOWN_HOSTS_MISSING: &str = "~/.ssh/known_hosts not found.";
+
+// ── Snippet runner errors ───────────────────────────────────────────
+
+pub fn snippet_ssh_launch_failed(e: &impl std::fmt::Display) -> String {
+    format!("Failed to launch ssh: {}", e)
+}
+
+// ── Vault SSH library errors ────────────────────────────────────────
+//
+// Reach the user via the anyhow chain that `ensure_vault_ssh_chain_if_needed`
+// turns into a toast. `vault_create_dir_failed` and `vault_write_cert_failed`
+// are with_context strings, so they appear after a colon in the error chain.
+
+pub fn vault_create_dir_failed(path: &impl std::fmt::Display) -> String {
+    format!("Failed to create {}", path)
+}
+
+pub fn vault_write_cert_failed(path: &impl std::fmt::Display) -> String {
+    format!("Failed to write certificate to {}", path)
+}
+
+pub fn vault_ssh_keygen_run_failed(e: &impl std::fmt::Display) -> String {
+    format!("Failed to run ssh-keygen: {}", e)
+}
+
+// ── Container library errors ────────────────────────────────────────
+//
+// Validation (`validate_container_id`) errors propagate via the
+// `ContainerActionComplete` event and become toasts. The "no runtime"
+// and "unknown sentinel" lines surface in the same path.
+
+pub const CONTAINER_ID_EMPTY: &str = "Container ID must not be empty.";
+pub const CONTAINER_RUNTIME_MISSING: &str = "No container runtime found. Install Docker or Podman.";
+
+pub fn container_id_invalid_char(c: char) -> String {
+    format!("Container ID contains invalid character: '{c}'")
+}
+
+pub fn container_unknown_sentinel(s: &str) -> String {
+    format!("Unknown sentinel: {s}")
+}
+
+/// Transient label shown on the file browser overlay while an scp transfer
+/// is running. Singular form for a single source.
+pub fn scp_copying_one(source: &str) -> String {
+    format!("Copying {}...", source)
+}
+
+/// Transient label shown on the file browser overlay while an scp transfer
+/// is running. Plural form when multiple files were selected at once.
+pub fn scp_copying_many(count: usize) -> String {
+    format!("Copying {} files...", count)
+}
+
+/// Toast shown when scp exited non-zero with no captured stderr to relay.
+/// The exit code is the only signal we have left.
+pub fn scp_failed_exit_code(code: i32) -> String {
+    format!("Copy failed (exit code {}).", code)
+}
+
+/// Toast shown when the scp subprocess itself failed to spawn or wait
+/// (e.g. binary missing, signal interrupted), distinct from a non-zero
+/// exit which uses `scp_failed_exit_code`.
+pub fn scp_spawn_failed(e: &impl std::fmt::Display) -> String {
+    format!("scp failed: {}", e)
+}
+
 // ── Picker (password source, key, proxy) ────────────────────────────
 
 pub const GLOBAL_DEFAULT_CLEARED: &str = "Global default cleared.";
 pub const PASSWORD_SOURCE_CLEARED: &str = "Password source cleared.";
+pub const ASKPASS_CUSTOM_COMMAND_HINT: &str =
+    "Type your command. Use %a (alias) and %h (hostname) as placeholders.";
 
 pub fn global_default_set(label: &str) -> String {
     format!("Global default set to {}.", label)
@@ -374,6 +652,23 @@ pub fn container_action_complete(action: &str) -> String {
 pub const HOST_KEY_UNKNOWN: &str = "Host key unknown. Connect first (Enter) to trust the host.";
 pub const HOST_KEY_CHANGED: &str =
     "Host key changed. Possible tampering or server re-install. Clear with ssh-keygen -R.";
+
+// User-friendly classifications of stderr from a remote `docker ps` /
+// `podman ps`. The raw stderr is too technical and varies across
+// distros; these phrasings give the user the actionable next step.
+pub const CONTAINER_RUNTIME_NOT_FOUND: &str = "Docker or Podman not found on remote host.";
+pub const CONTAINER_PERMISSION_DENIED: &str =
+    "Permission denied. Is your user in the docker group?";
+pub const CONTAINER_DAEMON_NOT_RUNNING: &str = "Container daemon is not running.";
+pub const CONTAINER_CONNECTION_REFUSED: &str = "Connection refused.";
+pub const CONTAINER_HOST_UNREACHABLE: &str = "Host unreachable.";
+
+/// Generic fallback when none of the container error classifiers
+/// matched. The exit code is the only signal we can show without
+/// leaking unfiltered remote stderr.
+pub fn container_command_failed(code: i32) -> String {
+    format!("Command failed with code {}.", code)
+}
 
 // ── Import ──────────────────────────────────────────────────────────
 
@@ -424,6 +719,25 @@ pub fn tmux_error(e: &impl std::fmt::Display) -> String {
 
 pub fn connection_failed(alias: &str) -> String {
     format!("Connection to {} failed.", alias)
+}
+
+/// Stderr line printed when the ssh subprocess itself failed to spawn or
+/// wait (e.g. binary missing, signal interrupted), distinct from a
+/// non-zero exit code which the user sees via the toast.
+pub fn connection_spawn_failed(e: &impl std::fmt::Display) -> String {
+    format!("Connection failed: {}", e)
+}
+
+/// Toast shown when ssh exited non-zero with a captured stderr line we
+/// can show. The reason is the trimmed last meaningful line of ssh stderr.
+pub fn ssh_failed_with_reason(alias: &str, reason: &str) -> String {
+    format!("SSH to {} failed. {}", alias, reason)
+}
+
+/// Toast shown when ssh exited non-zero with no captured stderr to relay.
+/// The exit code is the only signal we have left.
+pub fn ssh_exited_with_code(alias: &str, code: i32) -> String {
+    format!("SSH to {} exited with code {}.", alias, code)
 }
 
 // ── Host key reset ──────────────────────────────────────────────────
@@ -686,12 +1000,34 @@ pub mod update {
     pub const SUDO_WARNING: &str =
         "Running via sudo. Consider fixing directory permissions instead.";
 
+    /// Two-space-indented progress prefixes printed before each step.
+    /// Trailing space is intentional so the success/fail glyph or
+    /// `DONE` constant follows on the same line, matching the visual
+    /// rhythm of the updater output.
+    pub const STEP_CHECKING: &str = "  Checking for updates... ";
+    pub const STEP_VERIFYING_CHECKSUM: &str = "  Verifying checksum... ";
+    pub const STEP_INSTALLING: &str = "  Installing... ";
+
     pub fn already_on(current: &str) -> String {
         format!("already on v{} (latest).", current)
     }
 
     pub fn available(latest: &str, current: &str) -> String {
         format!("v{} available (current: v{}).", latest, current)
+    }
+
+    /// Two-space-indented progress prefix for the download step. Matches
+    /// the trailing-space convention of the other STEP_* constants so
+    /// the next print resumes on the same line.
+    pub fn step_downloading(version: &str) -> String {
+        format!("  Downloading v{}... ", version)
+    }
+
+    /// Indented sudo warning rendered before the download step. The
+    /// caller passes a pre-bolded bang (`!`) so the line reads
+    /// `  ! Running via sudo. ...` with the `!` emphasized.
+    pub fn sudo_warning_line(bold_bang: &str) -> String {
+        format!("  {} {}", bold_bang, SUDO_WARNING)
     }
 
     pub fn header(bold_name: &str) -> String {
@@ -729,6 +1065,28 @@ pub mod askpass {
 
     pub fn unlock_failed_prompt(e: &impl std::fmt::Display) -> String {
         format!("Unlock failed: {}. SSH will prompt for password.", e)
+    }
+
+    /// CLI prompt shown by the inline askpass path when the user has no
+    /// stored credential yet. The trailing space is intentional — the
+    /// reader echoes user input directly after.
+    pub fn password_prompt(alias: &str) -> String {
+        format!("Password for {}: ", alias)
+    }
+
+    /// CLI prompt shown when keychain storage is the sink. Reminds the
+    /// user that the entry will be persisted, not just used once.
+    pub fn keychain_password_prompt(alias: &str) -> String {
+        format!("Password for {} (stored in keychain): ", alias)
+    }
+
+    /// Stderr line emitted when the keychain `add-generic-password` call
+    /// failed. The user falls back to ssh's own prompt on the next try.
+    pub fn keychain_store_failed(e: &impl std::fmt::Display) -> String {
+        format!(
+            "Failed to store in keychain: {}. SSH will prompt for password.",
+            e
+        )
     }
 }
 

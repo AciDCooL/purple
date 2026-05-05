@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use log::{debug, error, info};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -208,7 +209,7 @@ pub fn sign_certificate(
 
     if let Some(parent) = cert_dest.parent() {
         std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create {}", parent.display()))?;
+            .with_context(|| crate::messages::vault_create_dir_failed(&parent.display()))?;
     }
 
     // The Vault CLI receives the public key path as a UTF-8 argument. `Path::display()`
@@ -392,7 +393,7 @@ pub fn sign_certificate(
     }
 
     crate::fs_util::atomic_write(&cert_dest, signed_key.as_bytes())
-        .with_context(|| format!("Failed to write certificate to {}", cert_dest.display()))?;
+        .with_context(|| crate::messages::vault_write_cert_failed(&cert_dest.display()))?;
 
     info!("Vault SSH certificate signed for {}", alias);
     Ok(SignResult {
@@ -418,7 +419,7 @@ pub fn check_cert_validity(cert_path: &Path) -> CertStatus {
         .output()
     {
         Ok(o) => o,
-        Err(e) => return CertStatus::Invalid(format!("Failed to run ssh-keygen: {}", e)),
+        Err(e) => return CertStatus::Invalid(crate::messages::vault_ssh_keygen_run_failed(&e)),
     };
 
     if !output.status.success() {
@@ -704,6 +705,89 @@ pub fn resolve_vault_addr(
     None
 }
 
+/// Resolve the effective ProxyJump chain for an alias by asking ssh itself.
+///
+/// Uses `ssh -G -F <config> <alias>` so wildcard patterns and `Match` blocks
+/// contribute the same way they do at connect time. Without this, a host that
+/// inherits ProxyJump from a wildcard (e.g. `Host *prod*  ProxyJump bastion`)
+/// would look like it has no proxy when read from its own block alone.
+///
+/// Returns aliases in dependency order: proxies first, the target last. The
+/// target is always present, even when ssh resolution yields nothing. Cycles
+/// are broken with a visited set. Hosts referenced via ProxyJump that have no
+/// matching `Host` block in the config still appear in the chain so callers
+/// can decide what to do with them; existence is verified by the caller.
+pub fn resolve_proxy_chain(config_path: &Path, alias: &str) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut queue: Vec<String> = vec![alias.to_string()];
+
+    while let Some(current) = queue.pop() {
+        if !visited.insert(current.clone()) {
+            continue;
+        }
+        chain.push(current.clone());
+
+        let output = Command::new("ssh")
+            .args(["-G", "-F"])
+            .arg(config_path)
+            .arg("--")
+            .arg(&current)
+            .output();
+
+        let Ok(output) = output else {
+            debug!("[external] ssh -G failed for {}: spawn error", current);
+            continue;
+        };
+        if !output.status.success() {
+            debug!(
+                "[external] ssh -G non-zero exit for {} (code {:?})",
+                current,
+                output.status.code()
+            );
+            continue;
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let lower = line.to_ascii_lowercase();
+            let Some(rest) = lower.strip_prefix("proxyjump ") else {
+                continue;
+            };
+            // ssh -G emits literal "none" when no proxy is configured.
+            if rest.trim() == "none" {
+                continue;
+            }
+            // Use the original-case slice for the value; ssh prints the
+            // proxyjump value verbatim after the lower-cased key.
+            // strip_prefix already guarantees line.len() >= "proxyjump ".len().
+            let value = &line["proxyjump ".len()..];
+            for jump in value.split(',') {
+                let host = parse_proxy_jump_host(jump.trim());
+                if !host.is_empty() {
+                    queue.push(host.to_string());
+                }
+            }
+        }
+    }
+
+    chain.reverse();
+    chain
+}
+
+/// Extract the host portion from a single `[user@]host[:port]` ProxyJump entry.
+/// Handles bracketed IPv6 hosts like `[::1]:22`.
+fn parse_proxy_jump_host(jump: &str) -> &str {
+    let trimmed = jump.trim();
+    let after_user = trimmed.rsplit_once('@').map(|(_, h)| h).unwrap_or(trimmed);
+    if let Some(rest) = after_user.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            return &rest[..end];
+        }
+    }
+    after_user.split(':').next().unwrap_or(after_user)
+}
+
 /// Format remaining certificate time for display.
 pub fn format_remaining(remaining_secs: i64) -> String {
     if remaining_secs <= 0 {
@@ -718,6 +802,9 @@ pub fn format_remaining(remaining_secs: i64) -> String {
     }
 }
 
+// Visible to sibling test modules (`main_tests.rs`) so they can share
+// `PATH_LOCK` and other process-global mocking helpers without spawning
+// a second lock that would race against this one.
 #[cfg(test)]
 #[path = "vault_ssh_tests.rs"]
-mod tests;
+pub(crate) mod tests;

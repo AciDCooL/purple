@@ -56,15 +56,58 @@ send_key() {
 }
 
 alive() {
-    tmux has-session -t "$SESSION" 2>/dev/null
+    # Verify the tmux session AND that purple's TUI is still on the
+    # alternate screen. Without the second check, pressing Esc on the
+    # bare host list (which sets app.running = false) leaves the shell
+    # alive in tmux while purple has exited — every subsequent step
+    # then "passes" the bare session check but is sending keys to the
+    # shell prompt. Look for the title bar that only appears in the
+    # TUI: `╭` ... `purple` ... `tunnels`.
+    tmux has-session -t "$SESSION" 2>/dev/null || return 1
+    local out
+    out=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null || true)
+    echo "$out" | grep -qF "tunnels" || return 1
+    return 0
 }
 
 capture() {
     tmux capture-pane -t "$SESSION" -p 2>/dev/null || echo ""
 }
 
-# Start purple in demo mode
-tmux new-session -d -s "$SESSION" -x 120 -y 40
+# Liveness + content check in one. Used for screens where rendering blank
+# (no panel, empty body, missing title) would not crash but also would
+# not show the user anything useful. Prefer over the bare `alive` check
+# whenever the screen has a stable title or label string.
+#
+# `pattern` is grep -F text (literal). Pick the most stable substring
+# that appears only on this screen — usually the title between the
+# rounded ╭ ╮ borders, e.g. " Help ", " Commands ", " Add New Host ".
+expect_screen() {
+    local pattern="$1"
+    if ! alive; then
+        fail "crash"
+        exit 1
+    fi
+    OUTPUT=$(capture)
+    if echo "$OUTPUT" | grep -qF "$pattern"; then
+        ok
+    else
+        fail "screen missing '$pattern'"
+        if [ "${SMOKE_DEBUG:-0}" = "1" ]; then
+            printf '\n--- captured pane (last 8 lines) ---\n%s\n---\n' \
+                "$(echo "$OUTPUT" | tail -8)"
+        fi
+    fi
+}
+
+# Start purple in demo mode.
+# `-c "$(pwd)"` pins the new session to the script's cwd; without it
+# tmux can pick up a stale `default-path` from a previously-running
+# tmux server, which makes `./target/debug/purple` resolve to nothing
+# and the binary exits silently before any capture can see it. The
+# downstream effect is that every step then fails with "screen missing"
+# even though the keystrokes are correct.
+tmux new-session -d -s "$SESSION" -x 120 -y 40 -c "$(pwd)"
 sleep 0.3
 tmux send-keys -t "$SESSION" "$BINARY --demo" Enter
 sleep 3
@@ -97,72 +140,91 @@ send "/"; sleep 0.2; send "prod"; sleep 0.4
 if alive; then ok; else fail "crash"; exit 1; fi
 send_key Escape; sleep 0.3
 
-# 5. Detail panel
-step "Detail panel (Enter, Esc)"
+# 5. Connect attempt in demo mode (Enter triggers a "connection disabled"
+#    toast, doesn't open a separate screen). The follow-up Esc that lived
+#    here previously hit the bare host list and SET app.running = false,
+#    silently killing the TUI — every later step then sent keys to the
+#    shell prompt. The new alive() check would have caught that, but we
+#    drop the Esc anyway so the toast auto-dismisses on its own and the
+#    test stays on a known-good screen.
+step "Connect attempt in demo mode (Enter)"
 send_key Enter; sleep 0.5
-if alive; then ok; else fail "crash"; fi
-send_key Escape; sleep 0.3
+expect_screen "Demo mode. Connection disabled."
 
 # 6. Help screen
 step "Help screen (?, Esc)"
 send "?"; sleep 0.5
-if alive; then ok; else fail "crash"; fi
+expect_screen " Help "
 send_key Escape; sleep 0.3
 
 # 7. Command palette
-step "Command palette (Ctrl-p, Esc)"
-send_key C-p; sleep 0.5
-if alive; then ok; else fail "crash"; fi
+# Trigger key is `:` (the footer hint reads `:  cmds`). Ctrl-p clears
+# ping results, not the palette — using it here used to silently leave
+# the test on the host list and the Esc that followed killed the TUI.
+step "Command palette (:, Esc)"
+send ":"; sleep 0.5
+expect_screen " Commands "
 send_key Escape; sleep 0.3
 
 # 8. Theme picker
-step "Theme picker (t, navigate, Esc)"
-send "t"; sleep 0.4
+# `t` opens the tag picker, not the theme picker. Theme is `m`. Easy
+# regression to make when copying-and-renaming a step; the new
+# expect_screen call catches it instead of letting the next Esc kill
+# the TUI.
+step "Theme picker (m, navigate, Esc)"
+send "m"; sleep 0.4
 send "j"; send "j"; send "j"; sleep 0.2
-if alive; then ok; else fail "crash"; fi
+expect_screen " Theme "
 send_key Escape; sleep 0.3
 
 # 9. Provider list
 step "Provider list (S, Esc)"
 send "S"; sleep 0.4
-if alive; then ok; else fail "crash"; fi
+expect_screen " Providers "
 send_key Escape; sleep 0.3
 
 # 10. Snippet picker
-step "Snippet picker (x, Esc)"
-send "x"; sleep 0.4
-if alive; then ok; else fail "crash"; fi
+# `x` copies the selected host's config block. Snippet picker on the
+# selected host is `r` (run snippet). Capital `R` runs across all
+# displayed hosts; either opens the same picker.
+step "Snippet picker (r, Esc)"
+send "r"; sleep 0.4
+expect_screen " Snippets "
 send_key Escape; sleep 0.3
 
 # 11. Tunnel list
 step "Tunnel list (T, Esc)"
 send "T"; sleep 0.4
-if alive; then ok; else fail "crash"; fi
+expect_screen " Tunnels for "
 send_key Escape; sleep 0.3
 
 # 12. Add host form
 step "Add host form (a, Esc)"
 send "a"; sleep 0.4
-if alive; then ok; else fail "crash"; fi
+expect_screen " Add New Host "
 send_key Escape; sleep 0.3
 
 # 13. Edit host form
 step "Edit host form (e, Esc)"
 send "e"; sleep 0.4
-if alive; then ok; else fail "crash"; fi
+expect_screen " Edit: "
 send_key Escape; sleep 0.3
 
 # 14. Container screen
-step "Container screen (c, Esc)"
-send "c"; sleep 0.4
-if alive; then ok; else fail "crash"; fi
+# Lowercase `c` clones the selected host. Containers overlay is `C`.
+step "Container screen (C, Esc)"
+send "C"; sleep 0.4
+expect_screen " Containers for "
 send_key Escape; sleep 0.3
 
 # 15. File browser
-step "File browser (f, Esc)"
-send "f"; sleep 0.4
-if alive; then ok; else fail "crash"; fi
-send_key Escape; sleep 0.3
+# Lowercase `f` is unbound. File browser is `F`. In demo mode the
+# overlay refuses to open and surfaces a "Demo mode. File browser
+# disabled." toast instead — assert THAT, since asserting the title
+# would require a non-demo binary with a real ssh target.
+step "File browser disabled in demo (F)"
+send "F"; sleep 0.4
+expect_screen "Demo mode. File browser disabled."
 
 # 16. Sort cycling
 step "Sort modes (s s s)"
@@ -198,8 +260,8 @@ if alive; then ok; else fail "crash"; fi
 step "What's new overlay (n, j, Esc)"
 send "n"; sleep 0.3
 send "j"; sleep 0.2
+expect_screen " What's new "
 send_key Escape; sleep 0.3
-if alive; then ok; else fail "crash"; fi
 
 # 23. Clean exit
 step "Clean exit (q)"

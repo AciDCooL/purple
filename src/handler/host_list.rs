@@ -65,23 +65,29 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
         }
         KeyCode::Char('j') | KeyCode::Down => {
             app.select_next_skipping_headers();
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::Char('k') | KeyCode::Up => {
             app.select_prev_skipping_headers();
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::Tab => {
             app.top_page = app.top_page.next();
             app.search.query = None;
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::BackTab => {
             app.top_page = app.top_page.prev();
             app.search.query = None;
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::PageDown => {
             app.page_down_host();
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::PageUp => {
             app.page_up_host();
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::Enter => {
             if app.is_pattern_selected() {

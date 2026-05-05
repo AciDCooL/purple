@@ -1390,6 +1390,183 @@ fn ensure_vault_ssh_returns_none_when_no_role_configured() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Regression for the "first connect fails, second works" bug:
+/// `ensure_vault_ssh_chain_if_needed` must walk the entire ProxyJump chain,
+/// not just the target. Hosts with no vault role are skipped; hosts with a
+/// role are processed in the right order (proxies first).
+///
+/// We can't actually invoke vault here (no server, no CLI in CI). The test
+/// instead verifies that with no vault role configured anywhere in the
+/// chain, the function returns None — meaning the chain *was* walked and
+/// every hop was inspected.
+#[test]
+fn ensure_vault_ssh_chain_no_role_returns_none() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config");
+    std::fs::write(
+        &config_path,
+        "Host bastion\n  HostName 9.9.9.9\n\
+         Host target\n  HostName 1.2.3.4\n  ProxyJump bastion\n",
+    )
+    .unwrap();
+    let mut config = SshConfigFile::parse(&config_path).unwrap();
+    let provider_config = providers::config::ProviderConfig::parse("");
+    let result =
+        ensure_vault_ssh_chain_if_needed("target", &config_path, &provider_config, &mut config);
+    assert!(
+        result.is_none(),
+        "no role on any chain host: must short-circuit to None, got {:?}",
+        result
+    );
+}
+
+/// Regression: the chain helper must not crash when the target alias is not
+/// present in the config. `ssh -G` will fall back to its own resolution and
+/// the result must be a no-op (None) rather than a panic or error.
+#[test]
+fn ensure_vault_ssh_chain_unknown_target_safe() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config");
+    std::fs::write(&config_path, "Host known\n  HostName 1.2.3.4\n").unwrap();
+    let mut config = SshConfigFile::parse(&config_path).unwrap();
+    let provider_config = providers::config::ProviderConfig::parse("");
+    let result = ensure_vault_ssh_chain_if_needed(
+        "completely-unknown-alias",
+        &config_path,
+        &provider_config,
+        &mut config,
+    );
+    assert!(
+        result.is_none(),
+        "unknown target: must short-circuit to None"
+    );
+}
+
+/// Regression test for the "first connect fails, second works" bug. Drives
+/// `ensure_vault_ssh_chain_if_needed` end-to-end with a mock vault that
+/// records the role argument of every signing call, then asserts the proxy
+/// hop was signed BEFORE the target — the invariant the original code
+/// violated.
+///
+/// Without this test, a regression that reverts to the single-host path,
+/// flips `chain.reverse()` in `resolve_proxy_chain`, or short-circuits on
+/// the first hop would slip past the resolution-only tests in
+/// `vault_ssh_tests.rs`. Those prove the function returns the right list;
+/// they do not prove the chain is walked or signed in the right order.
+///
+/// Lives in `main_tests.rs` (not `vault_ssh_tests.rs`) because the
+/// function under test only exists in the binary crate. The shared
+/// `PATH_LOCK` from `vault_ssh::tests` serializes env mutations against
+/// every other vault- and ssh-keygen-mocking test in the suite so we
+/// never race on `PATH` / `HOME`.
+#[cfg(unix)]
+#[test]
+fn ensure_vault_ssh_chain_signs_proxy_before_target() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _guard = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+
+    // Isolated tempdir for the mock binary, the call log, and a sandboxed
+    // HOME so signed certs do not pollute the developer's ~/.purple/certs.
+    let dir = tempfile::tempdir().unwrap();
+    let mock_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&mock_dir).unwrap();
+    let log_path = dir.path().join("vault_calls.log");
+
+    // Mock `vault` binary: log the role argument (positional `$3` after
+    // `write -field=signed_key`) one per line, then emit a fake cert
+    // payload so `sign_certificate`'s "empty stdout" guard is satisfied.
+    let script = mock_dir.join("vault");
+    let body = format!(
+        "#!/bin/sh\n\
+         echo \"$3\" >> \"{log}\"\n\
+         printf 'ssh-ed25519-cert-v01@openssh.com AAAAFAKECERT mock\\n'\n\
+         exit 0\n",
+        log = log_path.display()
+    );
+    std::fs::write(&script, body).unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+
+    // Tempdir HOME with a fake ed25519 pubkey so `resolve_pubkey_path`
+    // does not fall through to the developer's real key file.
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    std::fs::create_dir_all(home.join(".purple/certs")).unwrap();
+    std::fs::write(
+        home.join(".ssh/id_ed25519.pub"),
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@test\n",
+    )
+    .unwrap();
+
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let old_home = std::env::var("HOME").ok();
+    let new_path = format!("{}:{}", mock_dir.display(), old_path);
+
+    // SAFETY: PATH_LOCK held above serializes all env mutations within
+    // this test binary. Both PATH and HOME are restored before the lock
+    // releases. Any future test that mutates HOME MUST also acquire
+    // PATH_LOCK (or an equivalent process-wide lock).
+    unsafe { std::env::set_var("PATH", &new_path) };
+    unsafe { std::env::set_var("HOME", &home) };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let config_path = dir.path().join("ssh_config");
+        std::fs::write(
+            &config_path,
+            "Host bastion\n  \
+              HostName 9.9.9.9\n  \
+              IdentityFile ~/.ssh/id_ed25519\n  \
+              # purple:vault-ssh ssh/sign/bastion\n\
+             Host target\n  \
+              HostName 1.2.3.4\n  \
+              IdentityFile ~/.ssh/id_ed25519\n  \
+              ProxyJump bastion\n  \
+              # purple:vault-ssh ssh/sign/target\n",
+        )
+        .unwrap();
+
+        let mut config = SshConfigFile::parse(&config_path).unwrap();
+        let provider_config = providers::config::ProviderConfig::parse("");
+
+        let result =
+            ensure_vault_ssh_chain_if_needed("target", &config_path, &provider_config, &mut config);
+        assert!(
+            result.is_some(),
+            "expected chain helper to report at least one signing action"
+        );
+        let (msg, is_error) = result.unwrap();
+        assert!(!is_error, "unexpected error path: {}", msg);
+
+        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+        let lines: Vec<&str> = log.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(
+            lines,
+            vec!["ssh/sign/bastion", "ssh/sign/target"],
+            "expected bastion to be signed BEFORE target. \
+             got log: {:?}. msg: {}",
+            lines,
+            msg
+        );
+    }));
+
+    // Restore env regardless of test outcome, then propagate panics so
+    // the test reports a normal failure rather than leaving global state
+    // tainted.
+    unsafe { std::env::set_var("PATH", &old_path) };
+    match old_home {
+        Some(h) => unsafe { std::env::set_var("HOME", h) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
 #[test]
 fn cli_legacy_vault_sign_flat_form_rejected() {
     // The old flat `purple vault-sign` subcommand was removed. Ensure it
@@ -1404,9 +1581,21 @@ fn cli_legacy_vault_sign_flat_form_rejected() {
 
 // Regression: Claude Desktop did not substitute ${HOME} before passing
 // CLI args. The binary must expand it itself.
+//
+// Each `expand_user_path_*` test below reads `dirs::home_dir()` twice:
+// once directly to capture the expected value and once inside
+// `expand_user_path()`. Both reads consult $HOME. Other tests in the
+// suite (e.g. `ensure_vault_ssh_chain_signs_proxy_before_target`)
+// mutate $HOME under `vault_ssh::tests::PATH_LOCK`. If we read $HOME
+// here without the lock, the mutator can change it between our two
+// reads and the assertion flips. Holding `PATH_LOCK` for the whole
+// test serialises us against every env-mutating test in the binary.
 
 #[test]
 fn expand_user_path_tilde_slash() {
+    let _g = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     let result = super::expand_user_path("~/.ssh/config").unwrap();
     assert_eq!(result, home.join(".ssh/config"));
@@ -1414,6 +1603,9 @@ fn expand_user_path_tilde_slash() {
 
 #[test]
 fn expand_user_path_dollar_brace_home_slash() {
+    let _g = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     let result = super::expand_user_path("${HOME}/.ssh/config").unwrap();
     assert_eq!(result, home.join(".ssh/config"));
@@ -1421,6 +1613,9 @@ fn expand_user_path_dollar_brace_home_slash() {
 
 #[test]
 fn expand_user_path_dollar_home_slash() {
+    let _g = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     let result = super::expand_user_path("$HOME/.purple/mcp-audit.log").unwrap();
     assert_eq!(result, home.join(".purple/mcp-audit.log"));
@@ -1428,18 +1623,27 @@ fn expand_user_path_dollar_home_slash() {
 
 #[test]
 fn expand_user_path_bare_tilde() {
+    let _g = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     assert_eq!(super::expand_user_path("~").unwrap(), home);
 }
 
 #[test]
 fn expand_user_path_bare_dollar_brace_home() {
+    let _g = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     assert_eq!(super::expand_user_path("${HOME}").unwrap(), home);
 }
 
 #[test]
 fn expand_user_path_bare_dollar_home() {
+    let _g = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     assert_eq!(super::expand_user_path("$HOME").unwrap(), home);
 }

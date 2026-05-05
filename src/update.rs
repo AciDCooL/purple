@@ -385,7 +385,7 @@ pub fn self_update() -> Result<()> {
     }
 
     // Fetch latest version (needs redirects for GitHub release asset downloads)
-    print!("  Checking for updates... ");
+    print!("{}", crate::messages::update::STEP_CHECKING);
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(30)))
         .build()
@@ -418,7 +418,7 @@ pub fn self_update() -> Result<()> {
 
     // Warn when running via sudo — creates root-owned cache files
     if std::env::var_os("SUDO_USER").is_some() {
-        eprintln!("  {} {}", bold("!"), crate::messages::update::SUDO_WARNING,);
+        eprintln!("{}", crate::messages::update::sudo_warning_line(&bold("!")));
     }
 
     if !is_writable(parent) {
@@ -459,7 +459,7 @@ pub fn self_update() -> Result<()> {
     );
 
     // Download tarball
-    print!("  Downloading v{}... ", latest);
+    print!("{}", crate::messages::update::step_downloading(&latest));
     let tarball_path = tmp_dir.join(&tarball_name);
     download_file(
         &agent,
@@ -477,12 +477,12 @@ pub fn self_update() -> Result<()> {
     println!("{}", crate::messages::update::DONE);
 
     // Verify checksum
-    print!("  Verifying checksum... ");
+    print!("{}", crate::messages::update::STEP_VERIFYING_CHECKSUM);
     verify_checksum(&tarball_path, &sha_path)?;
     println!("{}", crate::messages::update::CHECKSUM_OK);
 
     // Extract
-    print!("  Installing... ");
+    print!("{}", crate::messages::update::STEP_INSTALLING);
     let status = std::process::Command::new("tar")
         .arg("-xzf")
         .arg(&tarball_path)
@@ -562,7 +562,7 @@ fn download_file(agent: &ureq::Agent, url: &str, dest: &Path) -> Result<()> {
         anyhow::bail!("Empty response from {}", url);
     }
 
-    std::fs::write(dest, bytes).context("Failed to write file")?;
+    crate::fs_util::atomic_write(dest, &bytes).context("Failed to write file")?;
     Ok(())
 }
 

@@ -983,6 +983,8 @@ mod top_bar {
     #[test]
     fn nav_active_is_underlined_not_a_solid_badge() {
         use ratatui::style::Modifier;
+        let _guard = THEME_CAPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        theme::set_colored_underline_support(true);
         let style = theme::nav_active();
         assert!(
             style.add_modifier.contains(Modifier::UNDERLINED),
@@ -993,6 +995,74 @@ mod top_bar {
             theme::brand_badge(),
             "active tab must not use the brand badge style"
         );
+    }
+
+    /// Module-wide lock for tests that flip `theme::COLORED_UNDERLINE` so they
+    /// do not race with each other under parallel `cargo test` execution.
+    static THEME_CAPS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn nav_active_uses_colored_underline_when_supported() {
+        let _guard = THEME_CAPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        // Pin to ANSI 16 so the accent.ansi16 branch is exercised (default in
+        // most CI / dev shells) and the assertion is deterministic.
+        theme::init_with_mode(1);
+        theme::set_colored_underline_support(true);
+        let style = theme::nav_active();
+        assert!(
+            style.underline_color.is_some(),
+            "modern terminals: nav_active must set a styled underline color"
+        );
+        assert!(
+            style.fg.is_none(),
+            "modern terminals: foreground stays default so the label reads white"
+        );
+        // Restore the supported default for any unrelated tests that follow.
+        theme::set_colored_underline_support(true);
+    }
+
+    #[test]
+    fn nav_active_falls_back_to_plain_underline_when_unsupported() {
+        let _guard = THEME_CAPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        theme::init_with_mode(1);
+        theme::set_colored_underline_support(false);
+        let style = theme::nav_active();
+        assert!(
+            style.underline_color.is_none(),
+            "legacy terminals: must not emit SGR 58 (no styled underline color)"
+        );
+        assert!(
+            style.fg.is_none(),
+            "legacy terminals: leave fg default so the label stays white instead of brand-coloured"
+        );
+        use ratatui::style::Modifier;
+        assert!(
+            style.add_modifier.contains(Modifier::UNDERLINED),
+            "legacy terminals: keep SGR 4 so the active tab still has an underline"
+        );
+        // Restore for unrelated tests.
+        theme::set_colored_underline_support(true);
+    }
+
+    #[test]
+    fn nav_active_no_color_mode_skips_accent_in_both_paths() {
+        let _guard = THEME_CAPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        theme::init_with_mode(0);
+        for supported in [true, false] {
+            theme::set_colored_underline_support(supported);
+            let style = theme::nav_active();
+            assert!(
+                style.underline_color.is_none(),
+                "NO_COLOR: never emit a styled underline color (cap={supported})"
+            );
+            assert!(
+                style.fg.is_none(),
+                "NO_COLOR: never set a fg accent (cap={supported})"
+            );
+        }
+        // Restore mode + cap for unrelated tests.
+        theme::init_with_mode(1);
+        theme::set_colored_underline_support(true);
     }
 
     #[test]

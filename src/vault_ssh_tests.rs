@@ -4,8 +4,12 @@ use super::*;
 /// a mock `ssh-keygen` or `vault` binary. Without this, parallel tests
 /// race on the process-wide environment and one test's PATH restore
 /// overwrites another's mock.
+/// Module-wide lock shared by every test in the crate that mutates `PATH`,
+/// `HOME`, or any other process-global env var. Marked `pub(crate)` so
+/// regression tests in sibling modules (e.g. `main_tests.rs`) can serialize
+/// against vault and ssh-keygen mocks here without spawning a second lock.
 #[cfg(unix)]
-static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn cert_path_for_simple_alias() {
@@ -661,6 +665,30 @@ fn resolve_vault_role_empty_host_falls_through_to_provider() {
     assert_eq!(role.as_deref(), Some("ssh/sign/default"));
 }
 
+#[cfg(unix)]
+#[test]
+fn ensure_cert_returns_error_without_vault() {
+    // Serialize against every other test that injects a mock `vault` into
+    // PATH. Without this lock a concurrent mock makes `ensure_cert`
+    // succeed and the `is_err` assertion below flips, manifesting as a
+    // flaky failure under the precommit's repeated `cargo test` runs.
+    let _guard = PATH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+    let tmpdir = std::env::temp_dir();
+    let fake_key = tmpdir.join("purple_test_ensure_cert_key.pub");
+    std::fs::write(
+        &fake_key,
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@test\n",
+    )
+    .unwrap();
+
+    let result = ensure_cert("ssh/sign/test", &fake_key, "ensure-test-host", "", None);
+    // Should fail because vault CLI is not available
+    assert!(result.is_err());
+    let _ = std::fs::remove_file(&fake_key);
+}
+
+#[cfg(not(unix))]
 #[test]
 fn ensure_cert_returns_error_without_vault() {
     let tmpdir = std::env::temp_dir();
@@ -672,7 +700,6 @@ fn ensure_cert_returns_error_without_vault() {
     .unwrap();
 
     let result = ensure_cert("ssh/sign/test", &fake_key, "ensure-test-host", "", None);
-    // Should fail because vault CLI is not available
     assert!(result.is_err());
     let _ = std::fs::remove_file(&fake_key);
 }
@@ -735,6 +762,157 @@ fn scrub_vault_stderr_truncation_bound() {
         out.chars().count()
     );
     assert!(out.ends_with("..."));
+}
+
+#[test]
+fn parse_proxy_jump_host_strips_user() {
+    assert_eq!(super::parse_proxy_jump_host("user@bastion"), "bastion");
+}
+
+#[test]
+fn parse_proxy_jump_host_strips_port() {
+    assert_eq!(super::parse_proxy_jump_host("bastion:2222"), "bastion");
+}
+
+#[test]
+fn parse_proxy_jump_host_strips_user_and_port() {
+    assert_eq!(super::parse_proxy_jump_host("user@bastion:2222"), "bastion");
+}
+
+#[test]
+fn parse_proxy_jump_host_handles_ipv6_brackets() {
+    assert_eq!(super::parse_proxy_jump_host("[::1]:22"), "::1");
+    assert_eq!(super::parse_proxy_jump_host("user@[::1]:22"), "::1");
+}
+
+#[test]
+fn parse_proxy_jump_host_bare_alias() {
+    assert_eq!(super::parse_proxy_jump_host("bastion"), "bastion");
+}
+
+/// A direct host with no ProxyJump should resolve to a single-element chain
+/// containing only itself.
+#[test]
+fn resolve_proxy_chain_no_proxy_returns_target_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config");
+    std::fs::write(
+        &config_path,
+        "Host direct\n  HostName 1.2.3.4\n  User root\n",
+    )
+    .unwrap();
+    let chain = resolve_proxy_chain(&config_path, "direct");
+    assert_eq!(chain, vec!["direct".to_string()]);
+}
+
+/// ProxyJump set on the host's own block must surface in the chain with the
+/// proxy listed before the target so callers can sign in dependency order.
+#[test]
+fn resolve_proxy_chain_explicit_proxy_jump() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config");
+    std::fs::write(
+        &config_path,
+        "Host bastion\n  HostName 9.9.9.9\n  User root\n\
+         Host target\n  HostName 1.2.3.4\n  User root\n  ProxyJump bastion\n",
+    )
+    .unwrap();
+    let chain = resolve_proxy_chain(&config_path, "target");
+    assert_eq!(chain, vec!["bastion".to_string(), "target".to_string()]);
+}
+
+/// Wildcard-inherited ProxyJump (the very pattern that triggered the
+/// original bug) must surface too. Without `ssh -G` the proxy hop would be
+/// invisible because the target's own host block has no ProxyJump line.
+#[test]
+fn resolve_proxy_chain_wildcard_inherited_proxy() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config");
+    std::fs::write(
+        &config_path,
+        "Host *prod*\n  ProxyJump bastion\n\
+         Host bastion\n  HostName 9.9.9.9\n  User root\n\
+         Host web-prod-01\n  HostName 1.2.3.4\n  User root\n",
+    )
+    .unwrap();
+    let chain = resolve_proxy_chain(&config_path, "web-prod-01");
+    assert_eq!(
+        chain,
+        vec!["bastion".to_string(), "web-prod-01".to_string()]
+    );
+}
+
+/// A ProxyJump cycle (a→b→a) must terminate. Visited set guarantees this.
+#[test]
+fn resolve_proxy_chain_breaks_cycles() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config");
+    std::fs::write(
+        &config_path,
+        "Host a\n  HostName 1.1.1.1\n  ProxyJump b\n\
+         Host b\n  HostName 2.2.2.2\n  ProxyJump a\n",
+    )
+    .unwrap();
+    let chain = resolve_proxy_chain(&config_path, "a");
+    // Both hosts must appear, the function must not loop forever.
+    assert!(chain.contains(&"a".to_string()));
+    assert!(chain.contains(&"b".to_string()));
+    assert_eq!(chain.len(), 2);
+}
+
+/// Multi-hop chains: target → mid → bastion. The chain must be in strict
+/// dependency order so the deepest proxy gets signed first and callers
+/// never hand ssh a partially-signed path. `contains` checks were too lax;
+/// they accept `[mid, bastion, target]` which would sign mid before its
+/// own dependency bastion.
+#[test]
+fn resolve_proxy_chain_multi_hop() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config");
+    std::fs::write(
+        &config_path,
+        "Host bastion\n  HostName 9.9.9.9\n\
+         Host mid\n  HostName 5.5.5.5\n  ProxyJump bastion\n\
+         Host target\n  HostName 1.2.3.4\n  ProxyJump mid\n",
+    )
+    .unwrap();
+    let chain = resolve_proxy_chain(&config_path, "target");
+    assert_eq!(
+        chain,
+        vec![
+            "bastion".to_string(),
+            "mid".to_string(),
+            "target".to_string()
+        ]
+    );
+}
+
+/// Comma-separated ProxyJump (jump1,jump2) must produce a chain whose
+/// final element is the target. ssh connects to jump1 first, then through
+/// it to jump2, then to target — so target's cert is the last to be used
+/// and must be the last to be signed. Asserting `last() == "target"`
+/// catches a regression where signing skips the target after the proxies
+/// were processed.
+#[test]
+fn resolve_proxy_chain_comma_separated_proxies() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config");
+    std::fs::write(
+        &config_path,
+        "Host jump1\n  HostName 1.1.1.1\n\
+         Host jump2\n  HostName 2.2.2.2\n\
+         Host target\n  HostName 3.3.3.3\n  ProxyJump jump1,jump2\n",
+    )
+    .unwrap();
+    let chain = resolve_proxy_chain(&config_path, "target");
+    assert_eq!(chain.len(), 3);
+    assert!(chain.contains(&"jump1".to_string()));
+    assert!(chain.contains(&"jump2".to_string()));
+    assert_eq!(
+        chain.last().unwrap(),
+        "target",
+        "target must be last so its cert is signed after every proxy hop"
+    );
 }
 
 #[test]

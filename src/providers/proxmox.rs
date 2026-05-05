@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use log::debug;
+use log::{debug, warn};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -155,7 +155,7 @@ struct LxcInterface {
 }
 
 /// Outcome of resolving an IP for a single VM/container.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ResolveOutcome {
     /// Successfully resolved an IP address (ip, optional ostype).
     Resolved(String, Option<String>),
@@ -163,10 +163,117 @@ enum ResolveOutcome {
     Stopped,
     /// No IP could be determined (running but no static or agent IP).
     NoIp,
-    /// API call failed (HTTP error, parse error).
-    Failed,
+    /// API call failed (HTTP error, parse error). Carries a short reason category.
+    Failed(FailureReason),
     /// API call failed with 401/403 (authentication or permission error).
     AuthFailed,
+}
+
+/// Group key used when authentication failures are bucketed in the summary.
+/// Shared between the resolve loop (insertion) and `format_failure_summary`
+/// (collapse + display rename) so a typo on either side is a compile error.
+const AUTH_GROUP: &str = "auth";
+
+/// Short, classifiable reason for a `ResolveOutcome::Failed`. Used both in the
+/// per-failure warn log and to break down the summary line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailureReason {
+    /// HTTP status code outside 2xx (excluding 401/403 which becomes AuthFailed).
+    HttpStatus(u16),
+    /// Request timed out (read/connect deadline exceeded).
+    Timeout,
+    /// Network or transport error (DNS, connect, TLS, etc.) other than timeout.
+    Transport,
+    /// Response body could not be parsed as expected JSON.
+    Parse,
+}
+
+impl FailureReason {
+    /// Compact label for logs (no VM identity, that is added separately).
+    fn label(self) -> String {
+        match self {
+            FailureReason::HttpStatus(code) => format!("HTTP {code}"),
+            FailureReason::Timeout => "timeout".to_string(),
+            FailureReason::Transport => "transport error".to_string(),
+            FailureReason::Parse => "parse error".to_string(),
+        }
+    }
+
+    /// Group key for the summary breakdown (e.g. "timeout", "HTTP 5xx").
+    fn group(self) -> &'static str {
+        match self {
+            FailureReason::HttpStatus(code) if code >= 500 => "HTTP 5xx",
+            FailureReason::HttpStatus(code) if code >= 400 => "HTTP 4xx",
+            // Catch-all for unusual codes (1xx/2xx/3xx via ureq are rare;
+            // 2xx is normally Ok(_) and redirects are followed transparently).
+            FailureReason::HttpStatus(_) => "HTTP error",
+            FailureReason::Timeout => "timeout",
+            FailureReason::Transport => "transport",
+            FailureReason::Parse => "parse",
+        }
+    }
+}
+
+/// Build the human label used in per-failure warn logs. Falls back to
+/// `{type}-{vmid}` when the cluster API returned a VM without a name.
+fn resource_display_name(resource: &ClusterResource) -> String {
+    if resource.name.is_empty() {
+        format!("{}-{}", resource.resource_type, resource.vmid)
+    } else {
+        resource.name.clone()
+    }
+}
+
+/// Classify a `ureq::Error` into a `FailureReason`. Caller is responsible for
+/// peeling off 401/403 first if those should be `AuthFailed`.
+fn classify_ureq_error(e: &ureq::Error) -> FailureReason {
+    match e {
+        ureq::Error::StatusCode(code) => FailureReason::HttpStatus(*code),
+        ureq::Error::Timeout(_) => FailureReason::Timeout,
+        // Everything else (Io, Http, Protocol, Tls, Rustls, NativeTls, etc.)
+        // collapses to a single "transport" bucket. We deliberately do not
+        // surface TLS as its own category: the operator action is the same
+        // (check connectivity to PVE) and bucket explosion hurts readability.
+        _ => FailureReason::Transport,
+    }
+}
+
+/// Build the failure summary suffix shown in the footer/toast and parsed by
+/// users. Examples:
+///   "6 failed"                                    (counts only)
+///   "6 failed (authentication)"                   (all auth)
+///   "6 failed (4 HTTP 5xx, 2 transport)"          (mixed, breakdown)
+///   "6 failed (3 authentication, 3 transport)"    (mixed with auth)
+fn format_failure_summary(total: usize, groups: &HashMap<&'static str, usize>) -> String {
+    if groups.is_empty() {
+        return format!("{} failed", total);
+    }
+    if let Some(&n) = groups.get(AUTH_GROUP) {
+        if n == total {
+            return format!("{} failed (authentication)", total);
+        }
+    }
+    let mut entries: Vec<(&str, usize)> = groups
+        .iter()
+        .map(|(k, v)| {
+            let label = if *k == AUTH_GROUP {
+                "authentication"
+            } else {
+                *k
+            };
+            (label, *v)
+        })
+        .collect();
+    // Highest count first; ties broken alphabetically on the *display label*
+    // (so renamed "authentication" sorts among the other group names, not
+    // under its raw key "auth").
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    let breakdown = entries
+        .iter()
+        .map(|(label, n)| format!("{} {}", n, label))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{} failed ({})", total, breakdown)
 }
 
 // --- Helper functions ---
@@ -580,6 +687,7 @@ impl Provider for Proxmox {
         let mut skipped_no_ip = 0usize;
         let mut skipped_stopped = 0usize;
         let mut resolved_count = 0usize;
+        let mut failure_groups: HashMap<&'static str, usize> = HashMap::new();
 
         // N+1 API calls (one per VM). No rate limiting for v1. For very large clusters
         // (hundreds of VMs), consider adding a small delay between calls.
@@ -622,13 +730,30 @@ impl Provider for Proxmox {
                     skipped_no_ip += 1;
                     (String::new(), None)
                 }
-                ResolveOutcome::Failed => {
+                ResolveOutcome::Failed(reason) => {
                     fetch_failures += 1;
+                    *failure_groups.entry(reason.group()).or_insert(0) += 1;
+                    warn!(
+                        "[external] Proxmox resolve failed: {}/{}/{} '{}': {}",
+                        resource.node,
+                        resource.resource_type,
+                        resource.vmid,
+                        resource_display_name(resource),
+                        reason.label()
+                    );
                     continue;
                 }
                 ResolveOutcome::AuthFailed => {
                     fetch_failures += 1;
                     auth_failures += 1;
+                    *failure_groups.entry(AUTH_GROUP).or_insert(0) += 1;
+                    warn!(
+                        "[external] Proxmox resolve failed: {}/{}/{} '{}': authentication (401/403)",
+                        resource.node,
+                        resource.resource_type,
+                        resource.vmid,
+                        resource_display_name(resource),
+                    );
                     continue;
                 }
             };
@@ -683,16 +808,7 @@ impl Provider for Proxmox {
             parts.push(format!("{} skipped (stopped)", skipped_stopped));
         }
         if fetch_failures > 0 {
-            let label = if auth_failures == fetch_failures {
-                format!("{} failed (authentication)", fetch_failures)
-            } else if auth_failures > 0 {
-                format!(
-                    "{} failed ({} authentication)",
-                    fetch_failures, auth_failures
-                )
-            } else {
-                format!("{} failed", fetch_failures)
-            };
+            let label = format_failure_summary(fetch_failures, &failure_groups);
             parts.push(label);
         }
         progress(&parts.join(", "));
@@ -782,12 +898,18 @@ impl Proxmox {
         let config: VmConfig = match agent.get(&config_url).header("Authorization", auth).call() {
             Ok(mut resp) => match resp.body_mut().read_json::<PveResponse<VmConfig>>() {
                 Ok(r) => r.data,
-                Err(_) => return ResolveOutcome::Failed,
+                Err(e) => {
+                    debug!("[external] Proxmox VM config parse failed for {config_url}: {e}");
+                    return ResolveOutcome::Failed(FailureReason::Parse);
+                }
             },
             Err(ureq::Error::StatusCode(401 | 403)) => {
                 return ResolveOutcome::AuthFailed;
             }
-            Err(_) => return ResolveOutcome::Failed,
+            Err(e) => {
+                debug!("[external] Proxmox VM config fetch failed for {config_url}: {e}");
+                return ResolveOutcome::Failed(classify_ureq_error(&e));
+            }
         };
 
         let ostype = extract_ostype(&config);
@@ -825,16 +947,20 @@ impl Proxmox {
                     Some(ip) => ResolveOutcome::Resolved(ip, ostype),
                     None => ResolveOutcome::NoIp,
                 },
-                Err(_) => ResolveOutcome::Failed,
+                Err(e) => {
+                    debug!("[external] Proxmox guest agent parse failed for {agent_url}: {e}");
+                    ResolveOutcome::Failed(FailureReason::Parse)
+                }
             },
             Err(ureq::Error::StatusCode(500 | 501)) => {
                 // Agent not responding or not supported
                 ResolveOutcome::NoIp
             }
             Err(ureq::Error::StatusCode(401 | 403)) => ResolveOutcome::AuthFailed,
-            Err(_) => {
+            Err(e) => {
                 // Network errors, timeouts, etc.
-                ResolveOutcome::Failed
+                debug!("[external] Proxmox guest agent fetch failed for {agent_url}: {e}");
+                ResolveOutcome::Failed(classify_ureq_error(&e))
             }
         }
     }
@@ -854,12 +980,18 @@ impl Proxmox {
         let config: VmConfig = match agent.get(&config_url).header("Authorization", auth).call() {
             Ok(mut resp) => match resp.body_mut().read_json::<PveResponse<VmConfig>>() {
                 Ok(r) => r.data,
-                Err(_) => return ResolveOutcome::Failed,
+                Err(e) => {
+                    debug!("[external] Proxmox LXC config parse failed for {config_url}: {e}");
+                    return ResolveOutcome::Failed(FailureReason::Parse);
+                }
             },
             Err(ureq::Error::StatusCode(401 | 403)) => {
                 return ResolveOutcome::AuthFailed;
             }
-            Err(_) => return ResolveOutcome::Failed,
+            Err(e) => {
+                debug!("[external] Proxmox LXC config fetch failed for {config_url}: {e}");
+                return ResolveOutcome::Failed(classify_ureq_error(&e));
+            }
         };
 
         let ostype = extract_ostype(&config);
@@ -889,7 +1021,10 @@ impl Proxmox {
                     Some(ip) => ResolveOutcome::Resolved(ip, ostype),
                     None => ResolveOutcome::NoIp,
                 },
-                Err(_) => ResolveOutcome::Failed,
+                Err(e) => {
+                    debug!("[external] Proxmox LXC interfaces parse failed for {iface_url}: {e}");
+                    ResolveOutcome::Failed(FailureReason::Parse)
+                }
             },
             Err(ureq::Error::StatusCode(401 | 403)) => ResolveOutcome::AuthFailed,
             Err(ureq::Error::StatusCode(500 | 404 | 501)) => {
@@ -897,7 +1032,10 @@ impl Proxmox {
                 // 404/501: endpoint may not exist on older PVE
                 ResolveOutcome::NoIp
             }
-            Err(_) => ResolveOutcome::Failed,
+            Err(e) => {
+                debug!("[external] Proxmox LXC interfaces fetch failed for {iface_url}: {e}");
+                ResolveOutcome::Failed(classify_ureq_error(&e))
+            }
         }
     }
 }

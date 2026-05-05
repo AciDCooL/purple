@@ -123,11 +123,11 @@ pub fn container_action_command(
 /// Rejects empty, non-ASCII, shell metacharacters, colon.
 pub fn validate_container_id(id: &str) -> Result<(), String> {
     if id.is_empty() {
-        return Err("Container ID must not be empty.".to_string());
+        return Err(crate::messages::CONTAINER_ID_EMPTY.to_string());
     }
     for c in id.chars() {
         if !c.is_ascii_alphanumeric() && c != '-' && c != '_' && c != '.' {
-            return Err(format!("Container ID contains invalid character: '{c}'"));
+            return Err(crate::messages::container_id_invalid_char(c));
         }
     }
     Ok(())
@@ -168,14 +168,14 @@ pub fn parse_container_output(
     if let Some(sentinel_line) = output.lines().find(|l| l.trim().starts_with("##purple:")) {
         let sentinel = sentinel_line.trim();
         if sentinel == "##purple:none##" {
-            return Err("No container runtime found. Install Docker or Podman.".to_string());
+            return Err(crate::messages::CONTAINER_RUNTIME_MISSING.to_string());
         }
         let runtime = if sentinel == "##purple:docker##" {
             ContainerRuntime::Docker
         } else if sentinel == "##purple:podman##" {
             ContainerRuntime::Podman
         } else {
-            return Err(format!("Unknown sentinel: {sentinel}"));
+            return Err(crate::messages::container_unknown_sentinel(sentinel));
         };
         let containers: Vec<ContainerInfo> = output
             .lines()
@@ -233,19 +233,19 @@ fn friendly_container_error(stderr: &str, code: Option<i32>) -> String {
         log::debug!("[external] Host key UNKNOWN detected; returning HOST_KEY_UNKNOWN toast");
         crate::messages::HOST_KEY_UNKNOWN.to_string()
     } else if lower.contains("command not found") {
-        "Docker or Podman not found on remote host.".to_string()
+        crate::messages::CONTAINER_RUNTIME_NOT_FOUND.to_string()
     } else if lower.contains("permission denied") || lower.contains("got permission denied") {
-        "Permission denied. Is your user in the docker group?".to_string()
+        crate::messages::CONTAINER_PERMISSION_DENIED.to_string()
     } else if lower.contains("cannot connect to the docker daemon")
         || lower.contains("cannot connect to podman")
     {
-        "Container daemon is not running.".to_string()
+        crate::messages::CONTAINER_DAEMON_NOT_RUNNING.to_string()
     } else if lower.contains("connection refused") {
-        "Connection refused.".to_string()
+        crate::messages::CONTAINER_CONNECTION_REFUSED.to_string()
     } else if lower.contains("no route to host") || lower.contains("network is unreachable") {
-        "Host unreachable.".to_string()
+        crate::messages::CONTAINER_HOST_UNREACHABLE.to_string()
     } else {
-        format!("Command failed with code {}.", code.unwrap_or(1))
+        crate::messages::container_command_failed(code.unwrap_or(1))
     }
 }
 

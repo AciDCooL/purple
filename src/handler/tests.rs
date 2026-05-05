@@ -5745,6 +5745,93 @@ fn refresh_selected_if_stale_skips_proxyjump_when_bastion_missing() {
     assert!(app.ping.status.is_empty());
 }
 
+/// Stage two hosts where web1 has a stale timestamp and web2 does not. After
+/// pressing the navigation key the new selection's stale state should drive
+/// a single fresh probe — the previously-stale entry must NOT be re-probed.
+fn stage_two_hosts_first_stale() -> App {
+    // 127.0.0.1:59999 is the loopback-RST trick used by the existing stale
+    // tests: probe spawns and exits fast, status stays Checking.
+    let mut app = make_app(
+        "Host web1\n  HostName 127.0.0.1\n  Port 59999\nHost web2\n  HostName 127.0.0.1\n  Port 59999\n",
+    );
+    app.ping.auto_ping = true;
+    let stale = std::time::Instant::now()
+        - crate::app::ping::STALE_REFRESH_AFTER
+        - std::time::Duration::from_secs(1);
+    app.ping.status.insert(
+        "web1".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 5 },
+    );
+    app.ping.last_checked.insert("web1".to_string(), stale);
+    // web2 starts with no recorded status -> stale on selection.
+    app
+}
+
+#[test]
+fn host_list_down_triggers_stale_refresh_for_new_selection() {
+    let mut app = stage_two_hosts_first_stale();
+    // Initial selection is web1; press Down to land on web2 (stale because no record).
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::host_list::handle_host_list(&mut app, key(KeyCode::Down), &tx);
+    assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web2"));
+    assert!(matches!(
+        app.ping.status.get("web2"),
+        Some(crate::app::PingStatus::Checking)
+    ));
+}
+
+#[test]
+fn host_list_j_triggers_stale_refresh_for_new_selection() {
+    let mut app = stage_two_hosts_first_stale();
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::host_list::handle_host_list(&mut app, key(KeyCode::Char('j')), &tx);
+    assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web2"));
+    assert!(matches!(
+        app.ping.status.get("web2"),
+        Some(crate::app::PingStatus::Checking)
+    ));
+}
+
+#[test]
+fn host_list_up_triggers_stale_refresh_when_selection_is_stale() {
+    // Land on web2 first, then press k to go back to web1 (which is stale).
+    let mut app = stage_two_hosts_first_stale();
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::host_list::handle_host_list(&mut app, key(KeyCode::Down), &tx);
+    // Clear web2's checking marker so we can observe a fresh transition.
+    app.ping.status.remove("web2");
+    super::host_list::handle_host_list(&mut app, key(KeyCode::Char('k')), &tx);
+    assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web1"));
+    // web1 was Reachable + stale; after k it should now be Checking.
+    assert!(matches!(
+        app.ping.status.get("web1"),
+        Some(crate::app::PingStatus::Checking)
+    ));
+}
+
+#[test]
+fn host_list_pagedown_triggers_stale_refresh_for_new_selection() {
+    let mut app = stage_two_hosts_first_stale();
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::host_list::handle_host_list(&mut app, key(KeyCode::PageDown), &tx);
+    assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web2"));
+    assert!(matches!(
+        app.ping.status.get("web2"),
+        Some(crate::app::PingStatus::Checking)
+    ));
+}
+
+#[test]
+fn host_list_navigation_does_not_refire_when_auto_ping_off() {
+    let mut app = stage_two_hosts_first_stale();
+    app.ping.auto_ping = false;
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::host_list::handle_host_list(&mut app, key(KeyCode::Down), &tx);
+    assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web2"));
+    // auto_ping=off short-circuits the refresh: web2 should remain unmarked.
+    assert!(!app.ping.status.contains_key("web2"));
+}
+
 #[test]
 fn handle_ping_result_records_last_checked_for_alias_and_dependents() {
     let mut app = make_app(

@@ -52,9 +52,7 @@ pub(super) fn handle_password_picker(app: &mut App, key: KeyEvent) {
                         app.forms.host.askpass = String::new();
                         app.forms.host.focused_field = FormField::AskPass;
                         app.forms.host.sync_cursor_to_end();
-                        app.notify(
-                            "Type your command. Use %a (alias) and %h (hostname) as placeholders.",
-                        );
+                        app.notify(crate::messages::ASKPASS_CUSTOM_COMMAND_HINT);
                         needs_more_input = true;
                     } else if is_prefix {
                         app.forms.host.askpass = source.value.to_string();

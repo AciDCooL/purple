@@ -60,7 +60,7 @@ pub fn connect_tmux_window(alias: &str, config_path: &Path, has_active_tunnel: b
         Ok(())
     } else {
         let code = status.code().unwrap_or(-1);
-        error!("tmux new-window failed for {alias} (exit {code})");
+        error!("[external] tmux new-window failed for {alias} (exit {code})");
         anyhow::bail!("tmux new-window exited with code {code}")
     }
 }

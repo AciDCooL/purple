@@ -475,3 +475,22 @@ fn online_dot_pulsing_truecolor_lerps_brightness() {
 
     COLOR_MODE.store(1, Ordering::Release);
 }
+
+// ---------------------------------------------------------------------------
+// Terminal-capability detection
+// ---------------------------------------------------------------------------
+
+#[test]
+fn detects_colored_underline_opts_out_for_apple_terminal() {
+    assert!(!detects_colored_underline(Some("Apple_Terminal")));
+}
+
+#[test]
+fn detects_colored_underline_defaults_true_for_unknown_or_modern() {
+    // Unknown / unset terminal -> assume modern. Add new opt-outs by name only.
+    assert!(detects_colored_underline(None));
+    assert!(detects_colored_underline(Some("ghostty")));
+    assert!(detects_colored_underline(Some("iTerm.app")));
+    assert!(detects_colored_underline(Some("WezTerm")));
+    assert!(detects_colored_underline(Some("vscode")));
+}

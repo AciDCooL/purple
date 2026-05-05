@@ -115,7 +115,7 @@ pub fn handle() -> Result<()> {
         if let Err(e) = std::fs::create_dir_all(marker_path.parent().unwrap()) {
             debug!("[config] Failed to create askpass marker directory: {e}");
         }
-        if let Err(e) = std::fs::write(marker_path, b"") {
+        if let Err(e) = crate::fs_util::atomic_write(marker_path, b"") {
             debug!("[config] Failed to write askpass marker: {e}");
         }
     }

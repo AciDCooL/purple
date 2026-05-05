@@ -26,6 +26,53 @@ pub const IMPORT_NO_FILE: &str =
 
 pub const NO_PROVIDERS: &str = "No providers configured. Run 'purple provider add' to set one up.";
 
+/// All supported provider slugs as a comma-separated string. Surfaced in
+/// `unknown_provider` and `skipping_unknown_provider`. Kept as a single
+/// const so adding a new provider only updates one place.
+pub const PROVIDER_LIST: &str = "digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, \
+     scaleway, gcp, azure, tailscale, oracle, ovh, leaseweb, i3d, transip";
+
+/// Stderr line when the user passed `--provider X` for an unknown slug.
+/// Different from `skipping_unknown_provider` so each call site can
+/// evolve its wording without breaking the other.
+pub fn unknown_provider(name: &str) -> String {
+    format!("Never heard of '{}'. Try: {}.", name, PROVIDER_LIST)
+}
+
+/// Stderr line when iterating configured providers and one is unknown
+/// (e.g. config file references a since-removed provider). The sync
+/// continues with the remaining providers.
+pub fn skipping_unknown_provider(name: &str) -> String {
+    format!(
+        "Skipping unknown provider '{}'. Try: {}.",
+        name, PROVIDER_LIST
+    )
+}
+
+/// Stderr line printed by `purple add` when the alias already exists.
+/// Tells the user the exact flag to fix it instead of just complaining.
+pub fn alias_already_exists(alias: &str) -> String {
+    format!(
+        "'{}' already exists. Use --alias to pick a different name.",
+        alias
+    )
+}
+
+/// Stderr lines printed after `purple import` when some lines failed
+/// to parse or read. Use the singular/plural form via the count.
+pub fn import_parse_failures(count: usize) -> String {
+    let s = if count == 1 { "" } else { "s" };
+    format!(
+        "! {} line{} could not be parsed (invalid format).",
+        count, s
+    )
+}
+
+pub fn import_read_errors(count: usize) -> String {
+    let s = if count == 1 { "" } else { "s" };
+    format!("! {} line{} could not be read (encoding error).", count, s)
+}
+
 pub fn no_config_for(provider: &str) -> String {
     format!(
         "No configuration for {}. Run 'purple provider add {}' first.",
@@ -183,6 +230,37 @@ pub fn syncing(name: &str, summary: &str) -> String {
     format!("\x1b[2K\rSyncing {}... {}", name, summary)
 }
 
+/// One-shot "Syncing X... " prefix without the cursor-clear/CR escapes.
+/// Used before progress callbacks start emitting overwrite-style updates,
+/// so the user sees something happening even if the provider is slow to
+/// produce the first progress event.
+pub fn syncing_start(name: &str) -> String {
+    format!("Syncing {}... ", name)
+}
+
+/// Rendered before the dot-progress (`\u{2713}` or error) on each
+/// per-host vault sign in the CLI bulk path. The trailing space is
+/// intentional — the success/fail glyph follows on the same line.
+pub fn vault_signing_host(alias: &str) -> String {
+    format!("Signing {}... ", alias)
+}
+
+/// Stderr line emitted by `purple vault sign --all` when a host block
+/// disappeared between the moment we enumerated it and the moment we
+/// tried to write its CertificateFile (rename, delete, race with another
+/// process). The cert is on disk; only the wiring is missing.
+pub fn vault_sign_host_block_gone(alias: &str) -> String {
+    format!(
+        "  warning: {} no longer in ssh config; CertificateFile not written (cert saved on disk)",
+        alias
+    )
+}
+
+/// Single-word "failed." status the CLI sync output appends when a
+/// provider fetch hit a hard error. Mirrors the trailing-status pattern
+/// used by `syncing_start` so the line reads `Syncing X... failed.`.
+pub const SYNC_FAILED: &str = "failed.";
+
 pub fn servers_found_with_failures(count: usize, failures: usize, total: usize) -> String {
     format!(
         "{} servers found ({} of {} failed to fetch).",
@@ -242,6 +320,43 @@ pub const WARN_PROJECT_NOT_USED: &str =
     "Warning: --project is only used by the GCP provider. Ignoring.";
 pub const WARN_COMPARTMENT_NOT_USED: &str =
     "Warning: --compartment is only used by the Oracle provider. Ignoring.";
+pub const WARN_NO_VERIFY_TLS_NOT_USED: &str =
+    "Warning: --no-verify-tls is only used by the Proxmox provider. Ignoring.";
+pub const WARN_VERIFY_TLS_NOT_USED: &str =
+    "Warning: --verify-tls is only used by the Proxmox provider. Ignoring.";
+pub const WARN_REGIONS_NOT_USED: &str = "Warning: --regions is only used by the AWS, Scaleway, GCP, Azure and Oracle providers. \
+     Ignoring.";
+
+/// Per-host status prefixes for `purple sync` output. Indented two
+/// spaces so the result line aligns under the `Syncing X...` header.
+/// `--dry-run` mode prepends "Would have:" so the user knows nothing
+/// was written.
+pub const SYNC_RESULT_PREFIX_LIVE: &str = "  ";
+pub const SYNC_RESULT_PREFIX_DRY_RUN: &str = "  Would have: ";
+
+/// Stderr line printed by `purple provider add` when the user-supplied
+/// URL does not start with `https://`. CLI-flavoured: tells the user to
+/// use the `--no-verify-tls` flag, distinct from the TUI variant which
+/// references a Verify TLS toggle.
+pub const PROVIDER_URL_REQUIRES_HTTPS: &str =
+    "URL must start with https://. For self-signed certificates use --no-verify-tls.";
+
+/// Reuse the TUI form's `Token can't be empty...` lines verbatim — the
+/// remediation steps (paste a JSON file path, paste an OCI config path,
+/// grab a token from the dashboard) are identical between CLI and TUI.
+pub use super::PROVIDER_TOKEN_REQUIRED_GCP;
+pub use super::PROVIDER_TOKEN_REQUIRED_ORACLE;
+pub use super::azure_subscription_id_invalid;
+pub use super::provider_token_required;
+
+/// Stderr line printed when `purple provider add scaleway` is missing
+/// `--regions`. Mirrors the Azure/GCP/Oracle pattern of including the
+/// concrete flag form in the message.
+pub const SCALEWAY_REGIONS_REQUIRED: &str = "Scaleway requires --regions with one or more zones \
+     (e.g. --regions fr-par-1,nl-ams-1).";
+
+pub const ORACLE_COMPARTMENT_REQUIRED: &str =
+    "Oracle requires --compartment (e.g. --compartment ocid1.compartment.oc1..aaa...).";
 
 // ── Vault CLI ───────────────────────────────────────────────────
 

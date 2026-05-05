@@ -53,16 +53,16 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| format!("Failed to run {}.", cmd))?;
+        .map_err(|_| crate::messages::clipboard_run_failed(cmd))?;
 
     let write_result = (|| {
         let stdin = child
             .stdin
             .as_mut()
-            .ok_or_else(|| format!("Failed to write to {}.", cmd))?;
+            .ok_or_else(|| crate::messages::clipboard_write_failed(cmd))?;
         stdin
             .write_all(text.as_bytes())
-            .map_err(|_| format!("Failed to write to {}.", cmd))
+            .map_err(|_| crate::messages::clipboard_write_failed(cmd))
     })();
 
     // Drop stdin so the child process gets EOF before we wait
@@ -71,12 +71,12 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     // Reap the child process and check exit status
     let status = child
         .wait()
-        .map_err(|_| format!("Failed to wait for {}.", cmd))?;
+        .map_err(|_| crate::messages::clipboard_wait_failed(cmd))?;
 
     write_result?;
 
     if !status.success() {
-        return Err(format!("{} exited with error.", cmd));
+        return Err(crate::messages::clipboard_exited_error(cmd));
     }
 
     Ok(())

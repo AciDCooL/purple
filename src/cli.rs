@@ -70,10 +70,7 @@ pub(super) fn handle_quick_add(
     }
 
     if config.has_host(&alias_str) {
-        eprintln!(
-            "'{}' already exists. Use --alias to pick a different name.",
-            alias_str
-        );
+        eprintln!("{}", crate::messages::cli::alias_already_exists(&alias_str));
         std::process::exit(1);
     }
 
@@ -113,26 +110,15 @@ pub(super) fn handle_import(
             if imported > 0 {
                 config.write()?;
             }
-            println!(
-                "Imported {} host{}, skipped {} duplicate{}.",
-                imported,
-                if imported == 1 { "" } else { "s" },
-                skipped,
-                if skipped == 1 { "" } else { "s" },
-            );
+            println!("{}", crate::messages::imported_hosts(imported, skipped));
             if parse_failures > 0 {
                 eprintln!(
-                    "! {} line{} could not be parsed (invalid format).",
-                    parse_failures,
-                    if parse_failures == 1 { "" } else { "s" },
+                    "{}",
+                    crate::messages::cli::import_parse_failures(parse_failures)
                 );
             }
             if read_errors > 0 {
-                eprintln!(
-                    "! {} line{} could not be read (encoding error).",
-                    read_errors,
-                    if read_errors == 1 { "" } else { "s" },
-                );
+                eprintln!("{}", crate::messages::cli::import_read_errors(read_errors));
             }
             Ok(())
         }
@@ -152,10 +138,7 @@ pub(super) fn handle_sync(
     let provider_config = providers::config::ProviderConfig::load();
     let sections: Vec<&providers::config::ProviderSection> = if let Some(name) = provider_name {
         if providers::get_provider(name).is_none() {
-            eprintln!(
-                "Never heard of '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle, ovh, leaseweb, i3d, transip.",
-                name
-            );
+            eprintln!("{}", crate::messages::cli::unknown_provider(name));
             std::process::exit(1);
         }
         match provider_config.section(name) {
@@ -183,8 +166,8 @@ pub(super) fn handle_sync(
             Some(p) => p,
             None => {
                 eprintln!(
-                    "Skipping unknown provider '{}'. Try: digitalocean, vultr, linode, hetzner, upcloud, proxmox, aws, scaleway, gcp, azure, tailscale, oracle, ovh, leaseweb, i3d, transip.",
-                    section.provider
+                    "{}",
+                    crate::messages::cli::skipping_unknown_provider(&section.provider)
                 );
                 any_failures = true;
                 // Not a hard failure: unknown provider contributes no changes,
@@ -194,7 +177,7 @@ pub(super) fn handle_sync(
         };
         let display_name = providers::provider_display_name(section.provider.as_str());
         let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
-        print!("Syncing {}... ", display_name);
+        print!("{}", crate::messages::cli::syncing_start(display_name));
         let _ = std::io::Write::flush(&mut std::io::stdout());
 
         let last_summary = std::cell::RefCell::new(String::new());
@@ -240,7 +223,7 @@ pub(super) fn handle_sync(
                 (hosts, true)
             }
             Err(e) => {
-                println!("failed.");
+                println!("{}", crate::messages::cli::SYNC_FAILED);
                 eprintln!("{}", crate::messages::cli::sync_error(display_name, &e));
                 any_failures = true;
                 any_hard_failures = true;
@@ -260,7 +243,11 @@ pub(super) fn handle_sync(
             suppress_remove, // suppress stale marking when partial failures occurred
             dry_run,
         );
-        let prefix = if dry_run { "  Would have: " } else { "  " };
+        let prefix = if dry_run {
+            crate::messages::cli::SYNC_RESULT_PREFIX_DRY_RUN
+        } else {
+            crate::messages::cli::SYNC_RESULT_PREFIX_LIVE
+        };
         println!(
             "{}",
             crate::messages::cli::sync_result(
@@ -337,15 +324,11 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     url = None;
                 }
                 if no_verify_tls {
-                    eprintln!(
-                        "Warning: --no-verify-tls is only used by the Proxmox provider. Ignoring."
-                    );
+                    eprintln!("{}", crate::messages::cli::WARN_NO_VERIFY_TLS_NOT_USED);
                     no_verify_tls = false;
                 }
                 if verify_tls {
-                    eprintln!(
-                        "Warning: --verify-tls is only used by the Proxmox provider. Ignoring."
-                    );
+                    eprintln!("{}", crate::messages::cli::WARN_VERIFY_TLS_NOT_USED);
                     verify_tls = false;
                 }
             }
@@ -359,9 +342,7 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 "aws" | "scaleway" | "gcp" | "azure" | "oracle"
             ) && regions.is_some()
             {
-                eprintln!(
-                    "Warning: --regions is only used by the AWS, Scaleway, GCP, Azure and Oracle providers. Ignoring."
-                );
+                eprintln!("{}", crate::messages::cli::WARN_REGIONS_NOT_USED);
                 regions = None;
             }
             if provider != "gcp" && project.is_some() {
@@ -435,9 +416,7 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 }
                 let u = url.as_deref().unwrap();
                 if !u.to_ascii_lowercase().starts_with("https://") {
-                    eprintln!(
-                        "URL must start with https://. For self-signed certificates use --no-verify-tls."
-                    );
+                    eprintln!("{}", crate::messages::cli::PROVIDER_URL_REQUIRES_HTTPS);
                     std::process::exit(1);
                 }
             }
@@ -463,17 +442,15 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
 
             if token.trim().is_empty() && !aws_has_profile && provider != "tailscale" {
                 if provider == "gcp" {
-                    eprintln!(
-                        "Token can't be empty. Provide a service account JSON key file path or access token."
-                    );
+                    eprintln!("{}", crate::messages::cli::PROVIDER_TOKEN_REQUIRED_GCP);
                 } else if provider == "oracle" {
-                    eprintln!(
-                        "Token can't be empty. Provide the path to your OCI config file (e.g. ~/.oci/config)."
-                    );
+                    eprintln!("{}", crate::messages::cli::PROVIDER_TOKEN_REQUIRED_ORACLE);
                 } else {
                     eprintln!(
-                        "Token can't be empty. Grab one from your {} dashboard.",
-                        providers::provider_display_name(&provider)
+                        "{}",
+                        crate::messages::cli::provider_token_required(
+                            providers::provider_display_name(&provider)
+                        )
                     );
                 }
                 std::process::exit(1);
@@ -537,9 +514,7 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 std::process::exit(1);
             }
             if provider == "scaleway" && resolved_regions.trim().is_empty() {
-                eprintln!(
-                    "Scaleway requires --regions with one or more zones (e.g. --regions fr-par-1,nl-ams-1)."
-                );
+                eprintln!("{}", crate::messages::cli::SCALEWAY_REGIONS_REQUIRED);
                 std::process::exit(1);
             }
             if provider == "azure" {
@@ -554,8 +529,8 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 {
                     if !providers::azure::is_valid_subscription_id(sub) {
                         eprintln!(
-                            "Invalid subscription ID '{}'. Expected UUID format (e.g. 12345678-1234-1234-1234-123456789012).",
-                            sub
+                            "{}",
+                            crate::messages::cli::azure_subscription_id_invalid(sub)
                         );
                         std::process::exit(1);
                     }
@@ -568,9 +543,7 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             }
             // Oracle requires --compartment
             if provider == "oracle" && resolved_compartment.trim().is_empty() {
-                eprintln!(
-                    "Oracle requires --compartment (e.g. --compartment ocid1.compartment.oc1..aaa...)."
-                );
+                eprintln!("{}", crate::messages::cli::ORACLE_COMPARTMENT_REQUIRED);
                 std::process::exit(1);
             }
 
@@ -794,17 +767,18 @@ pub(super) fn prompt_hidden_input(prompt: &str) -> Result<Option<String>> {
 pub(super) fn handle_password_command(command: PasswordCommands) -> Result<()> {
     match command {
         PasswordCommands::Set { alias } => {
-            let password = match prompt_hidden_input(&format!("Password for {}: ", alias))? {
-                Some(p) if !p.is_empty() => p,
-                Some(_) => {
-                    eprintln!("{}", crate::messages::cli::PASSWORD_EMPTY);
-                    std::process::exit(1);
-                }
-                None => {
-                    eprintln!("{}", crate::messages::cli::CANCELLED);
-                    std::process::exit(1);
-                }
-            };
+            let password =
+                match prompt_hidden_input(&crate::messages::askpass::password_prompt(&alias))? {
+                    Some(p) if !p.is_empty() => p,
+                    Some(_) => {
+                        eprintln!("{}", crate::messages::cli::PASSWORD_EMPTY);
+                        std::process::exit(1);
+                    }
+                    None => {
+                        eprintln!("{}", crate::messages::cli::CANCELLED);
+                        std::process::exit(1);
+                    }
+                };
 
             askpass::store_in_keychain(&alias, &password)?;
             println!(
@@ -1207,7 +1181,7 @@ pub(super) fn handle_vault_sign_command(
                     &provider_config,
                 )
             });
-            print!("Signing {}... ", entry.alias);
+            print!("{}", crate::messages::cli::vault_signing_host(&entry.alias));
             match vault_ssh::sign_certificate(
                 &role,
                 &pubkey,
@@ -1225,8 +1199,8 @@ pub(super) fn handle_vault_sign_command(
                         );
                         if !updated {
                             eprintln!(
-                                "  warning: {} no longer in ssh config; CertificateFile not written (cert saved on disk)",
-                                entry.alias
+                                "{}",
+                                crate::messages::cli::vault_sign_host_block_gone(&entry.alias)
                             );
                         }
                     }

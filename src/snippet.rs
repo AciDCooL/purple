@@ -636,7 +636,7 @@ fn execute_host(
                 run_id,
                 alias: alias.to_string(),
                 stdout: String::new(),
-                stderr: format!("Failed to launch ssh: {}", e),
+                stderr: crate::messages::snippet_ssh_launch_failed(&e),
                 exit_code: None,
             });
             None

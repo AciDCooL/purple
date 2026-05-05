@@ -1,3 +1,13 @@
+## 3.5.0 - 2026-05-05
+
+- feat: Vault SSH connects through bastions on the first try.
+- feat: Active tab stays crisply underlined on every terminal, including macOS Terminal where the highlight used to bleed across tabs.
+- feat: The selected host's ping dot self-refreshes as you arrow through the list, so freshness follows your cursor.
+- feat: When Vault signing fails, the toast tells you the actual cause instead of being shadowed by the generic SSH error.
+- change: Proxmox sync breaks down partial failures by category (timeout, HTTP 5xx, HTTP 4xx, transport, parse) in the summary line.
+- change: Pre-commit gates catch hardcoded user-facing text and convention drift before they ship, so error wording stays consistent.
+- change: Smoke tests verify each screen actually renders, not just that the binary stays alive.
+
 ## 3.4.1 - 2026-05-05
 
 - change: See exactly which key cleared your ping dots.

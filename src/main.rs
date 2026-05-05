@@ -332,9 +332,9 @@ fn write_startup_banner(config: &SshConfigFile, config_path: &Path, verbose: boo
 fn run_direct_connect(alias: String, config: &mut SshConfigFile, config_path: &Path) -> Result<()> {
     let provider_config = providers::config::ProviderConfig::load();
     let host_entry = config.host_entries().into_iter().find(|h| h.alias == alias);
-    if let Some(ref host) = host_entry {
+    if host_entry.is_some() {
         if let Some((msg, _is_error)) =
-            ensure_vault_ssh_if_needed(&alias, host, &provider_config, config)
+            ensure_vault_ssh_chain_if_needed(&alias, config_path, &provider_config, config)
         {
             eprintln!("{}", msg);
         }
@@ -377,9 +377,12 @@ fn run_positional_alias(
         .cloned();
     if let Some(host) = host_opt {
         let provider_config = providers::config::ProviderConfig::load();
-        if let Some((msg, _is_error)) =
-            ensure_vault_ssh_if_needed(&host.alias, &host, &provider_config, &mut config)
-        {
+        if let Some((msg, _is_error)) = ensure_vault_ssh_chain_if_needed(
+            &host.alias,
+            config_path,
+            &provider_config,
+            &mut config,
+        ) {
             eprintln!("{}", msg);
         }
         let alias = host.alias.clone();
@@ -501,47 +504,17 @@ pub(crate) fn replace_spinner_frame(text: &str, new_frame: &str) -> Option<Strin
         .map(|(_, rest)| format!("{} {}", new_frame, rest))
 }
 
+/// Thin re-export. The real implementation lives in `crate::messages` so
+/// every user-facing string in the binary funnels through one module.
+/// Kept as `pub(crate)` so existing call sites and tests don't need to
+/// learn the new path.
 pub(crate) fn format_vault_sign_summary(
     signed: u32,
     failed: u32,
     skipped: u32,
     first_error: Option<&str>,
 ) -> String {
-    let total = signed + failed + skipped;
-    let cert_word = if total == 1 {
-        "certificate"
-    } else {
-        "certificates"
-    };
-    if failed > 0 {
-        if let Some(err) = first_error {
-            if total == 1 {
-                // Single host: just show the error, no stats prefix
-                return err.to_string();
-            }
-            format!(
-                "Signed {} of {} {}. {} failed: {}",
-                signed, total, cert_word, failed, err
-            )
-        } else {
-            format!(
-                "Signed {} of {} {}. {} failed",
-                signed, total, cert_word, failed
-            )
-        }
-    } else if skipped > 0 && signed == 0 {
-        format!(
-            "All {} {} already valid. Nothing to sign.",
-            total, cert_word
-        )
-    } else if skipped > 0 {
-        format!(
-            "Signed {} of {} {}. {} already valid.",
-            signed, total, cert_word, skipped
-        )
-    } else {
-        format!("Signed {} of {} {}.", signed, total, cert_word)
-    }
+    crate::messages::vault_sign_summary(signed, failed, skipped, first_error)
 }
 
 pub(crate) fn format_sync_diff(added: usize, updated: usize, stale: usize) -> String {
@@ -700,7 +673,9 @@ pub(crate) fn ensure_vault_ssh_if_needed(
 
     let pubkey = match vault_ssh::resolve_pubkey_path(&host.identity_file) {
         Ok(p) => p,
-        Err(e) => return Some((format!("Vault SSH cert failed: {}", e), true)),
+        Err(e) => {
+            return Some((crate::messages::vault_cert_pubkey_resolve_failed(&e), true));
+        }
     };
 
     // Check if the cert needs renewal before calling ensure_cert, so we can
@@ -734,24 +709,94 @@ pub(crate) fn ensure_vault_ssh_if_needed(
                 let updated = config.set_host_certificate_file(alias, &cert_str);
                 if !updated {
                     eprintln!(
-                        "Warning: Signed cert for {} but host block is no longer in ssh config; CertificateFile not written (cert saved to {})",
-                        alias,
-                        cert_path.display()
+                        "{}",
+                        crate::messages::vault_cert_host_block_missing(alias, &cert_path)
                     );
                 } else if let Err(e) = config.write() {
                     eprintln!(
-                        "Warning: Signed cert for {} but failed to update SSH config CertificateFile: {}",
-                        alias, e
+                        "{}",
+                        crate::messages::vault_cert_config_write_failed(alias, &e)
                     );
                 }
             }
-            Some((format!("Signed SSH certificate for {}.", alias), false))
+            Some((crate::messages::vault_signed_pre_connect(alias), false))
         }
         Err(e) => {
-            eprintln!("Warning: Vault SSH signing failed: {}", e);
-            Some((format!("Vault SSH signing failed: {}", e), true))
+            // e is an anyhow chain built from pre-formatted messages inside
+            // vault_ssh (no raw vault output reaches here), so scrubbing is
+            // not needed and would clobber the word "token" in actionable
+            // messages like "token missing or expired. Run `vault login`."
+            let msg = e.to_string();
+            eprintln!(
+                "{}",
+                crate::messages::vault_sign_failed_pre_connect(alias, &msg)
+            );
+            Some((
+                crate::messages::vault_sign_failed_pre_connect(alias, &msg),
+                true,
+            ))
         }
     }
+}
+
+/// Resolve the effective ProxyJump chain for `target_alias` and run
+/// `ensure_vault_ssh_if_needed` for every host in it. Sign the proxy hops
+/// before the target so a freshly-signed target cert is never blocked by an
+/// unsigned proxy: ssh would otherwise fail at the proxy step on the very
+/// first connect (the bug this addresses).
+///
+/// Returns a synthesised `(message, is_error)` tuple suitable for the same
+/// callers as `ensure_vault_ssh_if_needed`. The message reflects:
+///   - any error encountered (highest priority — surfaced even if other
+///     hosts in the chain were signed successfully),
+///   - else the count of hosts that were freshly signed,
+///   - else `None` when nothing in the chain needed an action.
+pub(crate) fn ensure_vault_ssh_chain_if_needed(
+    target_alias: &str,
+    config_path: &Path,
+    provider_config: &providers::config::ProviderConfig,
+    config: &mut ssh_config::model::SshConfigFile,
+) -> Option<(String, bool)> {
+    let chain = vault_ssh::resolve_proxy_chain(config_path, target_alias);
+    let mut signed_count: usize = 0;
+    let mut last_error: Option<String> = None;
+
+    for hop_alias in &chain {
+        // Look the host up fresh on every iteration: prior iterations may
+        // have mutated `config` (CertificateFile inserts) and we want the
+        // current view, not a snapshot from before signing started.
+        let host_entry = config
+            .host_entries()
+            .into_iter()
+            .find(|h| h.alias == *hop_alias);
+        let Some(host) = host_entry else {
+            // Proxy host not defined as a Host block in this config.
+            // Could be an external bastion. Skip silently — ssh will use
+            // its own resolution and either succeed (no vault role needed)
+            // or fail with a normal error the user can see.
+            continue;
+        };
+        if let Some((msg, is_error)) =
+            ensure_vault_ssh_if_needed(hop_alias, &host, provider_config, config)
+        {
+            if is_error {
+                last_error = Some(msg);
+            } else {
+                signed_count += 1;
+            }
+        }
+    }
+
+    if let Some(err) = last_error {
+        return Some((err, true));
+    }
+    if signed_count == 0 {
+        return None;
+    }
+    Some((
+        crate::messages::vault_signed_pre_connect_chain(target_alias, signed_count),
+        false,
+    ))
 }
 
 /// Decide whether `ensure_vault_ssh_if_needed` (and the equivalent
@@ -836,22 +881,20 @@ pub(crate) fn ensure_keychain_password(alias: &str, askpass: Option<&str>) {
         return;
     }
     // Prompt for password and store it
-    let password =
-        match cli::prompt_hidden_input(&format!("Password for {} (stored in keychain): ", alias)) {
-            Ok(Some(p)) if !p.is_empty() => p,
-            Ok(Some(_)) => {
-                eprintln!("{}", crate::messages::askpass::EMPTY_PASSWORD);
-                return;
-            }
-            Ok(None) => return, // Esc
-            Err(_) => return,
-        };
+    let password = match cli::prompt_hidden_input(
+        &crate::messages::askpass::keychain_password_prompt(alias),
+    ) {
+        Ok(Some(p)) if !p.is_empty() => p,
+        Ok(Some(_)) => {
+            eprintln!("{}", crate::messages::askpass::EMPTY_PASSWORD);
+            return;
+        }
+        Ok(None) => return, // Esc
+        Err(_) => return,
+    };
     match askpass::store_in_keychain(alias, &password) {
         Ok(()) => eprintln!("{}", crate::messages::askpass::PASSWORD_IN_KEYCHAIN),
-        Err(e) => eprintln!(
-            "Failed to store in keychain: {}. SSH will prompt for password.",
-            e
-        ),
+        Err(e) => eprintln!("{}", crate::messages::askpass::keychain_store_failed(&e)),
     }
 }
 

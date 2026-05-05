@@ -61,9 +61,9 @@ pub(super) fn handle_file_browser(
 
                 // Show transfer status in the file browser
                 let label = if req.sources.len() == 1 {
-                    format!("Copying {}...", req.sources[0])
+                    crate::messages::scp_copying_one(&req.sources[0])
                 } else {
-                    format!("Copying {} files...", req.sources.len())
+                    crate::messages::scp_copying_many(req.sources.len())
                 };
                 fb.transferring = Some(label);
 
@@ -104,12 +104,12 @@ pub(super) fn handle_file_browser(
                                 debug!("[external] SCP stderr: {}", err.trim());
                             }
                             if err.is_empty() {
-                                (false, format!("Copy failed (exit code {}).", code))
+                                (false, crate::messages::scp_failed_exit_code(code))
                             } else {
                                 (false, err)
                             }
                         }
-                        Err(e) => (false, format!("scp failed: {}", e)),
+                        Err(e) => (false, crate::messages::scp_spawn_failed(&e)),
                     };
                     let _ = tx.send(crate::event::AppEvent::ScpComplete {
                         alias,

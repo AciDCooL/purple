@@ -3164,3 +3164,350 @@ fn test_stopped_vm_included_with_empty_ip() {
 
     config_mock.assert();
 }
+
+// =========================================================================
+// FailureReason classification and summary formatting
+// =========================================================================
+
+#[test]
+fn failure_reason_label_formats_status_and_categories() {
+    assert_eq!(FailureReason::HttpStatus(500).label(), "HTTP 500");
+    assert_eq!(FailureReason::HttpStatus(404).label(), "HTTP 404");
+    assert_eq!(FailureReason::Transport.label(), "transport error");
+    assert_eq!(FailureReason::Parse.label(), "parse error");
+}
+
+#[test]
+fn failure_reason_groups_by_status_class() {
+    assert_eq!(FailureReason::HttpStatus(500).group(), "HTTP 5xx");
+    assert_eq!(FailureReason::HttpStatus(503).group(), "HTTP 5xx");
+    assert_eq!(FailureReason::HttpStatus(404).group(), "HTTP 4xx");
+    assert_eq!(FailureReason::HttpStatus(418).group(), "HTTP 4xx");
+    assert_eq!(FailureReason::HttpStatus(302).group(), "HTTP error");
+    assert_eq!(FailureReason::Transport.group(), "transport");
+    assert_eq!(FailureReason::Parse.group(), "parse");
+}
+
+#[test]
+fn classify_ureq_error_extracts_status_codes() {
+    let e = ureq::Error::StatusCode(503);
+    assert_eq!(classify_ureq_error(&e), FailureReason::HttpStatus(503));
+    let e = ureq::Error::StatusCode(404);
+    assert_eq!(classify_ureq_error(&e), FailureReason::HttpStatus(404));
+}
+
+#[test]
+fn format_failure_summary_with_no_groups_falls_back_to_count() {
+    let groups: HashMap<&'static str, usize> = HashMap::new();
+    assert_eq!(format_failure_summary(6, &groups), "6 failed");
+}
+
+#[test]
+fn format_failure_summary_collapses_when_all_auth() {
+    let mut groups: HashMap<&'static str, usize> = HashMap::new();
+    groups.insert("auth", 6);
+    assert_eq!(
+        format_failure_summary(6, &groups),
+        "6 failed (authentication)"
+    );
+}
+
+#[test]
+fn format_failure_summary_breaks_down_mixed_groups() {
+    let mut groups: HashMap<&'static str, usize> = HashMap::new();
+    groups.insert("HTTP 5xx", 4);
+    groups.insert("transport", 2);
+    let summary = format_failure_summary(6, &groups);
+    assert_eq!(summary, "6 failed (4 HTTP 5xx, 2 transport)");
+}
+
+#[test]
+fn format_failure_summary_renames_auth_in_breakdown() {
+    let mut groups: HashMap<&'static str, usize> = HashMap::new();
+    groups.insert("auth", 3);
+    groups.insert("transport", 3);
+    let summary = format_failure_summary(6, &groups);
+    // Tie on 3: alphabetical -> "authentication" before "transport".
+    assert_eq!(summary, "6 failed (3 authentication, 3 transport)");
+}
+
+// =========================================================================
+// Failed outcomes carry a typed reason
+// =========================================================================
+
+#[test]
+fn resolve_qemu_ip_returns_failed_with_status_on_5xx_config() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/api2/json/nodes/pve1/qemu/101/config")
+        .with_status(503)
+        .create();
+
+    let proxmox = Proxmox {
+        base_url: server.url(),
+        verify_tls: false,
+    };
+    let agent = super::super::http_agent();
+    let resource = ClusterResource {
+        resource_type: "qemu".to_string(),
+        vmid: 101,
+        name: "broken".to_string(),
+        node: "pve1".to_string(),
+        status: "running".to_string(),
+        template: 0,
+        tags: None,
+        ip: None,
+        maxcpu: None,
+        maxmem: None,
+    };
+
+    let outcome = proxmox.resolve_qemu_ip(&agent, &server.url(), "PVEAPIToken=u@p!t=s", &resource);
+    assert_eq!(
+        outcome,
+        ResolveOutcome::Failed(FailureReason::HttpStatus(503))
+    );
+    m.assert();
+}
+
+#[test]
+fn resolve_qemu_ip_returns_failed_with_parse_on_invalid_json() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/api2/json/nodes/pve1/qemu/101/config")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body("not json at all")
+        .create();
+
+    let proxmox = Proxmox {
+        base_url: server.url(),
+        verify_tls: false,
+    };
+    let agent = super::super::http_agent();
+    let resource = ClusterResource {
+        resource_type: "qemu".to_string(),
+        vmid: 101,
+        name: "garbage".to_string(),
+        node: "pve1".to_string(),
+        status: "running".to_string(),
+        template: 0,
+        tags: None,
+        ip: None,
+        maxcpu: None,
+        maxmem: None,
+    };
+
+    let outcome = proxmox.resolve_qemu_ip(&agent, &server.url(), "PVEAPIToken=u@p!t=s", &resource);
+    assert_eq!(outcome, ResolveOutcome::Failed(FailureReason::Parse));
+    m.assert();
+}
+
+#[test]
+fn resolve_lxc_ip_returns_failed_with_status_on_5xx_config() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/api2/json/nodes/pve1/lxc/200/config")
+        .with_status(502)
+        .create();
+
+    let proxmox = Proxmox {
+        base_url: server.url(),
+        verify_tls: false,
+    };
+    let agent = super::super::http_agent();
+    let resource = ClusterResource {
+        resource_type: "lxc".to_string(),
+        vmid: 200,
+        name: "lxc-broken".to_string(),
+        node: "pve1".to_string(),
+        status: "running".to_string(),
+        template: 0,
+        tags: None,
+        ip: None,
+        maxcpu: None,
+        maxmem: None,
+    };
+
+    let outcome = proxmox.resolve_lxc_ip(&agent, &server.url(), "PVEAPIToken=u@p!t=s", &resource);
+    assert_eq!(
+        outcome,
+        ResolveOutcome::Failed(FailureReason::HttpStatus(502))
+    );
+    m.assert();
+}
+
+#[test]
+fn resolve_qemu_ip_still_returns_authfailed_on_401() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/api2/json/nodes/pve1/qemu/101/config")
+        .with_status(401)
+        .create();
+
+    let proxmox = Proxmox {
+        base_url: server.url(),
+        verify_tls: false,
+    };
+    let agent = super::super::http_agent();
+    let resource = ClusterResource {
+        resource_type: "qemu".to_string(),
+        vmid: 101,
+        name: "no-auth".to_string(),
+        node: "pve1".to_string(),
+        status: "running".to_string(),
+        template: 0,
+        tags: None,
+        ip: None,
+        maxcpu: None,
+        maxmem: None,
+    };
+
+    let outcome = proxmox.resolve_qemu_ip(&agent, &server.url(), "PVEAPIToken=u@p!t=s", &resource);
+    assert_eq!(outcome, ResolveOutcome::AuthFailed);
+    m.assert();
+}
+
+// --- Additional coverage: LXC parse/auth, Transport classification, group boundaries ---
+
+#[test]
+fn classify_ureq_error_returns_transport_for_io_error() {
+    // Connection-refused style I/O error: no StatusCode, no Timeout, must
+    // fall through the catch-all into Transport.
+    let io_err = std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused");
+    let e = ureq::Error::Io(io_err);
+    assert_eq!(classify_ureq_error(&e), FailureReason::Transport);
+}
+
+#[test]
+fn classify_ureq_error_returns_transport_for_tls_error() {
+    // TLS errors share the Transport bucket by design (operator action is
+    // identical: check connectivity).
+    let e = ureq::Error::Tls("handshake failed");
+    assert_eq!(classify_ureq_error(&e), FailureReason::Transport);
+}
+
+#[test]
+fn failure_reason_label_includes_timeout() {
+    assert_eq!(FailureReason::Timeout.label(), "timeout");
+}
+
+#[test]
+fn failure_reason_group_at_400_boundary() {
+    // 400 is the first 4xx; 399 is the lower fallback bucket.
+    assert_eq!(FailureReason::HttpStatus(400).group(), "HTTP 4xx");
+    assert_eq!(FailureReason::HttpStatus(399).group(), "HTTP error");
+    assert_eq!(FailureReason::HttpStatus(499).group(), "HTTP 4xx");
+    // 500 boundary covered separately in the existing test, but verify the
+    // upper edge of 4xx does not bleed into 5xx.
+}
+
+#[test]
+fn format_failure_summary_three_way_tie_is_alphabetical_ascending() {
+    // Three groups at equal count, picked so a reversed comparator would
+    // produce a different string. Expected ascending alpha order:
+    //   "HTTP 5xx" < "parse" < "transport"
+    let mut groups: HashMap<&'static str, usize> = HashMap::new();
+    groups.insert("transport", 2);
+    groups.insert("parse", 2);
+    groups.insert("HTTP 5xx", 2);
+    let summary = format_failure_summary(6, &groups);
+    assert_eq!(summary, "6 failed (2 HTTP 5xx, 2 parse, 2 transport)");
+}
+
+#[test]
+fn resolve_lxc_ip_returns_failed_with_parse_on_invalid_json() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/api2/json/nodes/pve1/lxc/200/config")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body("not json")
+        .create();
+
+    let proxmox = Proxmox {
+        base_url: server.url(),
+        verify_tls: false,
+    };
+    let agent = super::super::http_agent();
+    let resource = ClusterResource {
+        resource_type: "lxc".to_string(),
+        vmid: 200,
+        name: "lxc-garbage".to_string(),
+        node: "pve1".to_string(),
+        status: "running".to_string(),
+        template: 0,
+        tags: None,
+        ip: None,
+        maxcpu: None,
+        maxmem: None,
+    };
+
+    let outcome = proxmox.resolve_lxc_ip(&agent, &server.url(), "PVEAPIToken=u@p!t=s", &resource);
+    assert_eq!(outcome, ResolveOutcome::Failed(FailureReason::Parse));
+    m.assert();
+}
+
+#[test]
+fn resolve_lxc_ip_returns_authfailed_on_401() {
+    let mut server = mockito::Server::new();
+    let m = server
+        .mock("GET", "/api2/json/nodes/pve1/lxc/200/config")
+        .with_status(401)
+        .create();
+
+    let proxmox = Proxmox {
+        base_url: server.url(),
+        verify_tls: false,
+    };
+    let agent = super::super::http_agent();
+    let resource = ClusterResource {
+        resource_type: "lxc".to_string(),
+        vmid: 200,
+        name: "lxc-noauth".to_string(),
+        node: "pve1".to_string(),
+        status: "running".to_string(),
+        template: 0,
+        tags: None,
+        ip: None,
+        maxcpu: None,
+        maxmem: None,
+    };
+
+    let outcome = proxmox.resolve_lxc_ip(&agent, &server.url(), "PVEAPIToken=u@p!t=s", &resource);
+    assert_eq!(outcome, ResolveOutcome::AuthFailed);
+    m.assert();
+}
+
+#[test]
+fn resource_display_name_falls_back_to_type_and_vmid() {
+    let resource = ClusterResource {
+        resource_type: "qemu".to_string(),
+        vmid: 101,
+        name: String::new(),
+        node: "pve1".to_string(),
+        status: "running".to_string(),
+        template: 0,
+        tags: None,
+        ip: None,
+        maxcpu: None,
+        maxmem: None,
+    };
+    assert_eq!(resource_display_name(&resource), "qemu-101");
+}
+
+#[test]
+fn resource_display_name_uses_name_when_present() {
+    let resource = ClusterResource {
+        resource_type: "lxc".to_string(),
+        vmid: 200,
+        name: "dns-1".to_string(),
+        node: "pve1".to_string(),
+        status: "running".to_string(),
+        template: 0,
+        tags: None,
+        ip: None,
+        maxcpu: None,
+        maxmem: None,
+    };
+    assert_eq!(resource_display_name(&resource), "dns-1");
+}

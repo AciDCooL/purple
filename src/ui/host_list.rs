@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, Paragraph};
+use ratatui::widgets::{Clear, List, ListItem, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::design;
@@ -414,6 +414,14 @@ fn render_top_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         inner.width.saturating_sub(1),
         1,
     );
+    // Wipe the row to default style (no modifiers) before drawing the tab
+    // labels. macOS Terminal does not flush underline pixels on a pure SGR
+    // diff: a cell that goes from UNDERLINED to non-UNDERLINED with the
+    // same glyph keeps its underline until a full cell repaint is forced.
+    // The Clear pass writes a space + default style first, which makes the
+    // glyph change between frames and forces Terminal.app to repaint the
+    // underline-pixel buffer. Modern terminals are unaffected.
+    frame.render_widget(Clear, content_area);
     let line = Line::from(top_bar_spans(app));
     frame.render_widget(Paragraph::new(line), content_area);
 }

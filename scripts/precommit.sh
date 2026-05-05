@@ -95,6 +95,10 @@ step "./scripts/check-keybindings.sh"
 ./scripts/check-keybindings.sh
 pass
 
+step "./scripts/check-conventions.sh"
+./scripts/check-conventions.sh
+pass
+
 step "cargo test --bin purple visual_regression"
 cargo test --bin purple visual_regression
 pass

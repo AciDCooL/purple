@@ -82,39 +82,15 @@ pub(super) fn handle_bulk_tag_editor_screen(app: &mut App, key: KeyEvent) {
 
 /// Status string shown after a successful bulk apply. Empty when nothing
 /// was pending (no-op) and no included-host warning applies, so the caller
-/// can skip setting a status.
+/// can skip setting a status. Thin wrapper that funnels the formatting
+/// through `crate::messages` to keep all user-facing copy in one place.
 pub(crate) fn format_apply_status(result: &crate::app::BulkTagApplyResult) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if result.changed_hosts > 0 {
-        parts.push(format!(
-            "Updated {} host{}",
-            result.changed_hosts,
-            if result.changed_hosts == 1 { "" } else { "s" }
-        ));
-        let mut delta = Vec::new();
-        if result.added > 0 {
-            delta.push(format!("+{}", result.added));
-        }
-        if result.removed > 0 {
-            delta.push(format!("-{}", result.removed));
-        }
-        if !delta.is_empty() {
-            let last = parts.pop().expect("just pushed host count");
-            parts.push(format!("{} ({})", last, delta.join(" ")));
-        }
-    }
-    if result.skipped_included > 0 {
-        parts.push(format!(
-            "skipped {} in include file{}",
-            result.skipped_included,
-            if result.skipped_included == 1 {
-                ""
-            } else {
-                "s"
-            }
-        ));
-    }
-    parts.join(". ")
+    crate::messages::bulk_tag_apply_status(
+        result.changed_hosts,
+        result.added,
+        result.removed,
+        result.skipped_included,
+    )
 }
 
 fn handle_new_tag_input(app: &mut App, key: KeyEvent) {

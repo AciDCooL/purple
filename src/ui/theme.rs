@@ -6,6 +6,13 @@ use ratatui::style::{Color, Modifier, Style};
 /// Color mode: 0 = NO_COLOR, 1 = ANSI 16, 2 = truecolor.
 static COLOR_MODE: AtomicU8 = AtomicU8::new(1);
 
+/// Whether the host terminal renders SGR 58 (styled underline color, "kitty
+/// underline" extension). Defaults to 1 (supported); `init()` flips it to 0
+/// for known holdouts such as macOS Terminal so styles can pick a fallback.
+/// Acts as the central point for terminal-capability quirks, mirroring how
+/// `messages` centralises user-facing strings.
+static COLORED_UNDERLINE: AtomicU8 = AtomicU8::new(1);
+
 /// Active theme.
 static THEME: OnceLock<RwLock<ThemeDef>> = OnceLock::new();
 
@@ -1391,8 +1398,31 @@ fn mode() -> u8 {
     COLOR_MODE.load(Ordering::Acquire)
 }
 
+/// True when the terminal is expected to honour SGR 58 (colored underline).
+/// Falls back to false on known legacy terminals so styles can pick a
+/// non-styled-underline alternative. Detected once in `init()`.
+pub fn supports_colored_underline() -> bool {
+    COLORED_UNDERLINE.load(Ordering::Acquire) != 0
+}
+
+/// Pure decision: given a `TERM_PROGRAM` value, does this terminal honour
+/// styled underlines (SGR 58/59)? Conservative default is `true`; only known
+/// holdouts opt out. Kept separate from env reads so it stays unit-testable.
+fn detects_colored_underline(term_program: Option<&str>) -> bool {
+    // macOS Terminal (Terminal.app) does not implement styled underlines.
+    !matches!(term_program, Some("Apple_Terminal"))
+}
+
+/// Read the env once and write the detected cap flags into the atomics.
+fn detect_terminal_caps() {
+    let term_program = std::env::var("TERM_PROGRAM").ok();
+    let supports = detects_colored_underline(term_program.as_deref());
+    COLORED_UNDERLINE.store(u8::from(supports), Ordering::Release);
+}
+
 /// Initialize theme settings. Call once at startup.
 pub fn init() {
+    detect_terminal_caps();
     if std::env::var_os("NO_COLOR").is_some() {
         COLOR_MODE.store(0, Ordering::Release);
         set_theme(ThemeDef::no_color());
@@ -1423,6 +1453,11 @@ pub fn init() {
 pub(crate) fn init_with_mode(m: u8) {
     COLOR_MODE.store(m, Ordering::Release);
     let _ = THEME.get_or_init(|| RwLock::new(ThemeDef::purple()));
+}
+
+#[cfg(test)]
+pub(crate) fn set_colored_underline_support(v: bool) {
+    COLORED_UNDERLINE.store(u8::from(v), Ordering::Release);
 }
 
 // ---------------------------------------------------------------------------
@@ -1475,20 +1510,30 @@ pub fn brand() -> Style {
         .remove_modifier(Modifier::DIM)
 }
 
-/// Active tab marker for the top navigation bar: bold white label with a
-/// purple underline. Letters stay white so the selected tab reads as a label,
-/// not as a second brand splash; only the underline carries the brand colour.
+/// Active tab marker for the top navigation bar.
+///
+/// Modern terminals (Ghostty, iTerm2 3.4+, WezTerm, Kitty, recent VTE):
+/// bold white label with a brand-coloured underline via SGR 58. Letters stay
+/// white so the active tab reads as a label, not as a second brand splash.
+///
+/// Legacy terminals without SGR 58 (macOS Terminal): bold white label with
+/// the basic SGR 4 underline only. The underline inherits the foreground
+/// (white) because Terminal.app cannot decouple underline colour from fg.
+/// Brand accent on the underline is sacrificed; the label stays white so
+/// it does not visually compete with the solid `purple` brand badge.
 pub fn nav_active() -> Style {
     let mut style = bold().add_modifier(Modifier::UNDERLINED);
+    if !supports_colored_underline() {
+        return style;
+    }
     let m = mode();
-    if m == 2 {
-        if let Some(c) = active_theme().accent.truecolor {
-            style = style.underline_color(c);
-        }
-    } else if m == 1 {
-        if let Some(c) = active_theme().accent.ansi16 {
-            style = style.underline_color(c);
-        }
+    let accent_color = match m {
+        2 => active_theme().accent.truecolor,
+        1 => active_theme().accent.ansi16,
+        _ => None,
+    };
+    if let Some(c) = accent_color {
+        style = style.underline_color(c);
     }
     style
 }

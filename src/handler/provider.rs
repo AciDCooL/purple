@@ -464,9 +464,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
 
     // Check for external provider config changes since form was opened
     if app.provider_config_changed_since_form_open() {
-        app.notify_error(
-            "Provider config changed externally. Press Esc and re-open to pick up changes.",
-        );
+        app.notify_error(crate::messages::PROVIDER_CONFIG_CHANGED_EXTERNALLY);
         return;
     }
 
@@ -496,9 +494,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
             return;
         }
         if !url.to_ascii_lowercase().starts_with("https://") {
-            app.notify_error(
-                "URL must start with https://. Toggle Verify TLS off for self-signed certificates.",
-            );
+            app.notify_error(crate::messages::PROVIDER_URL_REQUIRES_HTTPS);
             return;
         }
     }
@@ -509,17 +505,12 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         && (provider_name != "aws" || app.providers.form.profile.trim().is_empty())
     {
         let hint = if provider_name == "gcp" {
-            "Token can't be empty. Provide a service account JSON key file path or access token."
-                .to_string()
+            crate::messages::PROVIDER_TOKEN_REQUIRED_GCP.to_string()
         } else if provider_name == "oracle" {
-            "Token can't be empty. Provide the path to your OCI config file (e.g. ~/.oci/config)."
-                .to_string()
+            crate::messages::PROVIDER_TOKEN_REQUIRED_ORACLE.to_string()
         } else {
             let display_name = crate::providers::provider_display_name(provider_name.as_str());
-            format!(
-                "Token can't be empty. Grab one from your {} dashboard.",
-                display_name
-            )
+            crate::messages::provider_token_required(display_name)
         };
         app.notify_error(hint);
         return;
@@ -554,8 +545,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         }
         for sub in subs.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
             if !crate::providers::azure::is_valid_subscription_id(sub) {
-                app.notify_error(
-                    format!("Invalid subscription ID '{}'. Expected UUID format (e.g. 12345678-1234-1234-1234-123456789012).", sub));
+                app.notify_error(crate::messages::azure_subscription_id_invalid(sub));
                 return;
             }
         }

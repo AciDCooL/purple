@@ -163,8 +163,7 @@ fn start_vault_bulk_sign(
             let mut first_error: Option<String> = None;
             let mut aborted_message: Option<String> = None;
 
-            for (idx, (alias, role, cert_file, pubkey, vault_addr)) in signable.iter().enumerate()
-            {
+            for (idx, (alias, role, cert_file, pubkey, vault_addr)) in signable.iter().enumerate() {
                 if cancel.load(Ordering::Relaxed) {
                     break;
                 }
@@ -209,10 +208,9 @@ fn start_vault_bulk_sign(
                         }
                         remove_in_flight(&in_flight, alias);
                         if consecutive_failures >= 3 {
-                            aborted_message = Some(format!(
-                                "Vault SSH signing aborted after {} consecutive failures. Press V to retry. Last error: {}",
+                            aborted_message = Some(crate::messages::vault_signing_aborted(
                                 failed,
-                                first_error.clone().unwrap_or_else(|| "unknown".into())
+                                first_error.as_deref(),
                             ));
                             break;
                         }
@@ -259,10 +257,9 @@ fn start_vault_bulk_sign(
                         failed += 1;
                         consecutive_failures += 1;
                         if consecutive_failures >= 3 {
-                            aborted_message = Some(format!(
-                                "Vault SSH signing aborted after {} consecutive failures. Press V to retry. Last error: {}",
+                            aborted_message = Some(crate::messages::vault_signing_aborted(
                                 failed,
-                                first_error.clone().unwrap_or_else(|| "unknown".into())
+                                first_error.as_deref(),
                             ));
                             break;
                         }

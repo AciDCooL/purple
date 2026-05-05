@@ -13,8 +13,8 @@ use crate::event::{self, AppEvent, EventHandler};
 use crate::ssh_config::model::SshConfigFile;
 use crate::{
     animation, askpass, connection, ensure_bw_session, ensure_keychain_password,
-    ensure_vault_ssh_if_needed, first_launch_init, handler, import, ping, preferences, snippet,
-    tui, update, vault_ssh,
+    ensure_vault_ssh_chain_if_needed, first_launch_init, handler, import, ping, preferences,
+    snippet, tui, update, vault_ssh,
 };
 
 pub(crate) fn run_tui(mut app: App) -> Result<()> {
@@ -398,17 +398,20 @@ fn handle_pending_connect(
         // Tmux mode: open SSH in a new tmux window. TUI stays alive.
         // Vault SSH cert signing runs first (eprintln warnings are harmless
         // on the alternate screen — ratatui repaints over them on the next
-        // draw cycle).
-        let vault_msg = if let Some(ref host) = vault_host {
-            let msg = ensure_vault_ssh_if_needed(
+        // draw cycle). Sign the entire ProxyJump chain so the proxy hop's
+        // cert is in place before ssh tries to use it.
+        let vault_msg = if vault_host.is_some() {
+            let msg = ensure_vault_ssh_chain_if_needed(
                 &alias,
-                host,
+                &app.reload.config_path,
                 &app.providers.config,
                 &mut app.hosts_state.ssh_config,
             );
             if msg.is_some() {
                 app.reload_hosts();
-                app.refresh_cert_cache(&alias);
+                for hop in vault_ssh::resolve_proxy_chain(&app.reload.config_path, &alias) {
+                    app.refresh_cert_cache(&hop);
+                }
             }
             msg
         } else {
@@ -437,19 +440,22 @@ fn handle_pending_connect(
     // Standard mode: suspend TUI, run SSH inline, restore TUI.
     // Order preserved: pause events, exit TUI, THEN run vault signing and
     // password setup (which may eprintln or prompt for input on the real
-    // terminal).
+    // terminal). Sign the entire ProxyJump chain so the proxy hop's cert is
+    // in place before ssh tries to use it.
     events.pause();
     terminal.exit()?;
-    let vault_msg = if let Some(ref host) = vault_host {
-        let msg = ensure_vault_ssh_if_needed(
+    let vault_msg = if vault_host.is_some() {
+        let msg = ensure_vault_ssh_chain_if_needed(
             &alias,
-            host,
+            &app.reload.config_path,
             &app.providers.config,
             &mut app.hosts_state.ssh_config,
         );
         if msg.is_some() {
             app.reload_hosts();
-            app.refresh_cert_cache(&alias);
+            for hop in vault_ssh::resolve_proxy_chain(&app.reload.config_path, &alias) {
+                app.refresh_cert_cache(&hop);
+            }
         }
         msg
     } else {
@@ -486,11 +492,19 @@ fn handle_pending_connect(
                         askpass,
                     };
                 } else {
+                    // A failed Vault sign that came alongside a failed SSH
+                    // is almost always the CAUSE of the SSH failure (no cert
+                    // → permission denied). Surface the vault error first so
+                    // the user can fix the actual problem; otherwise they
+                    // chase the generic ssh error.
+                    if let Some((ref vmsg, true)) = vault_msg {
+                        app.notify_error(vmsg.clone());
+                    }
                     let reason = connection::stderr_summary(&cr.stderr_output);
                     let msg = if let Some(reason) = reason {
-                        format!("SSH to {} failed. {}", alias, reason)
+                        crate::messages::ssh_failed_with_reason(&alias, &reason)
                     } else {
-                        format!("SSH to {} exited with code {}.", alias, code)
+                        crate::messages::ssh_exited_with_code(&alias, code)
                     };
                     app.notify_error(msg);
                 }
@@ -503,7 +517,7 @@ fn handle_pending_connect(
             }
         }
         Err(e) => {
-            eprintln!("Connection failed: {}", e);
+            eprintln!("{}", crate::messages::connection_spawn_failed(&e));
             app.notify_error(crate::messages::connection_failed(&alias));
         }
     }

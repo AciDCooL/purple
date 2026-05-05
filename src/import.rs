@@ -14,8 +14,8 @@ pub fn import_from_file(
     group: Option<&str>,
 ) -> Result<(usize, usize, usize, usize), String> {
     info!("Import started: source={}", path.display());
-    let file =
-        std::fs::File::open(path).map_err(|e| format!("Can't open {}: {}", path.display(), e))?;
+    let file = std::fs::File::open(path)
+        .map_err(|e| crate::messages::import_open_failed(&path.display(), &e))?;
     let reader = std::io::BufReader::new(file);
 
     let mut read_errors = 0;
@@ -103,15 +103,15 @@ pub fn import_from_known_hosts(
     group: Option<&str>,
 ) -> Result<(usize, usize, usize, usize), String> {
     info!("Import started: source=~/.ssh/known_hosts");
-    let home = dirs::home_dir().ok_or("Could not determine home directory.")?;
+    let home = dirs::home_dir().ok_or(crate::messages::IMPORT_HOME_DIR_UNKNOWN)?;
     let known_hosts_path = home.join(".ssh").join("known_hosts");
 
     if !known_hosts_path.exists() {
-        return Err("~/.ssh/known_hosts not found.".to_string());
+        return Err(crate::messages::IMPORT_KNOWN_HOSTS_MISSING.to_string());
     }
 
     let file = std::fs::File::open(&known_hosts_path)
-        .map_err(|e| format!("Can't open known_hosts: {}", e))?;
+        .map_err(|e| crate::messages::import_known_hosts_open_failed(&e))?;
     let reader = std::io::BufReader::new(file);
 
     let mut read_errors = 0;
