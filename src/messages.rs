@@ -452,6 +452,28 @@ pub fn provider_progress(spinner: &str, name: &str, message: &str) -> String {
     format!("{} {}: {}", spinner, name, message)
 }
 
+// ── Relative age (detail panel "checked" suffix) ────────────────────
+
+pub const AGE_JUST_NOW: &str = "just now";
+
+/// Compact relative age: "just now", "12s ago", "3m ago", "2h ago",
+/// "2d ago". Used in the detail panel so the reader can tell stale
+/// data from fresh.
+pub fn relative_age(elapsed: std::time::Duration) -> String {
+    let secs = elapsed.as_secs();
+    if secs < 5 {
+        AGE_JUST_NOW.to_string()
+    } else if secs < 60 {
+        format!("{}s ago", secs)
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
+}
+
 // ── Vault SSH bulk signing summaries (event_loop.rs) ────────────────
 
 pub fn vault_config_reapply_failed(signed: usize, e: &impl std::fmt::Display) -> String {
@@ -845,3 +867,23 @@ pub mod whats_new;
 
 #[path = "messages/whats_new_toast.rs"]
 pub mod whats_new_toast;
+
+#[cfg(test)]
+mod relative_age_tests {
+    use super::relative_age;
+    use std::time::Duration;
+
+    #[test]
+    fn relative_age_boundaries() {
+        assert_eq!(relative_age(Duration::from_secs(0)), "just now");
+        assert_eq!(relative_age(Duration::from_secs(4)), "just now");
+        assert_eq!(relative_age(Duration::from_secs(5)), "5s ago");
+        assert_eq!(relative_age(Duration::from_secs(59)), "59s ago");
+        assert_eq!(relative_age(Duration::from_secs(60)), "1m ago");
+        assert_eq!(relative_age(Duration::from_secs(3599)), "59m ago");
+        assert_eq!(relative_age(Duration::from_secs(3600)), "1h ago");
+        assert_eq!(relative_age(Duration::from_secs(86399)), "23h ago");
+        assert_eq!(relative_age(Duration::from_secs(86400)), "1d ago");
+        assert_eq!(relative_age(Duration::from_secs(86400 * 7)), "7d ago");
+    }
+}

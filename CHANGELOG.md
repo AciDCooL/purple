@@ -1,3 +1,8 @@
+## 3.4.1 - 2026-05-05
+
+- change: See exactly which key cleared your ping dots.
+- change: Every ping refresh, clear and config-driven reset now appears in --verbose so your bug reports include the right context out of the box.
+
 ## 3.4.0 - 2026-05-05
 
 - feat: Online dots stay accurate without manual refreshes.

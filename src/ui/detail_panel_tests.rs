@@ -858,18 +858,3 @@ fn pattern_detail_multiple_negations() {
     let info = compute_pattern_detail_info(&patterns[0], &hosts);
     assert_eq!(info.matching_aliases, vec!["db-01"]);
 }
-
-#[test]
-fn format_checked_age_boundaries() {
-    use std::time::Duration;
-    assert_eq!(format_checked_age(Duration::from_secs(0)), "just now");
-    assert_eq!(format_checked_age(Duration::from_secs(4)), "just now");
-    assert_eq!(format_checked_age(Duration::from_secs(5)), "5s ago");
-    assert_eq!(format_checked_age(Duration::from_secs(59)), "59s ago");
-    assert_eq!(format_checked_age(Duration::from_secs(60)), "1m ago");
-    assert_eq!(format_checked_age(Duration::from_secs(3599)), "59m ago");
-    assert_eq!(format_checked_age(Duration::from_secs(3600)), "1h ago");
-    assert_eq!(format_checked_age(Duration::from_secs(86399)), "23h ago");
-    assert_eq!(format_checked_age(Duration::from_secs(86400)), "1d ago");
-    assert_eq!(format_checked_age(Duration::from_secs(86400 * 7)), "7d ago");
-}

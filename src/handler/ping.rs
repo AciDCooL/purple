@@ -41,6 +41,12 @@ pub(crate) fn refresh_selected_if_stale(app: &mut App, events_tx: &mpsc::Sender<
     ) {
         return;
     }
+    log::debug!(
+        "stale-refresh: marking {} Checking and probing {}:{}",
+        ping_alias,
+        hostname,
+        port
+    );
     app.ping
         .status
         .insert(ping_alias.clone(), crate::app::PingStatus::Checking);

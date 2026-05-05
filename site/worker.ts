@@ -178,7 +178,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "3.4.0",
+  "softwareVersion": "3.4.1",
   "datePublished": "2024-10-01",
   "dateModified": "2026-05-05",
   "softwareRequirements": "macOS or Linux",
@@ -707,6 +707,9 @@ h1 .dot { color: var(--cyan); text-shadow: 0 0 20px var(--cyan); }
   margin-bottom: 48px;
   font-weight: 400;
   letter-spacing: -0.01em;
+  max-width: 56ch;
+  margin-inline: auto;
+  text-wrap: balance;
 }
 
 /* ── Install block ── */
@@ -1025,7 +1028,7 @@ footer .sep { margin: 0 0.3em; }
       </svg>
       <span class="h1-sub">One terminal. All your servers.</span>
     </h1>
-    <h2 class="tagline">Open-source terminal SSH manager for macOS and Linux that keeps ~/.ssh/config in sync with your cloud infra.<br>Spin up a VM, it shows up. Destroy it, it dims. Across 16 cloud providers.</h2>
+    <h2 class="tagline">Open-source terminal SSH manager for macOS and Linux that keeps ~/.ssh/config in sync with your cloud infra. Spin up a VM, it shows up. Destroy it, it dims. Across 16 cloud providers.</h2>
     <div class="terminal">
       <div class="terminal-bar">
         <span class="terminal-dots">
@@ -1042,7 +1045,7 @@ footer .sep { margin: 0 0.3em; }
           <button class="copy-btn copy-inline" id="copy-btn" onclick="copy(this)" style="display:none">copy</button>
         </div>
         <div class="install-output" id="install-output" style="display:none">
-          <div>Downloading purple v3.4.0 for darwin-arm64...</div>
+          <div>Downloading purple v3.4.1 for darwin-arm64...</div>
           <div>Installing to /usr/local/bin/purple... <span class="success">done.</span></div>
         </div>
         <div class="alt-installs" id="alt-installs" style="display:none">
@@ -1169,7 +1172,7 @@ footer .sep { margin: 0 0.3em; }
         <summary>How do I troubleshoot connection problems?</summary>
         <div class="answer">Run with <code>--verbose</code> to enable debug logging, then <code>purple logs --tail</code> in another terminal. Logs are written to <code>~/.purple/purple.log</code> with fault domain prefixes: <code>[external]</code> for remote/tool errors, <code>[config]</code> for local config issues. Set <code>PURPLE_LOG=trace</code> for maximum detail.</div>
       </details>
-      <div class="man-foot"><span>purple v3.4.0</span><span>2026-05-05</span><span>PURPLE(1)</span></div>
+      <div class="man-foot"><span>purple v3.4.1</span><span>2026-05-05</span><span>PURPLE(1)</span></div>
     </div>
   </div>
 
@@ -1671,7 +1674,7 @@ A: Press m in the host list to open the theme picker with live preview. 11 built
 
 ## Status
 
-- Current version: 3.4.0 (May 2026)
+- Current version: 3.4.1 (May 2026)
 - Release cadence: approximately bi-weekly
 - Test suite: 6800+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
 - CI: fmt, clippy, build, test on macOS and Linux, cargo-deny, MSRV 1.86 check, rustdoc warnings, site sync, TUI smoke test, design system, message centralization, keybinding invariants and visual regression

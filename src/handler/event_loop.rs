@@ -93,6 +93,13 @@ pub(crate) fn handle_ping_result(
     if generation == app.ping.generation {
         let status = app::classify_ping(rtt_ms, app.ping.slow_threshold_ms);
         let now = Instant::now();
+        log::debug!(
+            "ping-result: {} → {:?} (rtt={:?}ms, gen={})",
+            alias,
+            status,
+            rtt_ms,
+            generation
+        );
         app.ping.status.insert(alias.clone(), status.clone());
         app.ping.last_checked.insert(alias.clone(), now);
         // Propagate bastion status to all ProxyJump dependents.
@@ -102,10 +109,19 @@ pub(crate) fn handle_ping_result(
             &alias,
             &status,
         );
+        let mut propagated = 0usize;
         for h in &app.hosts_state.list {
             if h.proxy_jump == alias {
                 app.ping.last_checked.insert(h.alias.clone(), now);
+                propagated += 1;
             }
+        }
+        if propagated > 0 {
+            log::debug!(
+                "ping-result: propagated bastion {} status+timestamp to {} dependent(s)",
+                alias,
+                propagated
+            );
         }
         // Update live filter/sort as results arrive
         if app.ping.filter_down_only {

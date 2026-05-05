@@ -182,22 +182,6 @@ pub fn compute_pattern_detail_info(
     }
 }
 
-/// Compact relative age: "just now", "12s ago", "3m ago", "2h ago", "2d ago".
-pub(crate) fn format_checked_age(elapsed: std::time::Duration) -> String {
-    let secs = elapsed.as_secs();
-    if secs < 5 {
-        "just now".to_string()
-    } else if secs < 60 {
-        format!("{}s ago", secs)
-    } else if secs < 3600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86400 {
-        format!("{}h ago", secs / 3600)
-    } else {
-        format!("{}d ago", secs / 86400)
-    }
-}
-
 fn password_label(source: &str) -> &'static str {
     if source == "keychain" {
         "keychain"
@@ -391,7 +375,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
         if stable && !status_spans.is_empty() {
             if let Some(t) = app.ping.last_checked.get(&host.alias) {
                 status_spans.push(Span::styled(
-                    format!("  checked {}", format_checked_age(t.elapsed())),
+                    format!("  checked {}", crate::messages::relative_age(t.elapsed())),
                     theme::muted(),
                 ));
             }

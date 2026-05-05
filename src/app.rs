@@ -311,12 +311,23 @@ impl App {
             .iter()
             .map(|h| h.alias.as_str())
             .collect();
+        let pre_status = self.ping.status.len();
+        let pre_checked = self.ping.last_checked.len();
         self.ping
             .status
             .retain(|alias, _| valid_aliases.contains(alias.as_str()));
         self.ping
             .last_checked
             .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        let dropped = pre_status.saturating_sub(self.ping.status.len())
+            + pre_checked.saturating_sub(self.ping.last_checked.len());
+        if dropped > 0 {
+            log::debug!(
+                "[purple] reload_hosts: pruned {} orphan ping entrie(s); {} aliases remain",
+                dropped,
+                valid_aliases.len()
+            );
+        }
 
         // Restore search if it was active, otherwise reset
         if let Some(query) = had_search {
@@ -635,6 +646,10 @@ impl App {
                 // Invalidate undo state — config structure may have changed externally
                 self.hosts_state.undo_stack.clear();
                 // Clear stale ping status — hosts may have changed
+                log::debug!(
+                    "[config] external config change: clearing {} ping result(s) + timestamps",
+                    self.ping.status.len()
+                );
                 self.ping.status.clear();
                 self.ping.last_checked.clear();
                 self.ping.filter_down_only = false;

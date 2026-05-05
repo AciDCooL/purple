@@ -227,6 +227,10 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                 return;
             }
             if !app.ping.status.is_empty() {
+                log::debug!(
+                    "[purple] p: clearing {} ping result(s) + timestamps",
+                    app.ping.status.len()
+                );
                 app.ping.status.clear();
                 app.ping.last_checked.clear();
                 app.ping.filter_down_only = false;
@@ -239,6 +243,10 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
         }
         KeyCode::Char('P') => {
             if !app.ping.status.is_empty() {
+                log::debug!(
+                    "[purple] P: clearing {} ping result(s) + timestamps",
+                    app.ping.status.len()
+                );
                 app.ping.status.clear();
                 app.ping.last_checked.clear();
                 app.ping.filter_down_only = false;
@@ -729,6 +737,10 @@ pub(super) fn handle_host_list_search(
         }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if !app.ping.status.is_empty() {
+                log::debug!(
+                    "[purple] ctrl+p: clearing {} ping result(s) + timestamps",
+                    app.ping.status.len()
+                );
                 app.ping.status.clear();
                 app.ping.last_checked.clear();
                 app.ping.checked_at = None;
