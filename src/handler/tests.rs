@@ -23,6 +23,9 @@ fn make_app(content: &str) -> App {
     // share a config path when `app.hosts_state.ssh_config.write()` or preferences-write
     // runs.
     let scratch = tempfile::tempdir().expect("tempdir").keep();
+    // Set preferences override BEFORE App::new so PingState::from_preferences
+    // reads the per-test path, never the real ~/.purple/preferences.
+    crate::preferences::set_path_override(scratch.join("preferences"));
     let config = SshConfigFile {
         elements: SshConfigFile::parse_content(content),
         path: scratch.join("test_config"),
@@ -30,9 +33,7 @@ fn make_app(content: &str) -> App {
         bom: false,
     };
     let mut app = App::new(config);
-    // Never write to the real ~/.purple during tests
     app.providers.config = test_provider_config();
-    crate::preferences::set_path_override(scratch.join("preferences"));
     app
 }
 
@@ -5574,6 +5575,9 @@ fn test_p_key_clears_ping_increments_generation() {
         "web1".to_string(),
         crate::app::PingStatus::Reachable { rtt_ms: 10 },
     );
+    app.ping
+        .last_checked
+        .insert("web1".to_string(), std::time::Instant::now());
     app.ping.filter_down_only = true;
     app.ping.checked_at = Some(std::time::Instant::now());
     assert_eq!(app.ping.generation, 0);
@@ -5582,6 +5586,7 @@ fn test_p_key_clears_ping_increments_generation() {
     handle_key_event(&mut app, key(KeyCode::Char('P')), &tx).unwrap();
 
     assert!(app.ping.status.is_empty());
+    assert!(app.ping.last_checked.is_empty());
     assert_eq!(app.ping.generation, 1);
     assert!(!app.ping.filter_down_only);
     assert!(app.ping.checked_at.is_none());
@@ -5633,6 +5638,151 @@ fn test_bang_key_toggles_down_only_off() {
     handle_key_event(&mut app, key(KeyCode::Char('!')), &tx).unwrap();
     assert!(!app.ping.filter_down_only);
     assert!(app.search.query.is_none());
+}
+
+#[test]
+fn refresh_selected_if_stale_skips_when_auto_ping_off() {
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    app.ping.auto_ping = false;
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::ping::refresh_selected_if_stale(&mut app, &tx);
+    assert!(app.ping.status.is_empty());
+}
+
+#[test]
+fn refresh_selected_if_stale_skips_fresh_host() {
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    app.ping.auto_ping = true;
+    app.ping.status.insert(
+        "web1".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 10 },
+    );
+    app.ping
+        .last_checked
+        .insert("web1".to_string(), std::time::Instant::now());
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::ping::refresh_selected_if_stale(&mut app, &tx);
+    // Status remains Reachable, not flipped to Checking
+    assert!(matches!(
+        app.ping.status.get("web1"),
+        Some(crate::app::PingStatus::Reachable { .. })
+    ));
+}
+
+#[test]
+fn refresh_selected_if_stale_marks_checking_for_stale_host() {
+    // Loopback + high port: TCP RST returns immediately so the spawned
+    // probe thread exits fast. The PingResult goes to a dropped rx, so
+    // status stays Checking — the only behavior we assert.
+    let mut app = make_app("Host web1\n  HostName 127.0.0.1\n  Port 59999\n");
+    app.ping.auto_ping = true;
+    app.ping
+        .status
+        .insert("web1".to_string(), crate::app::PingStatus::Unreachable);
+    let stale = std::time::Instant::now()
+        - crate::app::ping::STALE_REFRESH_AFTER
+        - std::time::Duration::from_secs(1);
+    app.ping.last_checked.insert("web1".to_string(), stale);
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::ping::refresh_selected_if_stale(&mut app, &tx);
+    assert!(matches!(
+        app.ping.status.get("web1"),
+        Some(crate::app::PingStatus::Checking)
+    ));
+}
+
+#[test]
+fn refresh_selected_if_stale_skips_host_already_checking() {
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    app.ping.auto_ping = true;
+    app.ping
+        .status
+        .insert("web1".to_string(), crate::app::PingStatus::Checking);
+    let (tx, rx) = std::sync::mpsc::channel::<crate::event::AppEvent>();
+    super::ping::refresh_selected_if_stale(&mut app, &tx);
+    // Guard fires before ping_host spawn: no event produced.
+    assert!(rx.try_recv().is_err());
+    assert!(matches!(
+        app.ping.status.get("web1"),
+        Some(crate::app::PingStatus::Checking)
+    ));
+}
+
+#[test]
+fn refresh_selected_if_stale_skips_host_with_empty_hostname() {
+    let mut app = make_app("Host web1\n");
+    app.ping.auto_ping = true;
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::ping::refresh_selected_if_stale(&mut app, &tx);
+    assert!(app.ping.status.is_empty());
+}
+
+#[test]
+fn refresh_selected_if_stale_probes_bastion_for_proxyjump_host() {
+    let mut app = make_app(
+        "Host bastion\n  HostName 127.0.0.1\n  Port 59999\nHost web1\n  HostName 10.0.0.1\n  ProxyJump bastion\n",
+    );
+    app.ping.auto_ping = true;
+    // Select web1 (second selectable item).
+    app.select_next();
+    assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web1"));
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::ping::refresh_selected_if_stale(&mut app, &tx);
+    // Bastion (not web1) gets marked Checking — the probe targets the bastion.
+    assert!(matches!(
+        app.ping.status.get("bastion"),
+        Some(crate::app::PingStatus::Checking)
+    ));
+    assert!(!app.ping.status.contains_key("web1"));
+}
+
+#[test]
+fn refresh_selected_if_stale_skips_proxyjump_when_bastion_missing() {
+    let mut app = make_app("Host web1\n  HostName 10.0.0.1\n  ProxyJump ghost\n");
+    app.ping.auto_ping = true;
+    let (tx, _rx) = std::sync::mpsc::channel();
+    super::ping::refresh_selected_if_stale(&mut app, &tx);
+    assert!(app.ping.status.is_empty());
+}
+
+#[test]
+fn handle_ping_result_records_last_checked_for_alias_and_dependents() {
+    let mut app = make_app(
+        "Host bastion\n  HostName 1.1.1.1\nHost web1\n  HostName 10.0.0.1\n  ProxyJump bastion\n",
+    );
+    app.ping.generation = 0;
+    let before = std::time::Instant::now();
+    super::event_loop::handle_ping_result(&mut app, "bastion".to_string(), Some(15), 0);
+    let after = std::time::Instant::now();
+    let bastion_ts = app.ping.last_checked["bastion"];
+    let web1_ts = app.ping.last_checked["web1"];
+    assert!(bastion_ts >= before && bastion_ts <= after);
+    assert!(web1_ts >= before && web1_ts <= after);
+    // Dependent inherits the bastion's status, not just its timestamp.
+    assert!(matches!(
+        app.ping.status.get("web1"),
+        Some(crate::app::PingStatus::Reachable { .. })
+    ));
+}
+
+#[test]
+fn tick_does_not_clear_ping_status_after_sixty_seconds() {
+    // Contract guard: removing the 60s expiry must not be silently re-added.
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    app.ping.status.insert(
+        "web1".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 10 },
+    );
+    let old = std::time::Instant::now() - std::time::Duration::from_secs(120);
+    app.ping.last_checked.insert("web1".to_string(), old);
+    app.ping.checked_at = Some(old);
+    let mut anim = crate::animation::AnimationState::default();
+    let mut last_check = std::time::Instant::now();
+    super::event_loop::handle_tick(&mut app, &mut anim, false, &mut last_check);
+    assert!(
+        app.ping.status.contains_key("web1"),
+        "tick must not expire ping status"
+    );
 }
 
 // ─── Progressive disclosure: host form ─────────────────────────

@@ -1,3 +1,11 @@
+## 3.4.0 - 2026-05-05
+
+- feat: Online dots stay accurate without manual refreshes.
+- feat: Ping results no longer expire. Once you press P, dots stay green, amber or red until you choose to clear them.
+- feat: The detail panel now shows when each host was last checked, so you can tell fresh data from yesterday at a glance.
+- feat: Selecting a host whose result is older than 2 minutes triggers a quiet single-host re-ping in the background. Dots stay current as you browse, even on configs with hundreds of hosts, without flooding the network.
+- change: ProxyJump dependents inherit both status and last-checked time from their bastion.
+
 ## 3.3.0 - 2026-05-04
 
 - feat: Use SSH keys stored anywhere via symlinks.

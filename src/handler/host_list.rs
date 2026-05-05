@@ -228,6 +228,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
             }
             if !app.ping.status.is_empty() {
                 app.ping.status.clear();
+                app.ping.last_checked.clear();
                 app.ping.filter_down_only = false;
                 app.ping.checked_at = None;
                 app.ping.generation += 1;
@@ -239,6 +240,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
         KeyCode::Char('P') => {
             if !app.ping.status.is_empty() {
                 app.ping.status.clear();
+                app.ping.last_checked.clear();
                 app.ping.filter_down_only = false;
                 app.ping.checked_at = None;
                 app.ping.generation += 1;
@@ -711,19 +713,24 @@ pub(super) fn handle_host_list_search(
         }
         KeyCode::Down | KeyCode::Tab => {
             app.select_next();
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::Up | KeyCode::BackTab => {
             app.select_prev();
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::PageDown => {
             app.page_down_host();
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::PageUp => {
             app.page_up_host();
+            super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if !app.ping.status.is_empty() {
                 app.ping.status.clear();
+                app.ping.last_checked.clear();
                 app.ping.checked_at = None;
                 app.ping.generation += 1;
                 if app.ping.filter_down_only {

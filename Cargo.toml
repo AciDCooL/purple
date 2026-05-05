@@ -1,8 +1,8 @@
 [package]
 name = "purple-ssh"
-version = "3.3.0"
+version = "3.4.0"
 edition = "2024"
-description = "Open-source terminal SSH manager and SSH config editor. Search hundreds of hosts, sync from 16 clouds, transfer files, manage Docker and Podman over SSH, sign short-lived Vault SSH certs and expose an MCP server for AI agents. Rust TUI, MIT licensed."
+description = "Open-source terminal SSH manager that keeps ~/.ssh/config in sync with your cloud infra. Spin up a VM on AWS, GCP, Azure, Hetzner or 12 other cloud providers and it appears in your host list. Destroy it and the entry dims. Search hundreds of hosts, transfer files, manage Docker and Podman over SSH, sign Vault SSH certs. Rust TUI, MIT licensed."
 license = "MIT"
 repository = "https://github.com/erickochen/purple"
 homepage = "https://getpurple.sh"

@@ -1,6 +1,6 @@
 <img src="site/purple-logo.svg" alt="purple" width="213" height="48">
 
-**An open-source terminal SSH manager and SSH config editor for macOS and Linux.** A fast Rust TUI that searches hundreds of hosts, syncs from 16 clouds including AWS, GCP, Azure, Hetzner, Proxmox and OCI, transfers files, manages Docker and Podman over SSH, signs short-lived HashiCorp Vault SSH certificates and exposes an MCP server for AI agents. Keyboard-driven. Single binary. MIT licensed.
+**An open-source terminal SSH manager for macOS and Linux that keeps `~/.ssh/config` in sync with your cloud infra.** Spin up a VM on AWS, GCP, Azure, Hetzner, Proxmox or 11 other cloud providers and it shows up in your host list. Destroy it and the entry dims. No more hand-editing `~/.ssh/config` after every Terraform run, no more grepping cloud consoles for the right IP. A fast Rust TUI with fuzzy search across hundreds of hosts, file transfer, Docker and Podman over SSH, short-lived HashiCorp Vault SSH certificates and an MCP server for AI agents. Keyboard-driven. Single binary. MIT licensed.
 
 [![crates.io](https://img.shields.io/crates/v/purple-ssh?color=b44aff&labelColor=0a0a14)](https://crates.io/crates/purple-ssh)
 [![downloads](https://img.shields.io/crates/d/purple-ssh?color=b44aff&labelColor=0a0a14)](https://crates.io/crates/purple-ssh)
@@ -59,7 +59,7 @@ I wanted one place for all of that. So I built it.
 
 ![fuzzy search](screenshots/search.png)
 
-☁️ **16 cloud providers.** AWS, DigitalOcean, Hetzner, GCP, Azure, Proxmox VE, Vultr, Linode, UpCloud, Scaleway, Tailscale, Oracle Cloud, OVHcloud, Leaseweb, i3D.net and TransIP. VMs appear, IPs update, stale hosts dim. Region, instance type, OS and status synced as metadata.
+☁️ **Your ssh config tracks your infra.** Drop in one API token per cloud provider. New VMs land in `~/.ssh/config` the moment they boot. IPs stay current as instances move. Decommissioned hosts dim so you can purge them on your terms. No more hand-editing after every Terraform run, no more grepping cloud consoles for the right IP. 16 cloud providers: AWS, DigitalOcean, Hetzner, GCP, Azure, Proxmox VE, Vultr, Linode, UpCloud, Scaleway, Tailscale, Oracle Cloud, OVHcloud, Leaseweb, i3D.net and TransIP. Region, instance type, OS and status travel as metadata next to each Host block.
 
 ![cloud providers](screenshots/providers.png)
 

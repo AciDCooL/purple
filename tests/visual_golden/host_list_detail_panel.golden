@@ -3,7 +3,7 @@
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 22 ── ●20 ✖2 ────────────────────────────────────────────╮╭─ bastion-ams ────────────────────────╮
 │     NAME                             TAGS          LAST▾ ││ ops@140.82.121.3:22                  │
-│──────────────────────────────────────────────────────────││ ● online (7ms)                       │
+│──────────────────────────────────────────────────────────││ ● online (7ms)  checked just now     │
 │▌  ● bastion-ams ⇄                    production     <1m  │╰──────────────────────────────────────╯
 │   ● db-primary ↗ ⇄                   production      1h  │╭─ CONNECTION ─────────────────────────╮
 │   ● monitoring ↗ ⇄                   production      2h  ││ Host          140.82.121.3           │
@@ -490,6 +490,24 @@
 (73,5) fg=Green bg=Reset mod=-
 (74,5) fg=Green bg=Reset mod=-
 (75,5) fg=Green bg=Reset mod=-
+(76,5) fg=Reset bg=Reset mod=DIM
+(77,5) fg=Reset bg=Reset mod=DIM
+(78,5) fg=Reset bg=Reset mod=DIM
+(79,5) fg=Reset bg=Reset mod=DIM
+(80,5) fg=Reset bg=Reset mod=DIM
+(81,5) fg=Reset bg=Reset mod=DIM
+(82,5) fg=Reset bg=Reset mod=DIM
+(83,5) fg=Reset bg=Reset mod=DIM
+(84,5) fg=Reset bg=Reset mod=DIM
+(85,5) fg=Reset bg=Reset mod=DIM
+(86,5) fg=Reset bg=Reset mod=DIM
+(87,5) fg=Reset bg=Reset mod=DIM
+(88,5) fg=Reset bg=Reset mod=DIM
+(89,5) fg=Reset bg=Reset mod=DIM
+(90,5) fg=Reset bg=Reset mod=DIM
+(91,5) fg=Reset bg=Reset mod=DIM
+(92,5) fg=Reset bg=Reset mod=DIM
+(93,5) fg=Reset bg=Reset mod=DIM
 (99,5) fg=Reset bg=Reset mod=DIM
 (0,6) fg=Reset bg=Reset mod=DIM
 (1,6) fg=White bg=Magenta mod=BOLD

@@ -46,7 +46,7 @@ mod forms;
 mod groups;
 mod host_state;
 mod hosts;
-mod ping;
+pub(crate) mod ping;
 mod provider_state;
 mod reload_state;
 mod screen;
@@ -313,6 +313,9 @@ impl App {
             .collect();
         self.ping
             .status
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        self.ping
+            .last_checked
             .retain(|alias, _| valid_aliases.contains(alias.as_str()));
 
         // Restore search if it was active, otherwise reset
@@ -633,6 +636,7 @@ impl App {
                 self.hosts_state.undo_stack.clear();
                 // Clear stale ping status — hosts may have changed
                 self.ping.status.clear();
+                self.ping.last_checked.clear();
                 self.ping.filter_down_only = false;
                 self.ping.checked_at = None;
                 self.reload_hosts();

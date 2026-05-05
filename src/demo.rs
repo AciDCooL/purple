@@ -417,7 +417,11 @@ pub fn build_demo_app() -> App {
         .insert("pve-backup".into(), PingStatus::Unreachable);
 
     app.ping.has_pinged = true;
-    app.ping.checked_at = Some(std::time::Instant::now());
+    let now = std::time::Instant::now();
+    app.ping.checked_at = Some(now);
+    for alias in app.ping.status.keys().cloned().collect::<Vec<_>>() {
+        app.ping.last_checked.insert(alias, now);
+    }
 
     // Vault SSH cert status (deterministic demo data)
     {

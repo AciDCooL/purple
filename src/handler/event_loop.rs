@@ -67,18 +67,6 @@ pub(crate) fn handle_tick(
             }
         }
     }
-    // Expire ping results after 60s TTL
-    if let Some(checked_at) = app.ping.checked_at {
-        if checked_at.elapsed() > std::time::Duration::from_secs(60) {
-            app.ping.status.clear();
-            app.ping.checked_at = None;
-            app.ping.generation += 1;
-            if app.ping.filter_down_only {
-                app.cancel_search();
-            }
-            app.notify_background(crate::messages::PING_EXPIRED);
-        }
-    }
     // Throttle config file stat() to every 4 seconds
     if last_config_check.elapsed() >= std::time::Duration::from_secs(4) {
         app.check_config_changed();
@@ -104,7 +92,9 @@ pub(crate) fn handle_ping_result(
 ) {
     if generation == app.ping.generation {
         let status = app::classify_ping(rtt_ms, app.ping.slow_threshold_ms);
+        let now = Instant::now();
         app.ping.status.insert(alias.clone(), status.clone());
+        app.ping.last_checked.insert(alias.clone(), now);
         // Propagate bastion status to all ProxyJump dependents.
         app::propagate_ping_to_dependents(
             &app.hosts_state.list,
@@ -112,6 +102,11 @@ pub(crate) fn handle_ping_result(
             &alias,
             &status,
         );
+        for h in &app.hosts_state.list {
+            if h.proxy_jump == alias {
+                app.ping.last_checked.insert(h.alias.clone(), now);
+            }
+        }
         // Update live filter/sort as results arrive
         if app.ping.filter_down_only {
             app.apply_filter();

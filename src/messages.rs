@@ -442,8 +442,6 @@ pub const TRANSFER_COMPLETE: &str = "Transfer complete.";
 
 // ── Background / event loop ─────────────────────────────────────────
 
-pub const PING_EXPIRED: &str = "Ping expired. Press P to refresh.";
-
 /// Per-provider sync progress line with a leading spinner frame so
 /// `event_loop::handle_tick` animates the prefix while the message is
 /// on screen. Format: `⠋ Proxmox VE: Resolving IPs (1/5)...`. Mirrors
