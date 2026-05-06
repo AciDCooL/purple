@@ -1,6 +1,12 @@
 <img src="site/purple-logo.svg" alt="purple" width="213" height="48">
 
-**An open-source terminal SSH manager for macOS and Linux that keeps `~/.ssh/config` in sync with your cloud infra.** Spin up a VM on AWS, GCP, Azure, Hetzner, Proxmox or 11 other cloud providers and it shows up in your host list. Destroy it and the entry dims. No more hand-editing `~/.ssh/config` after every Terraform run, no more grepping cloud consoles for the right IP. A fast Rust TUI with fuzzy search across hundreds of hosts, file transfer, Docker and Podman over SSH, short-lived HashiCorp Vault SSH certificates and an MCP server for AI agents. Keyboard-driven. Single binary. MIT licensed.
+**An open-source terminal SSH manager for macOS and Linux that keeps `~/.ssh/config` in sync with your cloud infra.** 
+
+Spin up a VM on AWS, GCP, Azure, Hetzner, Proxmox or 11 other cloud providers and it shows up in your host list. Destroy it and the entry dims. No more hand-editing `~/.ssh/config` after every Terraform run, no more grepping cloud consoles for the right IP.
+
+A fast Rust TUI with fuzzy search across hundreds of hosts, file transfer, Docker and Podman over SSH, short-lived HashiCorp Vault SSH certificates and an MCP server for AI agents.
+
+Keyboard-driven. Single binary. MIT licensed.
 
 [![crates.io](https://img.shields.io/crates/v/purple-ssh?color=b44aff&labelColor=0a0a14)](https://crates.io/crates/purple-ssh)
 [![downloads](https://img.shields.io/crates/d/purple-ssh?color=b44aff&labelColor=0a0a14)](https://crates.io/crates/purple-ssh)
@@ -48,16 +54,16 @@ I wanted one place for all of that. So I built it.
 
 ## What you get
 
-🔎 **Jump to anything with one keystroke.** Press `:` for a universal fuzzy bar across hosts, tunnels, containers, snippets and actions. Searches the SSH `User`, `ProxyJump` and Vault SSH role too, so typing your username finds every server you log in as. Field prefixes (`user:`, `proxy:`, `vault:`, `tag:`) scope to a single directive. Like Linear's `Cmd+K`, but in your terminal.
-
-![jump bar](screenshots/jump.png)
-
-<img src="screenshots/detail.png" width="40%" align="left" alt="detail panel">
+<img src="screenshots/detail.png" width="70%" align="left" alt="detail panel">
 
 🔍 **Everything at a glance.** Connection info, jump route, activity sparkline, tags, tunnels, snippets, containers and server metadata. Health dots show which hosts are up. Group by provider, tag or flat.
 
 <br clear="both">
 <br>
+
+🔎 **Jump to anything with one keystroke.** Press `:` for a universal fuzzy bar across hosts, tunnels, containers, snippets and actions. Searches the SSH `User`, `ProxyJump` and Vault SSH role too, so typing your username finds every server you log in as. Field prefixes (`user:`, `proxy:`, `vault:`, `tag:`) scope to a single directive. Like Linear's `Cmd+K`, but in your terminal.
+
+![jump bar](screenshots/jump.png)
 
 ⚡ **Instant fuzzy search.** Names, IPs, tags, users. Frecency sorting puts your most-used hosts on top. Works the same with 5 hosts or 500. Scoped search within groups.
 
@@ -75,7 +81,19 @@ I wanted one place for all of that. So I built it.
 
 ![live tunnels](screenshots/tunnels.png)
 
-**And more.** Visual file transfer with split-pane explorer. Multi-host command execution with snippets. Automatic password retrieval from OS Keychain, 1Password, Bitwarden, pass and the HashiCorp Vault KV secrets engine. Short-lived SSH certificates signed via the HashiCorp Vault SSH secrets engine. MCP server for AI agents like Claude Code and Cursor. See the [wiki](https://github.com/erickochen/purple/wiki) for details.
+**And more.**
+
+🚚 Visual file transfer with split-pane explorer.
+
+🪄 Multi-host command execution with snippets.
+
+🗝️ Automatic password retrieval from OS Keychain, 1Password, Bitwarden, pass and the HashiCorp Vault KV secrets engine.
+
+🎫 Short-lived SSH certificates signed via the HashiCorp Vault SSH secrets engine.
+
+🤖 MCP server for AI agents like Claude Code and Cursor.
+
+See the [wiki](https://github.com/erickochen/purple/wiki) for details.
 
 ## How it works
 
@@ -89,7 +107,25 @@ Written in Rust. Single binary. 6800+ tests. MIT license.
 
 ## Credits
 
-The font used in the demo videos and screenshots is [Berkeley Mono™](https://usgraphics.com/products/berkeley-mono) by U.S. Graphics Company.
+Screenshots and demo videos are captured in [Ghostty](https://ghostty.org) with [Berkeley Mono™](https://usgraphics.com/products/berkeley-mono) by U.S. Graphics Company.
+
+<details>
+<summary>Ghostty config</summary>
+
+```
+theme = Dracula
+
+font-family = Berkeley Mono
+font-size = 15
+font-feature = +ss01
+font-feature = +ss05
+font-feature = +calt
+
+window-colorspace = display-p3
+window-padding-x = 6
+window-padding-y = 6,6
+```
+</details>
 
 ## Feedback
 
