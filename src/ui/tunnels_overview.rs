@@ -799,7 +799,7 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &mut App, rows: &[TunnelRow
         .primary("Enter", primary_label)
         .action("/", " search ")
         .action("s", " sort ")
-        .action(":", " cmds ")
+        .action(":", " jump ")
         .into_spans();
     super::render_footer_with_help(frame, area, spans, app);
 }

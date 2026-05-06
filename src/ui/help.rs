@@ -285,7 +285,7 @@ fn blank() -> Line<'static> {
 fn host_list_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
     // Essentials only. Headers in col2 are shifted down so CONNECT AND RUN
     // vertically aligns with VIEW (col1) and TOOLS aligns with CLIPBOARD.
-    // The command palette (`:`) sits at the very bottom of col1, vertically
+    // The jump bar (`:`) sits at the very bottom of col1, vertically
     // aligned with `q/Esc quit` in col2, so the last row of both columns is
     // a close/leave action. `r/R` mirrors `p/P` — single-target vs all.
     let col1 = vec![
@@ -312,7 +312,7 @@ fn host_list_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         blank(),
         blank(),
         blank(),
-        help_line(":", "command palette"), // row 23 ↔ col2 q/Esc quit
+        help_line(":", "jump (search anything)"), // row 23 ↔ col2 q/Esc quit
     ];
 
     let col2 = vec![
@@ -437,7 +437,7 @@ fn tunnels_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         help_line("Enter", "start / stop"),
         help_line("s", "cycle sort"),
         blank(),
-        help_line(":", "command palette"), // row 15 ↔ col2 q/Esc quit
+        help_line(":", "jump (search anything)"), // row 15 ↔ col2 q/Esc quit
     ];
 
     let col2 = vec![
@@ -914,7 +914,7 @@ mod tests {
     #[test]
     fn tunnels_overview_columns_cover_tab_specific_shortcuts() {
         // Tunnels tab supports more than the per-host TunnelList — at
-        // minimum search, sort, command palette and tab switching.
+        // minimum search, sort, jump bar and tab switching.
         let (col1, col2) = tunnels_overview_columns();
         let text: String = col1
             .iter()
@@ -927,7 +927,7 @@ mod tests {
             "edit",
             "search",
             "cycle sort",
-            "command palette",
+            "jump (search anything)",
             "switch to hosts",
         ] {
             assert!(

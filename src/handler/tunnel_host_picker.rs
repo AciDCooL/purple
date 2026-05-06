@@ -3,7 +3,7 @@
 //! Lists all editable hosts (hosts that live in the user's own SSH config,
 //! not in an included file). Always-on filter input — every printable
 //! keystroke appends to the query and the candidate set shrinks live, using
-//! the same case-insensitive substring match the command palette uses.
+//! the same case-insensitive substring match the jump uses.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -26,7 +26,7 @@ pub(crate) fn editable_aliases(app: &App) -> Vec<String> {
 /// Hosts that match the live query, paired with the matching hostname for
 /// display. When the query is empty every editable host is returned.
 ///
-/// Match rule mirrors `CommandPaletteState::filtered_commands`:
+/// Match rule mirrors `JumpState::filtered_commands`:
 /// case-insensitive substring search. Same predictable semantics across
 /// every "type to filter" overlay in the app.
 pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
@@ -78,7 +78,7 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
             app.capture_tunnel_form_baseline();
         }
         KeyCode::Backspace => {
-            // Mirror the command palette: Backspace on an empty query
+            // Mirror the jump: Backspace on an empty query
             // closes the overlay; otherwise it shortens the query.
             if app.ui.tunnel_host_picker_query.is_empty() {
                 close(app);
@@ -92,7 +92,7 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
                 && app.ui.tunnel_host_picker_query.len() < 64 =>
         {
             // Cap the query length so a stuck key cannot grow the buffer
-            // unbounded. Same 64-char cap the command palette uses.
+            // unbounded. Same 64-char cap the jump uses.
             app.ui.tunnel_host_picker_query.push(c);
             reset_cursor_after_query_change(app);
         }

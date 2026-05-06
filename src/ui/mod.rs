@@ -1,5 +1,4 @@
 mod bulk_tag_editor;
-mod command_palette;
 pub(crate) mod confirm_dialog;
 pub(crate) mod containers;
 pub(crate) mod design;
@@ -9,6 +8,7 @@ mod help;
 mod host_detail;
 pub mod host_form;
 mod host_list;
+mod jump;
 mod key_detail;
 mod key_list;
 mod provider_list;
@@ -60,7 +60,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
     // hide the status so it only appears in the overlay's own footer.
     // Note: host_list::render does not set app.status_center.status, so the unconditional restore
     // is safe. If that invariant ever changes, use get_or_insert semantics instead.
-    let has_overlay = !matches!(app.screen, Screen::HostList) || app.palette.is_some();
+    let has_overlay = !matches!(app.screen, Screen::HostList) || app.jump.is_some();
     let status = if has_overlay {
         app.status_center.status.take()
     } else {
@@ -219,12 +219,12 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         }
     }
 
-    // Command palette renders on top of any screen. Rendered directly (not via
+    // Jump renders on top of any screen. Rendered directly (not via
     // render_overlay) to avoid polluting the overlay_close animation buffer,
     // which is reserved for Screen-driven overlays.
-    if app.palette.is_some() {
+    if app.jump.is_some() {
         dim_background(frame);
-        command_palette::render(frame, app);
+        jump::render(frame, app);
     }
 
     // Toast overlay renders on top of everything

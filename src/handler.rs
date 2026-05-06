@@ -9,7 +9,6 @@ use crate::event::AppEvent;
 use crate::ssh_config::model::HostEntry;
 
 mod bulk_tag_editor;
-mod command_palette;
 mod confirm;
 mod containers;
 pub(crate) mod event_loop;
@@ -18,6 +17,7 @@ mod help;
 mod host_detail;
 mod host_form;
 mod host_list;
+mod jump;
 mod picker;
 mod ping;
 mod provider;
@@ -112,9 +112,9 @@ pub fn handle_key_event(
         return Ok(());
     }
 
-    // Command palette intercept
-    if app.palette.is_some() {
-        command_palette::handle_command_palette(app, key, events_tx);
+    // Jump intercept
+    if app.jump.is_some() {
+        jump::handle_jump(app, key, events_tx);
         return Ok(());
     }
 

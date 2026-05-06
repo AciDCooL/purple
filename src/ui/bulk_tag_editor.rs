@@ -134,10 +134,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             // changes"), so primary verb is "apply" not generic "ok".
             // NNGroup: name a button to explain what it does.
             design::Footer::new()
+                .primary("Enter", " apply ")
                 .action("Space", " cycle ")
                 .action("+", " new ")
-                .primary("Enter", " apply ")
-                .action("Esc", " back")
+                .action("Esc", " cancel")
         };
         f.render_with_status(frame, footer_area, app);
     }

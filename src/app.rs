@@ -46,6 +46,7 @@ mod forms;
 mod groups;
 mod host_state;
 mod hosts;
+pub(crate) mod jump;
 pub(crate) mod ping;
 mod provider_state;
 mod reload_state;
@@ -184,8 +185,8 @@ pub struct App {
     /// Deferred config write from VaultSignAllDone (guarded while forms are open).
     pub pending_vault_config_write: bool,
 
-    /// Command palette state. Some when palette is open.
-    pub palette: Option<CommandPaletteState>,
+    /// Jump state. Some when the jump bar is open.
+    pub jump: Option<JumpState>,
 }
 
 impl App {
@@ -235,7 +236,7 @@ impl App {
             welcome_opened: None,
             demo_mode: false,
             pending_vault_config_write: false,
-            palette: None,
+            jump: None,
         }
     }
 
@@ -431,6 +432,286 @@ impl App {
             self.screen,
             Screen::AddHost | Screen::EditHost { .. } | Screen::ProviderForm { .. }
         )
+    }
+
+    /// Open the unified jump in the given mode. Loads recents
+    /// from disk and seeds the empty-query view. Recomputes hits.
+    pub fn open_jump(&mut self, mode: JumpMode) {
+        log::debug!("jump: open mode={:?}", mode);
+        let mut state = JumpState::for_mode(mode);
+        let recents_file = jump::load_recents();
+        state.recents = self.resolve_recents(&recents_file);
+        self.jump = Some(state);
+        self.recompute_jump_hits();
+    }
+
+    /// Translate the on-disk recents log into live `JumpHit`s, dropping
+    /// dangling references silently.
+    fn resolve_recents(&self, file: &RecentsFile) -> Vec<JumpHit> {
+        let mode = self
+            .jump
+            .as_ref()
+            .map(|p| p.mode)
+            .unwrap_or(JumpMode::Hosts);
+        let mut out = Vec::with_capacity(file.entries.len());
+        for entry in &file.entries {
+            if let Some(hit) = self.resolve_recent_ref(&entry.target, mode) {
+                out.push(hit);
+            }
+        }
+        out
+    }
+
+    /// Test seam: exposes `resolve_recent_ref` as `pub(crate)` so the unit
+    /// tests in `app::tests` can drive each `SourceKind` branch without
+    /// going through `open_jump`.
+    #[cfg(test)]
+    pub(crate) fn resolve_recent_ref_for_test(
+        &self,
+        r: &RecentRef,
+        mode: JumpMode,
+    ) -> Option<JumpHit> {
+        self.resolve_recent_ref(r, mode)
+    }
+
+    fn resolve_recent_ref(&self, r: &RecentRef, mode: JumpMode) -> Option<JumpHit> {
+        match r.kind {
+            SourceKind::Action => {
+                let key_char = r.key.chars().next()?;
+                let actions = JumpAction::for_mode(mode);
+                actions
+                    .iter()
+                    .find(|a| a.key == key_char)
+                    .copied()
+                    .map(JumpHit::Action)
+            }
+            SourceKind::Host => {
+                let host = self.hosts_state.list.iter().find(|h| h.alias == r.key)?;
+                Some(JumpHit::Host(HostHit {
+                    alias: host.alias.clone(),
+                    hostname: host.hostname.clone(),
+                    tags: host.tags.clone(),
+                    provider: host.provider.clone(),
+                    user: host.user.clone(),
+                    identity_file: host.identity_file.clone(),
+                    proxy_jump: host.proxy_jump.clone(),
+                    vault_ssh: host.vault_ssh.clone(),
+                }))
+            }
+            SourceKind::Tunnel => {
+                let (alias, port_str) = r.key.split_once(':')?;
+                let port: u16 = port_str.parse().ok()?;
+                let rules = self.hosts_state.ssh_config.find_tunnel_directives(alias);
+                let rule = rules.iter().find(|r| r.bind_port == port)?;
+                Some(JumpHit::Tunnel(TunnelHit {
+                    alias: alias.to_string(),
+                    bind_port: rule.bind_port,
+                    bind_port_str: rule.bind_port.to_string(),
+                    destination: rule.display(),
+                    active: self.tunnels.active.contains_key(alias),
+                }))
+            }
+            SourceKind::Container => {
+                let (alias, name) = r.key.split_once('/')?;
+                let entry = self.container_cache.get(alias)?;
+                let info = entry.containers.iter().find(|c| c.names == name)?;
+                Some(JumpHit::Container(ContainerHit {
+                    alias: alias.to_string(),
+                    container_name: info.names.clone(),
+                    container_id: info.id.clone(),
+                    state: info.state.clone(),
+                }))
+            }
+            SourceKind::Snippet => {
+                let snippet = self.snippets.store.get(&r.key)?;
+                Some(JumpHit::Snippet(SnippetHit {
+                    name: snippet.name.clone(),
+                    command_preview: preview(&snippet.command, 40),
+                }))
+            }
+        }
+    }
+
+    /// Recompute the jump bar hit list against the current query. Pulls
+    /// candidates from every live source and ranks them with nucleo-matcher.
+    /// Preserves the previously-selected hit's identity across the
+    /// recompute so mid-typing arrow-key navigation does not jump back to
+    /// row 0.
+    pub fn recompute_jump_hits(&mut self) {
+        let Some(mut state) = self.jump.take() else {
+            return;
+        };
+        // Identity of the row the user was on before the recompute. We
+        // re-resolve it after rebuilding `hits` to keep selection stable
+        // when the user types and the matched row is still in the list.
+        let prior_identity = state
+            .visible_hits()
+            .get(state.selected)
+            .map(|h| h.identity());
+
+        let candidates = self.collect_jump_candidates(state.mode);
+        if state.query.is_empty() {
+            state.hits = candidates;
+            state.selected = restore_selection(&state.visible_hits(), prior_identity.as_ref(), 0);
+            self.jump = Some(state);
+            return;
+        }
+
+        // Field-prefix syntax: `user:eric` scopes to one field. Empty
+        // remainder after the prefix is treated as no query (empty
+        // scope-search). Mode is held in `query_scope` for the row
+        // renderer to surface a "via <field>" hint.
+        let (scope, effective_query) = parse_query_scope(&state.query);
+
+        use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
+        use nucleo_matcher::{Config, Matcher, Utf32Str};
+        let matcher_state = state
+            .matcher
+            .get_or_insert_with(|| Matcher::new(Config::DEFAULT));
+        let pattern = Pattern::parse(effective_query, CaseMatching::Smart, Normalization::Smart);
+        let mut buf: Vec<char> = Vec::new();
+        let mut scored: Vec<(JumpHit, u32)> = Vec::with_capacity(candidates.len());
+        for hit in candidates {
+            let mut best: u32 = 0;
+            // Score over the right haystack set: scoped queries narrow to
+            // a single field; unscoped queries score over everything the
+            // hit advertises.
+            let scoped_haystacks = scoped_haystacks_for(&hit, scope);
+            let haystacks: Vec<&str> = if let Some(hs) = scoped_haystacks {
+                hs
+            } else {
+                hit.haystacks()
+            };
+            for haystack in haystacks {
+                buf.clear();
+                let chars = Utf32Str::new(haystack, &mut buf);
+                if let Some(score) = pattern.score(chars, matcher_state) {
+                    best = best.max(score);
+                }
+            }
+            // Boost: a single-char query that exactly matches an action's
+            // hotkey letter (case-insensitive) lands the action at the top.
+            // When two actions share the same hotkey (e.g. 'a' for `Hosts:
+            // Add host` and `Tunnels: Add tunnel`), the one whose target
+            // matches the current mode wins, so muscle memory survives.
+            if let JumpHit::Action(a) = &hit {
+                let single = effective_query.chars().next();
+                if effective_query.chars().count() == 1
+                    && single
+                        .map(|c| c.eq_ignore_ascii_case(&a.key))
+                        .unwrap_or(false)
+                {
+                    let mode_match = matches!(
+                        (state.mode, a.target),
+                        (JumpMode::Hosts, JumpActionTarget::Hosts)
+                            | (JumpMode::Tunnels, JumpActionTarget::Tunnels)
+                    );
+                    let bump = if mode_match { 20_000 } else { 10_000 };
+                    best = best.saturating_add(bump);
+                }
+            }
+            // Score floor: actions need to clear a higher bar than data
+            // rows. Stops query 'eric' from dragging in 'Containers: List
+            // containers' on stray e/r/i/c char overlap.
+            let floor = match &hit {
+                JumpHit::Action(_) => PALETTE_ACTION_FLOOR,
+                _ => 1,
+            };
+            if best >= floor {
+                scored.push((hit, best));
+            }
+        }
+        // Stable sort: higher score first, ties broken by render-order kind so
+        // hosts come before actions when scores tie.
+        scored.sort_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| kind_rank(a.0.kind()).cmp(&kind_rank(b.0.kind())))
+        });
+        // Cap per-section using a fixed-size array so a broad query (one
+        // char that matches everything) cannot blow the visible list.
+        let mut per_kind: [usize; 5] = [0; 5];
+        let mut filtered: Vec<JumpHit> = Vec::with_capacity(scored.len().min(160));
+        for (hit, _) in scored {
+            let slot = kind_rank(hit.kind()) as usize;
+            if per_kind[slot] < PALETTE_PER_SECTION_CAP {
+                per_kind[slot] += 1;
+                filtered.push(hit);
+            }
+        }
+        state.hits = filtered;
+        state.selected = restore_selection(&state.visible_hits(), prior_identity.as_ref(), 0);
+        self.jump = Some(state);
+    }
+
+    fn collect_jump_candidates(&self, mode: JumpMode) -> Vec<JumpHit> {
+        let mut out: Vec<JumpHit> = Vec::new();
+        // Hosts
+        for h in &self.hosts_state.list {
+            out.push(JumpHit::Host(HostHit {
+                alias: h.alias.clone(),
+                hostname: h.hostname.clone(),
+                tags: h.tags.clone(),
+                provider: h.provider.clone(),
+                user: h.user.clone(),
+                identity_file: h.identity_file.clone(),
+                proxy_jump: h.proxy_jump.clone(),
+                vault_ssh: h.vault_ssh.clone(),
+            }));
+        }
+        // Tunnels: every configured rule from every host with a directive.
+        for h in &self.hosts_state.list {
+            let rules = self.hosts_state.ssh_config.find_tunnel_directives(&h.alias);
+            for rule in rules {
+                out.push(JumpHit::Tunnel(TunnelHit {
+                    alias: h.alias.clone(),
+                    bind_port: rule.bind_port,
+                    bind_port_str: rule.bind_port.to_string(),
+                    destination: rule.display(),
+                    active: self.tunnels.active.contains_key(&h.alias),
+                }));
+            }
+        }
+        // Containers: cached only. Triggering an SSH fetch on jump bar open
+        // would be unbounded latency.
+        for (alias, entry) in &self.container_cache {
+            for info in &entry.containers {
+                out.push(JumpHit::Container(ContainerHit {
+                    alias: alias.clone(),
+                    container_name: info.names.clone(),
+                    container_id: info.id.clone(),
+                    state: info.state.clone(),
+                }));
+            }
+        }
+        // Snippets
+        for snippet in &self.snippets.store.snippets {
+            out.push(JumpHit::Snippet(SnippetHit {
+                name: snippet.name.clone(),
+                command_preview: preview(&snippet.command, 40),
+            }));
+        }
+        // Actions last
+        for a in JumpAction::for_mode(mode) {
+            out.push(JumpHit::Action(*a));
+        }
+        out
+    }
+
+    /// Persist a jump dispatch to the on-disk MRU log. Best-effort; a
+    /// write error logs and is otherwise swallowed so user navigation is
+    /// never blocked by a recents-file failure. Takes `&mut self` so the
+    /// type system reflects that this performs I/O and mutates persistent
+    /// state, even though `jump::save_recents` only needs `&File`.
+    pub fn record_jump_hit(&mut self, hit: &JumpHit) {
+        if self.demo_mode {
+            log::debug!("jump: record skipped (demo mode)");
+            return;
+        }
+        let mut file = jump::load_recents();
+        jump::touch_recent(&mut file, hit.identity());
+        if let Err(e) = jump::save_recents(&file) {
+            log::warn!("[purple] failed to save recents: {e}");
+        }
     }
 
     /// Flush a deferred vault config write if one is pending and no form is open.
@@ -774,202 +1055,511 @@ pub(crate) fn page_up(state: &mut ListState, len: usize, page_size: usize) {
     state.select(Some(prev));
 }
 
-/// A command that can be executed from the command palette.
-#[derive(Debug, Clone, Copy)]
-pub struct PaletteCommand {
-    pub key: char,
-    pub label: &'static str,
-    /// Section for future grouped display. Not yet used by the renderer.
-    #[allow(dead_code)]
-    pub section: &'static str,
-}
+// Re-export the jump bar types so call sites keep referring to them via
+// `crate::app::JumpHit` / `crate::app::JumpAction` without caring
+// which submodule they live in.
+pub use jump::{
+    ContainerHit, HostHit, JumpAction, JumpActionTarget, JumpHit, RecentRef, RecentsFile,
+    SnippetHit, SourceKind, TunnelHit,
+};
 
-static ALL_PALETTE_COMMANDS: &[PaletteCommand] = &[
-    PaletteCommand {
+/// Backwards-compatible alias for the old `PaletteCommand` (now `JumpAction`) name. The
+/// renamed type is `JumpAction`. Test-only — there is no production
+/// caller.
+#[cfg(test)]
+pub type PaletteCommand = JumpAction;
+
+/// Unified action set. Every action declares its `target` so dispatch
+/// switches `top_page` first, then synthesises the hotkey for the right
+/// handler. The jump bar shows this same list regardless of which
+/// top-page was active when it opened — so the overlay size is
+/// consistent and `Tunnels: Add tunnel` is reachable from the Hosts
+/// tab and vice versa.
+static ALL_JUMP_ACTIONS: &[JumpAction] = &[
+    JumpAction {
         key: 'a',
-        label: "add host",
-        section: "manage",
+        key_str: "a",
+        label: "Hosts: Add host",
+        aliases: &["new", "create"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'A',
-        label: "add pattern",
-        section: "manage",
+        key_str: "A",
+        label: "Hosts: Add pattern",
+        aliases: &["new pattern", "wildcard"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'e',
-        label: "edit",
-        section: "manage",
+        key_str: "e",
+        label: "Hosts: Edit host",
+        aliases: &["modify", "change"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'd',
-        label: "del",
-        section: "manage",
+        key_str: "d",
+        label: "Hosts: Delete host",
+        aliases: &["remove", "rm"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'c',
-        label: "clone",
-        section: "manage",
+        key_str: "c",
+        label: "Hosts: Clone host",
+        aliases: &["duplicate", "copy"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'u',
-        label: "undo del",
-        section: "manage",
+        key_str: "u",
+        label: "Hosts: Undo delete",
+        aliases: &["restore"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 't',
-        label: "tag (inline)",
-        section: "manage",
+        key_str: "t",
+        label: "Hosts: Tag host",
+        aliases: &["label", "category"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'i',
-        label: "all directives",
-        section: "manage",
+        key_str: "i",
+        label: "Hosts: Show all directives",
+        aliases: &["raw", "config", "settings"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'y',
-        label: "copy ssh command",
-        section: "clipboard",
+        key_str: "y",
+        label: "Clipboard: Copy SSH command",
+        aliases: &["yank"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'x',
-        label: "copy config block",
-        section: "clipboard",
+        key_str: "x",
+        label: "Clipboard: Copy config block",
+        aliases: &["yank config"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'X',
-        label: "purge stale",
-        section: "clipboard",
+        key_str: "X",
+        label: "Hosts: Purge stale hosts",
+        aliases: &["clean", "cleanup"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'F',
-        label: "file explorer",
-        section: "tools",
+        key_str: "F",
+        label: "Files: Browse remote files",
+        aliases: &[
+            "browse",
+            "filesystem",
+            "scp",
+            "sftp",
+            "transfer",
+            "explorer",
+            "open",
+        ],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
-        key: 'T',
-        label: "tunnels",
-        section: "tools",
-    },
-    PaletteCommand {
+    JumpAction {
         key: 'C',
-        label: "containers",
-        section: "tools",
+        key_str: "C",
+        label: "Containers: List containers",
+        aliases: &["docker", "podman", "ps", "open"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'K',
-        label: "SSH keys",
-        section: "tools",
+        key_str: "K",
+        label: "Keys: Manage SSH keys",
+        aliases: &["identity", "id_rsa", "id_ed25519", "private key", "open"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'S',
-        label: "providers",
-        section: "tools",
+        key_str: "S",
+        label: "Providers: Manage cloud sync",
+        aliases: &["cloud", "aws", "gcp", "azure", "hetzner", "sync", "open"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'V',
-        label: "vault sign",
-        section: "tools",
+        key_str: "V",
+        label: "Vault: Sign certificate",
+        aliases: &["hashicorp", "ssh cert", "vault ssh"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'I',
-        label: "import known_hosts",
-        section: "tools",
+        key_str: "I",
+        label: "Hosts: Import from known_hosts",
+        aliases: &["known", "import"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'm',
-        label: "theme",
-        section: "tools",
+        key_str: "m",
+        label: "Settings: Switch theme",
+        aliases: &["color", "appearance", "dark", "light"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'n',
-        label: "what's new",
-        section: "tools",
+        key_str: "n",
+        label: "Help: What's new",
+        aliases: &["changelog", "news", "release notes"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'r',
-        label: "run snippet",
-        section: "connect",
+        key_str: "r",
+        label: "Snippets: Run snippet",
+        aliases: &["execute", "command"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'R',
-        label: "run on all visible",
-        section: "connect",
+        key_str: "R",
+        label: "Snippets: Run on all visible",
+        aliases: &["batch", "execute all"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'p',
-        label: "ping",
-        section: "connect",
+        key_str: "p",
+        label: "Hosts: Ping host",
+        aliases: &["health", "check"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'P',
-        label: "ping all",
-        section: "connect",
+        key_str: "P",
+        label: "Hosts: Ping all hosts",
+        aliases: &["health all"],
+        target: JumpActionTarget::Hosts,
     },
-    PaletteCommand {
+    JumpAction {
         key: '!',
-        label: "down-only filter",
-        section: "connect",
+        key_str: "!",
+        label: "Hosts: Show down only",
+        aliases: &["filter offline", "down only"],
+        target: JumpActionTarget::Hosts,
     },
-];
-
-/// Tunnel-screen palette commands. The tunnels overview only supports a
-/// subset of host actions, so the palette here is deliberately small.
-static TUNNELS_PALETTE_COMMANDS: &[PaletteCommand] = &[
-    PaletteCommand {
+    // Tunnel-tab actions. Disambiguated by label so they coexist with
+    // hosts-tab hotkey letters in the same list. Dispatch switches to
+    // Tunnels top-page before synthesising the keypress.
+    JumpAction {
+        key: 'T',
+        key_str: "T",
+        label: "Tunnels: Manage tunnels",
+        aliases: &["forward", "port forward", "ssh -L", "ssh -R", "open"],
+        target: JumpActionTarget::Hosts,
+    },
+    JumpAction {
         key: 'a',
-        label: "add tunnel",
-        section: "manage",
+        key_str: "a",
+        label: "Tunnels: Add tunnel",
+        aliases: &["new tunnel", "create tunnel", "forward"],
+        target: JumpActionTarget::Tunnels,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'e',
-        label: "edit tunnel",
-        section: "manage",
+        key_str: "e",
+        label: "Tunnels: Edit tunnel",
+        aliases: &["modify tunnel"],
+        target: JumpActionTarget::Tunnels,
     },
-    PaletteCommand {
+    JumpAction {
         key: 'd',
-        label: "del tunnel",
-        section: "manage",
+        key_str: "d",
+        label: "Tunnels: Delete tunnel",
+        aliases: &["remove tunnel"],
+        target: JumpActionTarget::Tunnels,
     },
-    PaletteCommand {
+    JumpAction {
         key: 's',
-        label: "sort",
-        section: "view",
+        key_str: "s",
+        label: "Tunnels: Sort",
+        aliases: &["order tunnels"],
+        target: JumpActionTarget::Tunnels,
     },
 ];
 
-/// Which command set the palette displays. Determined by the screen that
-/// opened the palette so the action list matches what the underlying
+/// Which command set the jump bar displays. Determined by the screen that
+/// opened the jump bar so the action list matches what the underlying
 /// handler can dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PaletteMode {
+pub enum JumpMode {
     #[default]
     Hosts,
     Tunnels,
 }
 
-impl PaletteCommand {
+/// Cap on hits rendered per section. Broad queries (e.g. one character)
+/// match thousands of candidates; capping keeps the jump bar legible without
+/// virtualizing the render. The selected hit always falls within the cap
+/// because results are sorted by score before truncation.
+pub const PALETTE_PER_SECTION_CAP: usize = 32;
+
+/// On the empty-query state we show only the top-N actions to keep the
+/// first impression a short menu rather than a wall. The full list is
+/// one keystroke away. Lives in the data layer so `visible_hits()`,
+/// `empty_state_groups()` and the Down handler all agree on the bound.
+pub const JUMP_EMPTY_STATE_ACTIONS_CAP: usize = 6;
+
+/// Display order for action categories on the empty state. The
+/// round-robin walks these buckets in this order, NOT in static-table
+/// order, so the first impression always shows the most-used categories
+/// regardless of how the static action list happens to be sorted.
+/// Categories not listed here fall through to a stable last-seen order.
+const CATEGORY_PRIORITY: &[&str] = &[
+    "Hosts",
+    "Tunnels",
+    "Containers",
+    "Files",
+    "Vault",
+    "Keys",
+    "Providers",
+    "Snippets",
+    "Clipboard",
+    "Settings",
+    "Help",
+];
+
+/// Minimum nucleo score for actions. Below this the action is dropped from
+/// results — kills "Containers: List containers" matching `eric` because
+/// `e/r/i/c` happen to scatter across the label without semantic intent.
+const PALETTE_ACTION_FLOOR: u32 = 30;
+
+/// Field-prefix parser: `user:eric` → (`Some(QueryScope::User)`, "eric").
+/// Returns `(None, query)` for queries without a recognised scope.
+pub fn parse_query_scope(query: &str) -> (Option<QueryScope>, &str) {
+    if let Some((prefix, rest)) = query.split_once(':') {
+        let scope = match prefix.trim() {
+            "user" => Some(QueryScope::User),
+            "host" => Some(QueryScope::Hostname),
+            "proxy" => Some(QueryScope::ProxyJump),
+            "vault" => Some(QueryScope::VaultSsh),
+            "tag" => Some(QueryScope::Tag),
+            _ => None,
+        };
+        if scope.is_some() {
+            return (scope, rest.trim_start());
+        }
+    }
+    (None, query)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryScope {
+    User,
+    Hostname,
+    ProxyJump,
+    VaultSsh,
+    Tag,
+}
+
+/// Truncate a string to `max` characters, appending "..." if cut.
+fn preview(s: &str, max: usize) -> String {
+    let s = s.replace('\n', " ");
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        s
+    } else {
+        let mut out: String = chars.iter().take(max.saturating_sub(3)).collect();
+        out.push_str("...");
+        out
+    }
+}
+
+/// Restrict scoring to a single field when the user prefixes the query
+/// with `user:` / `host:` / `proxy:` / `vault:` / `tag:`. Returns `None`
+/// when no scope is set OR when the scope does not apply to the hit
+/// (e.g. `vault:` on a snippet) — caller falls back to the full set.
+fn scoped_haystacks_for(hit: &JumpHit, scope: Option<QueryScope>) -> Option<Vec<&str>> {
+    let scope = scope?;
+    match (hit, scope) {
+        (JumpHit::Host(h), QueryScope::User) if !h.user.is_empty() => Some(vec![&h.user]),
+        (JumpHit::Host(h), QueryScope::Hostname) if !h.hostname.is_empty() => {
+            Some(vec![&h.hostname])
+        }
+        (JumpHit::Host(h), QueryScope::ProxyJump) if !h.proxy_jump.is_empty() => {
+            Some(vec![&h.proxy_jump])
+        }
+        (JumpHit::Host(h), QueryScope::VaultSsh) => h.vault_ssh.as_deref().map(|s| vec![s]),
+        (JumpHit::Host(h), QueryScope::Tag) => Some(h.tags.iter().map(|t| t.as_str()).collect()),
+        // Scoped queries do not match other kinds.
+        _ => None,
+    }
+}
+
+/// Determine which field caused the host hit to match. The renderer uses
+/// this to append a `via user`, `via proxy`, `vault: <role>` hint to the
+/// row when the matched field is not part of the visible columns. Returns
+/// `None` if the alias/hostname (already visible) matched.
+pub fn match_source_for_host(host: &HostHit, query: &str) -> Option<MatchSource> {
+    if query.is_empty() {
+        return None;
+    }
+    let q = query.to_lowercase();
+    let alias_hit = host.alias.to_lowercase().contains(&q);
+    let hostname_hit = host.hostname.to_lowercase().contains(&q);
+    if alias_hit || hostname_hit {
+        return None;
+    }
+    if !host.user.is_empty() && host.user.to_lowercase().contains(&q) {
+        return Some(MatchSource::User);
+    }
+    if !host.proxy_jump.is_empty() && host.proxy_jump.to_lowercase().contains(&q) {
+        return Some(MatchSource::ProxyJump);
+    }
+    if let Some(role) = &host.vault_ssh {
+        if role.to_lowercase().contains(&q) {
+            return Some(MatchSource::VaultSsh);
+        }
+    }
+    if !host.identity_file.is_empty() && host.identity_file.to_lowercase().contains(&q) {
+        return Some(MatchSource::IdentityFile);
+    }
+    None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchSource {
+    User,
+    ProxyJump,
+    VaultSsh,
+    IdentityFile,
+}
+
+/// Reorder actions so the first N show one per category, the next N
+/// show the second action of each category, etc. Preserves within-bucket
+/// order so muscle memory survives. Buckets are visited in
+/// `CATEGORY_PRIORITY` order — declarative, decoupled from static-table
+/// row order — so the empty-state top-N always leads with the most
+/// important categories. Categories not in the priority list fall to
+/// the end in stable encounter order.
+fn round_robin_actions_by_category(actions: impl Iterator<Item = JumpAction>) -> Vec<JumpHit> {
+    let mut buckets: Vec<(String, Vec<JumpAction>)> = Vec::new();
+    for action in actions {
+        let category = action
+            .label
+            .split_once(':')
+            .map(|(c, _)| c.trim().to_string())
+            .unwrap_or_else(|| "Other".to_string());
+        if let Some(slot) = buckets.iter_mut().find(|(c, _)| c == &category) {
+            slot.1.push(action);
+        } else {
+            buckets.push((category, vec![action]));
+        }
+    }
+    let priority_index = |cat: &str| -> usize {
+        CATEGORY_PRIORITY
+            .iter()
+            .position(|p| *p == cat)
+            .unwrap_or(usize::MAX)
+    };
+    buckets.sort_by_key(|(c, _)| priority_index(c));
+    let mut out: Vec<JumpHit> = Vec::new();
+    let mut depth = 0usize;
+    let max_depth = buckets.iter().map(|(_, v)| v.len()).max().unwrap_or(0);
+    while depth < max_depth {
+        for (_, bucket) in &buckets {
+            if let Some(action) = bucket.get(depth) {
+                out.push(JumpHit::Action(*action));
+            }
+        }
+        depth += 1;
+    }
+    out
+}
+
+fn kind_rank(k: SourceKind) -> u8 {
+    match k {
+        SourceKind::Host => 0,
+        SourceKind::Tunnel => 1,
+        SourceKind::Container => 2,
+        SourceKind::Snippet => 3,
+        SourceKind::Action => 4,
+    }
+}
+
+/// Find `prior` in `hits` and return its index, or `fallback` if the prior
+/// hit is gone (e.g. the typed query no longer matches it). Used by
+/// `recompute_jump_hits` so mid-typing arrow navigation does not lose
+/// the user's place.
+fn restore_selection(hits: &[JumpHit], prior: Option<&RecentRef>, fallback: usize) -> usize {
+    if let Some(target) = prior {
+        if let Some(idx) = hits.iter().position(|h| &h.identity() == target) {
+            return idx;
+        }
+    }
+    fallback.min(hits.len().saturating_sub(1))
+}
+
+impl JumpAction {
     #[cfg(test)]
-    pub fn all() -> &'static [PaletteCommand] {
-        ALL_PALETTE_COMMANDS
+    pub fn all() -> &'static [JumpAction] {
+        ALL_JUMP_ACTIONS
     }
 
-    pub fn for_mode(mode: PaletteMode) -> &'static [PaletteCommand] {
-        match mode {
-            PaletteMode::Hosts => ALL_PALETTE_COMMANDS,
-            PaletteMode::Tunnels => TUNNELS_PALETTE_COMMANDS,
+    /// The jump bar surfaces the same action set regardless of mode now.
+    /// `mode` is preserved on the API so the dispatcher and test helpers
+    /// can still pass through, but it no longer narrows the visible list.
+    pub fn for_mode(_mode: JumpMode) -> &'static [JumpAction] {
+        ALL_JUMP_ACTIONS
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct JumpState {
+    pub query: String,
+    pub selected: usize,
+    pub mode: JumpMode,
+    /// Computed result list, recomputed on every query change. Empty until
+    /// `App::recompute_jump_hits` runs.
+    pub hits: Vec<JumpHit>,
+    /// MRU snapshot loaded on jump bar open, used by the empty-query state.
+    pub recents: Vec<JumpHit>,
+    /// True once the user has navigated (Down/Up/Tab) at least once. The
+    /// renderer keeps the selection invisible on the empty state until
+    /// this flips, so the eye stays on the input field on first open.
+    /// Also makes the FIRST Down keystroke land on row 0 instead of
+    /// skipping to row 1.
+    pub cursor_revealed: bool,
+    /// Reused matcher with growable scratch buffers. Populated lazily on
+    /// the first scoring pass and kept across keystrokes so nucleo's
+    /// internal vectors do not reallocate every recompute.
+    pub matcher: Option<nucleo_matcher::Matcher>,
+}
+
+// Manual `Clone` because `nucleo_matcher::Matcher` is not `Clone`. State
+// clones (e.g. in tests) drop the cached matcher and let the next
+// recompute build a fresh one — correct behavior, just slightly slower
+// for the next keystroke after a clone.
+impl Clone for JumpState {
+    fn clone(&self) -> Self {
+        Self {
+            query: self.query.clone(),
+            selected: self.selected,
+            mode: self.mode,
+            hits: self.hits.clone(),
+            recents: self.recents.clone(),
+            cursor_revealed: self.cursor_revealed,
+            matcher: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct CommandPaletteState {
-    pub query: String,
-    pub selected: usize,
-    pub mode: PaletteMode,
-}
-
-impl CommandPaletteState {
-    pub fn for_mode(mode: PaletteMode) -> Self {
+impl JumpState {
+    pub fn for_mode(mode: JumpMode) -> Self {
         Self {
             mode,
             ..Self::default()
@@ -980,28 +1570,182 @@ impl CommandPaletteState {
         if self.query.len() < 64 {
             self.query.push(c);
         }
-        self.selected = 0;
+        // Selection is handled by `App::recompute_jump_hits` which
+        // tries to keep the previously-selected hit's identity. We do
+        // NOT reset to 0 here because that would defeat mid-typing
+        // navigation: typing a char must not jump the cursor.
     }
 
     pub fn pop_query(&mut self) {
         self.query.pop();
-        self.selected = 0;
     }
 
-    /// Return commands filtered by the current query (substring match on label).
-    /// Returns a borrowed static slice when the query is empty (no allocation).
-    pub fn filtered_commands(&self) -> std::borrow::Cow<'static, [PaletteCommand]> {
-        let all = PaletteCommand::for_mode(self.mode);
+    /// Return the hit list to render. With an empty query this is the
+    /// composed empty-state view (recents + the round-robin top-N
+    /// actions); otherwise it is the live computed `hits`. The cap on
+    /// the empty state is applied HERE (data layer) so the Down/Up
+    /// handlers, `visible_hits().len()`, and the renderer all agree on
+    /// the same bound — without this, scrolling past the rendered cap
+    /// would silently advance `selected` into invisible rows and the
+    /// highlight would appear to jump back to row 0.
+    pub fn visible_hits(&self) -> Vec<JumpHit> {
         if self.query.is_empty() {
-            return std::borrow::Cow::Borrowed(all);
+            let mut out: Vec<JumpHit> = self.recents.clone();
+            let recent_keys: std::collections::HashSet<RecentRef> =
+                self.recents.iter().map(|h| h.identity()).collect();
+            let actions = round_robin_actions_by_category(
+                JumpAction::for_mode(self.mode)
+                    .iter()
+                    .filter(|a| {
+                        let id = RecentRef::new(SourceKind::Action, a.key.to_string());
+                        !recent_keys.contains(&id)
+                    })
+                    .copied(),
+            );
+            for hit in actions.into_iter().take(JUMP_EMPTY_STATE_ACTIONS_CAP) {
+                out.push(hit);
+            }
+            out
+        } else {
+            self.hits.clone()
+        }
+    }
+
+    /// Number of actions available for the empty-state ACTIONS section
+    /// BEFORE the cap. Used by the renderer to render `Actions  6 of 29`
+    /// when the cap is applied.
+    pub fn empty_state_actions_total(&self) -> usize {
+        let recent_keys: std::collections::HashSet<RecentRef> =
+            self.recents.iter().map(|h| h.identity()).collect();
+        JumpAction::for_mode(self.mode)
+            .iter()
+            .filter(|a| {
+                let id = RecentRef::new(SourceKind::Action, a.key.to_string());
+                !recent_keys.contains(&id)
+            })
+            .count()
+    }
+
+    /// Group `visible_hits()` for the query view: by `SourceKind` in render
+    /// order. Empty sections are omitted. Only meaningful when a query is
+    /// active; the empty-state view uses `empty_state_groups` instead.
+    pub fn grouped_hits(&self) -> Vec<(SourceKind, Vec<JumpHit>)> {
+        let visible = self.visible_hits();
+        let mut out = Vec::with_capacity(SourceKind::render_order().len());
+        for kind in SourceKind::render_order() {
+            let group: Vec<JumpHit> = visible
+                .iter()
+                .filter(|h| h.kind() == kind)
+                .cloned()
+                .collect();
+            if !group.is_empty() {
+                out.push((kind, group));
+            }
+        }
+        out
+    }
+
+    /// Empty-state grouping: a single `RECENT` group (everything that came
+    /// from the MRU log, of any kind) followed by an `ACTIONS` group.
+    /// Returns `(label, hits)` rather than `(kind, hits)` so the renderer
+    /// can distinguish "RECENT" from a per-kind label.
+    pub fn empty_state_groups(&self) -> Vec<(&'static str, Vec<JumpHit>)> {
+        let mut out: Vec<(&'static str, Vec<JumpHit>)> = Vec::new();
+        if !self.recents.is_empty() {
+            out.push(("RECENT", self.recents.clone()));
+        }
+        let recent_keys: std::collections::HashSet<RecentRef> =
+            self.recents.iter().map(|h| h.identity()).collect();
+        // Round-robin by `Category:` prefix so the empty-state top-N
+        // shows one action per category before showing a second from the
+        // same category. Without this, the first six all start with
+        // `Hosts:` (because that's the static-list order) and the user
+        // believes the bar is a host CRUD menu.
+        let actions: Vec<JumpHit> = round_robin_actions_by_category(
+            JumpAction::for_mode(self.mode)
+                .iter()
+                .filter(|a| {
+                    let id = RecentRef::new(SourceKind::Action, a.key.to_string());
+                    !recent_keys.contains(&id)
+                })
+                .copied(),
+        )
+        .into_iter()
+        .take(JUMP_EMPTY_STATE_ACTIONS_CAP)
+        .collect();
+        if !actions.is_empty() {
+            out.push(("ACTIONS", actions));
+        }
+        out
+    }
+
+    /// Map `selected` index (into `visible_hits()`) to a `SourceKind` so the
+    /// renderer knows which section header is currently active.
+    pub fn selected_section(&self) -> Option<SourceKind> {
+        self.visible_hits().get(self.selected).map(|h| h.kind())
+    }
+
+    /// Return actions whose label substring-matches the current query.
+    /// Test-only shim for tests that predate the unified jump bar.
+    /// Production code iterates `visible_hits()` instead.
+    #[cfg(test)]
+    pub fn filtered_commands(&self) -> Vec<JumpAction> {
+        let all = JumpAction::for_mode(self.mode);
+        if self.query.is_empty() {
+            return all.to_vec();
         }
         let q = self.query.to_lowercase();
-        std::borrow::Cow::Owned(
-            all.iter()
-                .filter(|cmd| cmd.label.to_lowercase().contains(&q))
-                .copied()
-                .collect(),
-        )
+        all.iter()
+            .filter(|cmd| {
+                cmd.label.to_lowercase().contains(&q)
+                    || cmd.aliases.iter().any(|a| a.to_lowercase().contains(&q))
+            })
+            .copied()
+            .collect()
+    }
+
+    /// Move selection to the first hit in the next non-empty section. Wraps.
+    pub fn jump_next_section(&mut self) {
+        let visible = self.visible_hits();
+        if visible.is_empty() {
+            return;
+        }
+        if self.query.is_empty() {
+            // Empty-state has up to two groups: RECENT (length =
+            // recents.len()) and ACTIONS (the rest). Tab toggles between
+            // their first rows. Skip the toggle if there is no second
+            // group to jump to (e.g. no recents, or no actions after
+            // recents). The two `if` branches inside this block both fire
+            // in real cases: from RECENT row n we jump to actions; from
+            // an action row we wrap back to the first recent.
+            let n_recent = self.recents.len();
+            if n_recent == 0 || n_recent >= visible.len() {
+                return;
+            }
+            if self.selected < n_recent {
+                self.selected = n_recent; // RECENT -> ACTIONS
+            } else {
+                self.selected = 0; // ACTIONS -> first RECENT
+            }
+            return;
+        }
+        let groups = self.grouped_hits();
+        if groups.len() < 2 {
+            return;
+        }
+        let cur_kind = match self.selected_section() {
+            Some(k) => k,
+            None => {
+                self.selected = 0;
+                return;
+            }
+        };
+        let cur_idx = groups.iter().position(|(k, _)| *k == cur_kind).unwrap_or(0);
+        let next_idx = (cur_idx + 1) % groups.len();
+        let next_kind = groups[next_idx].0;
+        if let Some(pos) = visible.iter().position(|h| h.kind() == next_kind) {
+            self.selected = pos;
+        }
     }
 }
 

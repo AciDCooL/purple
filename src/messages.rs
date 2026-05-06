@@ -986,6 +986,22 @@ pub fn mcp_config_file_not_found(path: &impl std::fmt::Display) -> String {
 /// needs an explicit cue.
 pub const MCP_AUDIT_HOME_DIR_UNAVAILABLE: &str = "Could not determine home directory; MCP audit log disabled. Set --audit-log <PATH> explicitly to enable auditing.";
 
+// ── Jump ─────────────────────────────────────────────────
+
+/// Placeholder shown in the jump bar input when the query is empty.
+pub const PALETTE_PLACEHOLDER: &str = "Find anything";
+/// Empty-state copy when the current query has no matches.
+pub const PALETTE_NO_RESULTS: &str = "No matches.";
+/// Toast shown when the user dispatches a snippet from the jump bar while
+/// no host is selected (the snippet picker needs at least one target).
+pub const PALETTE_SNIPPET_NEEDS_HOST: &str =
+    "Pick a host first, then run a snippet from the jump bar.";
+/// Suffix appended to the truncated row list when the visible window is
+/// smaller than the result list.
+pub fn jump_more_rows(n: usize) -> String {
+    format!("+{n} more (scroll down)")
+}
+
 // ── CLI messages ────────────────────────────────────────────────────
 
 #[path = "messages/cli.rs"]

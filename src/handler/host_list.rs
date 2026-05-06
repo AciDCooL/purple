@@ -676,8 +676,8 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
             }
         }
         KeyCode::Char(':') => {
-            log::debug!("palette: opened from host list");
-            app.palette = Some(crate::app::CommandPaletteState::default());
+            log::debug!("jump: opened from host list");
+            app.open_jump(crate::app::JumpMode::Hosts);
         }
         KeyCode::Char('F') => actions::open_file_browser(app, events_tx),
         KeyCode::Char('C') => actions::open_container_overlay(app, events_tx),

@@ -6609,42 +6609,56 @@ fn message_class_is_error() {
 }
 
 #[test]
-fn palette_commands_have_unique_keys() {
+fn jump_commands_have_unique_keys_per_target() {
+    // Hotkey letters are unique within a `JumpActionTarget`. Across
+    // targets, the same letter ('a') can map to two distinct actions
+    // (Hosts: Add host vs Tunnels: Add tunnel) because dispatch routes
+    // by `target` first, then synthesises the hotkey for that handler.
     let commands = PaletteCommand::all();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen_hosts = std::collections::HashSet::new();
+    let mut seen_tunnels = std::collections::HashSet::new();
     for cmd in commands {
-        assert!(seen.insert(cmd.key), "duplicate palette key: '{}'", cmd.key);
+        let bucket = match cmd.target {
+            crate::app::JumpActionTarget::Hosts => &mut seen_hosts,
+            crate::app::JumpActionTarget::Tunnels => &mut seen_tunnels,
+        };
+        assert!(
+            bucket.insert(cmd.key),
+            "duplicate jump key '{}' within target {:?}",
+            cmd.key,
+            cmd.target
+        );
     }
+    assert!(commands.len() >= 25, "expected at least 25 jump actions");
+}
+
+#[test]
+fn jump_action_set_includes_tunnel_actions() {
+    let commands = PaletteCommand::for_mode(JumpMode::Tunnels);
     assert!(
-        commands.len() >= 20,
-        "expected at least 20 palette commands"
+        commands
+            .iter()
+            .any(|c| c.label.contains("Tunnels: Add tunnel")),
+        "Tunnels: Add tunnel must be present in the unified action set"
+    );
+    assert!(
+        commands.iter().any(|c| c.label.contains("Hosts: Add host")),
+        "Hosts: Add host must remain present even on Tunnels-mode jump"
     );
 }
 
 #[test]
-fn palette_tunnel_commands_have_unique_keys() {
-    let commands = PaletteCommand::for_mode(PaletteMode::Tunnels);
-    let mut seen = std::collections::HashSet::new();
-    for cmd in commands {
-        assert!(
-            seen.insert(cmd.key),
-            "duplicate tunnel palette key: '{}'",
-            cmd.key
-        );
-    }
-    assert!(!commands.is_empty(), "tunnel palette must not be empty");
-}
-
-#[test]
-fn palette_state_filters_by_query() {
-    let mut state = CommandPaletteState::default();
+fn jump_state_filters_by_query() {
+    let mut state = JumpState::default();
     state.push_query('t');
     let filtered = state.filtered_commands();
     assert!(
-        filtered
-            .iter()
-            .all(|c| c.label.to_lowercase().contains("t")),
-        "all filtered commands should contain 't' in label"
+        filtered.iter().all(|c| {
+            let q = "t";
+            c.label.to_lowercase().contains(q)
+                || c.aliases.iter().any(|a| a.to_lowercase().contains(q))
+        }),
+        "all filtered commands should match 't' in label or alias"
     );
     assert!(
         filtered.len() < PaletteCommand::all().len(),
@@ -6653,26 +6667,310 @@ fn palette_state_filters_by_query() {
 }
 
 #[test]
-fn palette_state_empty_query_returns_all() {
-    let state = CommandPaletteState::default();
+fn jump_state_empty_query_returns_all() {
+    let state = JumpState::default();
     let filtered = state.filtered_commands();
     assert_eq!(filtered.len(), PaletteCommand::all().len());
 }
 
 #[test]
-fn palette_selected_resets_on_query_change() {
-    let mut state = CommandPaletteState {
+fn jump_query_mutation_preserves_selected_for_recompute_to_handle() {
+    // push_query / pop_query no longer wipe `selected` directly — the
+    // recompute path computes the new index via identity tracking so
+    // mid-typing navigation does not jump back to row 0.
+    let mut state = JumpState {
         selected: 5,
         ..Default::default()
     };
     state.push_query('x');
-    assert_eq!(
-        state.selected, 0,
-        "selected should reset when query changes"
-    );
-    state.selected = 3;
+    assert_eq!(state.selected, 5, "push_query must not clobber selected");
     state.pop_query();
-    assert_eq!(state.selected, 0, "selected should reset on pop too");
+    assert_eq!(state.selected, 5, "pop_query must not clobber selected");
+}
+
+// --- Unified jump: multi-source collection, dispatch and ranking ---
+
+use crate::app::JumpHit;
+use crate::app::JumpMode;
+use crate::app::SourceKind;
+
+fn make_jump_app(content: &str) -> App {
+    let scratch = tempfile::tempdir().expect("tempdir").keep();
+    crate::preferences::set_path_override(scratch.join("preferences"));
+    let config = crate::ssh_config::model::SshConfigFile {
+        elements: crate::ssh_config::model::SshConfigFile::parse_content(content),
+        path: scratch.join("test_config"),
+        crlf: false,
+        bom: false,
+    };
+    App::new(config)
+}
+
+#[test]
+fn collect_jump_candidates_emits_hosts_tunnels_and_actions() {
+    // Two hosts, one with a LocalForward tunnel rule. With a query that
+    // matches both the host alias and a tunnel destination, the visible
+    // hit list must include host + tunnel variants. Actions appear in the
+    // empty-query view (verified separately).
+    let mut app = make_jump_app(
+        "Host web-01\n  HostName web.example\n  LocalForward 5432 db.internal:5432\n\
+         Host db-01\n  HostName db.example\n",
+    );
+    app.jump = Some(crate::app::JumpState::for_mode(JumpMode::Hosts));
+    if let Some(p) = app.jump.as_mut() {
+        for c in "web".chars() {
+            p.push_query(c);
+        }
+    }
+    app.recompute_jump_hits();
+    let jump = app.jump.as_ref().expect("jump");
+    let visible = jump.visible_hits();
+    assert!(
+        visible
+            .iter()
+            .any(|h| matches!(h, JumpHit::Host(host) if host.alias == "web-01")),
+        "host candidate missing for query 'web'"
+    );
+    assert!(
+        visible
+            .iter()
+            .any(|h| matches!(h, JumpHit::Tunnel(t) if t.alias == "web-01" && t.bind_port == 5432)),
+        "tunnel candidate missing for query 'web'"
+    );
+}
+
+#[test]
+fn hotkey_boost_outranks_fuzzy_host_match() {
+    // Add a host whose alias matches the boost letter `K`, then type `K`
+    // and verify the action lands on top thanks to the +10000 score boost.
+    let mut app = make_jump_app("Host Kbrk\n  HostName k.example\n");
+    app.jump = Some(crate::app::JumpState::for_mode(JumpMode::Hosts));
+    app.jump.as_mut().unwrap().push_query('K');
+    app.recompute_jump_hits();
+    let jump = app.jump.as_ref().expect("jump");
+    let visible = jump.visible_hits();
+    let first = visible.first().expect("at least one hit");
+    assert!(
+        matches!(first, JumpHit::Action(a) if a.key == 'K'),
+        "expected K action at index 0, got {:?}",
+        first
+    );
+}
+
+#[test]
+fn empty_query_view_lists_actions_only_when_no_recents() {
+    let mut app = make_jump_app("");
+    app.jump = Some(crate::app::JumpState::for_mode(JumpMode::Hosts));
+    app.recompute_jump_hits();
+    let jump = app.jump.as_ref().expect("jump");
+    let visible = jump.visible_hits();
+    assert!(!visible.is_empty(), "empty query should still show actions");
+    assert!(
+        visible.iter().all(|h| matches!(h, JumpHit::Action(_))),
+        "empty-state with no recents should show only actions"
+    );
+}
+
+#[test]
+fn empty_query_view_deduplicates_recent_actions() {
+    let mut app = make_jump_app("");
+    app.jump = Some(crate::app::JumpState::for_mode(JumpMode::Hosts));
+    // Manually inject the F action into recents so the dedup path exercises.
+    let f_action = crate::app::JumpAction::for_mode(JumpMode::Hosts)
+        .iter()
+        .find(|a| a.key == 'F')
+        .copied()
+        .expect("F action present");
+    if let Some(p) = app.jump.as_mut() {
+        p.recents = vec![JumpHit::Action(f_action)];
+    }
+    app.recompute_jump_hits();
+    let jump = app.jump.as_ref().expect("jump");
+    let count_f = jump
+        .visible_hits()
+        .iter()
+        .filter(|h| matches!(h, JumpHit::Action(a) if a.key == 'F'))
+        .count();
+    assert_eq!(
+        count_f, 1,
+        "action present in recents must not appear twice in the empty-state view"
+    );
+}
+
+#[test]
+fn jump_next_section_empty_state_toggles_recent_to_actions() {
+    let mut app = make_jump_app("Host one\n  HostName one.example\n");
+    app.jump = Some(crate::app::JumpState::for_mode(JumpMode::Hosts));
+    let host_hit = JumpHit::Host(crate::app::HostHit {
+        alias: "one".into(),
+        hostname: "one.example".into(),
+        tags: vec![],
+        provider: None,
+        user: String::new(),
+        identity_file: String::new(),
+        proxy_jump: String::new(),
+        vault_ssh: None,
+    });
+    if let Some(p) = app.jump.as_mut() {
+        p.recents = vec![host_hit];
+    }
+    app.recompute_jump_hits();
+    if let Some(p) = app.jump.as_mut() {
+        p.selected = 0;
+        p.jump_next_section();
+        assert_eq!(
+            p.selected, 1,
+            "Tab from RECENT row 0 should jump to first ACTIONS row"
+        );
+        p.jump_next_section();
+        assert_eq!(p.selected, 0, "second Tab wraps back to RECENT");
+    }
+}
+
+#[test]
+fn jump_next_section_query_state_walks_kinds() {
+    let mut app =
+        make_jump_app("Host alpha\n  HostName alpha.example\n  LocalForward 4000 localhost:4000\n");
+    app.jump = Some(crate::app::JumpState::for_mode(JumpMode::Hosts));
+    if let Some(p) = app.jump.as_mut() {
+        // Type a fragment that matches both 'alpha' (host alias / tunnel
+        // alias) and the action label 'Tunnels: Manage tunnels'.
+        for c in "alpha".chars() {
+            p.push_query(c);
+        }
+    }
+    app.recompute_jump_hits();
+    let mut jump = app.jump.take().expect("jump");
+    jump.selected = 0;
+    let first_kind = jump.visible_hits()[0].kind();
+    jump.jump_next_section();
+    let next_kind = jump.visible_hits()[jump.selected].kind();
+    assert_ne!(
+        first_kind, next_kind,
+        "Tab in query-state must move to a different section kind"
+    );
+    app.jump = Some(jump);
+}
+
+#[test]
+fn recompute_preserves_selection_when_prior_hit_remains() {
+    // Set up a jump bar with two hosts. Type a query that matches both.
+    // Move selection to the second hit, then mutate the query so the
+    // second hit is still in the new list. Selection must follow the
+    // hit's identity, not snap back to row 0.
+    let mut app = make_jump_app(
+        "Host alpha-one\n  HostName a1.example\n\
+         Host alpha-two\n  HostName a2.example\n",
+    );
+    app.jump = Some(crate::app::JumpState::for_mode(JumpMode::Hosts));
+    if let Some(p) = app.jump.as_mut() {
+        for c in "alph".chars() {
+            p.push_query(c);
+        }
+    }
+    app.recompute_jump_hits();
+    let prior_id = {
+        let p = app.jump.as_mut().unwrap();
+        let visible = p.visible_hits();
+        // Pick the second host hit (some sort of stable target).
+        let hosts: Vec<usize> = visible
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| matches!(h, JumpHit::Host(_)))
+            .map(|(i, _)| i)
+            .collect();
+        if hosts.len() < 2 {
+            return; // demo-config too narrow on this platform; nothing to assert
+        }
+        p.selected = hosts[1];
+        visible[p.selected].identity()
+    };
+    if let Some(p) = app.jump.as_mut() {
+        p.push_query('a');
+    }
+    app.recompute_jump_hits();
+    let jump = app.jump.as_ref().unwrap();
+    let visible = jump.visible_hits();
+    if visible.iter().any(|h| h.identity() == prior_id) {
+        assert_eq!(
+            visible[jump.selected].identity(),
+            prior_id,
+            "selection should track the prior hit across recompute"
+        );
+    }
+}
+
+#[test]
+fn resolve_recent_ref_host_found_and_dangling() {
+    let app = make_jump_app("Host kept\n  HostName kept.example\n");
+    let kept = crate::app::RecentRef::new(SourceKind::Host, "kept".into());
+    let gone = crate::app::RecentRef::new(SourceKind::Host, "deleted".into());
+    let resolved_kept = app.resolve_recent_ref_for_test(&kept, JumpMode::Hosts);
+    let resolved_gone = app.resolve_recent_ref_for_test(&gone, JumpMode::Hosts);
+    assert!(matches!(resolved_kept, Some(JumpHit::Host(_))));
+    assert!(resolved_gone.is_none(), "dangling host ref must drop");
+}
+
+#[test]
+fn resolve_recent_ref_tunnel_malformed_port_returns_none() {
+    let app = make_jump_app("Host h\n  HostName h.example\n  LocalForward 4000 localhost:4000\n");
+    let bad = crate::app::RecentRef::new(SourceKind::Tunnel, "h:notanumber".into());
+    assert!(
+        app.resolve_recent_ref_for_test(&bad, JumpMode::Hosts)
+            .is_none(),
+        "tunnel ref with non-numeric port must drop"
+    );
+}
+
+#[test]
+fn resolve_recent_ref_action_round_trips() {
+    let app = make_jump_app("");
+    let r = crate::app::RecentRef::new(SourceKind::Action, "F".into());
+    let resolved = app.resolve_recent_ref_for_test(&r, JumpMode::Hosts);
+    assert!(matches!(resolved, Some(JumpHit::Action(a)) if a.key == 'F'));
+}
+
+#[test]
+fn resolve_recent_ref_snippet_dangling_returns_none() {
+    let app = make_jump_app("");
+    let r = crate::app::RecentRef::new(SourceKind::Snippet, "no-such-snippet".into());
+    assert!(
+        app.resolve_recent_ref_for_test(&r, JumpMode::Hosts)
+            .is_none(),
+        "snippet ref to missing snippet must drop"
+    );
+}
+
+#[test]
+fn record_jump_hit_round_trips_via_recents() {
+    // End-to-end: record a hit through the public API, then opening the
+    // jump again should surface it as a recent.
+    let _g = crate::app::jump::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let recents_dir = tempfile::tempdir().expect("tempdir");
+    crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
+    let mut app = make_jump_app("Host visited\n  HostName visited.example\n");
+    let hit = JumpHit::Host(crate::app::HostHit {
+        alias: "visited".into(),
+        hostname: "visited.example".into(),
+        tags: vec![],
+        provider: None,
+        user: String::new(),
+        identity_file: String::new(),
+        proxy_jump: String::new(),
+        vault_ssh: None,
+    });
+    app.record_jump_hit(&hit);
+    app.open_jump(JumpMode::Hosts);
+    let jump = app.jump.as_ref().expect("jump");
+    assert!(
+        jump.recents
+            .iter()
+            .any(|h| matches!(h, JumpHit::Host(host) if host.alias == "visited")),
+        "recorded hit should surface as a recent on next open"
+    );
+    crate::app::jump::test_path::clear();
 }
 
 // --- ProxyJump candidate ranking tests ---

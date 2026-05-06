@@ -458,7 +458,7 @@ fn render_error_dialog(frame: &mut Frame, message: &str, area: Rect) {
     frame.render_widget(paragraph, dialog_area);
 
     let footer_area = design::render_overlay_footer(frame, dialog_area);
-    let footer_line = design::Footer::new().action("Esc", " dismiss").to_line();
+    let footer_line = design::Footer::new().action("Esc", " close").to_line();
     frame.render_widget(Paragraph::new(footer_line), footer_area);
 }
 

@@ -105,7 +105,7 @@ fi
 
 # 9. Golden file count matches expected screen count.
 GOLDEN_COUNT=$(ls tests/visual_golden/*.golden 2>/dev/null | wc -l | tr -d ' ')
-EXPECTED_GOLDEN=36
+EXPECTED_GOLDEN=40
 if [ "$GOLDEN_COUNT" != "$EXPECTED_GOLDEN" ]; then
     echo "ERROR: Expected $EXPECTED_GOLDEN golden files, found $GOLDEN_COUNT."
     echo "If you added a new Screen variant, add a visual regression test and update EXPECTED_GOLDEN."
@@ -189,6 +189,105 @@ if grep -rEn 'theme::success\(\)' src/ui/ --include='*.rs' \
         | grep -v 'design\.rs' \
         | grep -v 'mod\.rs' \
         | grep -v 'theme.*tests'
+    exit 1
+fi
+
+# 15. Footer chip ordering — primary action first, exit (Esc/Ctrl+C) last.
+#
+# Canonical order purple already uses in 11+ overlays:
+#   .primary("Enter", ...)        // first
+#   .action(...)                  // navigation / mode / feature keys
+#   .action("Esc"|"Ctrl+C", ...)  // last (exit)
+#
+# Two violations are flagged:
+#  (a) `.action(...)` followed by `.primary(...)` — primary must come BEFORE
+#      any action chip on the same builder.
+#  (b) `.action("Esc"|"Ctrl+C", ...)` followed by another `.action(...)` —
+#      exit chip must be the LAST action.
+#
+# We scan a sliding two-line window per file. Files exempt: design.rs (the
+# builder definition), tests files.
+python3 - <<'PY' || exit 1
+import re, sys, os
+
+ROOT = "src/ui"
+violations = []
+
+PRIMARY_RE = re.compile(r'\.primary\(\s*"([^"]+)"')
+ACTION_RE  = re.compile(r'\.action\(\s*"([^"]+)"')
+EXIT_KEY   = {"Esc", "Ctrl+C"}
+
+for dirpath, _, files in os.walk(ROOT):
+    for fn in files:
+        if not fn.endswith(".rs"):
+            continue
+        if fn in ("design.rs",) or "test" in fn:
+            continue
+        path = os.path.join(dirpath, fn)
+        with open(path) as f:
+            text = f.read()
+
+        # Split into Footer-builder chains. Each chain runs from `Footer::new()`
+        # to the next non-chained statement. We capture the chain as a single
+        # logical line so order can be checked.
+        for m in re.finditer(
+            r'Footer::new\(\)((?:\s*\.\w+\([^)]*\))+)', text, re.DOTALL
+        ):
+            chain = m.group(1)
+            # Find positions of primary / action / exit-action calls.
+            calls = []
+            for cm in re.finditer(r'\.(primary|action)\(\s*"([^"]*)"', chain):
+                calls.append((cm.group(1), cm.group(2)))
+
+            seen_action = False
+            for kind, label in calls:
+                if kind == "action":
+                    seen_action = True
+                if kind == "primary" and seen_action:
+                    violations.append(
+                        f"{path}: primary action chip appears AFTER an .action(...). "
+                        f"Move .primary({label!r}, ...) before any .action(...)."
+                    )
+
+            # Exit chip (Esc / Ctrl+C) must be last action.
+            for i, (kind, label) in enumerate(calls):
+                if kind == "action" and label in EXIT_KEY:
+                    if i != len(calls) - 1:
+                        tail = ", ".join(f"{k}({l!r})" for k, l in calls[i+1:])
+                        violations.append(
+                            f"{path}: exit chip .action({label!r}, ...) is not last. "
+                            f"Trailing chips: {tail}."
+                        )
+
+if violations:
+    print("ERROR: footer chip ordering violation(s):")
+    for v in violations:
+        print("  " + v)
+    print()
+    print("  Canonical order: primary first, secondary actions middle, exit (Esc/Ctrl+C) last.")
+    sys.exit(1)
+PY
+
+# 16. Footer exit-label drift — Esc/Ctrl+C must use one of close/back/cancel.
+#
+# Convention:
+#   close  — read-only viewers (snippet output, key detail, jump bar)
+#   back   — list overlays in a navigation stack (key list, containers,
+#            tag picker, provider list)
+#   cancel — forms with unsaved input (host form, snippet form, etc.)
+#
+# Other verbs are allowed only when the screen has its own non-generic
+# semantics (multi-select uses `clear` to convey "drop selection"; that
+# is recorded in the allowlist below).
+EXIT_VERB_ALLOWLIST="clear|done"
+BAD_EXIT=$(grep -rEn '\.action\(\s*"(Esc|Ctrl\+C)"\s*,\s*"\s*[a-z]+' src/ui/ --include='*.rs' \
+    | grep -vE '\.action\(\s*"(Esc|Ctrl\+C)"\s*,\s*"\s*(close|back|cancel|'"$EXIT_VERB_ALLOWLIST"')\s*"' \
+    | grep -v 'design\.rs' || true)
+if [ -n "$BAD_EXIT" ]; then
+    echo "ERROR: footer exit-label uses an unrecognised verb."
+    echo "       Use 'close' (viewer), 'back' (list overlay), or 'cancel' (form)."
+    echo "       Allowlist for screen-specific verbs: $EXIT_VERB_ALLOWLIST"
+    echo "$BAD_EXIT"
     exit 1
 fi
 

@@ -48,7 +48,11 @@ I wanted one place for all of that. So I built it.
 
 ## What you get
 
-<img src="screenshots/detail.png" width="55%" align="left" alt="detail panel">
+🔎 **Jump to anything with one keystroke.** Press `:` for a universal fuzzy bar across hosts, tunnels, containers, snippets and actions. Searches the SSH `User`, `ProxyJump` and Vault SSH role too, so typing your username finds every server you log in as. Field prefixes (`user:`, `proxy:`, `vault:`, `tag:`) scope to a single directive. Like Linear's `Cmd+K`, but in your terminal.
+
+![jump bar](screenshots/jump.png)
+
+<img src="screenshots/detail.png" width="40%" align="left" alt="detail panel">
 
 🔍 **Everything at a glance.** Connection info, jump route, activity sparkline, tags, tunnels, snippets, containers and server metadata. Health dots show which hosts are up. Group by provider, tag or flat.
 
@@ -59,7 +63,7 @@ I wanted one place for all of that. So I built it.
 
 ![fuzzy search](screenshots/search.png)
 
-☁️ **Your ssh config tracks your infra.** Drop in one API token per cloud provider. New VMs land in `~/.ssh/config` the moment they boot. IPs stay current as instances move. Decommissioned hosts dim so you can purge them on your terms. No more hand-editing after every Terraform run, no more grepping cloud consoles for the right IP. 16 cloud providers: AWS, DigitalOcean, Hetzner, GCP, Azure, Proxmox VE, Vultr, Linode, UpCloud, Scaleway, Tailscale, Oracle Cloud, OVHcloud, Leaseweb, i3D.net and TransIP. Region, instance type, OS and status travel as metadata next to each Host block.
+☁️ **Your ssh config tracks your infra.** Drop in one API token per provider. New VMs land in `~/.ssh/config` the moment they boot. IPs stay current as instances move. Decommissioned hosts dim so you can purge them on your terms. 16 providers including AWS, GCP, Azure, Hetzner, DigitalOcean and Proxmox. See the [wiki](https://github.com/erickochen/purple/wiki/Cloud-Providers) for the full list.
 
 ![cloud providers](screenshots/providers.png)
 
@@ -71,11 +75,11 @@ I wanted one place for all of that. So I built it.
 
 ![live tunnels](screenshots/tunnels.png)
 
-**And more.** Visual file transfer with split-pane explorer. Multi-host command execution with snippets. Automatic password retrieval from OS Keychain, 1Password, Bitwarden, pass and the HashiCorp Vault KV secrets engine. Short-lived SSH certificates signed via the HashiCorp Vault SSH secrets engine. Command palette (`:`) for quick access to all actions. MCP server for AI agents like Claude Code and Cursor. See the [wiki](https://github.com/erickochen/purple/wiki) for details.
+**And more.** Visual file transfer with split-pane explorer. Multi-host command execution with snippets. Automatic password retrieval from OS Keychain, 1Password, Bitwarden, pass and the HashiCorp Vault KV secrets engine. Short-lived SSH certificates signed via the HashiCorp Vault SSH secrets engine. MCP server for AI agents like Claude Code and Cursor. See the [wiki](https://github.com/erickochen/purple/wiki) for details.
 
 ## How it works
 
-purple reads `~/.ssh/config` directly. No database, no daemon, no account. Comments, indentation, Include files, unknown directives. All preserved.
+purple reads `~/.ssh/config` directly. No database, no daemon, no account. Comments, indentation, include files, unknown directives. All preserved.
 
 Written in Rust. Single binary. 6800+ tests. MIT license.
 

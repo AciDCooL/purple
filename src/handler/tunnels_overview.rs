@@ -262,10 +262,8 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
             app.notify(crate::messages::sorted_by(app.tunnels.sort_mode.label()));
         }
         KeyCode::Char(':') => {
-            log::debug!("palette: opened from tunnels overview");
-            app.palette = Some(crate::app::CommandPaletteState::for_mode(
-                crate::app::PaletteMode::Tunnels,
-            ));
+            log::debug!("jump: opened from tunnels overview");
+            app.open_jump(crate::app::JumpMode::Tunnels);
         }
         KeyCode::Tab | KeyCode::BackTab => {
             app.top_page = TopPage::Hosts;

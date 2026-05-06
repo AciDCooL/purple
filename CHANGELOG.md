@@ -1,3 +1,13 @@
+## 3.6.0 - 2026-05-06
+
+- feat: Find any host, tunnel or action in one keystroke.
+- feat: Press `:` to open Jump, a universal fuzzy bar across hosts, tunnels, containers, snippets and actions. Like `Cmd+K`, in your terminal.
+- feat: Type your SSH username to find every server you log in as. Jump searches User, ProxyJump and Vault SSH role too, not just aliases and hostnames.
+- feat: Field prefixes (`user:`, `proxy:`, `vault:`, `tag:`) scope your search to a single SSH directive when you need precision.
+- feat: Recent picks lead the bar across sessions, so the second time is always faster than the first.
+- change: Footer keys land in one canonical order across every overlay, so muscle memory survives between screens.
+- change: Action labels carry their category up front (`Hosts: Add host`, `Tunnels: Manage tunnels`) so you can search by what you want to do.
+
 ## 3.5.0 - 2026-05-05
 
 - feat: Vault SSH connects through bastions on the first try.

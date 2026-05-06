@@ -27,7 +27,7 @@
 │   ✖ aws-cache-eu                     cache           9h  ││ D 1080                               │
 │   ✖ pve-backup                       backup         21h  ││ L 8443 → internal.corp:443           │
 ╰──────────────────────────────────────────── getpurple.sh ╯╰──────────────────────────────────────╯
- Enter  connect    /  search    #  tag    v  compact    :  cmds                              ?  more
+ Enter  connect    /  search    #  tag    v  compact    :  jump                              ?  more
 ---STYLES---
 (0,0) fg=Reset bg=Reset mod=DIM
 (1,0) fg=Reset bg=Reset mod=DIM

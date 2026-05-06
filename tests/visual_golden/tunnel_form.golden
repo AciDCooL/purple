@@ -27,7 +27,7 @@
 │   ✖ aws-cache-eu       3.120.55.19                         cache aws                         9h  │
 │   ✖ pve-backup         192.168.1.70                        backup internal proxmox          21h  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
- Enter  connect    /  search    #  tag    v  detail    :  cmds                               ?  more
+ Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---
 (0,0) fg=DarkGray bg=Reset mod=DIM
 (1,0) fg=DarkGray bg=Reset mod=DIM

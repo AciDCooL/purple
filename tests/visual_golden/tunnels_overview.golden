@@ -27,7 +27,7 @@
 │                                                                                                  │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
- Enter  start    /  search    s  sort    :  cmds                                             ?  more
+ Enter  start    /  search    s  sort    :  jump                                             ?  more
 ---STYLES---
 (0,0) fg=Reset bg=Reset mod=DIM
 (1,0) fg=Reset bg=Reset mod=DIM

@@ -1,6 +1,6 @@
 [package]
 name = "purple-ssh"
-version = "3.5.0"
+version = "3.6.0"
 edition = "2024"
 description = "Open-source terminal SSH manager that keeps ~/.ssh/config in sync with your cloud infra. Spin up a VM on AWS, GCP, Azure, Hetzner or 12 other cloud providers and it appears in your host list. Destroy it and the entry dims. Search hundreds of hosts, transfer files, manage Docker and Podman over SSH, sign Vault SSH certs. Rust TUI, MIT licensed."
 license = "MIT"
@@ -43,6 +43,7 @@ libc = "0.2"
 log = "0.4"
 simplelog = "0.12"
 semver = "1"
+nucleo-matcher = "0.3"
 
 # Linux-only: per-socket TCP byte counters via NETLINK_SOCK_DIAG. Used
 # by src/tcp_diag.rs to populate live tunnel throughput on the Tunnels

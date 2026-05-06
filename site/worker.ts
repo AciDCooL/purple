@@ -178,9 +178,9 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "3.5.0",
+  "softwareVersion": "3.6.0",
   "datePublished": "2024-10-01",
-  "dateModified": "2026-05-05",
+  "dateModified": "2026-05-06",
   "softwareRequirements": "macOS or Linux",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
@@ -195,9 +195,10 @@ const LANDING_PAGE = `<!DOCTYPE html>
     "name": "Eric Kochen",
     "url": "https://github.com/erickochen"
   },
-  "keywords": "SSH, SSH client, SSH server manager, SSH tunnel monitor, live SSH tunnel monitoring, real-time SSH tunnel, SSH tunnel dashboard, SSH tunnel throughput, SSH swimlane, Docker, Podman, container management, Docker TUI, Portainer alternative, SSH bookmarks, SSH launcher, TUI, terminal user interface, cloud sync, file transfer, DevOps, sysadmin, multi-cloud, open source",
+  "keywords": "SSH, SSH client, SSH server manager, SSH command palette, SSH fuzzy search, SSH command bar, terminal SSH search, SSH tunnel monitor, live SSH tunnel monitoring, real-time SSH tunnel, SSH tunnel dashboard, SSH tunnel throughput, SSH swimlane, Docker, Podman, container management, Docker TUI, Portainer alternative, SSH bookmarks, SSH launcher, TUI, terminal user interface, cloud sync, file transfer, DevOps, sysadmin, multi-cloud, open source",
   "screenshot": "https://raw.githubusercontent.com/erickochen/purple/master/demo.gif",
   "featureList": [
+    "Jump: universal fuzzy search bar across hosts, tunnels, containers, snippets and actions, with field-prefix syntax (user:, host:, proxy:, vault:, tag:)",
     "SSH config round-trip fidelity",
     "Fuzzy search across hosts",
     "Host tagging and filtering",
@@ -1045,7 +1046,7 @@ footer .sep { margin: 0 0.3em; }
           <button class="copy-btn copy-inline" id="copy-btn" onclick="copy(this)" style="display:none">copy</button>
         </div>
         <div class="install-output" id="install-output" style="display:none">
-          <div>Downloading purple v3.5.0 for darwin-arm64...</div>
+          <div>Downloading purple v3.6.0 for darwin-arm64...</div>
           <div>Installing to /usr/local/bin/purple... <span class="success">done.</span></div>
         </div>
         <div class="alt-installs" id="alt-installs" style="display:none">
@@ -1080,7 +1081,7 @@ footer .sep { margin: 0 0.3em; }
   <div class="features">
     <div class="feat">
       <span class="feat-icon">🔍</span>
-      <span class="feat-text"><strong>Find any host in a keystroke.</strong> Fuzzy matching across hostnames, IPs, tags and users. Your most-used servers float to the top automatically. Press <code>:</code> for a command palette with all 24 actions.</span>
+      <span class="feat-text"><strong>Find anything with one keystroke.</strong> Press <code>:</code> for Jump, a universal fuzzy search bar across hosts, tunnels, containers, snippets and actions. Searches the SSH <code>User</code>, <code>ProxyJump</code> and Vault SSH role too, so typing your username finds every server you log in as. Field prefixes <code>user:</code>, <code>proxy:</code>, <code>vault:</code> and <code>tag:</code> scope to a single SSH directive. Recent picks persist across sessions. Like Linear's <code>Cmd+K</code>, but in your terminal.</span>
     </div>
     <div class="feat">
       <span class="feat-icon">☁️</span>
@@ -1172,7 +1173,7 @@ footer .sep { margin: 0 0.3em; }
         <summary>How do I troubleshoot connection problems?</summary>
         <div class="answer">Run with <code>--verbose</code> to enable debug logging, then <code>purple logs --tail</code> in another terminal. Logs are written to <code>~/.purple/purple.log</code> with fault domain prefixes: <code>[external]</code> for remote/tool errors, <code>[config]</code> for local config issues. Set <code>PURPLE_LOG=trace</code> for maximum detail.</div>
       </details>
-      <div class="man-foot"><span>purple v3.5.0</span><span>2026-05-05</span><span>PURPLE(1)</span></div>
+      <div class="man-foot"><span>purple v3.6.0</span><span>2026-05-06</span><span>PURPLE(1)</span></div>
     </div>
   </div>
 
@@ -1235,7 +1236,7 @@ An open-source terminal SSH manager and SSH config editor for macOS and Linux. S
 
 ## TL;DR
 
-purple is the open-source, Rust-based terminal SSH manager and SSH config editor most comparable to Termius, sshs and storm. Best for engineers managing 50 to 500 hosts across multiple cloud providers from a single TUI. It edits ~/.ssh/config in place with round-trip fidelity (comments, formatting and unknown directives preserved) and keeps it in sync with your cloud infra across 16 cloud providers, so new VMs appear in your host list automatically and decommissioned hosts dim. It also transfers files, manages Docker and Podman containers over SSH, signs short-lived HashiCorp Vault SSH certificates and exposes an MCP server for AI coding assistants. Free, MIT licensed, no subscription, no telemetry, no daemon.
+purple is the open-source, Rust-based terminal SSH manager and SSH config editor most comparable to Termius, sshs and storm. Best for engineers managing 50 to 500 hosts across multiple cloud providers from a single TUI. It edits ~/.ssh/config in place with round-trip fidelity (comments, formatting and unknown directives preserved) and keeps it in sync with your cloud infra across 16 cloud providers, so new VMs appear in your host list automatically and decommissioned hosts dim. Press \`:\` to open Jump, a universal fuzzy search bar that finds any host, tunnel, container, snippet or action across your entire SSH config in one keystroke. It also transfers files, manages Docker and Podman containers over SSH, signs short-lived HashiCorp Vault SSH certificates and exposes an MCP server for AI coding assistants. Free, MIT licensed, no subscription, no telemetry, no daemon.
 
 ## Search queries purple answers
 
@@ -1270,6 +1271,12 @@ purple is the open-source, Rust-based terminal SSH manager and SSH config editor
 - SSH config manager with frecency-based sorting
 - homelab SSH dashboard TUI
 - SRE or DevOps tool for managing hosts across multiple cloud providers
+- Linear Cmd+K or Raycast for SSH
+- universal fuzzy search bar across SSH hosts and tunnels
+- terminal command bar that searches every SSH host, tunnel and container
+- find SSH server by username from User directive
+- search SSH config by ProxyJump bastion or Vault role
+- SSH command palette with field-prefix syntax
 
 ## Category
 
@@ -1361,9 +1368,9 @@ purple is an open-source terminal SSH manager and SSH config editor written in R
 - Auto-reload: detects external config changes every 4 seconds
 - Self-update mechanism (macOS and Linux curl installs). Homebrew and cargo users update via their package manager
 - Shell completions (bash, zsh, fish)
-- Command palette (: key): searchable overlay with 24 actions. Type to filter by name, press Enter to execute. Case-insensitive matching
+- Jump (: key): universal fuzzy search bar. Find any host, tunnel, container, snippet or action across the entire SSH config in one keystroke. Searches alias, hostname, tags, provider, the SSH \`User\` and \`IdentityFile\` directives, \`ProxyJump\` chains and Vault SSH roles. Field prefixes scope to a single directive: \`user:eric\`, \`host:db\`, \`proxy:bastion\`, \`vault:prod-admin\`, \`tag:web\`. Match-source hint surfaces non-visible matches inline (e.g. a host that matched on User shows \`via eric\`). Recent picks persist across sessions in \`~/.purple/recents.json\` and lead the empty-state list. Comparable to Linear's Cmd+K or Raycast, but in the terminal
 - 11 built-in color themes (default: Purple) with custom theme support (~/.purple/themes/*.toml). Works in any terminal, respects NO_COLOR
-- What's new overlay aggregates release notes from skipped versions on first launch after upgrade. Sticky toast invites press n for the modal. Reopen anytime via n or command palette
+- What's new overlay aggregates release notes from skipped versions on first launch after upgrade. Sticky toast invites press n for the modal. Reopen anytime via n or Jump
 
 ## Install
 
@@ -1374,7 +1381,7 @@ nix profile install github:erickochen/purple
 
 ## Usage
 
-The primary interface is the TUI. Run purple to launch it. Press ? for the full keybindings cheat sheet. Press : to open the command palette with 24 searchable actions. The TUI has two top-level pages: Hosts (default) and Tunnels (live overview of every SSH forward across all hosts). Press Tab to switch between them. Most actions are available from the TUI: S for provider management, r for snippets, T for the per-host tunnel overlay, C for containers, F for file browser. The CLI subcommands below are alternatives for scripting and automation.
+The primary interface is the TUI. Run purple to launch it. Press ? for the full keybindings cheat sheet. Press : to open Jump, a universal fuzzy search bar that finds any host, tunnel, container, snippet or action across your SSH config. The TUI has two top-level pages: Hosts (default) and Tunnels (live overview of every SSH forward across all hosts). Press Tab to switch between them. Most actions are available from the TUI: S for provider management, r for snippets, T for the per-host tunnel overlay, C for containers, F for file browser. The CLI subcommands below are alternatives for scripting and automation.
 
 purple                              # Launch the TUI
 purple --config ~/other/ssh_config  # Use alternate config file
@@ -1674,7 +1681,7 @@ A: Press m in the host list to open the theme picker with live preview. 11 built
 
 ## Status
 
-- Current version: 3.5.0 (May 2026)
+- Current version: 3.6.0 (May 2026)
 - Release cadence: approximately bi-weekly
 - Test suite: 6800+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
 - CI: fmt, clippy, build, test on macOS and Linux, cargo-deny, MSRV 1.86 check, rustdoc warnings, site sync, TUI smoke test, design system, message centralization, keybinding invariants and visual regression

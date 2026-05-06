@@ -1349,8 +1349,8 @@ fn footer_spans(
         return design::Footer::new()
             .action("t", " bulk tag ")
             .action("r", " run ")
-            .action("Esc", " clear ")
-            .action("?", " help")
+            .action("?", " help ")
+            .action("Esc", " clear")
             .into_spans();
     }
 
@@ -1364,7 +1364,7 @@ fn footer_spans(
         .action("/", " search ")
         .action("#", " tag ")
         .action("v", view_label)
-        .action(":", " cmds ")
+        .action(":", " jump ")
         .into_spans();
     if filter_down_only {
         spans.push(Span::raw(design::FOOTER_GAP));

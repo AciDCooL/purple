@@ -16,7 +16,7 @@
 │   ● do-web-ams        │                                                  │digitalocean      10h  │
 │   ● do-staging-ams    │                                                  │italocean         11h  │
 │   ● do-worker-ams     ╰──────────────────────────────────────────────────╯cean              12h  │
-│   ● do-ci-runner       Space  cycle    +  new    Enter  apply    Esc  back                  13h  │
+│   ● do-ci-runner       Enter  apply    Space  cycle    +  new    Esc  canc                  13h  │
 │   ● pve-web-01         192.168.1.20                        web internal proxmox             14h  │
 │   ● pve-web-02         192.168.1.21                        web internal proxmox             15h  │
 │   ● pve-db-01          192.168.1.30 ⇄                      database internal proxmox        16h  │
@@ -27,7 +27,7 @@
 │   ✖ aws-cache-eu       3.120.55.19                         cache aws                         9h  │
 │   ✖ pve-backup         192.168.1.70                        backup internal proxmox          21h  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
- t  bulk tag    r  run    Esc  clear    ?  help                                              ?  more
+ t  bulk tag    r  run    ?  help    Esc  clear                                              ?  more
 ---STYLES---
 (0,0) fg=DarkGray bg=Reset mod=DIM
 (1,0) fg=DarkGray bg=Reset mod=DIM
@@ -1672,20 +1672,20 @@
 (40,18) fg=White bg=DarkGray mod=-
 (41,18) fg=White bg=DarkGray mod=-
 (42,18) fg=White bg=DarkGray mod=-
-(43,18) fg=Reset bg=Reset mod=DIM
-(44,18) fg=Reset bg=Reset mod=DIM
-(45,18) fg=Reset bg=Reset mod=DIM
-(46,18) fg=Reset bg=Reset mod=DIM
+(43,18) fg=White bg=DarkGray mod=-
+(44,18) fg=White bg=DarkGray mod=-
+(45,18) fg=White bg=DarkGray mod=-
+(46,18) fg=White bg=DarkGray mod=-
 (47,18) fg=Reset bg=Reset mod=DIM
-(50,18) fg=White bg=DarkGray mod=-
-(51,18) fg=White bg=DarkGray mod=-
-(52,18) fg=White bg=DarkGray mod=-
-(53,18) fg=White bg=DarkGray mod=-
-(54,18) fg=White bg=DarkGray mod=-
-(55,18) fg=White bg=DarkGray mod=-
+(48,18) fg=Reset bg=Reset mod=DIM
+(49,18) fg=Reset bg=Reset mod=DIM
+(50,18) fg=Reset bg=Reset mod=DIM
+(51,18) fg=Reset bg=Reset mod=DIM
+(52,18) fg=Reset bg=Reset mod=DIM
+(53,18) fg=Reset bg=Reset mod=DIM
 (56,18) fg=White bg=DarkGray mod=-
-(57,18) fg=Reset bg=Reset mod=DIM
-(58,18) fg=Reset bg=Reset mod=DIM
+(57,18) fg=White bg=DarkGray mod=-
+(58,18) fg=White bg=DarkGray mod=-
 (59,18) fg=Reset bg=Reset mod=DIM
 (60,18) fg=Reset bg=Reset mod=DIM
 (61,18) fg=Reset bg=Reset mod=DIM
@@ -2753,20 +2753,20 @@
 (25,29) fg=White bg=DarkGray mod=DIM
 (26,29) fg=White bg=DarkGray mod=DIM
 (27,29) fg=White bg=DarkGray mod=DIM
-(28,29) fg=White bg=DarkGray mod=DIM
-(29,29) fg=White bg=DarkGray mod=DIM
+(28,29) fg=DarkGray bg=Reset mod=DIM
+(29,29) fg=DarkGray bg=Reset mod=DIM
 (30,29) fg=DarkGray bg=Reset mod=DIM
 (31,29) fg=DarkGray bg=Reset mod=DIM
 (32,29) fg=DarkGray bg=Reset mod=DIM
 (33,29) fg=DarkGray bg=Reset mod=DIM
 (34,29) fg=DarkGray bg=Reset mod=DIM
 (35,29) fg=DarkGray bg=Reset mod=DIM
-(36,29) fg=DarkGray bg=Reset mod=DIM
-(37,29) fg=DarkGray bg=Reset mod=DIM
-(38,29) fg=DarkGray bg=Reset mod=DIM
+(36,29) fg=White bg=DarkGray mod=DIM
+(37,29) fg=White bg=DarkGray mod=DIM
+(38,29) fg=White bg=DarkGray mod=DIM
 (39,29) fg=White bg=DarkGray mod=DIM
 (40,29) fg=White bg=DarkGray mod=DIM
-(41,29) fg=White bg=DarkGray mod=DIM
+(41,29) fg=DarkGray bg=Reset mod=DIM
 (42,29) fg=DarkGray bg=Reset mod=DIM
 (43,29) fg=DarkGray bg=Reset mod=DIM
 (44,29) fg=DarkGray bg=Reset mod=DIM

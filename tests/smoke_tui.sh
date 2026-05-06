@@ -81,7 +81,7 @@ capture() {
 #
 # `pattern` is grep -F text (literal). Pick the most stable substring
 # that appears only on this screen — usually the title between the
-# rounded ╭ ╮ borders, e.g. " Help ", " Commands ", " Add New Host ".
+# rounded ╭ ╮ borders, e.g. " Help ", " Jump ", " Add New Host ".
 expect_screen() {
     local pattern="$1"
     if ! alive; then
@@ -157,13 +157,13 @@ send "?"; sleep 0.5
 expect_screen " Help "
 send_key Escape; sleep 0.3
 
-# 7. Command palette
+# 7. Jump bar
 # Trigger key is `:` (the footer hint reads `:  cmds`). Ctrl-p clears
-# ping results, not the palette — using it here used to silently leave
+# ping results, not the jump bar — using it here used to silently leave
 # the test on the host list and the Esc that followed killed the TUI.
-step "Command palette (:, Esc)"
+step "Jump bar (:, Esc)"
 send ":"; sleep 0.5
-expect_screen " Commands "
+expect_screen " Jump "
 send_key Escape; sleep 0.3
 
 # 8. Theme picker

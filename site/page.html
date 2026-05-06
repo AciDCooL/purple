@@ -42,9 +42,9 @@
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "3.5.0",
+  "softwareVersion": "3.6.0",
   "datePublished": "2024-10-01",
-  "dateModified": "2026-05-05",
+  "dateModified": "2026-05-06",
   "softwareRequirements": "macOS or Linux",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
@@ -59,9 +59,10 @@
     "name": "Eric Kochen",
     "url": "https://github.com/erickochen"
   },
-  "keywords": "SSH, SSH client, SSH server manager, SSH tunnel monitor, live SSH tunnel monitoring, real-time SSH tunnel, SSH tunnel dashboard, SSH tunnel throughput, SSH swimlane, Docker, Podman, container management, Docker TUI, Portainer alternative, SSH bookmarks, SSH launcher, TUI, terminal user interface, cloud sync, file transfer, DevOps, sysadmin, multi-cloud, open source",
+  "keywords": "SSH, SSH client, SSH server manager, SSH command palette, SSH fuzzy search, SSH command bar, terminal SSH search, SSH tunnel monitor, live SSH tunnel monitoring, real-time SSH tunnel, SSH tunnel dashboard, SSH tunnel throughput, SSH swimlane, Docker, Podman, container management, Docker TUI, Portainer alternative, SSH bookmarks, SSH launcher, TUI, terminal user interface, cloud sync, file transfer, DevOps, sysadmin, multi-cloud, open source",
   "screenshot": "https://raw.githubusercontent.com/erickochen/purple/master/demo.gif",
   "featureList": [
+    "Jump: universal fuzzy search bar across hosts, tunnels, containers, snippets and actions, with field-prefix syntax (user:, host:, proxy:, vault:, tag:)",
     "SSH config round-trip fidelity",
     "Fuzzy search across hosts",
     "Host tagging and filtering",
@@ -909,7 +910,7 @@ footer .sep { margin: 0 0.3em; }
           <button class="copy-btn copy-inline" id="copy-btn" onclick="copy(this)" style="display:none">copy</button>
         </div>
         <div class="install-output" id="install-output" style="display:none">
-          <div>Downloading purple v3.5.0 for darwin-arm64...</div>
+          <div>Downloading purple v3.6.0 for darwin-arm64...</div>
           <div>Installing to /usr/local/bin/purple... <span class="success">done.</span></div>
         </div>
         <div class="alt-installs" id="alt-installs" style="display:none">
@@ -944,7 +945,7 @@ footer .sep { margin: 0 0.3em; }
   <div class="features">
     <div class="feat">
       <span class="feat-icon">🔍</span>
-      <span class="feat-text"><strong>Find any host in a keystroke.</strong> Fuzzy matching across hostnames, IPs, tags and users. Your most-used servers float to the top automatically. Press <code>:</code> for a command palette with all 24 actions.</span>
+      <span class="feat-text"><strong>Find anything with one keystroke.</strong> Press <code>:</code> for Jump, a universal fuzzy search bar across hosts, tunnels, containers, snippets and actions. Searches the SSH <code>User</code>, <code>ProxyJump</code> and Vault SSH role too, so typing your username finds every server you log in as. Field prefixes <code>user:</code>, <code>proxy:</code>, <code>vault:</code> and <code>tag:</code> scope to a single SSH directive. Recent picks persist across sessions. Like Linear's <code>Cmd+K</code>, but in your terminal.</span>
     </div>
     <div class="feat">
       <span class="feat-icon">☁️</span>
@@ -1036,7 +1037,7 @@ footer .sep { margin: 0 0.3em; }
         <summary>How do I troubleshoot connection problems?</summary>
         <div class="answer">Run with <code>--verbose</code> to enable debug logging, then <code>purple logs --tail</code> in another terminal. Logs are written to <code>~/.purple/purple.log</code> with fault domain prefixes: <code>[external]</code> for remote/tool errors, <code>[config]</code> for local config issues. Set <code>PURPLE_LOG=trace</code> for maximum detail.</div>
       </details>
-      <div class="man-foot"><span>purple v3.5.0</span><span>2026-05-05</span><span>PURPLE(1)</span></div>
+      <div class="man-foot"><span>purple v3.6.0</span><span>2026-05-06</span><span>PURPLE(1)</span></div>
     </div>
   </div>
 

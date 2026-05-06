@@ -107,18 +107,25 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     frame.render_widget(Paragraph::new(visible), content);
 
-    // Footer below the block
+    // Footer below the block. Reads left-to-right as "what you can do
+    // next" with the exit key last, matching the canonical purple
+    // ordering: primary action → secondary → exit.
     let footer_area = design::render_overlay_footer(frame, area);
     let mut f = design::Footer::new();
     if state.all_done {
-        f = f.action("Esc", " close ").action("c", " copy ");
+        f = f
+            .action("c", " copy ")
+            .action("j/k", " scroll ")
+            .action("n/N", " next/prev host ")
+            .action("g/G", " top/bottom ")
+            .action("Esc", " close");
     } else {
-        f = f.action("Ctrl+C", " cancel ");
+        f = f
+            .action("j/k", " scroll ")
+            .action("n/N", " next/prev host ")
+            .action("g/G", " top/bottom ")
+            .action("Ctrl+C", " cancel");
     }
-    f = f
-        .action("j/k", " scroll ")
-        .action("n/N", " next/prev host ")
-        .action("g/G", " top/bottom");
     f.render_with_status(frame, footer_area, app);
 }
 

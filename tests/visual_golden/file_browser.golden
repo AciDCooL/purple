@@ -27,7 +27,7 @@
 │   ✖│                                                                                        │9h  │
 │   ✖╰────────────────────────────────────────────────────────────────────────────────────────╯1h  │
 ╰──── Enter  copy    Tab  switch    ^Space  select    ^A  all    s  sort:name    .  hidden    R.sh ╯
- Enter  connect    /  search    #  tag    v  detail    :  cmds                               ?  more
+ Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---
 (0,0) fg=DarkGray bg=Reset mod=DIM
 (1,0) fg=DarkGray bg=Reset mod=DIM

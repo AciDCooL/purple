@@ -577,9 +577,9 @@ fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
 
     let footer_area = design::render_overlay_footer(frame, block_area);
     design::Footer::new()
-        .action("Space", " toggle ")
         .primary("Enter", " done ")
-        .action("Esc", " back")
+        .action("Space", " toggle ")
+        .action("Esc", " cancel")
         .render_with_status(frame, footer_area, app);
 }
 

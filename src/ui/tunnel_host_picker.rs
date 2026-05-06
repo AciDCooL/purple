@@ -1,5 +1,5 @@
 //! Host picker overlay reached from the Tunnels overview when adding a new
-//! tunnel. Layout, input affordance and footer mirror the command palette
+//! tunnel. Layout, input affordance and footer mirror the jump bar
 //! so users get the same "type to filter" experience everywhere in purple.
 
 use ratatui::Frame;
@@ -13,7 +13,7 @@ use super::theme;
 use crate::app::App;
 use crate::handler::tunnel_host_picker::{editable_aliases, filtered_hosts};
 
-/// Cap on simultaneously visible rows. Mirrors the command palette so both
+/// Cap on simultaneously visible rows. Mirrors the jump bar so both
 /// overlays scroll at the same rate on tall terminals.
 const MAX_VISIBLE_ROWS: u16 = 16;
 
@@ -27,7 +27,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // border(2) + input(1) + separator(1) + list. Footer below the block.
     let total_height = 2 + 1 + 1 + list_height;
 
-    // Width formula matches command_palette: max(48, 60% of terminal),
+    // Width formula matches command_jump: max(48, 60% of terminal),
     // capped at terminal - 4.
     let dynamic_width = 48u16.max(frame.area().width * 60 / 100);
     let overlay_width = dynamic_width.min(frame.area().width.saturating_sub(4));

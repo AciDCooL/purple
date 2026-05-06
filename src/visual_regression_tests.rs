@@ -592,12 +592,87 @@ fn visual_file_browser() {
 }
 
 #[test]
-fn visual_command_palette() {
+fn visual_jump() {
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.palette = Some(crate::app::CommandPaletteState::default());
+    app.jump = Some(crate::app::JumpState::default());
+    app.recompute_jump_hits();
     let actual = render_screen(&mut app);
-    assert_golden("command_palette", &actual);
+    assert_golden("jump", &actual);
+}
+
+#[test]
+fn visual_jump_query() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.jump = Some(crate::app::JumpState::default());
+    if let Some(p) = app.jump.as_mut() {
+        for c in "files".chars() {
+            p.push_query(c);
+        }
+    }
+    app.recompute_jump_hits();
+    let actual = render_screen(&mut app);
+    assert_golden("jump_query", &actual);
+}
+
+#[test]
+fn visual_jump_no_results() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.jump = Some(crate::app::JumpState::default());
+    if let Some(p) = app.jump.as_mut() {
+        for c in "zzzqqq".chars() {
+            p.push_query(c);
+        }
+    }
+    app.recompute_jump_hits();
+    let actual = render_screen(&mut app);
+    assert_golden("jump_no_results", &actual);
+}
+
+#[test]
+fn visual_jump_with_recents() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    let mut state = crate::app::JumpState::default();
+    // Seed two recents: one host, one action. Exercises the
+    // RECENT-section render path that visual_jump cannot.
+    let n_action = crate::app::JumpAction::all()
+        .iter()
+        .find(|a| a.key == 'n')
+        .copied()
+        .expect("'n' (What's new) action present");
+    state.recents = vec![
+        crate::app::JumpHit::Host(crate::app::HostHit {
+            alias: "bastion-ams".into(),
+            hostname: "bastion.ams.example".into(),
+            tags: vec![],
+            provider: None,
+            user: String::new(),
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            vault_ssh: None,
+        }),
+        crate::app::JumpHit::Action(n_action),
+    ];
+    app.jump = Some(state);
+    app.recompute_jump_hits();
+    let actual = render_screen(&mut app);
+    assert_golden("jump_with_recents", &actual);
+}
+
+#[test]
+fn visual_jump_over_tunnels() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.jump = Some(crate::app::JumpState::for_mode(
+        crate::app::JumpMode::Tunnels,
+    ));
+    app.recompute_jump_hits();
+    let actual = render_screen(&mut app);
+    assert_golden("jump_over_tunnels", &actual);
 }
 
 #[test]
