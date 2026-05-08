@@ -50,6 +50,7 @@
                    "Cargo.lock"
                    "build.rs"
                    "rust-toolchain.toml"
+                   "CHANGELOG.md"
                  ]
               || relPath == "src"
               || pkgs.lib.hasPrefix "src/" relPath
