@@ -5554,15 +5554,65 @@ Host do-web2
 }
 
 #[test]
-fn esc_quits_when_no_filter() {
+fn esc_does_not_quit_first_press_shows_hint_toast() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     assert!(app.hosts_state.group_filter.is_none());
+    assert!(app.hosts_state.multi_select.is_empty());
     assert!(app.running);
+    assert!(!app.esc_quit_hint_shown);
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
 
-    assert!(!app.running, "Esc with no group_filter should quit");
+    assert!(app.running, "Esc on idle host list must not quit");
+    assert!(
+        app.esc_quit_hint_shown,
+        "first idle Esc must arm the one-shot hint flag"
+    );
+    let toast = app
+        .status_center
+        .toast
+        .as_ref()
+        .expect("first idle Esc must surface a toast");
+    assert_eq!(toast.text, crate::messages::ESC_QUIT_HINT);
+}
+
+#[test]
+fn esc_second_press_after_hint_is_silent_noop() {
+    let mut app = make_app("Host test\n  HostName test.com\n");
+    let (tx, _rx) = mpsc::channel();
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(
+        app.status_center.toast.is_some(),
+        "first press should have produced a toast"
+    );
+    // Simulate the toast having been read and dismissed.
+    app.status_center.toast = None;
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+
+    assert!(app.running, "second idle Esc must still not quit");
+    assert!(
+        app.status_center.toast.is_none(),
+        "second idle Esc must stay silent (no repeated toast)"
+    );
+}
+
+#[test]
+fn q_still_quits_after_esc_hint() {
+    let mut app = make_app("Host test\n  HostName test.com\n");
+    let (tx, _rx) = mpsc::channel();
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(app.running);
+    assert!(app.esc_quit_hint_shown);
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+    assert!(
+        !app.running,
+        "q must always quit, even after Esc hint shown"
+    );
 }
 
 #[test]
@@ -8466,4 +8516,117 @@ fn tunnels_overview_delete_after_sort_targets_visible_row() {
         "aaa's tunnel should have been removed"
     );
     assert_eq!(zzz_rules.len(), 1, "zzz's tunnel must be untouched");
+}
+
+#[test]
+fn esc_on_tunnels_overview_does_not_quit_first_press_shows_hint() {
+    let mut app = make_tunnels_overview_app();
+    assert!(app.running);
+    assert!(!app.esc_quit_hint_shown);
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+
+    assert!(app.running, "Esc on idle tunnels overview must not quit");
+    assert!(app.esc_quit_hint_shown);
+    let toast = app
+        .status_center
+        .toast
+        .as_ref()
+        .expect("first idle Esc must surface a toast");
+    assert_eq!(toast.text, crate::messages::ESC_QUIT_HINT);
+}
+
+#[test]
+fn esc_on_tunnels_overview_second_press_silent_noop() {
+    let mut app = make_tunnels_overview_app();
+    let (tx, _rx) = mpsc::channel();
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    app.status_center.toast = None;
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+
+    assert!(app.running);
+    assert!(
+        app.status_center.toast.is_none(),
+        "second idle Esc must stay silent"
+    );
+}
+
+#[test]
+fn q_on_tunnels_overview_still_quits() {
+    let mut app = make_tunnels_overview_app();
+    let (tx, _rx) = mpsc::channel();
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+
+    assert!(!app.running, "q must always quit on tunnels overview");
+}
+
+#[test]
+fn esc_hint_does_not_displace_active_sticky_error_toast() {
+    let mut app = make_app("Host test\n  HostName test.com\n");
+    let (tx, _rx) = mpsc::channel();
+
+    // notify_error surfaces a sticky Error-class toast — exactly the kind of
+    // message that must not be silently clobbered by an informational hint.
+    app.notify_error("provider sync failed");
+    let sticky = app
+        .status_center
+        .toast
+        .as_ref()
+        .expect("notify_error must land in the toast slot");
+    assert!(sticky.sticky, "Error toasts are sticky by default");
+    let sticky_text = sticky.text.clone();
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+
+    assert!(app.running, "Esc must not quit");
+    assert!(
+        !app.esc_quit_hint_shown,
+        "flag must stay unset when the hint was suppressed by a sticky toast"
+    );
+    assert_eq!(
+        app.status_center
+            .toast
+            .as_ref()
+            .map(|t| t.text.as_str())
+            .unwrap_or(""),
+        sticky_text,
+        "sticky Error toast must remain visible, hint must not displace it"
+    );
+
+    // Once the sticky toast is cleared, a later idle Esc surfaces the hint as
+    // designed and arms the one-shot flag.
+    app.status_center.toast = None;
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(app.esc_quit_hint_shown);
+    assert_eq!(
+        app.status_center.toast.as_ref().map(|t| t.text.as_str()),
+        Some(crate::messages::ESC_QUIT_HINT)
+    );
+}
+
+#[test]
+fn esc_hint_flag_is_shared_between_host_list_and_tunnels_overview() {
+    let mut app = make_app("Host test\n  HostName test.com\n  LocalForward 8080 localhost:80\n");
+    let (tx, _rx) = mpsc::channel();
+
+    // First idle Esc on host list arms the hint flag.
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(app.esc_quit_hint_shown);
+    app.status_center.toast = None;
+
+    // Switch to tunnels overview and press Esc again. The shared flag means
+    // the hint stays silent — the user already learned about `q`.
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.ui.tunnels_overview_state.select(Some(0));
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+
+    assert!(app.running);
+    assert!(
+        app.status_center.toast.is_none(),
+        "second-tab idle Esc must not re-surface the hint"
+    );
 }

@@ -333,8 +333,23 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
                 return_screen: Box::new(Screen::HostList),
             });
         }
-        KeyCode::Esc | KeyCode::Char('q') => {
+        KeyCode::Char('q') => {
             app.running = false;
+        }
+        // Mirrors host-list policy: idle Esc never quits. The first idle press
+        // surfaces a one-shot toast pointing to `q`; the flag is shared with the
+        // host list so the hint shows at most once per session across both tabs.
+        // The guard also skips the hint when a sticky toast is active so an
+        // informational nudge cannot displace a sticky error. Subsequent idle
+        // Esc presses (or Esc while a sticky is up) fall through to the no-op
+        // arm below.
+        KeyCode::Esc
+            if !app.esc_quit_hint_shown
+                && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky) =>
+        {
+            log::debug!("[purple] esc on idle tunnels overview, showing quit hint toast");
+            app.notify(crate::messages::ESC_QUIT_HINT);
+            app.esc_quit_hint_shown = true;
         }
         _ => {}
     }

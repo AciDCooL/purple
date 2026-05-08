@@ -1,3 +1,11 @@
+## 3.8.0 - 2026-05-08
+
+- feat: Esc cancels, never quits. Press q to quit.
+- feat: Esc on the host list clears your group filter or your bulk selection and stops there. A stray Esc on an empty host list keeps you in the app instead of closing it.
+- feat: The first idle Esc per session surfaces a one-shot toast pointing to `q`, then stays a silent no-op. If a sticky error is up, the hint waits so it never displaces a message you still need to see.
+- change: Help footer and wiki spell out `q` as the only quit key on the host list and tunnels page.
+- Esc-as-cancel suggested by @BrahmingWu (#63).
+
 ## 3.7.0 - 2026-05-08
 
 - feat: Multiple accounts per cloud provider, no juggling.

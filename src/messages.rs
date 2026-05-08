@@ -99,6 +99,7 @@ pub const NO_HOSTS_TO_RUN: &str = "No hosts to run on.";
 pub const NO_HOSTS_TO_TAG: &str = "No hosts to tag.";
 pub const PING_FIRST: &str = "Ping first (p/P), then filter with !.";
 pub const PINGING_ALL: &str = "Pinging all the things...";
+pub const ESC_QUIT_HINT: &str = "Nothing to cancel. Press q to quit.";
 
 pub fn included_file_edit(name: &str) -> String {
     format!("{} is in an included file. Edit it there.", name)

@@ -189,6 +189,11 @@ pub struct App {
 
     /// Jump state. Some when the jump bar is open.
     pub jump: Option<JumpState>,
+
+    /// One-shot session flag: set the first time Esc is pressed on the host
+    /// list with no filter and no selection, so the toast that nudges users
+    /// toward `q` is shown exactly once per process.
+    pub esc_quit_hint_shown: bool,
 }
 
 impl App {
@@ -239,6 +244,7 @@ impl App {
             demo_mode: false,
             pending_vault_config_write: false,
             jump: None,
+            esc_quit_hint_shown: false,
         }
     }
 

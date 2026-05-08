@@ -53,14 +53,20 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
             if app.hosts_state.group_filter.is_some() {
                 app.clear_group_filter();
             } else if !app.hosts_state.multi_select.is_empty() {
-                // Clear the selection before quitting so Esc first resets
-                // bulk-edit intent, then a second Esc exits the app.
                 app.hosts_state.multi_select.clear();
-            } else {
-                if let Some(ref cancel) = app.vault.signing_cancel {
-                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-                }
-                app.running = false;
+            } else if !app.esc_quit_hint_shown
+                && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky)
+            {
+                // Esc never quits the app. The first time a user presses Esc
+                // on an idle host list we surface a one-shot toast pointing to
+                // `q`, so accidental Esc presses discover the conventional
+                // exit key. Skip the hint when a sticky toast is active so an
+                // informational nudge cannot displace a sticky error the user
+                // still needs to see; the flag stays unset so the hint will
+                // surface on a later Esc once the sticky toast is dismissed.
+                log::debug!("[purple] esc on idle host list, showing quit hint toast");
+                app.notify(crate::messages::ESC_QUIT_HINT);
+                app.esc_quit_hint_shown = true;
             }
         }
         KeyCode::Char('j') | KeyCode::Down => {

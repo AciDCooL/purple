@@ -15,7 +15,7 @@
 │   ● │                Enter  connect                           d  del                       │ 8h  │
 │   ● │                    /  search (scoped)                   u  undo del                  │14h  │
 │   ● │                    #  tag picker                        t  tag (bulk if se           │15h  │
-│   ● │                  Esc  clear filter / quit                                            │16h  │
+│   ● │                  Esc  clear filter / selection                                       │16h  │
 │   ● │                                                                                      │17h  │
 │   ● │           VIEW                                    CONNECT AND RUN                    │18h  │
 │   ● │                                                                                      │19h  │
@@ -25,7 +25,7 @@
 │   ○ │           All commands and docs:  github.com/erickochen/purple/wiki                  │  -  │
 │   ○ │           Got an idea or a bug?   github.com/erickochen/purple/issues                │  -  │
 │   ○ │                                                                                      │  -  │
-│   ○ ╰─────────────────────────────────────────────────────────── v3.7.0 (built 1 Jan 2000) ╯  -  │
+│   ○ ╰─────────────────────────────────────────────────────────── v3.8.0 (built 1 Jan 2000) ╯  -  │
 ╰───── j/k  scroll  [1/10]   Esc  close                                                       e.sh ╯
  Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---
@@ -795,6 +795,11 @@
 (46,17) fg=Reset bg=Reset mod=DIM
 (47,17) fg=Reset bg=Reset mod=DIM
 (48,17) fg=Reset bg=Reset mod=DIM
+(49,17) fg=Reset bg=Reset mod=DIM
+(50,17) fg=Reset bg=Reset mod=DIM
+(51,17) fg=Reset bg=Reset mod=DIM
+(52,17) fg=Reset bg=Reset mod=DIM
+(53,17) fg=Reset bg=Reset mod=DIM
 (93,17) fg=Reset bg=Reset mod=DIM
 (94,17) fg=DarkGray bg=Reset mod=DIM
 (95,17) fg=DarkGray bg=Reset mod=DIM

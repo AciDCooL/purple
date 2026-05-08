@@ -304,7 +304,7 @@ fn host_list_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         help_line("Enter", "connect"),
         help_line("/", "search (scoped)"),
         help_line("#", "tag picker"),
-        help_line("Esc", "clear filter / quit"),
+        help_line("Esc", "clear filter / selection"),
         blank(),                // row 9
         section_header("VIEW"), // row 10 ↔ col2 CONNECT AND RUN
         blank(),
@@ -319,7 +319,7 @@ fn host_list_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         blank(),
         blank(),
         blank(),
-        help_line(":", "jump (search anything)"), // row 23 ↔ col2 q/Esc quit
+        help_line(":", "jump (search anything)"), // row 23 ↔ col2 q quit
     ];
 
     let col2 = vec![
@@ -346,7 +346,7 @@ fn host_list_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         help_line_short("C", "containers"),
         help_line_short("K", "SSH keys"),
         help_line_short("S", "providers"),
-        help_line_short("q/Esc", "quit"), // row 23 ↔ col1 `:`
+        help_line_short("q", "quit"), // row 23 ↔ col1 `:`
     ];
 
     (col1, col2)
@@ -436,7 +436,7 @@ fn tunnels_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         help_line("PgDn/PgUp", "page down / up"),
         help_line("g/G", "top / bottom"),
         help_line("/", "search"),
-        help_line("Esc", "clear filter / quit"),
+        help_line("Esc", "clear search"),
         blank(),                   // row 8
         blank(),                   // row 9 padding so headers align
         section_header("ACTIONS"), // row 10 ↔ col2 NAVIGATE TABS
@@ -444,7 +444,7 @@ fn tunnels_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         help_line("Enter", "start / stop"),
         help_line("s", "cycle sort"),
         blank(),
-        help_line(":", "jump (search anything)"), // row 15 ↔ col2 q/Esc quit
+        help_line(":", "jump (search anything)"), // row 15 ↔ col2 q quit
     ];
 
     let col2 = vec![
@@ -463,7 +463,7 @@ fn tunnels_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         help_line_short("Tab", "switch to hosts"),
         help_line_short("n", "what's new"),
         blank(),
-        help_line_short("q/Esc", "quit"), // row 15 ↔ col1 `:`
+        help_line_short("q", "quit"), // row 15 ↔ col1 `:`
     ];
 
     (col1, col2)
