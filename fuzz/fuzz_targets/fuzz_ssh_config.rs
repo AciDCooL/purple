@@ -194,4 +194,95 @@ fuzz_target!(|data: &[u8]| {
             "post-v2.8.1 mutation APIs broke round-trip"
         );
     }
+
+    // 10. Multi-config provider marker writers (3-segment) and the lazy
+    //     migration helper. These mutate `# purple:provider` comments and
+    //     are the highest-risk paths in the data layer that handles
+    //     ~/.ssh/config. Exercise both paths against every parsed alias
+    //     plus the cross-config helper.
+    use purple_ssh::providers::config::ProviderConfigId;
+    if let Some(entry) = entries.first() {
+        let mut c = config.clone();
+        // Bare write.
+        c.set_host_provider_id(&entry.alias, &ProviderConfigId::bare("fuzz-bare"), "id-1");
+        // Labeled write.
+        c.set_host_provider_id(
+            &entry.alias,
+            &ProviderConfigId::labeled("fuzz-prov", "fuzz-label"),
+            "id-2",
+        );
+        // Downgrade back to bare.
+        c.set_host_provider_id(&entry.alias, &ProviderConfigId::bare("fuzz-prov"), "id-3");
+        let s1 = c.serialize();
+        let c2 = purple_ssh::ssh_config::model::SshConfigFile {
+            elements: purple_ssh::ssh_config::model::SshConfigFile::parse_content(&s1),
+            path: PathBuf::from("/tmp/fuzz_config"),
+            crlf: s1.contains("\r\n"),
+            bom: s1.starts_with('\u{FEFF}'),
+        };
+        assert_eq!(
+            s1,
+            c2.serialize(),
+            "set_host_provider_id broke round-trip"
+        );
+    }
+
+    // Lazy-migration legacy-rewrite helper. Run against every provider name
+    // referenced by parsed markers so the fuzzer can drive it on whatever
+    // input combination it constructs. Round-trip after.
+    let providers_seen: std::collections::HashSet<String> = entries
+        .iter()
+        .filter_map(|e| e.provider.clone())
+        .collect();
+    for prov in &providers_seen {
+        let mut c = config.clone();
+        let _ = c.rewrite_legacy_markers_to_label(prov, "fuzz-default");
+        let s1 = c.serialize();
+        let c2 = purple_ssh::ssh_config::model::SshConfigFile {
+            elements: purple_ssh::ssh_config::model::SshConfigFile::parse_content(&s1),
+            path: PathBuf::from("/tmp/fuzz_config"),
+            crlf: s1.contains("\r\n"),
+            bom: s1.starts_with('\u{FEFF}'),
+        };
+        assert_eq!(
+            s1,
+            c2.serialize(),
+            "rewrite_legacy_markers_to_label broke round-trip"
+        );
+    }
+
+    // Bare-config raw lookup must not panic on arbitrary input. The
+    // semantic correctness (no host duplication on bare-config sync) is
+    // covered by the `bare_sync_*` unit tests in providers/sync_tests.rs.
+    for prov in &providers_seen {
+        let _ = config.find_hosts_by_provider_raw(prov);
+    }
+
+    // 11. Forward-rule mutators (add_forward / remove_forward) and the
+    //     remaining purple:* writers (askpass, provider_tags). These were
+    //     missing from the fuzz target until now.
+    if let Some(entry) = entries.first() {
+        let mut c = config.clone();
+        c.add_forward(&entry.alias, "LocalForward", "8080 localhost:80");
+        c.add_forward(&entry.alias, "RemoteForward", "9090 localhost:3000");
+        c.add_forward(&entry.alias, "DynamicForward", "1080");
+        let _ = c.remove_forward(&entry.alias, "LocalForward", "8080 localhost:80");
+        c.set_host_askpass(&entry.alias, "keychain");
+        c.set_host_askpass(&entry.alias, "vault:secret/ssh/fuzz");
+        c.set_host_askpass(&entry.alias, "");
+        c.set_host_provider_tags(&entry.alias, &["fuzz".to_string(), "auto".to_string()]);
+        c.set_host_provider_tags(&entry.alias, &[]);
+        let s1 = c.serialize();
+        let c2 = purple_ssh::ssh_config::model::SshConfigFile {
+            elements: purple_ssh::ssh_config::model::SshConfigFile::parse_content(&s1),
+            path: PathBuf::from("/tmp/fuzz_config"),
+            crlf: s1.contains("\r\n"),
+            bom: s1.starts_with('\u{FEFF}'),
+        };
+        assert_eq!(
+            s1,
+            c2.serialize(),
+            "forward / askpass / provider_tags mutators broke round-trip"
+        );
+    }
 });

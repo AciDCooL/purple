@@ -265,12 +265,19 @@ pub enum ProviderCommands {
         /// Disable automatic sync on startup
         #[arg(long, conflicts_with = "auto_sync")]
         no_auto_sync: bool,
+
+        /// Optional label when adding a second config for the same
+        /// provider (e.g. --label work, --label personal). Required once
+        /// a provider already has a labeled config.
+        #[arg(long)]
+        label: Option<String>,
     },
     /// List configured providers
     List,
-    /// Remove a provider configuration
+    /// Remove a provider configuration. Pass `provider` for ALL configs
+    /// of that provider, or `provider:label` for one specific config.
     Remove {
-        /// Provider name to remove
+        /// Provider name (`digitalocean`) or `provider:label` (`digitalocean:work`)
         provider: String,
     },
 }

@@ -103,22 +103,115 @@ impl HostBlock {
 
     /// Extract provider info from purple:provider comment in directives.
     /// Returns (provider_name, server_id), e.g. ("digitalocean", "412345678").
+    /// Label is dropped here; use `provider_id()` for the full identifier.
     pub fn provider(&self) -> Option<(String, String)> {
+        self.provider_id()
+            .map(|(id, server_id)| (id.provider, server_id))
+    }
+
+    /// Raw 2-segment interpretation of the purple:provider marker.
+    /// Splits on the FIRST colon only and returns (provider_name, full_tail).
+    /// For `proxmox:qemu:300` this yields `("proxmox", "qemu:300")`, NOT
+    /// `("proxmox:qemu", "300")` like the label-aware `provider_id()` would.
+    ///
+    /// Use this when you need to claim or compare every marker for a provider
+    /// regardless of whether the middle segment happens to look like a label.
+    /// Server_ids containing colons (Proxmox `qemu:N`, OCI compartment paths)
+    /// otherwise produce false labeled-marker interpretations.
+    pub fn provider_raw(&self) -> Option<(String, String)> {
         for d in &self.directives {
-            if d.is_non_directive {
-                let trimmed = d.raw_line.trim();
-                if let Some(rest) = trimmed.strip_prefix("# purple:provider ") {
-                    if let Some((name, id)) = rest.split_once(':') {
-                        return Some((name.trim().to_string(), id.trim().to_string()));
-                    }
-                }
+            if !d.is_non_directive {
+                continue;
             }
+            let trimmed = d.raw_line.trim();
+            let rest = match trimmed.strip_prefix("# purple:provider ") {
+                Some(r) => r.trim(),
+                None => continue,
+            };
+            let (provider, server_id) = rest.split_once(':')?;
+            let provider = provider.trim();
+            let server_id = server_id.trim();
+            if provider.is_empty() || server_id.is_empty() {
+                return None;
+            }
+            return Some((provider.to_string(), server_id.to_string()));
         }
         None
     }
 
-    /// Set provider on a host block. Replaces existing purple:provider comment or adds one.
-    pub fn set_provider(&mut self, provider_name: &str, server_id: &str) {
+    /// Extract provider info as `(ProviderConfigId, server_id)`.
+    /// Supports both 2-segment legacy markers (`provider:server_id`) and
+    /// 3-segment labeled markers (`provider:label:server_id`).
+    pub fn provider_id(&self) -> Option<(crate::providers::config::ProviderConfigId, String)> {
+        for d in &self.directives {
+            if !d.is_non_directive {
+                continue;
+            }
+            let trimmed = d.raw_line.trim();
+            let rest = match trimmed.strip_prefix("# purple:provider ") {
+                Some(r) => r.trim(),
+                None => continue,
+            };
+            // splitn(3) so a server_id containing ':' (rare, but possible)
+            // ends up wholly in the last segment.
+            let parts: Vec<&str> = rest.splitn(3, ':').collect();
+            return match parts.as_slice() {
+                [provider, server_id] => {
+                    let provider = provider.trim();
+                    let server_id = server_id.trim();
+                    if provider.is_empty() || server_id.is_empty() {
+                        return None;
+                    }
+                    Some((
+                        crate::providers::config::ProviderConfigId::bare(provider),
+                        server_id.to_string(),
+                    ))
+                }
+                [provider, label, server_id] => {
+                    let label = label.trim();
+                    let provider = provider.trim();
+                    let server_id = server_id.trim();
+                    // Empty provider or empty server_id: malformed marker.
+                    // Returning None makes the host appear unowned, which is
+                    // safer than guessing an interpretation that could let
+                    // sync claim or delete the wrong host.
+                    if provider.is_empty() || server_id.is_empty() {
+                        return None;
+                    }
+                    if crate::providers::config::validate_label(label).is_ok() {
+                        // Well-formed 3-segment labeled marker.
+                        Some((
+                            crate::providers::config::ProviderConfigId::labeled(provider, label),
+                            server_id.to_string(),
+                        ))
+                    } else if label.is_empty() {
+                        // Empty middle (e.g. `aws::123`) cannot be either a
+                        // valid labeled marker or a legacy 2-segment one.
+                        // Treat as malformed.
+                        None
+                    } else {
+                        // Middle has content but isn't a valid label
+                        // (e.g. `azure:RES:i-12345`): legacy interpretation
+                        // with the embedded colon kept in server_id.
+                        Some((
+                            crate::providers::config::ProviderConfigId::bare(provider),
+                            format!("{}:{}", label, server_id),
+                        ))
+                    }
+                }
+                _ => None,
+            };
+        }
+        None
+    }
+
+    /// Set provider on a host block using a full ProviderConfigId.
+    /// Emits 2-segment marker if `id.label` is None, 3-segment if Some.
+    pub fn set_provider_id(
+        &mut self,
+        id: &crate::providers::config::ProviderConfigId,
+        server_id: &str,
+    ) {
         let indent = self.detect_indent();
         self.directives.retain(|d| {
             !(d.is_non_directive && d.raw_line.trim().starts_with("# purple:provider "))
@@ -129,10 +222,7 @@ impl HostBlock {
             Directive {
                 key: String::new(),
                 value: String::new(),
-                raw_line: format!(
-                    "{}# purple:provider {}:{}",
-                    indent, provider_name, server_id
-                ),
+                raw_line: format!("{}# purple:provider {}:{}", indent, id, server_id),
                 is_non_directive: true,
             },
         );
@@ -469,7 +559,10 @@ impl HostBlock {
         entry.tags = self.tags();
         entry.provider_tags = self.provider_tags();
         entry.has_provider_tags = self.has_provider_tags_comment();
-        entry.provider = self.provider().map(|(name, _)| name);
+        if let Some((id, _)) = self.provider_id() {
+            entry.provider = Some(id.provider);
+            entry.provider_label = id.label;
+        }
         entry.tunnel_count = self.tunnel_count();
         entry.askpass = self.askpass();
         entry.vault_ssh = self.vault_ssh();

@@ -1,12 +1,9 @@
 // ── What's New overlay strings ──────────────────────────────────────
 
 pub const TITLE: &str = "What's new";
+/// Special: what's_new combines `esc`, `q` and `n` (mark seen). Other
+/// labels and the `j/k` / `g/G` keys come from `messages::footer`.
 pub const FOOTER_CLOSE_KEYS: &str = "esc/q/n";
-pub const FOOTER_CLOSE_LABEL: &str = " close ";
-pub const FOOTER_SCROLL_KEYS: &str = "j/k";
-pub const FOOTER_SCROLL_LABEL: &str = " scroll ";
-pub const FOOTER_TOP_BOTTOM_KEYS: &str = "g/G";
-pub const FOOTER_TOP_BOTTOM_LABEL: &str = " top/bottom";
 pub const KIND_FEAT: &str = "+ feat  ";
 pub const KIND_CHANGE: &str = "~ change";
 pub const KIND_FIX: &str = "! fix   ";

@@ -209,8 +209,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let can_scroll = total_lines > max_body;
     // Footer below the block
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     if can_scroll {
-        let mut spans = design::Footer::new().action("j/k", " scroll ").into_spans();
+        let mut spans = design::Footer::new()
+            .action(fl::KEYS_SCROLL, fl::LABEL_SCROLL)
+            .into_spans();
         let position = app.ui.help_scroll.saturating_add(1);
         let max = max_scroll.saturating_add(1);
         spans.push(Span::styled(
@@ -218,11 +221,15 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             theme::muted(),
         ));
         spans.push(Span::raw(design::FOOTER_GAP));
-        spans.extend(design::Footer::new().action("Esc", " close").into_spans());
+        spans.extend(
+            design::Footer::new()
+                .action("Esc", fl::ESC_CLOSE)
+                .into_spans(),
+        );
         super::render_footer_with_status(frame, footer_area, spans, app);
     } else {
         design::Footer::new()
-            .action("Esc", " close")
+            .action("Esc", fl::ESC_CLOSE)
             .render_with_status(frame, footer_area, app);
     }
 }

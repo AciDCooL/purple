@@ -329,7 +329,7 @@ fn resolve_pubkey_absolute_path_inside_home() {
 #[test]
 fn resolve_vault_role_host_override() {
     let config = crate::providers::config::ProviderConfig::default();
-    let role = resolve_vault_role(Some("ssh/sign/admin"), Some("aws"), &config);
+    let role = resolve_vault_role(Some("ssh/sign/admin"), Some("aws"), None, &config);
     assert_eq!(role.as_deref(), Some("ssh/sign/admin"));
 }
 
@@ -373,13 +373,13 @@ fn is_valid_vault_addr_rejects_overlong() {
 #[test]
 fn resolve_vault_addr_none_when_nothing_set() {
     let config = crate::providers::config::ProviderConfig::default();
-    assert!(resolve_vault_addr(None, None, &config).is_none());
+    assert!(resolve_vault_addr(None, None, None, &config).is_none());
 }
 
 #[test]
 fn resolve_vault_addr_uses_host_override() {
     let config = crate::providers::config::ProviderConfig::default();
-    let addr = resolve_vault_addr(Some("http://127.0.0.1:8200"), Some("aws"), &config);
+    let addr = resolve_vault_addr(Some("http://127.0.0.1:8200"), Some("aws"), None, &config);
     assert_eq!(addr.as_deref(), Some("http://127.0.0.1:8200"));
 }
 
@@ -388,7 +388,7 @@ fn resolve_vault_addr_falls_back_to_provider() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_addr=https://vault.example:8200\n",
     );
-    let addr = resolve_vault_addr(None, Some("aws"), &config);
+    let addr = resolve_vault_addr(None, Some("aws"), None, &config);
     assert_eq!(addr.as_deref(), Some("https://vault.example:8200"));
 }
 
@@ -397,7 +397,7 @@ fn resolve_vault_addr_host_beats_provider() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_addr=https://provider:8200\n",
     );
-    let addr = resolve_vault_addr(Some("http://host:8200"), Some("aws"), &config);
+    let addr = resolve_vault_addr(Some("http://host:8200"), Some("aws"), None, &config);
     assert_eq!(addr.as_deref(), Some("http://host:8200"));
 }
 
@@ -406,7 +406,7 @@ fn resolve_vault_addr_empty_host_falls_through_to_provider() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_addr=https://provider:8200\n",
     );
-    let addr = resolve_vault_addr(Some(""), Some("aws"), &config);
+    let addr = resolve_vault_addr(Some(""), Some("aws"), None, &config);
     assert_eq!(addr.as_deref(), Some("https://provider:8200"));
 }
 
@@ -415,14 +415,14 @@ fn resolve_vault_addr_whitespace_host_falls_through_to_provider() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_addr=https://provider:8200\n",
     );
-    let addr = resolve_vault_addr(Some("   "), Some("aws"), &config);
+    let addr = resolve_vault_addr(Some("   "), Some("aws"), None, &config);
     assert_eq!(addr.as_deref(), Some("https://provider:8200"));
 }
 
 #[test]
 fn resolve_vault_addr_normalizes_bare_host_input() {
     let config = crate::providers::config::ProviderConfig::default();
-    let addr = resolve_vault_addr(Some("192.168.1.100"), None, &config);
+    let addr = resolve_vault_addr(Some("192.168.1.100"), None, None, &config);
     assert_eq!(addr.as_deref(), Some("https://192.168.1.100:8200"));
 }
 
@@ -431,7 +431,7 @@ fn resolve_vault_addr_normalizes_provider_bare_addr() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_addr=vault.example\n",
     );
-    let addr = resolve_vault_addr(None, Some("aws"), &config);
+    let addr = resolve_vault_addr(None, Some("aws"), None, &config);
     assert_eq!(addr.as_deref(), Some("https://vault.example:8200"));
 }
 
@@ -557,20 +557,20 @@ fn resolve_vault_role_provider_fallback() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_role=ssh/sign/engineer\n",
     );
-    let role = resolve_vault_role(None, Some("aws"), &config);
+    let role = resolve_vault_role(None, Some("aws"), None, &config);
     assert_eq!(role.as_deref(), Some("ssh/sign/engineer"));
 }
 
 #[test]
 fn resolve_vault_role_none_when_no_config() {
     let config = crate::providers::config::ProviderConfig::default();
-    assert!(resolve_vault_role(None, None, &config).is_none());
+    assert!(resolve_vault_role(None, None, None, &config).is_none());
 }
 
 #[test]
 fn resolve_vault_role_none_when_provider_has_no_role() {
     let config = crate::providers::config::ProviderConfig::parse("[aws]\ntoken=abc\n");
-    assert!(resolve_vault_role(None, Some("aws"), &config).is_none());
+    assert!(resolve_vault_role(None, Some("aws"), None, &config).is_none());
 }
 
 #[test]
@@ -578,7 +578,7 @@ fn resolve_vault_role_host_overrides_provider() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_role=ssh/sign/default\n",
     );
-    let role = resolve_vault_role(Some("ssh/sign/admin"), Some("aws"), &config);
+    let role = resolve_vault_role(Some("ssh/sign/admin"), Some("aws"), None, &config);
     assert_eq!(role.as_deref(), Some("ssh/sign/admin"));
 }
 
@@ -661,7 +661,7 @@ fn resolve_vault_role_empty_host_falls_through_to_provider() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_role=ssh/sign/default\n",
     );
-    let role = resolve_vault_role(Some(""), Some("aws"), &config);
+    let role = resolve_vault_role(Some(""), Some("aws"), None, &config);
     assert_eq!(role.as_deref(), Some("ssh/sign/default"));
 }
 
@@ -1370,7 +1370,7 @@ fn resolve_vault_role_host_overrides_provider_default() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_role=ssh/sign/default\n",
     );
-    let role = resolve_vault_role(Some("ssh/sign/override"), Some("aws"), &config);
+    let role = resolve_vault_role(Some("ssh/sign/override"), Some("aws"), None, &config);
     assert_eq!(role.as_deref(), Some("ssh/sign/override"));
 }
 
@@ -1379,15 +1379,15 @@ fn resolve_vault_role_falls_back_to_provider_when_host_empty() {
     let config = crate::providers::config::ProviderConfig::parse(
         "[aws]\ntoken=abc\nvault_role=ssh/sign/default\n",
     );
-    let role = resolve_vault_role(None, Some("aws"), &config);
+    let role = resolve_vault_role(None, Some("aws"), None, &config);
     assert_eq!(role.as_deref(), Some("ssh/sign/default"));
 }
 
 #[test]
 fn resolve_vault_role_returns_none_when_neither_set() {
     let config = crate::providers::config::ProviderConfig::default();
-    assert!(resolve_vault_role(None, Some("aws"), &config).is_none());
-    assert!(resolve_vault_role(None, None, &config).is_none());
+    assert!(resolve_vault_role(None, Some("aws"), None, &config).is_none());
+    assert!(resolve_vault_role(None, None, None, &config).is_none());
 }
 
 #[cfg(unix)]
@@ -1421,4 +1421,53 @@ fn check_cert_validity_invalid_file() {
         "Expected Invalid, got: {:?}",
         status
     );
+}
+
+// ---- multi-config label-aware resolution ----
+
+#[test]
+fn resolve_vault_role_picks_correct_labeled_config() {
+    // Two labeled DO configs with different vault_role values: the resolver
+    // must pick the one matching the host's label, not the first match.
+    let config = crate::providers::config::ProviderConfig::parse(
+        "[digitalocean:work]\ntoken=a\nvault_role=ssh/sign/work\n\n[digitalocean:personal]\ntoken=b\nvault_role=ssh/sign/personal\n",
+    );
+    let work_role = resolve_vault_role(None, Some("digitalocean"), Some("work"), &config);
+    assert_eq!(work_role.as_deref(), Some("ssh/sign/work"));
+    let personal_role = resolve_vault_role(None, Some("digitalocean"), Some("personal"), &config);
+    assert_eq!(personal_role.as_deref(), Some("ssh/sign/personal"));
+}
+
+#[test]
+fn resolve_vault_role_legacy_marker_falls_back_to_first_match() {
+    // A legacy 2-segment marker has no label. When no bare config exists the
+    // resolver still finds a section by bare provider name so vault stays
+    // usable during migration.
+    let config = crate::providers::config::ProviderConfig::parse(
+        "[digitalocean:work]\ntoken=a\nvault_role=ssh/sign/work\n",
+    );
+    let role = resolve_vault_role(None, Some("digitalocean"), None, &config);
+    assert_eq!(role.as_deref(), Some("ssh/sign/work"));
+}
+
+#[test]
+fn resolve_vault_addr_picks_correct_labeled_config() {
+    // Mirror of resolve_vault_role_picks_correct_labeled_config: ensure
+    // the addr resolver also discriminates by label rather than by first match.
+    let config = crate::providers::config::ProviderConfig::parse(
+        "[digitalocean:work]\ntoken=a\nvault_addr=https://vault-work:8200\n\n[digitalocean:personal]\ntoken=b\nvault_addr=https://vault-personal:8200\n",
+    );
+    let work = resolve_vault_addr(None, Some("digitalocean"), Some("work"), &config);
+    assert_eq!(work.as_deref(), Some("https://vault-work:8200"));
+    let personal = resolve_vault_addr(None, Some("digitalocean"), Some("personal"), &config);
+    assert_eq!(personal.as_deref(), Some("https://vault-personal:8200"));
+}
+
+#[test]
+fn resolve_vault_addr_legacy_marker_falls_back_to_first_match() {
+    let config = crate::providers::config::ProviderConfig::parse(
+        "[digitalocean:work]\ntoken=a\nvault_addr=https://vault-work:8200\n",
+    );
+    let addr = resolve_vault_addr(None, Some("digitalocean"), None, &config);
+    assert_eq!(addr.as_deref(), Some("https://vault-work:8200"));
 }

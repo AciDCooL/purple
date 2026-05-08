@@ -396,6 +396,7 @@ impl App {
             if crate::vault_ssh::resolve_vault_role(
                 host.vault_ssh.as_deref(),
                 host.provider.as_deref(),
+                host.provider_label.as_deref(),
                 &self.providers.config,
             )
             .is_some()

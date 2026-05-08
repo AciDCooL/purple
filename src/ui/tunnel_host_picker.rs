@@ -87,10 +87,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     design::Footer::new()
-        .action("Enter", " select ")
-        .action("\u{2191}\u{2193}", " move ")
-        .action("Esc", " cancel")
+        .primary("Enter", fl::ENTER_SELECT)
+        .action("\u{2191}\u{2193}", fl::ARROWS_SELECT)
+        .action("Esc", fl::ESC_CANCEL)
         .render_with_status(frame, footer_area, app);
 }
 

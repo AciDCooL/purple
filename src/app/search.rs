@@ -134,6 +134,7 @@ impl App {
                             && crate::vault_ssh::resolve_vault_role(
                                 host.vault_ssh.as_deref(),
                                 host.provider.as_deref(),
+                                host.provider_label.as_deref(),
                                 provider_config,
                             )
                             .is_some())
@@ -177,6 +178,7 @@ impl App {
                             && crate::vault_ssh::resolve_vault_role(
                                 host.vault_ssh.as_deref(),
                                 host.provider.as_deref(),
+                                host.provider_label.as_deref(),
                                 provider_config,
                             )
                             .is_some())

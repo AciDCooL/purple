@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::app::{App, ProviderFormFields, Screen};
 use crate::event::AppEvent;
@@ -22,14 +22,44 @@ pub(super) fn handle_provider_list(
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
-    // Handle pending provider delete confirmation first
+    // Handle pending provider delete confirmation first.
+    // `pending_delete_id` (Some) scopes the delete to one config; otherwise
+    // `pending_delete` (legacy bare-name) deletes whatever single section
+    // matches that provider name.
     if app.providers.pending_delete.is_some() && key.code != KeyCode::Char('?') {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
+                let pending_id = app.providers.pending_delete_id.take();
                 let Some(name) = app.providers.pending_delete.take() else {
                     return;
                 };
-                if let Some(old_section) = app.providers.config.section(name.as_str()).cloned() {
+                if let Some(id) = pending_id {
+                    let Some(old_section) = app.providers.config.section_by_id(&id).cloned() else {
+                        return;
+                    };
+                    app.providers.config.remove_section_by_id(&id);
+                    if let Err(e) = app.providers.config.save() {
+                        app.providers.config.set_section(old_section);
+                        app.notify_error(crate::messages::failed_to_save(&e));
+                    } else {
+                        app.providers.sync_history.remove(&id.to_string());
+                        crate::app::SyncRecord::save_all(&app.providers.sync_history);
+                        // Drop the expand-state if this was the last config of
+                        // its provider; otherwise a re-add would reopen expanded.
+                        if app
+                            .providers
+                            .config
+                            .sections_for_provider(&id.provider)
+                            .is_empty()
+                        {
+                            app.providers.expanded_providers.remove(&id.provider);
+                        }
+                        let display_name = crate::providers::provider_display_name(&id.provider);
+                        app.notify(crate::messages::provider_removed(display_name));
+                    }
+                } else if let Some(old_section) =
+                    app.providers.config.section(name.as_str()).cloned()
+                {
                     app.providers.config.remove_section(name.as_str());
                     if let Err(e) = app.providers.config.save() {
                         app.providers.config.set_section(old_section);
@@ -37,20 +67,23 @@ pub(super) fn handle_provider_list(
                     } else {
                         app.providers.sync_history.remove(name.as_str());
                         crate::app::SyncRecord::save_all(&app.providers.sync_history);
+                        app.providers.expanded_providers.remove(&name);
                         let display_name = crate::providers::provider_display_name(name.as_str());
                         app.notify(crate::messages::provider_removed(display_name));
                     }
                 }
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            super::ConfirmAction::No => {
                 app.providers.pending_delete = None;
+                app.providers.pending_delete_id = None;
             }
-            _ => {}
+            super::ConfirmAction::Ignored => {}
         }
         return;
     }
 
-    let provider_count = app.sorted_provider_names().len();
+    let rows = app.providers.provider_list_rows();
+    let row_count = rows.len();
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             // Cancel all running syncs
@@ -60,81 +93,85 @@ pub(super) fn handle_provider_list(
             app.set_screen(Screen::HostList);
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            crate::app::cycle_selection(&mut app.ui.provider_list_state, provider_count, true);
+            crate::app::cycle_selection(&mut app.ui.provider_list_state, row_count, true);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            crate::app::cycle_selection(&mut app.ui.provider_list_state, provider_count, false);
+            crate::app::cycle_selection(&mut app.ui.provider_list_state, row_count, false);
         }
         KeyCode::PageDown => {
-            crate::app::page_down(&mut app.ui.provider_list_state, provider_count, 10);
+            crate::app::page_down(&mut app.ui.provider_list_state, row_count, 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(&mut app.ui.provider_list_state, provider_count, 10);
+            crate::app::page_up(&mut app.ui.provider_list_state, row_count, 10);
+        }
+        KeyCode::Char(' ') => {
+            // Space toggles expand/collapse on a multi-config provider header.
+            if let Some(idx) = app.ui.provider_list_state.selected() {
+                if let Some(crate::app::ProviderRow::Header { name, config_count }) = rows.get(idx)
+                {
+                    if *config_count >= 2 {
+                        let n = name.clone();
+                        if app.providers.expanded_providers.contains(&n) {
+                            app.providers.expanded_providers.remove(&n);
+                            log::debug!("provider tree: collapsed '{}'", n);
+                        } else {
+                            log::debug!("provider tree: expanded '{}'", n);
+                            app.providers.expanded_providers.insert(n);
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            // Add another config for the selected provider. Triggers the
+            // lazy-migration prompt when the provider already has one bare
+            // config; for an already-labeled provider, opens the form
+            // directly with an empty label.
+            if let Some(idx) = app.ui.provider_list_state.selected() {
+                let provider_name = rows.get(idx).map(|r| r.provider_name().to_string());
+                if let Some(name) = provider_name {
+                    open_add_config_flow(app, &name);
+                }
+            }
         }
         KeyCode::Enter => {
             if let Some(index) = app.ui.provider_list_state.selected() {
-                let sorted = app.sorted_provider_names();
-                if let Some(name) = sorted.get(index) {
-                    let provider_impl = providers::get_provider(name.as_str());
-                    let short_label = provider_impl
-                        .as_ref()
-                        .map(|p| p.short_label().to_string())
-                        .unwrap_or_else(|| name.clone());
-
-                    // Pre-fill form from existing config or defaults
-                    let first_field = crate::app::ProviderFormField::fields_for(name.as_str())[0];
-                    app.providers.form = if let Some(section) =
-                        app.providers.config.section(name.as_str())
-                    {
-                        let cursor_pos = match first_field {
-                            crate::app::ProviderFormField::Url => section.url.chars().count(),
-                            crate::app::ProviderFormField::Token => section.token.chars().count(),
-                            _ => 0,
-                        };
-                        ProviderFormFields {
-                            url: section.url.clone(),
-                            token: section.token.clone(),
-                            profile: section.profile.clone(),
-                            project: section.project.clone(),
-                            compartment: section.compartment.clone(),
-                            regions: section.regions.clone(),
-                            alias_prefix: section.alias_prefix.clone(),
-                            user: section.user.clone(),
-                            identity_file: section.identity_file.clone(),
-                            verify_tls: section.verify_tls,
-                            auto_sync: section.auto_sync,
-                            vault_role: section.vault_role.clone(),
-                            vault_addr: section.vault_addr.clone(),
-                            focused_field: first_field,
-                            cursor_pos,
-                            expanded: true,
+                let row = match rows.get(index) {
+                    Some(r) => r.clone(),
+                    None => return,
+                };
+                // Multi-config header: Enter toggles expand/collapse.
+                if let crate::app::ProviderRow::Header { name, config_count } = &row {
+                    if *config_count >= 2 {
+                        if app.providers.expanded_providers.contains(name) {
+                            app.providers.expanded_providers.remove(name);
+                            log::debug!("provider tree: collapsed '{}'", name);
+                        } else {
+                            log::debug!("provider tree: expanded '{}'", name);
+                            app.providers.expanded_providers.insert(name.clone());
                         }
-                    } else {
-                        ProviderFormFields {
-                            url: String::new(),
-                            token: String::new(),
-                            profile: String::new(),
-                            project: String::new(),
-                            compartment: String::new(),
-                            regions: String::new(),
-                            alias_prefix: short_label,
-                            user: "root".to_string(),
-                            identity_file: String::new(),
-                            verify_tls: true,
-                            auto_sync: !matches!(name.as_str(), "proxmox"),
-                            vault_role: String::new(),
-                            vault_addr: String::new(),
-                            focused_field: first_field,
-                            cursor_pos: 0,
-                            expanded: false,
-                        }
-                    };
-                    app.set_screen(Screen::ProviderForm {
-                        provider: name.clone(),
-                    });
-                    app.capture_provider_form_mtime();
-                    app.capture_provider_form_baseline();
+                        return;
+                    }
                 }
+                // Single-config header or leaf: open the edit form.
+                let target_id = match &row {
+                    crate::app::ProviderRow::Header { name, config_count } => {
+                        if *config_count == 1 {
+                            app.providers
+                                .config
+                                .sections_for_provider(name)
+                                .first()
+                                .map(|s| s.id.clone())
+                                .unwrap_or_else(|| {
+                                    crate::providers::config::ProviderConfigId::bare(name.clone())
+                                })
+                        } else {
+                            crate::providers::config::ProviderConfigId::bare(name.clone())
+                        }
+                    }
+                    crate::app::ProviderRow::Leaf { id } => id.clone(),
+                };
+                open_provider_form(app, target_id);
             }
         }
         KeyCode::Char('s') => {
@@ -142,46 +179,84 @@ pub(super) fn handle_provider_list(
                 app.notify(crate::messages::DEMO_SYNC_DISABLED);
                 return;
             }
-            if let Some(index) = app.ui.provider_list_state.selected() {
-                let sorted = app.sorted_provider_names();
-                if let Some(name) = sorted.get(index) {
-                    if let Some(section) = app.providers.config.section(name.as_str()).cloned() {
-                        if !app.providers.syncing.contains_key(name.as_str()) {
-                            app.providers.reset_batch_if_idle();
-                            let cancel = Arc::new(AtomicBool::new(false));
-                            app.providers.syncing.insert(name.clone(), cancel.clone());
-                            // Grow batch_total so the footer counter reflects new
-                            // providers added mid-batch (e.g. user triggers a second
-                            // sync while the first is still running).
-                            app.providers.batch_total = app
-                                .providers
-                                .batch_total
-                                .max(app.providers.sync_done.len() + app.providers.syncing.len());
-                            super::sync::spawn_provider_sync(&section, events_tx.clone(), cancel);
-                            // Surface the live spinner + active names immediately
-                            // instead of waiting for the first sync_complete event.
-                            // For slow providers (1-3s API roundtrip) the user
-                            // would otherwise see a static line until the result
-                            // lands. set_sync_summary uses syncing.keys() so the
-                            // just-spawned provider shows up on this very tick.
-                            crate::set_sync_summary(app);
-                        }
-                    } else {
-                        let display_name = crate::providers::provider_display_name(name.as_str());
-                        app.notify_error(crate::messages::provider_configure_first(display_name));
-                    }
-                }
+            let row = match app
+                .ui
+                .provider_list_state
+                .selected()
+                .and_then(|i| rows.get(i))
+            {
+                Some(r) => r.clone(),
+                None => return,
+            };
+            let sections_to_sync: Vec<providers::config::ProviderSection> = match &row {
+                crate::app::ProviderRow::Header { name, .. } => app
+                    .providers
+                    .config
+                    .sections_for_provider(name)
+                    .into_iter()
+                    .cloned()
+                    .collect(),
+                crate::app::ProviderRow::Leaf { id } => app
+                    .providers
+                    .config
+                    .section_by_id(id)
+                    .cloned()
+                    .into_iter()
+                    .collect(),
+            };
+            if sections_to_sync.is_empty() {
+                let name = row.provider_name();
+                let display_name = crate::providers::provider_display_name(name);
+                app.notify_error(crate::messages::provider_configure_first(display_name));
+                return;
             }
+            for section in sections_to_sync {
+                let key = section.id.to_string();
+                if app.providers.syncing.contains_key(&key) {
+                    continue;
+                }
+                app.providers.reset_batch_if_idle();
+                let cancel = Arc::new(AtomicBool::new(false));
+                app.providers.syncing.insert(key, cancel.clone());
+                app.providers.batch_total = app
+                    .providers
+                    .batch_total
+                    .max(app.providers.sync_done.len() + app.providers.syncing.len());
+                super::sync::spawn_provider_sync(&section, events_tx.clone(), cancel);
+            }
+            crate::set_sync_summary(app);
         }
         KeyCode::Char('d') => {
-            if let Some(index) = app.ui.provider_list_state.selected() {
-                let sorted = app.sorted_provider_names();
-                if let Some(name) = sorted.get(index) {
-                    if app.providers.config.section(name.as_str()).is_some() {
-                        app.providers.pending_delete = Some(name.clone());
-                    } else {
-                        let display_name = crate::providers::provider_display_name(name.as_str());
+            let row = match app
+                .ui
+                .provider_list_state
+                .selected()
+                .and_then(|i| rows.get(i))
+            {
+                Some(r) => r.clone(),
+                None => return,
+            };
+            match &row {
+                crate::app::ProviderRow::Leaf { id } => {
+                    if app.providers.config.section_by_id(id).is_some() {
+                        app.providers.pending_delete_id = Some(id.clone());
+                        app.providers.pending_delete = Some(id.provider.clone());
+                    }
+                }
+                crate::app::ProviderRow::Header { name, config_count } => {
+                    if *config_count == 0 {
+                        let display_name = crate::providers::provider_display_name(name);
                         app.notify(crate::messages::provider_not_configured(display_name));
+                    } else if *config_count >= 2 {
+                        // Refuse to mass-delete from the header. Force the
+                        // user to expand and pick a specific config.
+                        app.notify(crate::messages::EXPAND_TO_REMOVE_CONFIG.to_string());
+                    } else {
+                        // Single config: scope the confirm to that exact id.
+                        if let Some(section) = app.providers.config.section(name) {
+                            app.providers.pending_delete_id = Some(section.id.clone());
+                            app.providers.pending_delete = Some(name.clone());
+                        }
                     }
                 }
             }
@@ -193,33 +268,317 @@ pub(super) fn handle_provider_list(
             });
         }
         KeyCode::Char('X') => {
-            if let Some(index) = app.ui.provider_list_state.selected() {
-                let sorted = app.sorted_provider_names();
-                if let Some(name) = sorted.get(index) {
-                    let stale = app.hosts_state.ssh_config.stale_hosts();
-                    let provider_stale: Vec<_> = stale
-                        .iter()
-                        .filter(|(alias, _)| {
-                            app.hosts_state.ssh_config.host_entries().iter().any(|e| {
-                                e.alias == *alias && e.provider.as_deref() == Some(name.as_str())
+            // The list state indexes the FULL row list (headers + leaves),
+            // not the bare-name list. Use the row to scope correctly:
+            // - Header → all hosts of that provider (any label)
+            // - Leaf   → only hosts of that labeled config
+            let row = match app
+                .ui
+                .provider_list_state
+                .selected()
+                .and_then(|i| rows.get(i))
+            {
+                Some(r) => r.clone(),
+                None => return,
+            };
+            let stale = app.hosts_state.ssh_config.stale_hosts();
+            let entries = app.hosts_state.ssh_config.host_entries();
+            let (display, scope_provider, provider_stale): (String, Option<String>, Vec<_>) =
+                match &row {
+                    crate::app::ProviderRow::Header { name, .. } => {
+                        let display = crate::providers::provider_display_name(name).to_string();
+                        let scope = name.clone();
+                        let filtered: Vec<_> = stale
+                            .iter()
+                            .filter(|(alias, _)| {
+                                entries.iter().any(|e| {
+                                    e.alias == *alias
+                                        && e.provider.as_deref() == Some(name.as_str())
+                                })
                             })
-                        })
-                        .collect();
-                    if provider_stale.is_empty() {
-                        let display = crate::providers::provider_display_name(name);
-                        app.notify_warning(crate::messages::no_stale_hosts_for(display));
-                    } else {
-                        let aliases: Vec<String> =
-                            provider_stale.into_iter().map(|(a, _)| a.clone()).collect();
-                        app.set_screen(Screen::ConfirmPurgeStale {
-                            aliases,
-                            provider: Some(name.clone()),
-                        });
+                            .collect();
+                        (display, Some(scope), filtered)
                     }
-                }
+                    crate::app::ProviderRow::Leaf { id } => {
+                        let display = format!(
+                            "{} ({})",
+                            crate::providers::provider_display_name(&id.provider),
+                            id.label.as_deref().unwrap_or("")
+                        );
+                        let prov = id.provider.clone();
+                        let label = id.label.clone();
+                        let filtered: Vec<_> = stale
+                            .iter()
+                            .filter(|(alias, _)| {
+                                entries.iter().any(|e| {
+                                    e.alias == *alias
+                                        && e.provider.as_deref() == Some(prov.as_str())
+                                        && e.provider_label == label
+                                })
+                            })
+                            .collect();
+                        (display, Some(prov), filtered)
+                    }
+                };
+            if provider_stale.is_empty() {
+                app.notify_warning(crate::messages::no_stale_hosts_for(&display));
+            } else {
+                let aliases: Vec<String> =
+                    provider_stale.into_iter().map(|(a, _)| a.clone()).collect();
+                app.set_screen(Screen::ConfirmPurgeStale {
+                    aliases,
+                    provider: scope_provider,
+                });
             }
         }
         _ => {}
+    }
+}
+
+/// Pre-fill the provider form for the given config and switch to it.
+/// If the id matches an existing section, the form starts in edit mode;
+/// otherwise it starts blank with provider-appropriate defaults.
+fn open_provider_form(app: &mut App, id: crate::providers::config::ProviderConfigId) {
+    let provider_impl = providers::get_provider(id.provider.as_str());
+    let short_label = provider_impl
+        .as_ref()
+        .map(|p| p.short_label().to_string())
+        .unwrap_or_else(|| id.provider.clone());
+    let first_field = crate::app::ProviderFormField::fields_for(id.provider.as_str())[0];
+
+    app.providers.form = if let Some(section) = app.providers.config.section_by_id(&id) {
+        let cursor_pos = match first_field {
+            crate::app::ProviderFormField::Url => section.url.chars().count(),
+            crate::app::ProviderFormField::Token => section.token.chars().count(),
+            _ => 0,
+        };
+        ProviderFormFields {
+            url: section.url.clone(),
+            token: section.token.clone(),
+            profile: section.profile.clone(),
+            project: section.project.clone(),
+            compartment: section.compartment.clone(),
+            regions: section.regions.clone(),
+            alias_prefix: section.alias_prefix.clone(),
+            user: section.user.clone(),
+            identity_file: section.identity_file.clone(),
+            verify_tls: section.verify_tls,
+            auto_sync: section.auto_sync,
+            vault_role: section.vault_role.clone(),
+            vault_addr: section.vault_addr.clone(),
+            focused_field: first_field,
+            cursor_pos,
+            expanded: true,
+        }
+    } else {
+        // New config: derive a sensible default alias_prefix. For a labeled
+        // config, suggest `<short>-<label>` (e.g. `do-work`); for bare,
+        // just the short label (existing behavior).
+        let default_prefix = match &id.label {
+            Some(l) => format!("{}-{}", short_label, l),
+            None => short_label.clone(),
+        };
+        ProviderFormFields {
+            url: String::new(),
+            token: String::new(),
+            profile: String::new(),
+            project: String::new(),
+            compartment: String::new(),
+            regions: String::new(),
+            alias_prefix: default_prefix,
+            user: "root".to_string(),
+            identity_file: String::new(),
+            verify_tls: true,
+            auto_sync: !matches!(id.provider.as_str(), "proxmox"),
+            vault_role: String::new(),
+            vault_addr: String::new(),
+            focused_field: first_field,
+            cursor_pos: 0,
+            expanded: false,
+        }
+    };
+    app.set_screen(Screen::ProviderForm { id });
+    app.capture_provider_form_mtime();
+    app.capture_provider_form_baseline();
+}
+
+/// Step 1 of the lazy add-second-config flow: pick labels for the existing
+/// (bare) config AND the new one. On Enter, validate both and transition
+/// to step 2 (the standard provider form). On Esc, drop pending state.
+pub fn handle_label_migration(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender<AppEvent>) {
+    let provider = match &app.screen {
+        Screen::ProviderLabelMigration { provider } => provider.clone(),
+        _ => return,
+    };
+    match key.code {
+        KeyCode::Esc => {
+            app.providers.pending_label_migration = None;
+            app.set_screen(Screen::Providers);
+        }
+        KeyCode::Tab | KeyCode::Down => {
+            if let Some(p) = &mut app.providers.pending_label_migration {
+                p.focused = match p.focused {
+                    crate::app::LabelMigrationField::Existing => {
+                        crate::app::LabelMigrationField::New
+                    }
+                    crate::app::LabelMigrationField::New => {
+                        crate::app::LabelMigrationField::Existing
+                    }
+                };
+                p.cursor_pos = p.focused_value().chars().count();
+            }
+        }
+        KeyCode::BackTab | KeyCode::Up => {
+            if let Some(p) = &mut app.providers.pending_label_migration {
+                p.focused = match p.focused {
+                    crate::app::LabelMigrationField::Existing => {
+                        crate::app::LabelMigrationField::New
+                    }
+                    crate::app::LabelMigrationField::New => {
+                        crate::app::LabelMigrationField::Existing
+                    }
+                };
+                p.cursor_pos = p.focused_value().chars().count();
+            }
+        }
+        KeyCode::Left => {
+            if let Some(p) = &mut app.providers.pending_label_migration {
+                if p.cursor_pos > 0 {
+                    p.cursor_pos -= 1;
+                }
+            }
+        }
+        KeyCode::Right => {
+            if let Some(p) = &mut app.providers.pending_label_migration {
+                let max = p.focused_value().chars().count();
+                if p.cursor_pos < max {
+                    p.cursor_pos += 1;
+                }
+            }
+        }
+        KeyCode::Home => {
+            if let Some(p) = &mut app.providers.pending_label_migration {
+                p.cursor_pos = 0;
+            }
+        }
+        KeyCode::End => {
+            if let Some(p) = &mut app.providers.pending_label_migration {
+                p.cursor_pos = p.focused_value().chars().count();
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(p) = &mut app.providers.pending_label_migration {
+                if p.cursor_pos > 0 {
+                    let cursor_pos = p.cursor_pos;
+                    let target = p.focused_value_mut();
+                    let mut chars: Vec<char> = target.chars().collect();
+                    chars.remove(cursor_pos - 1);
+                    *target = chars.into_iter().collect();
+                    p.cursor_pos -= 1;
+                }
+            }
+        }
+        KeyCode::Delete => {
+            if let Some(p) = &mut app.providers.pending_label_migration {
+                let len = p.focused_value().chars().count();
+                if p.cursor_pos < len {
+                    let cursor_pos = p.cursor_pos;
+                    let target = p.focused_value_mut();
+                    let mut chars: Vec<char> = target.chars().collect();
+                    chars.remove(cursor_pos);
+                    *target = chars.into_iter().collect();
+                }
+            }
+        }
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let allowed = c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
+            if !allowed {
+                return;
+            }
+            if let Some(p) = &mut app.providers.pending_label_migration {
+                let cursor_pos = p.cursor_pos;
+                let target = p.focused_value_mut();
+                if target.len() < 32 {
+                    let mut chars: Vec<char> = target.chars().collect();
+                    chars.insert(cursor_pos, c);
+                    *target = chars.into_iter().collect();
+                    p.cursor_pos += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            let (existing, new) = match app.providers.pending_label_migration.as_ref() {
+                Some(p) => (p.existing_label.clone(), p.new_label.clone()),
+                None => return,
+            };
+            if let Err(e) = crate::providers::config::validate_label(&existing) {
+                app.notify_error(crate::messages::label_invalid(&e));
+                return;
+            }
+            if let Err(e) = crate::providers::config::validate_label(&new) {
+                app.notify_error(crate::messages::label_invalid(&e));
+                return;
+            }
+            if existing == new {
+                app.notify_error(crate::messages::LABEL_MUST_DIFFER.to_string());
+                return;
+            }
+            // Move on to step 2: the standard provider form, pre-keyed to
+            // the new labeled id. submit_provider_form will pick up
+            // pending_label_migration to also rewrite the existing section.
+            open_provider_form(
+                app,
+                crate::providers::config::ProviderConfigId::labeled(provider.clone(), new),
+            );
+        }
+        _ => {}
+    }
+}
+
+/// Begin the "add another config" flow for a provider.
+/// - 0 existing configs: open the regular bare-config form (same as Enter).
+/// - 1 existing bare config: prompt for a label for the existing one (Y step 1).
+/// - 1+ existing labeled configs: open form for a new labeled config directly.
+fn open_add_config_flow(app: &mut App, provider_name: &str) {
+    let existing = app.providers.config.sections_for_provider(provider_name);
+    match existing.len() {
+        0 => {
+            open_provider_form(
+                app,
+                crate::providers::config::ProviderConfigId::bare(provider_name),
+            );
+        }
+        1 if existing[0].id.label.is_none() => {
+            // Lazy migration: existing config is bare. Prompt for both
+            // labels (existing + new) on one screen so step 2 is the
+            // standard provider form without an extra label field.
+            log::debug!("provider lazy migration: started for '{}'", provider_name);
+            app.providers.pending_label_migration = Some(crate::app::PendingLabelMigration {
+                provider: provider_name.to_string(),
+                existing_label: "default".to_string(),
+                new_label: String::new(),
+                // Focus the FIRST field (current config). It's the surprise
+                // — users didn't ask to rename their existing config —
+                // so the cursor lands there to force engagement instead
+                // of letting them blindly accept "default" by tabbing past.
+                focused: crate::app::LabelMigrationField::Existing,
+                cursor_pos: "default".chars().count(),
+            });
+            app.set_screen(Screen::ProviderLabelMigration {
+                provider: provider_name.to_string(),
+            });
+        }
+        _ => {
+            // One or more labeled configs already exist: open the form with
+            // an empty label so the user can fill it in.
+            open_provider_form(
+                app,
+                crate::providers::config::ProviderConfigId {
+                    provider: provider_name.to_string(),
+                    label: Some(String::new()),
+                },
+            );
+        }
     }
 }
 
@@ -258,7 +617,7 @@ pub(super) fn handle_provider_form(
     }
 
     let provider_name = match &app.screen {
-        Screen::ProviderForm { provider } => provider.clone(),
+        Screen::ProviderForm { id } => id.provider.clone(),
         _ => return,
     };
     // Progressive disclosure: hide `VaultAddr` when no role is set so Tab
@@ -457,10 +816,11 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         app.set_screen(Screen::Providers);
         return;
     }
-    let provider_name = match &app.screen {
-        Screen::ProviderForm { provider } => provider.clone(),
+    let form_id = match &app.screen {
+        Screen::ProviderForm { id } => id.clone(),
         _ => return,
     };
+    let provider_name = form_id.provider.clone();
 
     // Check for external provider config changes since form was opened
     if app.provider_config_changed_since_form_open() {
@@ -578,7 +938,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
 
     let section = providers::config::ProviderSection {
-        provider: provider_name.clone(),
+        id: form_id.clone(),
         token: token.clone(),
         alias_prefix,
         user,
@@ -594,28 +954,111 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         vault_addr: app.providers.form.vault_addr.trim().to_string(),
     };
 
-    let old_section = app.providers.config.section(&provider_name).cloned();
+    // Snapshot for rollback. When migrating from bare to labeled, we have
+    // an extra rename step on the existing section as well. Capture it.
+    let old_section_by_id = app.providers.config.section_by_id(&form_id).cloned();
+    let bare_id = providers::config::ProviderConfigId::bare(provider_name.clone());
+    let old_bare_section = app.providers.config.section_by_id(&bare_id).cloned();
+
+    let pending_migration = app.providers.pending_label_migration.clone();
+
+    // Step 1: if a lazy migration is pending, rewrite the existing bare
+    // section to its new labeled id BEFORE inserting the new section.
+    if let Some(migration) = &pending_migration {
+        if migration.provider == provider_name {
+            if let Some(mut existing) = old_bare_section.clone() {
+                let new_id = providers::config::ProviderConfigId::labeled(
+                    migration.provider.clone(),
+                    migration.existing_label.clone(),
+                );
+                existing.id = new_id.clone();
+                // Default a sensible alias_prefix for the relabeled config
+                // when the user hadn't set a custom one. Bare configs use
+                // the provider short label as alias_prefix; once labeled,
+                // we suffix the label so the two configs don't collide.
+                let short = providers::get_provider(provider_name.as_str())
+                    .map(|p| p.short_label().to_string())
+                    .unwrap_or_else(|| provider_name.clone());
+                if existing.alias_prefix == short {
+                    existing.alias_prefix = format!("{}-{}", short, migration.existing_label);
+                }
+                app.providers.config.remove_section_by_id(&bare_id);
+                app.providers.config.set_section(existing);
+            }
+        }
+    }
+
     app.providers.config.set_section(section);
     if let Err(e) = app.providers.config.save() {
-        // Rollback: restore previous state
-        match old_section {
+        log::warn!(
+            "[config] Save failed for [{}]: {}; rolling back in-memory state",
+            form_id,
+            e
+        );
+        // Rollback: restore the previous section state for the form id
+        // AND any migration-time relabel of the existing bare section.
+        match old_section_by_id {
             Some(old) => app.providers.config.set_section(old),
-            None => app.providers.config.remove_section(&provider_name),
+            None => app.providers.config.remove_section_by_id(&form_id),
         }
+        if let Some(old_bare) = old_bare_section {
+            // Drop any new labeled section the migration may have inserted,
+            // then restore the bare one.
+            if let Some(migration) = &pending_migration {
+                let migrated_id = providers::config::ProviderConfigId::labeled(
+                    migration.provider.clone(),
+                    migration.existing_label.clone(),
+                );
+                app.providers.config.remove_section_by_id(&migrated_id);
+            }
+            app.providers.config.set_section(old_bare);
+        }
+        // Drop pending migration state on failure too, so a retry doesn't
+        // pick up half-applied input.
+        app.providers.pending_label_migration = None;
         app.notify_error(crate::messages::failed_to_save(&e));
         return;
     }
+    // Migration succeeded. Before clearing the pending state, also rewrite
+    // any legacy 2-segment markers in ~/.ssh/config for this provider to
+    // the new `existing_label`. Without this, the formerly-bare config's
+    // hosts would be invisible to the labeled-default sync (different id),
+    // get stale-marked or duplicated, and surface as data loss.
+    if let Some(migration) = &pending_migration {
+        let rewritten = app
+            .hosts_state
+            .ssh_config
+            .rewrite_legacy_markers_to_label(&migration.provider, &migration.existing_label);
+        if rewritten > 0 {
+            log::debug!(
+                "provider lazy migration: rewrote {} legacy marker(s) for '{}' to label '{}'",
+                rewritten,
+                migration.provider,
+                migration.existing_label
+            );
+            if let Err(e) = app.hosts_state.ssh_config.write() {
+                app.notify_error(crate::messages::failed_to_save(&e));
+            }
+        }
+        log::debug!("provider lazy migration: completed for '{}'", provider_name);
+    }
+    app.providers.pending_label_migration = None;
 
     let display_name = crate::providers::provider_display_name(provider_name.as_str());
 
-    if !app.providers.syncing.contains_key(&provider_name) {
-        let sync_section = app.providers.config.section(&provider_name).cloned();
+    // Look up by the EXACT id we just saved, not the bare provider name.
+    // Otherwise a labeled save like `do:personal` would auto-sync `do:work`
+    // (the first-found section for that provider).
+    let sync_section = app.providers.config.section_by_id(&form_id).cloned();
+    let sync_key = sync_section
+        .as_ref()
+        .map(|s| s.id.to_string())
+        .unwrap_or_else(|| form_id.to_string());
+    if !app.providers.syncing.contains_key(&sync_key) {
         if let Some(sync_section) = sync_section {
             app.providers.reset_batch_if_idle();
             let cancel = Arc::new(AtomicBool::new(false));
-            app.providers
-                .syncing
-                .insert(provider_name.clone(), cancel.clone());
+            app.providers.syncing.insert(sync_key, cancel.clone());
             app.providers.batch_total = app
                 .providers
                 .batch_total

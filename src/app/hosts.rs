@@ -340,19 +340,27 @@ impl App {
 
     /// Apply sync results from a background provider fetch.
     /// Returns (message, is_error, server_count, added, updated, stale). Caller must remove from syncing_providers.
+    ///
+    /// `provider` is the full ProviderConfigId display string (`do` for bare,
+    /// `do:work` for labeled). We look up by exact id so multi-config
+    /// providers route to the correct section.
     pub fn apply_sync_result(
         &mut self,
         provider: &str,
         hosts: Vec<crate::providers::ProviderHost>,
         partial: bool,
     ) -> (String, bool, usize, usize, usize, usize) {
-        let section = match self.providers.config.section(provider).cloned() {
+        let id: crate::providers::config::ProviderConfigId = match provider.parse() {
+            Ok(id) => id,
+            Err(_) => crate::providers::config::ProviderConfigId::bare(provider),
+        };
+        let section = match self.providers.config.section_by_id(&id).cloned() {
             Some(s) => s,
             None => {
                 return (
                     format!(
                         "{} sync skipped: no config.",
-                        crate::providers::provider_display_name(provider)
+                        crate::providers::provider_display_name(&id.provider)
                     ),
                     true,
                     0,

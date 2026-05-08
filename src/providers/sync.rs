@@ -70,9 +70,27 @@ pub fn sync_provider(
 ) -> SyncResult {
     let mut result = SyncResult::default();
 
-    // Build map of server_id -> alias (top-level only, no Include files).
-    // Keep first occurrence if duplicate provider markers exist (e.g. manual copy).
-    let existing = config.find_hosts_by_provider(provider.name());
+    // Build map of server_id -> alias.
+    //
+    // Bare config: claim EVERY marker for this provider regardless of how
+    // many `:`-segments it has. Some providers' server_ids contain colons
+    // (Proxmox uses `qemu:300`, OCI compartment IDs are path-like) and the
+    // marker `# purple:provider proxmox:qemu:300` is ambiguous in isolation
+    // - it could be a labeled marker (`proxmox:qemu`, server_id=`300`) or a
+    // legacy 2-segment marker with a colon-bearing server_id. Since a bare
+    // section is by definition the only config for its provider (we reject
+    // bare+labeled mix), it must own all of those hosts to avoid duplication.
+    //
+    // Labeled config: scope to its exact ProviderConfigId so two labeled
+    // configs of the same provider don't clobber each other's diff.
+    let existing = if section.id.label.is_none() {
+        // Bare config: use raw 2-segment interpretation so server_ids with
+        // colons (Proxmox `qemu:300`, OCI compartment paths) match correctly
+        // against the API response and don't get duplicated as "missing".
+        config.find_hosts_by_provider_raw(provider.name())
+    } else {
+        config.find_hosts_by_id(&section.id)
+    };
     let mut existing_map: HashMap<String, String> = HashMap::new();
     for (alias, server_id) in &existing {
         existing_map
@@ -90,8 +108,10 @@ pub fn sync_provider(
     // Track which server IDs are still in the remote set (also deduplicates)
     let mut remote_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // Only add group header if this provider has no existing hosts in config
-    let mut needs_header = !dry_run && existing_map.is_empty();
+    // Only add group header if this PROVIDER (any config) has no existing hosts.
+    // Group headers are shared across labeled configs of the same provider so
+    // both `[do:work]` and `[do:personal]` hosts live under one "DigitalOcean" header.
+    let mut needs_header = !dry_run && config.find_hosts_by_provider(provider.name()).is_empty();
 
     for remote in remote_hosts {
         if !remote_ids.insert(remote.server_id.clone()) {
@@ -264,11 +284,13 @@ pub fn sync_provider(
                                     config.set_host_tags(tags_alias, &cleaned);
                                 }
                             }
-                            // Update provider marker with new alias
+                            // Update provider marker with new alias.
+                            // Use the section's full id so labeled configs
+                            // emit 3-segment markers.
                             if alias_changed {
-                                config.set_host_provider(
+                                config.set_host_provider_id(
                                     &new_alias,
-                                    provider.name(),
+                                    &section.id,
                                     &remote.server_id,
                                 );
                                 result
@@ -363,7 +385,7 @@ pub fn sync_provider(
                     config.elements.push(ConfigElement::HostBlock(block));
                 }
 
-                config.set_host_provider(&alias, provider.name(), &remote.server_id);
+                config.set_host_provider_id(&alias, &section.id, &remote.server_id);
                 if !remote.tags.is_empty() {
                     config.set_host_provider_tags(&alias, &remote.tags);
                 }

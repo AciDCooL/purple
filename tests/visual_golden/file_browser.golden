@@ -1,7 +1,7 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels                                                                 │
 ╰────╭ Files: bastion-ams ────────────────────────────────────────────────────────────────────╮────╯
-╭ 22 │ /demo                                       ...                                        │────╮
+╭ 24 │ /demo                                       ...                                        │────╮
 │    │────────────────────────────────────────────────────────────────────────────────────────│ST▾ │
 │────│   ..                                         Loading ~ ...                             │────│
 │▌  ●│   (empty directory)                                                                    │1m  │
@@ -13,10 +13,6 @@
 │   ●│                                                                                        │6h  │
 │   ●│                                                                                        │7h  │
 │   ●│                                                                                        │8h  │
-│   ●│                                                                                        │0h  │
-│   ●│                                                                                        │1h  │
-│   ●│                                                                                        │2h  │
-│   ●│                                                                                        │3h  │
 │   ●│                                                                                        │4h  │
 │   ●│                                                                                        │5h  │
 │   ●│                                                                                        │6h  │
@@ -24,9 +20,13 @@
 │   ●│                                                                                        │8h  │
 │   ●│                                                                                        │9h  │
 │   ●│                                                                                        │0h  │
-│   ✖│                                                                                        │9h  │
-│   ✖╰────────────────────────────────────────────────────────────────────────────────────────╯1h  │
-╰──── Enter  copy    Tab  switch    ^Space  select    ^A  all    s  sort:name    .  hidden    R.sh ╯
+│   ○│                                                                                        │ -  │
+│   ○│                                                                                        │ -  │
+│   ○│                                                                                        │ -  │
+│   ○│                                                                                        │ -  │
+│   ○│                                                                                        │ -  │
+│   ○╰────────────────────────────────────────────────────────────────────────────────────────╯ -  │
+╰──── Enter  copy    Tab  next    ^Space  select    ^A  all    s  sort:name    .  hidden    R  .sh ╯
  Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---
 (0,0) fg=DarkGray bg=Reset mod=DIM
@@ -738,9 +738,9 @@
 (99,25) fg=DarkGray bg=Reset mod=DIM
 (0,26) fg=DarkGray bg=Reset mod=DIM
 (1,26) fg=DarkGray bg=Reset mod=DIM
-(2,26) fg=DarkGray bg=Reset mod=DIM
-(3,26) fg=DarkGray bg=Reset mod=DIM
-(4,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(2,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(3,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(4,26) fg=DarkGray bg=Reset mod=DIM
 (5,26) fg=Reset bg=Reset mod=DIM
 (94,26) fg=Reset bg=Reset mod=DIM
 (95,26) fg=DarkGray bg=Reset mod=DIM
@@ -750,9 +750,9 @@
 (99,26) fg=DarkGray bg=Reset mod=DIM
 (0,27) fg=DarkGray bg=Reset mod=DIM
 (1,27) fg=DarkGray bg=Reset mod=DIM
-(2,27) fg=DarkGray bg=Reset mod=DIM
-(3,27) fg=DarkGray bg=Reset mod=DIM
-(4,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(2,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(3,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(4,27) fg=DarkGray bg=Reset mod=DIM
 (5,27) fg=Reset bg=Reset mod=DIM
 (6,27) fg=Reset bg=Reset mod=DIM
 (7,27) fg=Reset bg=Reset mod=DIM
@@ -877,36 +877,36 @@
 (28,28) fg=Reset bg=Reset mod=DIM
 (29,28) fg=Reset bg=Reset mod=DIM
 (30,28) fg=Reset bg=Reset mod=DIM
-(31,28) fg=Reset bg=Reset mod=DIM
-(32,28) fg=Reset bg=Reset mod=DIM
+(33,28) fg=White bg=DarkGray mod=-
+(34,28) fg=White bg=DarkGray mod=-
 (35,28) fg=White bg=DarkGray mod=-
 (36,28) fg=White bg=DarkGray mod=-
 (37,28) fg=White bg=DarkGray mod=-
 (38,28) fg=White bg=DarkGray mod=-
 (39,28) fg=White bg=DarkGray mod=-
 (40,28) fg=White bg=DarkGray mod=-
-(41,28) fg=White bg=DarkGray mod=-
-(42,28) fg=White bg=DarkGray mod=-
+(41,28) fg=Reset bg=Reset mod=DIM
+(42,28) fg=Reset bg=Reset mod=DIM
 (43,28) fg=Reset bg=Reset mod=DIM
 (44,28) fg=Reset bg=Reset mod=DIM
 (45,28) fg=Reset bg=Reset mod=DIM
 (46,28) fg=Reset bg=Reset mod=DIM
 (47,28) fg=Reset bg=Reset mod=DIM
 (48,28) fg=Reset bg=Reset mod=DIM
-(49,28) fg=Reset bg=Reset mod=DIM
-(50,28) fg=Reset bg=Reset mod=DIM
+(51,28) fg=White bg=DarkGray mod=-
+(52,28) fg=White bg=DarkGray mod=-
 (53,28) fg=White bg=DarkGray mod=-
 (54,28) fg=White bg=DarkGray mod=-
-(55,28) fg=White bg=DarkGray mod=-
-(56,28) fg=White bg=DarkGray mod=-
+(55,28) fg=Reset bg=Reset mod=DIM
+(56,28) fg=Reset bg=Reset mod=DIM
 (57,28) fg=Reset bg=Reset mod=DIM
 (58,28) fg=Reset bg=Reset mod=DIM
 (59,28) fg=Reset bg=Reset mod=DIM
-(60,28) fg=Reset bg=Reset mod=DIM
-(61,28) fg=Reset bg=Reset mod=DIM
+(62,28) fg=White bg=DarkGray mod=-
+(63,28) fg=White bg=DarkGray mod=-
 (64,28) fg=White bg=DarkGray mod=-
-(65,28) fg=White bg=DarkGray mod=-
-(66,28) fg=White bg=DarkGray mod=-
+(65,28) fg=Reset bg=Reset mod=DIM
+(66,28) fg=Reset bg=Reset mod=DIM
 (67,28) fg=Reset bg=Reset mod=DIM
 (68,28) fg=Reset bg=Reset mod=DIM
 (69,28) fg=Reset bg=Reset mod=DIM
@@ -916,21 +916,21 @@
 (73,28) fg=Reset bg=Reset mod=DIM
 (74,28) fg=Reset bg=Reset mod=DIM
 (75,28) fg=Reset bg=Reset mod=DIM
-(76,28) fg=Reset bg=Reset mod=DIM
-(77,28) fg=Reset bg=Reset mod=DIM
+(78,28) fg=White bg=DarkGray mod=-
+(79,28) fg=White bg=DarkGray mod=-
 (80,28) fg=White bg=DarkGray mod=-
-(81,28) fg=White bg=DarkGray mod=-
-(82,28) fg=White bg=DarkGray mod=-
+(81,28) fg=Reset bg=Reset mod=DIM
+(82,28) fg=Reset bg=Reset mod=DIM
 (83,28) fg=Reset bg=Reset mod=DIM
 (84,28) fg=Reset bg=Reset mod=DIM
 (85,28) fg=Reset bg=Reset mod=DIM
 (86,28) fg=Reset bg=Reset mod=DIM
 (87,28) fg=Reset bg=Reset mod=DIM
 (88,28) fg=Reset bg=Reset mod=DIM
-(89,28) fg=Reset bg=Reset mod=DIM
-(90,28) fg=Reset bg=Reset mod=DIM
+(91,28) fg=White bg=DarkGray mod=-
+(92,28) fg=White bg=DarkGray mod=-
 (93,28) fg=White bg=DarkGray mod=-
-(94,28) fg=White bg=DarkGray mod=-
+(94,28) fg=Reset bg=Reset mod=DIM
 (95,28) fg=DarkGray bg=Reset mod=DIM
 (96,28) fg=DarkGray bg=Reset mod=DIM
 (97,28) fg=DarkGray bg=Reset mod=DIM

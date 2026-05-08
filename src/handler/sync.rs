@@ -11,7 +11,10 @@ pub fn spawn_provider_sync(
     tx: mpsc::Sender<AppEvent>,
     cancel: Arc<AtomicBool>,
 ) {
-    let name = section.provider.clone();
+    // Use full ProviderConfigId (provider[:label]) as the event/sync key so
+    // two labeled configs of the same provider don't collide on the syncing
+    // HashMap or in event payloads.
+    let name = section.id.to_string();
     let token = section.token.clone();
     let section_clone = section.clone();
     let tx_fallback = tx.clone();

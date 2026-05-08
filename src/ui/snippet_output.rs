@@ -111,20 +111,21 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // next" with the exit key last, matching the canonical purple
     // ordering: primary action → secondary → exit.
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     let mut f = design::Footer::new();
     if state.all_done {
         f = f
-            .action("c", " copy ")
-            .action("j/k", " scroll ")
-            .action("n/N", " next/prev host ")
-            .action("g/G", " top/bottom ")
-            .action("Esc", " close");
+            .action("c", fl::SNIPPET_OUTPUT_COPY)
+            .action(fl::KEYS_SCROLL, fl::LABEL_SCROLL)
+            .action(fl::KEYS_NEXT_PREV_HOST, fl::LABEL_NEXT_PREV_HOST)
+            .action(fl::KEYS_TOP_BOTTOM, fl::LABEL_TOP_BOTTOM)
+            .action("Esc", fl::ESC_CLOSE);
     } else {
         f = f
-            .action("j/k", " scroll ")
-            .action("n/N", " next/prev host ")
-            .action("g/G", " top/bottom ")
-            .action("Ctrl+C", " cancel");
+            .action(fl::KEYS_SCROLL, fl::LABEL_SCROLL)
+            .action(fl::KEYS_NEXT_PREV_HOST, fl::LABEL_NEXT_PREV_HOST)
+            .action(fl::KEYS_TOP_BOTTOM, fl::LABEL_TOP_BOTTOM)
+            .action("Ctrl+C", fl::CTRL_C_CANCEL);
     }
     f.render_with_status(frame, footer_area, app);
 }

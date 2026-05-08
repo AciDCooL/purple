@@ -195,12 +195,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Footer below the block
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     design::Footer::new()
-        .action("s", " start ")
-        .action("x", " stop ")
-        .action("r", " restart ")
-        .action("R", " refresh ")
-        .action("Esc", " back")
+        .action("s", fl::ACTION_START)
+        .action("x", fl::ACTION_STOP)
+        .action("r", fl::ACTION_RESTART)
+        .action("R", fl::ACTION_REFRESH)
+        .action("Esc", fl::ESC_BACK)
         .render_with_status(frame, footer_area, app);
 
     // Confirmation dialog for stop/restart

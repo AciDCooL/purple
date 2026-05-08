@@ -7,6 +7,7 @@
 use std::path::PathBuf;
 
 use proptest::prelude::*;
+use purple_ssh::providers::config::ProviderConfigId;
 use purple_ssh::ssh_config::model::{HostEntry, SshConfigFile};
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,15 @@ enum Action {
         name: String,
         id: String,
     },
+    SetProviderLabeled {
+        name: String,
+        label: String,
+        id: String,
+    },
+    RewriteLegacyToLabel {
+        name: String,
+        label: String,
+    },
     SetMeta {
         meta: Vec<(String, String)>,
     },
@@ -218,7 +228,7 @@ fn action_strategy() -> impl Strategy<Value = Action> {
         tags_strategy().prop_map(|tags| Action::SetTags { tags }),
         // SetAskpass
         askpass_strategy().prop_map(|source| Action::SetAskpass { source }),
-        // SetProvider
+        // SetProvider (legacy 2-segment marker)
         (
             prop_oneof![
                 Just("aws"),
@@ -231,6 +241,31 @@ fn action_strategy() -> impl Strategy<Value = Action> {
             .prop_map(|(name, id)| Action::SetProvider {
                 name: name.to_string(),
                 id,
+            }),
+        // SetProviderLabeled (3-segment marker for multi-config)
+        (
+            prop_oneof![Just("aws"), Just("digitalocean"), Just("hetzner")],
+            prop_oneof![
+                Just("work"),
+                Just("personal"),
+                Just("default"),
+                Just("prod-1"),
+            ],
+            "[a-z0-9]{6,12}",
+        )
+            .prop_map(|(name, label, id)| Action::SetProviderLabeled {
+                name: name.to_string(),
+                label: label.to_string(),
+                id,
+            }),
+        // RewriteLegacyToLabel exercises the lazy-migration helper.
+        (
+            prop_oneof![Just("aws"), Just("digitalocean"), Just("hetzner")],
+            prop_oneof![Just("default"), Just("work"), Just("primary")],
+        )
+            .prop_map(|(name, label)| Action::RewriteLegacyToLabel {
+                name: name.to_string(),
+                label: label.to_string(),
             }),
         // SetMeta
         meta_strategy().prop_map(|meta| Action::SetMeta { meta }),
@@ -308,8 +343,17 @@ fn apply_action(config: &mut SshConfigFile, action: &Action) {
         }
         Action::SetProvider { name, id } => {
             if let Some(alias) = &first_alias {
-                config.set_host_provider(alias, name, id);
+                config.set_host_provider_id(alias, &ProviderConfigId::bare(name), id);
             }
+        }
+        Action::SetProviderLabeled { name, label, id } => {
+            if let Some(alias) = &first_alias {
+                config.set_host_provider_id(alias, &ProviderConfigId::labeled(name, label), id);
+            }
+        }
+        Action::RewriteLegacyToLabel { name, label } => {
+            // Lazy-migration helper. Must round-trip cleanly.
+            let _ = config.rewrite_legacy_markers_to_label(name, label);
         }
         Action::SetMeta { meta } => {
             if let Some(alias) = &first_alias {
@@ -451,7 +495,7 @@ proptest! {
         prop_assert_eq!(&entry.tags, &tags);
 
         // 3. Set provider
-        config.set_host_provider(&alias, "aws", "i-test123");
+        config.set_host_provider_id(&alias, &ProviderConfigId::bare( "aws"),  "i-test123");
         assert_idempotent(&config);
         let entry = config.host_entries().into_iter().find(|e| e.alias == alias).unwrap();
         prop_assert_eq!(entry.provider.as_deref(), Some("aws"));
@@ -557,7 +601,7 @@ proptest! {
                 continue;
             }
             config.add_host(&host_entry(&alias, ip, "ec2-user"));
-            config.set_host_provider(&alias, "aws", &format!("i-{name}"));
+            config.set_host_provider_id(&alias, &ProviderConfigId::bare( "aws"),  &format!("i-{name}"));
             config.set_host_tags(&alias, &["aws".to_string(), "cloud".to_string()]);
             config.set_host_meta(
                 &alias,
@@ -577,7 +621,7 @@ proptest! {
                 continue;
             }
             config.add_host(&host_entry(&alias, ip, "root"));
-            config.set_host_provider(&alias, "digitalocean", &format!("droplet-{name}"));
+            config.set_host_provider_id(&alias, &ProviderConfigId::bare( "digitalocean"),  &format!("droplet-{name}"));
             config.set_host_tags(&alias, &["do".to_string()]);
         }
 

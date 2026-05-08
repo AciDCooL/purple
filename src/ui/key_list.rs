@@ -147,9 +147,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Footer below the block
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     design::Footer::new()
-        .primary("Enter", " details ")
-        .action("Esc", " back")
+        .primary("Enter", fl::ENTER_SELECT)
+        .action("Esc", fl::ESC_BACK)
         .render_with_status(frame, footer_area, app);
 }
 

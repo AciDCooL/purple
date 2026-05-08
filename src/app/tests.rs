@@ -1673,7 +1673,7 @@ fn make_provider_app() -> App {
     app.providers
         .config
         .set_section(crate::providers::config::ProviderSection {
-            provider: "digitalocean".to_string(),
+            id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
             token: "test-token".to_string(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
@@ -1769,7 +1769,7 @@ fn test_apply_sync_result_unknown_provider() {
     app.providers
         .config
         .set_section(crate::providers::config::ProviderSection {
-            provider: "nonexistent".to_string(),
+            id: crate::providers::config::ProviderConfigId::bare("nonexistent"),
             token: "tok".to_string(),
             alias_prefix: "nope".to_string(),
             user: "root".to_string(),
@@ -1983,7 +1983,7 @@ fn test_sync_record_load_malformed_lines() {
 
 fn make_section(provider: &str, auto_sync: bool) -> crate::providers::config::ProviderSection {
     crate::providers::config::ProviderSection {
-        provider: provider.to_string(),
+        id: crate::providers::config::ProviderConfigId::bare(provider),
         token: "tok".to_string(),
         alias_prefix: provider[..2].to_string(),
         user: "root".to_string(),
@@ -2014,7 +2014,7 @@ fn test_startup_auto_sync_filter_skips_disabled_providers() {
         .configured_providers()
         .iter()
         .filter(|s| s.auto_sync)
-        .map(|s| s.provider.as_str())
+        .map(|s| s.provider())
         .collect();
     assert_eq!(auto_synced, vec!["digitalocean"]);
     assert!(!auto_synced.contains(&"proxmox"));
@@ -2029,7 +2029,7 @@ fn test_startup_auto_sync_filter_all_enabled() {
         .configured_providers()
         .iter()
         .filter(|s| !s.auto_sync)
-        .map(|s| s.provider.as_str())
+        .map(|s| s.provider())
         .collect();
     assert!(skipped.is_empty());
 }
@@ -3636,7 +3636,7 @@ Host do-db
     app.providers
         .config
         .set_section(crate::providers::config::ProviderSection {
-            provider: "digitalocean".to_string(),
+            id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
             token: "test-token".to_string(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),

@@ -11,11 +11,11 @@ use crate::history::ConnectionHistory;
 
 /// Render the provider management list as a centered overlay.
 pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
-    let sorted_names = app.sorted_provider_names();
+    let rows = app.providers.provider_list_rows();
 
     // Overlay: percentage-based width, height fits content. Reserve 1 row
     // below the block for the external footer.
-    let item_count = sorted_names.len();
+    let item_count = rows.len();
     let height = (item_count as u16 + 3).min(frame.area().height.saturating_sub(5));
     let area = design::overlay_area(frame, design::OVERLAY_W, design::OVERLAY_H, height);
     frame.render_widget(Clear, area);
@@ -28,89 +28,28 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
     // Content width inside the overlay
     let content_width = inner.width as usize;
 
-    let items: Vec<ListItem> = sorted_names
+    // Reserve room for the tree-glyph column ONLY when at least one provider
+    // in the list actually has 2+ configs. Otherwise every row would carry
+    // 3 dead spaces of padding for an arrow that never renders, making the
+    // overlay look wider than tunnel_list and key_list. Match design-system
+    // convention: padding flows directly from LIST_HIGHLIGHT, no extra inset.
+    let has_multi_config = rows.iter().any(|r| {
+        matches!(
+            r,
+            crate::app::ProviderRow::Header {
+                config_count,
+                ..
+            } if *config_count >= 2
+        )
+    });
+
+    let items: Vec<ListItem> = rows
         .iter()
-        .map(|name| {
-            let display_name = crate::providers::provider_display_name(name.as_str());
-            let configured = app.providers.config.section(name.as_str()).is_some();
-
-            let name_col = format!(" {:<16}", display_name);
-            let mut spans = vec![Span::styled(name_col, theme::bold())];
-            let mut used = 17;
-
-            if configured {
-                let has_error = app
-                    .providers
-                    .sync_history
-                    .get(name.as_str())
-                    .is_some_and(|r| r.is_error);
-                if has_error {
-                    spans.push(Span::styled(design::ICON_WARNING, theme::error()));
-                } else {
-                    spans.push(Span::styled(design::ICON_SUCCESS, theme::success()));
-                }
-                used += 1;
-
-                if let Some(section) = app.providers.config.section(name.as_str()) {
-                    if !section.auto_sync {
-                        spans.push(Span::styled(" (manual)", theme::muted()));
-                        used += 9;
-                    }
-                }
-
-                // Stale count for this provider
-                let stale_count = app
-                    .hosts_state
-                    .list
-                    .iter()
-                    .filter(|h| h.stale.is_some() && h.provider.as_deref() == Some(name.as_str()))
-                    .count();
-
-                // Sync detail on same line
-                if app.providers.syncing.contains_key(name.as_str()) {
-                    let max = content_width.saturating_sub(used + 2);
-                    if max > 1 {
-                        spans.push(Span::styled(
-                            format!("  {}", super::truncate("syncing...", max)),
-                            theme::muted(),
-                        ));
-                    }
-                } else if let Some(record) = app.providers.sync_history.get(name.as_str()) {
-                    let ago = ConnectionHistory::format_time_ago(record.timestamp);
-                    // Build segments: "N servers" [", N stale"] [", Xm ago"]
-                    let prefix = format!("  {}", record.message);
-                    let stale_text = if stale_count > 0 {
-                        format!(", {} stale", stale_count)
-                    } else {
-                        String::new()
-                    };
-                    let ago_text = if ago.is_empty() {
-                        String::new()
-                    } else {
-                        format!(", {} ago", ago)
-                    };
-                    let max = content_width.saturating_sub(used);
-                    let total_len = prefix.len() + stale_text.len() + ago_text.len();
-                    if max > 1 && total_len <= max {
-                        spans.push(Span::styled(prefix, theme::muted()));
-                        if stale_count > 0 {
-                            spans.push(Span::styled(stale_text, theme::warning()));
-                        }
-                        if !ago_text.is_empty() {
-                            spans.push(Span::styled(ago_text, theme::muted()));
-                        }
-                    } else if max > 1 {
-                        // Fallback: truncate combined string
-                        let combined = format!("{}{}{}", prefix, stale_text, ago_text);
-                        spans.push(Span::styled(
-                            super::truncate(&combined, max),
-                            theme::muted(),
-                        ));
-                    }
-                }
+        .map(|row| match row {
+            crate::app::ProviderRow::Header { name, config_count } => {
+                render_header_line(app, name, *config_count, content_width, has_multi_config)
             }
-
-            ListItem::new(Line::from(spans))
+            crate::app::ProviderRow::Leaf { id } => render_leaf_line(app, id, content_width),
         })
         .collect();
 
@@ -125,39 +64,352 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
     if app.providers.pending_delete.is_some() {
         let name = app.providers.pending_delete.as_deref().unwrap_or("");
         let display = crate::providers::provider_display_name(name);
-        let mut spans = vec![Span::styled(
-            format!(" Remove {}? ", display),
-            theme::bold(),
-        )];
+        // When removing one labeled config of a multi-config provider,
+        // surface the label so the user can't mistake it for "remove all".
+        let title = match app
+            .providers
+            .pending_delete_id
+            .as_ref()
+            .and_then(|id| id.label.as_deref())
+        {
+            Some(label) => crate::messages::confirm_remove_labeled_config(display, label),
+            None => crate::messages::confirm_remove_provider(display),
+        };
+        let mut spans = vec![Span::styled(title, theme::bold())];
         // Stakes test: removing the provider config is destructive
         // (synced hosts stay but the integration is gone). Action verbs.
         spans.extend(design::confirm_footer_destructive("remove", "keep").into_spans());
         super::render_footer_with_status(frame, footer_area, spans, app);
     } else {
-        // Count stale hosts for selected provider
-        let selected_stale_count: usize = app
+        // Count stale hosts for the currently selected row.
+        let selected_row = app
             .ui
             .provider_list_state
             .selected()
-            .and_then(|idx| sorted_names.get(idx))
-            .map(|name| {
-                app.hosts_state
+            .and_then(|idx| rows.get(idx));
+        let selected_stale_count: usize = selected_row
+            .map(|row| match row {
+                crate::app::ProviderRow::Header { name, .. } => app
+                    .hosts_state
                     .list
                     .iter()
                     .filter(|h| h.stale.is_some() && h.provider.as_deref() == Some(name.as_str()))
-                    .count()
+                    .count(),
+                crate::app::ProviderRow::Leaf { id } => app
+                    .hosts_state
+                    .list
+                    .iter()
+                    .filter(|h| {
+                        h.stale.is_some()
+                            && h.provider.as_deref() == Some(id.provider.as_str())
+                            && h.provider_label.as_deref() == id.label.as_deref()
+                    })
+                    .count(),
             })
             .unwrap_or(0);
 
+        // Header on a multi-config provider: Enter expands; otherwise edits.
+        // Single-word labels match the project convention (`add`, `del`,
+        // `edit`) used in tunnel_list, host_list, key_list.
+        use crate::messages::footer as fl;
+        let edit_label = match selected_row {
+            Some(crate::app::ProviderRow::Header { config_count, name }) if *config_count >= 2 => {
+                if app.providers.expanded_providers.contains(name) {
+                    fl::ENTER_COLLAPSE
+                } else {
+                    fl::ENTER_EXPAND
+                }
+            }
+            _ => fl::ENTER_EDIT,
+        };
         let mut f = design::Footer::new()
-            .primary("Enter", " edit ")
-            .action("s", " sync ")
-            .action("d", " remove ");
+            .primary("Enter", edit_label)
+            .action("a", fl::ACTION_ADD)
+            .action("s", fl::ACTION_SYNC)
+            .action("d", fl::ACTION_DEL);
         if selected_stale_count > 0 {
             f = f.action("X", &format!(" purge {} stale ", selected_stale_count));
         }
-        f = f.action("Esc", " back");
+        f = f.action("Esc", fl::ESC_BACK);
         f.render_with_status(frame, footer_area, app);
+    }
+}
+
+/// Render a provider group header row in the tree-style list.
+/// `config_count`: 0 = unconfigured, 1 = single config (no expand arrow),
+/// 2+ = multi-config (shows ▾/▸ depending on expand state).
+/// `has_multi_config_in_list`: if false, no row in the list needs the
+/// tree-glyph column, so single/zero-config rows skip the 3-space padding
+/// and start flush against LIST_HIGHLIGHT (matches tunnel_list/key_list).
+fn render_header_line(
+    app: &App,
+    name: &str,
+    config_count: usize,
+    content_width: usize,
+    has_multi_config_in_list: bool,
+) -> ListItem<'static> {
+    let display_name = crate::providers::provider_display_name(name);
+    let configured = config_count > 0;
+
+    // Expand indicator for multi-config providers, alignment whitespace
+    // for siblings, or nothing at all when the list contains no
+    // multi-config providers.
+    let prefix = if config_count >= 2 {
+        if app.providers.expanded_providers.contains(name) {
+            format!(" {} ", design::TREE_EXPANDED)
+        } else {
+            format!(" {} ", design::TREE_COLLAPSED)
+        }
+    } else if has_multi_config_in_list {
+        "   ".to_string()
+    } else {
+        String::new()
+    };
+
+    let name_col = format!("{}{:<14}", prefix, display_name);
+    let mut spans = vec![Span::styled(name_col, theme::bold())];
+    let mut used = 17;
+
+    if !configured {
+        return ListItem::new(Line::from(spans));
+    }
+
+    if config_count >= 2 {
+        let suffix = format!(" ({} configs)", config_count);
+        spans.push(Span::styled(suffix, theme::muted()));
+        return ListItem::new(Line::from(spans));
+    }
+
+    // Single config: look up by the section's full id (matches the key
+    // used in sync_history insertion) so the status icon and timestamp
+    // surface for both bare configs and labeled-but-only-one configs.
+    let single_section = app
+        .providers
+        .config
+        .sections_for_provider(name)
+        .first()
+        .cloned()
+        .cloned();
+    let key = single_section
+        .as_ref()
+        .map(|s| s.id.to_string())
+        .unwrap_or_else(|| name.to_string());
+    let has_error = app
+        .providers
+        .sync_history
+        .get(&key)
+        .is_some_and(|r| r.is_error);
+    if has_error {
+        spans.push(Span::styled(design::ICON_WARNING, theme::error()));
+    } else {
+        spans.push(Span::styled(design::ICON_SUCCESS, theme::success()));
+    }
+    used += 1;
+
+    if let Some(section) = single_section.as_ref() {
+        if !section.auto_sync {
+            spans.push(Span::styled(" (manual)", theme::muted()));
+            used += 9;
+        }
+    }
+
+    let stale_count = app
+        .hosts_state
+        .list
+        .iter()
+        .filter(|h| h.stale.is_some() && h.provider.as_deref() == Some(name))
+        .count();
+
+    append_sync_detail(app, &key, stale_count, used, content_width, &mut spans);
+    ListItem::new(Line::from(spans))
+}
+
+/// Render a leaf row (one labeled config) under an expanded provider header.
+fn render_leaf_line(
+    app: &App,
+    id: &crate::providers::config::ProviderConfigId,
+    content_width: usize,
+) -> ListItem<'static> {
+    let label = id.label.as_deref().unwrap_or("");
+    // Indented under the header, with a tree-branch glyph.
+    let name_col = format!("    {} {:<12}", design::TREE_BRANCH, label);
+    let mut spans = vec![Span::styled(name_col, theme::bold())];
+    let mut used = 17;
+
+    let key = id.to_string();
+    let has_error = app
+        .providers
+        .sync_history
+        .get(&key)
+        .is_some_and(|r| r.is_error);
+    if has_error {
+        spans.push(Span::styled(design::ICON_WARNING, theme::error()));
+    } else {
+        spans.push(Span::styled(design::ICON_SUCCESS, theme::success()));
+    }
+    used += 1;
+
+    if let Some(section) = app.providers.config.section_by_id(id) {
+        if !section.auto_sync {
+            spans.push(Span::styled(" (manual)", theme::muted()));
+            used += 9;
+        }
+    }
+
+    let stale_count = app
+        .hosts_state
+        .list
+        .iter()
+        .filter(|h| {
+            h.stale.is_some()
+                && h.provider.as_deref() == Some(id.provider.as_str())
+                && h.provider_label.as_deref() == id.label.as_deref()
+        })
+        .count();
+
+    append_sync_detail(app, &key, stale_count, used, content_width, &mut spans);
+    ListItem::new(Line::from(spans))
+}
+
+/// Append "syncing..." or "N servers, M stale, T ago" to a row.
+fn append_sync_detail(
+    app: &App,
+    key: &str,
+    stale_count: usize,
+    used: usize,
+    content_width: usize,
+    spans: &mut Vec<Span<'static>>,
+) {
+    if app.providers.syncing.contains_key(key) {
+        let max = content_width.saturating_sub(used + 2);
+        if max > 1 {
+            spans.push(Span::styled(
+                format!("  {}", super::truncate("syncing...", max)),
+                theme::muted(),
+            ));
+        }
+        return;
+    }
+    let Some(record) = app.providers.sync_history.get(key) else {
+        return;
+    };
+    let ago = ConnectionHistory::format_time_ago(record.timestamp);
+    let prefix = format!("  {}", record.message);
+    let stale_text = if stale_count > 0 {
+        format!(", {} stale", stale_count)
+    } else {
+        String::new()
+    };
+    let ago_text = if ago.is_empty() {
+        String::new()
+    } else {
+        format!(", {} ago", ago)
+    };
+    let max = content_width.saturating_sub(used);
+    let total_len = prefix.len() + stale_text.len() + ago_text.len();
+    if max > 1 && total_len <= max {
+        spans.push(Span::styled(prefix, theme::muted()));
+        if stale_count > 0 {
+            spans.push(Span::styled(stale_text, theme::warning()));
+        }
+        if !ago_text.is_empty() {
+            spans.push(Span::styled(ago_text, theme::muted()));
+        }
+    } else if max > 1 {
+        let combined = format!("{}{}{}", prefix, stale_text, ago_text);
+        spans.push(Span::styled(
+            super::truncate(&combined, max),
+            theme::muted(),
+        ));
+    }
+}
+
+/// Render step 1 of the lazy add-second-config flow as a proper form.
+/// Composes the same primitives as `render_provider_form`: per-field
+/// dividers, accent_bold focus style, real cursor positioning, and the
+/// standard `form_save_footer`. No ad-hoc spans or fake `[___]` boxes.
+pub fn render_label_migration(frame: &mut Frame, app: &mut App, provider_name: &str) {
+    let display_name = crate::providers::provider_display_name(provider_name);
+    let title = format!("Add a 2nd {} config", display_name);
+
+    // Block layout: 1 top pad + 2 field rows (divider+content each = 4 rows)
+    // + 1 trailing pad = 6 inner rows. Plus borders = 8. The title implies
+    // the why ("you have one and want a second"); the action verb in the
+    // field labels carries the instruction.
+    let block_height: u16 = 8;
+    let area = design::overlay_area(frame, design::OVERLAY_W, design::OVERLAY_H, block_height);
+    frame.render_widget(Clear, area);
+
+    let block = design::overlay_block(&title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let (existing, new, focused, cursor_pos) = match app.providers.pending_label_migration.as_ref()
+    {
+        Some(p) => (
+            p.existing_label.as_str(),
+            p.new_label.as_str(),
+            p.focused,
+            p.cursor_pos,
+        ),
+        None => ("", "", crate::app::LabelMigrationField::Existing, 0),
+    };
+
+    let fields = [
+        (
+            crate::app::LabelMigrationField::Existing,
+            crate::messages::LABEL_MIGRATION_FIELD_CURRENT,
+            existing,
+        ),
+        (
+            crate::app::LabelMigrationField::New,
+            crate::messages::LABEL_MIGRATION_FIELD_NEW,
+            new,
+        ),
+    ];
+
+    let mut y_offset: u16 = 1; // skip top pad
+    let mut focused_cursor: Option<(u16, u16)> = None;
+    for (field, label, value) in fields {
+        let divider_y = inner.y + y_offset;
+        let content_y = divider_y + 1;
+        y_offset += 2;
+
+        let is_focused = focused == field;
+        let label_style = if is_focused {
+            theme::accent_bold()
+        } else {
+            theme::muted()
+        };
+        super::render_divider(frame, area, divider_y, label, label_style, theme::accent());
+
+        let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
+        let content = if value.is_empty() {
+            Line::from(Span::raw(""))
+        } else {
+            Line::from(Span::styled(value.to_string(), theme::bold()))
+        };
+        frame.render_widget(Paragraph::new(content), content_area);
+        if is_focused {
+            let prefix: String = value.chars().take(cursor_pos).collect();
+            let cursor_x = content_area
+                .x
+                .saturating_add(prefix.width().min(u16::MAX as usize) as u16);
+            if content_area.width > 0
+                && cursor_x < content_area.x.saturating_add(content_area.width)
+            {
+                focused_cursor = Some((cursor_x, content_area.y));
+            }
+        }
+    }
+
+    // Standard form save footer: Enter save / Tab next / Esc cancel.
+    let footer_area = design::render_overlay_footer(frame, area);
+    design::form_save_footer(design::FormFooterMode::Expanded(design::FieldKind::Text))
+        .render_with_status(frame, footer_area, app);
+
+    if let Some((x, y)) = focused_cursor {
+        frame.set_cursor_position((x, y));
     }
 }
 
@@ -479,7 +731,7 @@ fn build_region_rows(provider: &str) -> Vec<(String, Option<&'static str>)> {
 
 fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
     let provider_name = match &app.screen {
-        crate::app::Screen::ProviderForm { provider } => provider.as_str(),
+        crate::app::Screen::ProviderForm { id } => id.provider.as_str(),
         _ => "aws",
     };
     let rows = build_region_rows(provider_name);
@@ -576,10 +828,11 @@ fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
     }
 
     let footer_area = design::render_overlay_footer(frame, block_area);
+    use crate::messages::footer as fl;
     design::Footer::new()
-        .primary("Enter", " done ")
-        .action("Space", " toggle ")
-        .action("Esc", " cancel")
+        .primary("Enter", fl::ENTER_APPLY)
+        .action("Space", fl::SPACE_TOGGLE)
+        .action("Esc", fl::ESC_CANCEL)
         .render_with_status(frame, footer_area, app);
 }
 

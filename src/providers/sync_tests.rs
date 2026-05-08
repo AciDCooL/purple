@@ -21,7 +21,7 @@ fn empty_config() -> SshConfigFile {
 
 fn make_section() -> ProviderSection {
     ProviderSection {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "test".to_string(),
         alias_prefix: "do".to_string(),
         user: "root".to_string(),
@@ -1016,7 +1016,7 @@ fn test_sync_rename_skips_included_host() {
     let mut config = config_with_include_provider_host();
 
     let new_section = ProviderSection {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "test".to_string(),
         alias_prefix: "ocean".to_string(), // Different prefix
         user: "root".to_string(),
@@ -2735,7 +2735,7 @@ fn test_sync_two_providers_independent() {
 
     let do_section = make_section(); // prefix = "do"
     let vultr_section = ProviderSection {
-        provider: "vultr".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("vultr"),
         token: "test".to_string(),
         alias_prefix: "vultr".to_string(),
         user: String::new(),
@@ -2797,7 +2797,7 @@ fn test_sync_remove_only_affects_own_provider() {
     let mut config = empty_config();
     let do_section = make_section();
     let vultr_section = ProviderSection {
-        provider: "vultr".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("vultr"),
         token: "test".to_string(),
         alias_prefix: "vultr".to_string(),
         user: String::new(),
@@ -3608,7 +3608,11 @@ fn test_set_host_provider_updates_existing() {
         bom: false,
     };
 
-    config.set_host_provider("do-web", "digitalocean", "new-id");
+    config.set_host_provider_id(
+        "do-web",
+        &crate::providers::config::ProviderConfigId::bare("digitalocean"),
+        "new-id",
+    );
     let hosts = config.find_hosts_by_provider("digitalocean");
     assert_eq!(hosts.len(), 1);
     assert_eq!(hosts[0].1, "new-id");
@@ -4621,7 +4625,11 @@ Host do-web-1
     };
 
     // Update provider marker (e.g. server_id changed)
-    config.set_host_provider("do-web-1", "digitalocean", "456");
+    config.set_host_provider_id(
+        "do-web-1",
+        &crate::providers::config::ProviderConfigId::bare("digitalocean"),
+        "456",
+    );
 
     let serialized = config.serialize();
     assert!(
@@ -5166,6 +5174,7 @@ fn test_sync_stale_cross_provider_isolation() {
     let mut config = empty_config();
     let do_section = make_section();
     let vultr_section = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::bare("vultr"),
         alias_prefix: "vultr".to_string(),
         ..make_section()
     };
@@ -5692,5 +5701,510 @@ Host pve-testvm
         !output.contains("\n\n\n"),
         "triple blank lines:\n{}",
         output
+    );
+}
+
+// --- Multi-config provider tests ---
+
+#[test]
+fn multi_config_two_labeled_sections_keep_hosts_isolated() {
+    // Two labeled DO configs ("work" and "personal") sync independently:
+    // each only sees and mutates its own hosts even though both use
+    // provider.name() == "digitalocean".
+    let mut config = empty_config();
+    let work = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "work"),
+        alias_prefix: "do-work".to_string(),
+        ..make_section()
+    };
+    let personal = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "personal"),
+        alias_prefix: "do-personal".to_string(),
+        ..make_section()
+    };
+    let work_remote = vec![ProviderHost::new(
+        "100".into(),
+        "frontend".into(),
+        "1.1.1.1".into(),
+        Vec::new(),
+    )];
+    let personal_remote = vec![ProviderHost::new(
+        "200".into(),
+        "blog".into(),
+        "2.2.2.2".into(),
+        Vec::new(),
+    )];
+
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &work_remote,
+        &work,
+        false,
+        false,
+        false,
+    );
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &personal_remote,
+        &personal,
+        false,
+        false,
+        false,
+    );
+
+    let output = config.serialize();
+    assert!(output.contains("# purple:provider digitalocean:work:100"));
+    assert!(output.contains("# purple:provider digitalocean:personal:200"));
+    assert!(output.contains("Host do-work-frontend"));
+    assert!(output.contains("Host do-personal-blog"));
+
+    // Now drop work's remote host: only the work host should go stale, not personal's.
+    sync_provider(&mut config, &MockProvider, &[], &work, false, false, false);
+    let entries = config.host_entries();
+    let work_entry = entries
+        .iter()
+        .find(|e| e.alias == "do-work-frontend")
+        .unwrap();
+    let personal_entry = entries
+        .iter()
+        .find(|e| e.alias == "do-personal-blog")
+        .unwrap();
+    assert!(work_entry.stale.is_some(), "work host must be stale");
+    assert!(
+        personal_entry.stale.is_none(),
+        "personal host must not be affected"
+    );
+}
+
+#[test]
+fn multi_config_shares_one_group_header_per_provider() {
+    // Adding two labeled configs of the same provider must not produce two
+    // group headers — both configs live under one "DigitalOcean" header.
+    let mut config = empty_config();
+    let work = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "work"),
+        alias_prefix: "do-work".to_string(),
+        ..make_section()
+    };
+    let personal = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "personal"),
+        alias_prefix: "do-personal".to_string(),
+        ..make_section()
+    };
+    let work_remote = vec![ProviderHost::new(
+        "1".into(),
+        "a".into(),
+        "1.1.1.1".into(),
+        Vec::new(),
+    )];
+    let personal_remote = vec![ProviderHost::new(
+        "2".into(),
+        "b".into(),
+        "2.2.2.2".into(),
+        Vec::new(),
+    )];
+
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &work_remote,
+        &work,
+        false,
+        false,
+        false,
+    );
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &personal_remote,
+        &personal,
+        false,
+        false,
+        false,
+    );
+
+    let output = config.serialize();
+    let header_count = output.matches("# purple:group DigitalOcean").count();
+    assert_eq!(
+        header_count, 1,
+        "expected exactly one DigitalOcean group header, got {}:\n{}",
+        header_count, output
+    );
+}
+
+#[test]
+fn multi_config_legacy_marker_compatible_with_bare_section() {
+    // A legacy 2-segment marker (`digitalocean:123`) is still claimed by a
+    // bare section. After upgrading to a labeled section, sync rewrites the
+    // marker to 3-segment form on the next touch.
+    let mut config = empty_config();
+    let bare = make_section(); // bare "digitalocean", alias_prefix "do"
+    let remote = vec![ProviderHost::new(
+        "999".into(),
+        "legacy".into(),
+        "9.9.9.9".into(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &bare,
+        false,
+        false,
+        false,
+    );
+
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider digitalocean:999"));
+    assert!(!serialized.contains("digitalocean:work:999"));
+    // Bare section still finds it on the next sync (no duplicate add).
+    let result = sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &bare,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(result.added, 0);
+    assert_eq!(result.unchanged, 1);
+}
+
+#[test]
+fn multi_config_deleted_section_does_not_orphan_other_label() {
+    // Two labeled DO configs, both with hosts. Then "delete" the work
+    // config (it stops participating in sync). When personal syncs again,
+    // it must NOT touch work's hosts (different label in the marker).
+    let mut config = empty_config();
+    let work = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "work"),
+        alias_prefix: "do-work".to_string(),
+        ..make_section()
+    };
+    let personal = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "personal"),
+        alias_prefix: "do-personal".to_string(),
+        ..make_section()
+    };
+    let work_remote = vec![ProviderHost::new(
+        "100".into(),
+        "frontend".into(),
+        "1.1.1.1".into(),
+        Vec::new(),
+    )];
+    let personal_remote = vec![ProviderHost::new(
+        "200".into(),
+        "blog".into(),
+        "2.2.2.2".into(),
+        Vec::new(),
+    )];
+
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &work_remote,
+        &work,
+        false,
+        false,
+        false,
+    );
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &personal_remote,
+        &personal,
+        false,
+        false,
+        false,
+    );
+
+    // Re-sync only personal. Work's host should not be touched.
+    let result = sync_provider(
+        &mut config,
+        &MockProvider,
+        &personal_remote,
+        &personal,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(result.unchanged, 1);
+    assert_eq!(result.added, 0);
+    assert_eq!(result.stale, 0);
+
+    let entries = config.host_entries();
+    let work_host = entries
+        .iter()
+        .find(|e| e.alias == "do-work-frontend")
+        .expect("work host must remain in config");
+    assert_eq!(work_host.stale, None, "work host must not be touched");
+    let personal_host = entries
+        .iter()
+        .find(|e| e.alias == "do-personal-blog")
+        .expect("personal host must still exist");
+    assert_eq!(personal_host.stale, None);
+}
+
+struct MockProxmox;
+impl Provider for MockProxmox {
+    fn name(&self) -> &str {
+        "proxmox"
+    }
+    fn short_label(&self) -> &str {
+        "pve"
+    }
+    fn fetch_hosts_cancellable(
+        &self,
+        _token: &str,
+        _cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<Vec<ProviderHost>, super::super::ProviderError> {
+        Ok(Vec::new())
+    }
+}
+
+fn make_section_with_provider(name: &str) -> ProviderSection {
+    ProviderSection {
+        id: crate::providers::config::ProviderConfigId::bare(name),
+        token: "test".to_string(),
+        alias_prefix: name.to_string(),
+        user: "root".to_string(),
+        identity_file: String::new(),
+        url: String::new(),
+        verify_tls: true,
+        auto_sync: true,
+        profile: String::new(),
+        regions: String::new(),
+        project: String::new(),
+        compartment: String::new(),
+        vault_role: String::new(),
+        vault_addr: String::new(),
+    }
+}
+
+#[test]
+fn bare_sync_does_not_duplicate_hosts_with_colon_in_server_id() {
+    // Regression for v3.7.0 data-loss bug: Proxmox server_ids look like
+    // `qemu:300` and `lxc:101`. Their markers are 2-segment but contain a
+    // colon: `# purple:provider proxmox:qemu:300`. The label-aware parser
+    // happens to interpret `qemu` as a valid label, which made
+    // find_hosts_by_id miss them and sync re-add every host on every run.
+    //
+    // Bare configs MUST claim every marker for their provider, regardless
+    // of how the middle segment looks.
+    let mut config = empty_config();
+    let bare = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::bare("proxmox"),
+        alias_prefix: "pve".to_string(),
+        ..make_section_with_provider("proxmox")
+    };
+    let remote = vec![
+        ProviderHost::new(
+            "qemu:300".into(),
+            "vm-300".into(),
+            "10.0.0.300".into(),
+            Vec::new(),
+        ),
+        ProviderHost::new(
+            "lxc:101".into(),
+            "ct-101".into(),
+            "10.0.0.101".into(),
+            Vec::new(),
+        ),
+    ];
+
+    // First sync: writes the hosts.
+    let r1 = sync_provider(
+        &mut config,
+        &MockProxmox,
+        &remote,
+        &bare,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(r1.added, 2);
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider proxmox:qemu:300"));
+    assert!(serialized.contains("# purple:provider proxmox:lxc:101"));
+
+    // Second sync with the SAME remote: must NOT add anything.
+    let r2 = sync_provider(
+        &mut config,
+        &MockProxmox,
+        &remote,
+        &bare,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(
+        r2.added, 0,
+        "bare sync of colon-bearing server_ids must not duplicate hosts; got {:?}",
+        r2
+    );
+    assert_eq!(r2.unchanged, 2);
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 2, "host count must not grow on re-sync");
+}
+
+#[test]
+fn bare_sync_handles_arbitrary_colons_in_server_id() {
+    // Generalisation: any colon-bearing server_id (Azure resource paths,
+    // OCI compartment paths in some scenarios, future provider conventions)
+    // must round-trip through bare-config sync without duplication.
+    let mut config = empty_config();
+    let bare = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::bare("proxmox"),
+        alias_prefix: "pve".to_string(),
+        ..make_section_with_provider("proxmox")
+    };
+    let exotic_ids = vec![
+        ProviderHost::new("a:b:c:d:e".into(), "deep".into(), "1.1.1.1".into(), vec![]),
+        ProviderHost::new(
+            "/path/like/id".into(),
+            "slashy".into(),
+            "2.2.2.2".into(),
+            vec![],
+        ),
+    ];
+    sync_provider(
+        &mut config,
+        &MockProxmox,
+        &exotic_ids,
+        &bare,
+        false,
+        false,
+        false,
+    );
+    let r2 = sync_provider(
+        &mut config,
+        &MockProxmox,
+        &exotic_ids,
+        &bare,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(r2.added, 0, "second sync must dedupe exotic server_ids");
+    assert_eq!(r2.unchanged, 2);
+}
+
+#[test]
+fn lazy_migration_rewrite_then_sync_preserves_hosts() {
+    // End-to-end test of the lazy-migration data-safety fix.
+    // 1. Sync hosts under a bare config -> legacy 2-segment markers.
+    // 2. Run the lazy-migration helper to relabel them to "default".
+    // 3. Sync the (now-labeled) [digitalocean:default] with the same remote.
+    // The host count must not change, no host gets duplicated, no host gets
+    // marked stale.
+    let mut config = empty_config();
+    let bare = make_section();
+    let remote = vec![ProviderHost::new(
+        "1".into(),
+        "web".into(),
+        "1.1.1.1".into(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &bare,
+        false,
+        false,
+        false,
+    );
+    let before = config.serialize();
+    assert!(before.contains("# purple:provider digitalocean:1"));
+
+    // Migration step: relabel all legacy markers to "default".
+    let rewritten = config.rewrite_legacy_markers_to_label("digitalocean", "default");
+    assert_eq!(rewritten, 1);
+    let after_migrate = config.serialize();
+    assert!(after_migrate.contains("# purple:provider digitalocean:default:1"));
+    assert!(!after_migrate.contains("# purple:provider digitalocean:1\n"));
+
+    // Sync with the labeled-default section.
+    let labeled_default = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "default"),
+        alias_prefix: "do".to_string(),
+        ..make_section()
+    };
+    let result = sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &labeled_default,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(result.added, 0, "no new hosts");
+    assert_eq!(result.unchanged, 1, "the existing host is recognised");
+    assert_eq!(result.stale, 0, "host must not be stale-marked");
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].alias, "do-web");
+    assert_eq!(entries[0].provider.as_deref(), Some("digitalocean"));
+    assert_eq!(entries[0].provider_label.as_deref(), Some("default"));
+}
+
+#[test]
+fn lazy_migration_without_rewrite_loses_ownership() {
+    // Negative control: without calling rewrite_legacy_markers_to_label,
+    // a labeled-default sync over legacy markers ADDS a new host because
+    // find_hosts_by_id returns empty. This documents WHY the migration
+    // helper exists and prevents anyone from later "optimising" it away.
+    let mut config = empty_config();
+    let bare = make_section();
+    let remote = vec![ProviderHost::new(
+        "1".into(),
+        "web".into(),
+        "1.1.1.1".into(),
+        Vec::new(),
+    )];
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &bare,
+        false,
+        false,
+        false,
+    );
+
+    // Skip the migration helper. Sync the labeled config directly.
+    let labeled_default = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "default"),
+        alias_prefix: "do".to_string(),
+        ..make_section()
+    };
+    let result = sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &labeled_default,
+        false,
+        false,
+        false,
+    );
+    // Without migration: the labeled sync sees no existing hosts (existing_map
+    // empty), tries to add → dedupe_alias creates `do-web-2`. So we end up
+    // with TWO hosts. This is the silent data corruption that the migration
+    // helper exists to prevent.
+    assert!(
+        result.added >= 1,
+        "without migration, labeled sync would add a duplicate: {:?}",
+        result
+    );
+    let entries = config.host_entries();
+    assert!(
+        entries.len() >= 2,
+        "without migration, host count grows: {}",
+        entries.len()
     );
 }

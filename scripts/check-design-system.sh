@@ -103,9 +103,52 @@ if grep -rEn '"\\u\{25B8\}"|"\\u\{2423\}"' src/ui/ --include='*.rs' \
     exit 1
 fi
 
+# 8a. List rows render flush against LIST_HIGHLIGHT / HOST_HIGHLIGHT.
+#     The first column of every row in a `List` widget is rendered straight
+#     after the highlight_symbol. Rows that prepend extra whitespace via
+#     `format!("   <name>", ...)` create a wider-than-elsewhere padded column
+#     that drifts away from sibling overlays (see 2026-05-08 image #6 review).
+#     Rule: no `format!("   ` (3+ leading spaces) inside src/ui except for
+#     the explicit whitelist below — tree-glyph leaf indentation in
+#     provider_list, and confirm-dialog body lines in file_browser.
+LIST_PADDING_HITS=$(grep -rnE 'format!\("   ' src/ui/ --include='*.rs' \
+    | grep -v '_tests\.rs' \
+    | grep -v 'src/ui/provider_list\.rs:.*TREE_BRANCH' \
+    | grep -v 'src/ui/file_browser\.rs:.*dest_path' \
+    | grep -v 'src/ui/file_browser\.rs:.*more' \
+    || true)
+if [ -n "$LIST_PADDING_HITS" ]; then
+    echo "ERROR: List-row content with 3+ leading spaces detected."
+    echo "       Rows render directly after LIST_HIGHLIGHT / HOST_HIGHLIGHT;"
+    echo "       extra spaces produce wider padding than other overlays."
+    echo "       If this is a tree-aligned leaf row or confirm-dialog body,"
+    echo "       extend the allowlist in scripts/check-design-system.sh."
+    echo "$LIST_PADDING_HITS"
+    exit 1
+fi
+
+# 8b. Footer key labels must come from messages::footer (single source of truth).
+#     Detect: `.primary("...", " <word> ")` and `.action("...", " <word> ")` with
+#     a string-literal label. The regex anchors on `, "` followed by content
+#     ending in `")`. Allows passing in a variable (no quote on second arg).
+#     Exempt: design.rs (the helpers themselves), the `messages/footer.rs` file,
+#     and width-padding "compact"/" detail " labels in host_list which are
+#     dynamic by view-state.
+INLINE_FOOTER_HITS=$(grep -rnE '\.(primary|action)\("[^"]+",\s*"[^"]+"\)' src/ui/ --include='*.rs' \
+    | grep -v 'design\.rs' \
+    | grep -v 'messages' \
+    | grep -v '_tests\.rs' \
+    || true)
+if [ -n "$INLINE_FOOTER_HITS" ]; then
+    echo "ERROR: Inline footer label literal found. Use crate::messages::footer constants."
+    echo "       Defined in src/messages/footer.rs."
+    echo "$INLINE_FOOTER_HITS"
+    exit 1
+fi
+
 # 9. Golden file count matches expected screen count.
 GOLDEN_COUNT=$(ls tests/visual_golden/*.golden 2>/dev/null | wc -l | tr -d ' ')
-EXPECTED_GOLDEN=40
+EXPECTED_GOLDEN=41
 if [ "$GOLDEN_COUNT" != "$EXPECTED_GOLDEN" ]; then
     echo "ERROR: Expected $EXPECTED_GOLDEN golden files, found $GOLDEN_COUNT."
     echo "If you added a new Screen variant, add a visual regression test and update EXPECTED_GOLDEN."

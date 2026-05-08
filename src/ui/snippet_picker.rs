@@ -178,10 +178,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 
     // Footer
+    use crate::messages::footer as fl;
     if searching {
         design::Footer::new()
-            .primary("Enter", " select ")
-            .action("Esc", " cancel")
+            .primary("Enter", fl::ENTER_SELECT)
+            .action("Esc", fl::ESC_CANCEL)
             .render_with_status(frame, footer_area, app);
     } else if app.snippets.pending_delete.is_some() {
         let name = app
@@ -200,16 +201,18 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         let mut f = design::Footer::new();
         if !app.snippets.store.snippets.is_empty() {
-            f = f.primary("Enter", " run ").action("!", " terminal ");
+            f = f
+                .primary("Enter", fl::ENTER_RUN)
+                .action("!", fl::ACTION_TERMINAL);
         }
-        f = f.action("a", " add ");
+        f = f.action("a", fl::ACTION_ADD);
         if !app.snippets.store.snippets.is_empty() {
             f = f
-                .action("e", " edit ")
-                .action("d", " del ")
-                .action("/", " search ");
+                .action("e", fl::ACTION_EDIT)
+                .action("d", fl::ACTION_DEL)
+                .action("/", fl::ACTION_SEARCH);
         }
-        f = f.action("Esc", " back");
+        f = f.action("Esc", fl::ESC_BACK);
         f.render_with_status(frame, footer_area, app);
     }
 }

@@ -150,15 +150,16 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         BrowserSort::DateAsc => " sort:date\u{2191} ",
     };
 
+    use crate::messages::footer as fl;
     let mut footer_spans = design::Footer::new()
-        .primary("Enter", " copy ")
-        .action("Tab", " switch ")
-        .action("^Space", " select ")
-        .action("^A", " all ")
+        .primary("Enter", fl::ENTER_COPY)
+        .action("Tab", fl::TAB_NEXT)
+        .action("^Space", fl::FB_SELECT)
+        .action("^A", fl::ACTION_ALL)
         .action("s", sort_label)
-        .action(".", " hidden ")
-        .action("R", " refresh ")
-        .action("Esc", " close")
+        .action(".", fl::ACTION_HIDDEN)
+        .action("R", fl::ACTION_REFRESH)
+        .action("Esc", fl::ESC_CLOSE)
         .into_spans();
 
     if selected_count > 0 {
@@ -458,7 +459,9 @@ fn render_error_dialog(frame: &mut Frame, message: &str, area: Rect) {
     frame.render_widget(paragraph, dialog_area);
 
     let footer_area = design::render_overlay_footer(frame, dialog_area);
-    let footer_line = design::Footer::new().action("Esc", " close").to_line();
+    let footer_line = design::Footer::new()
+        .action("Esc", crate::messages::footer::ESC_CLOSE)
+        .to_line();
     frame.render_widget(Paragraph::new(footer_line), footer_area);
 }
 

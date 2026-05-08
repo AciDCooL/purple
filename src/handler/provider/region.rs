@@ -67,7 +67,7 @@ pub(crate) fn zone_data_for(provider: &str) -> (ZoneList, ZoneGroups) {
 
 pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
     let provider_name = match &app.screen {
-        Screen::ProviderForm { provider } => provider.clone(),
+        Screen::ProviderForm { id } => id.provider.clone(),
         _ => return,
     };
     let rows = region_picker_rows(&provider_name);

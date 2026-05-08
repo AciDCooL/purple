@@ -122,22 +122,23 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // dirty-checked surface routes through `render_discard_prompt` for
     // uniform confirm behavior.
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     if app.forms.pending_discard_confirm {
         design::render_discard_prompt(frame, footer_area, app);
     } else {
         let f = if input_active {
             design::Footer::new()
-                .primary("Enter", " add ")
-                .action("Esc", " cancel")
+                .primary("Enter", fl::ENTER_ADD)
+                .action("Esc", fl::ESC_CANCEL)
         } else {
             // Stakes test: this is a list-completion action ("apply my
             // changes"), so primary verb is "apply" not generic "ok".
             // NNGroup: name a button to explain what it does.
             design::Footer::new()
-                .primary("Enter", " apply ")
-                .action("Space", " cycle ")
-                .action("+", " new ")
-                .action("Esc", " cancel")
+                .primary("Enter", fl::ENTER_APPLY)
+                .action("Space", fl::SPACE_CYCLE)
+                .action("+", fl::ACTION_NEW)
+                .action("Esc", fl::ESC_CANCEL)
         };
         f.render_with_status(frame, footer_area, app);
     }

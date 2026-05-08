@@ -82,6 +82,6 @@ pub fn render(frame: &mut Frame, app: &App, index: usize) {
     // Footer below the block
     let footer_area = design::render_overlay_footer(frame, area);
     design::Footer::new()
-        .action("Esc", " close")
+        .action("Esc", crate::messages::footer::ESC_CLOSE)
         .render_with_status(frame, footer_area, app);
 }

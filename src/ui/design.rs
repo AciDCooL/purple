@@ -450,11 +450,39 @@ pub fn render_empty_with_hint(
     frame.render_widget(Paragraph::new(line), area);
 }
 
+/// Body-content area inside an overlay block. Inset 1 char left so
+/// paragraphs align with field-content rows (which sit at `inner.x + 1`)
+/// and the divider labels (which start with a leading space). Use this
+/// instead of `Rect::new(inner.x, ...)` for any prose inside an overlay.
+///
+/// Currently no overlay renders body prose alongside form dividers — the
+/// label-migration form proved the field labels are enough by themselves —
+/// but keep this helper available so the next screen that needs body text
+/// gets the inset for free.
+#[allow(dead_code)]
+pub fn body_text_area(inner: Rect, y: u16, height: u16) -> Rect {
+    Rect::new(
+        inner.x.saturating_add(1),
+        y,
+        inner.width.saturating_sub(1),
+        height,
+    )
+}
+
 /// Right-arrow glyph for picker fields.
 pub const PICKER_ARROW: &str = "\u{25B8}";
 
 /// Space-bar glyph for toggle fields.
 pub const TOGGLE_HINT: &str = "\u{2423}";
+
+/// Down-pointing triangle for an expanded tree node (multi-config provider).
+pub const TREE_EXPANDED: &str = "\u{25BE}";
+
+/// Right-pointing triangle for a collapsed tree node (multi-config provider).
+pub const TREE_COLLAPSED: &str = "\u{25B8}";
+
+/// L-shaped branch glyph for the last-child leaf row under an expanded tree node.
+pub const TREE_BRANCH: &str = "\u{2514}";
 
 /// Empty-state line for embedding in Paragraphs that render inside a block.
 /// Same visual output as `render_empty()` but returns a composable `Line`.
@@ -517,22 +545,27 @@ pub enum FormFooterMode {
 /// save action, and that Space is the universal field-action key. Screens
 /// must call this instead of building form footers ad hoc.
 pub fn form_save_footer(mode: FormFooterMode) -> Footer {
-    let mut footer = Footer::new().primary("Enter", " save ");
+    use crate::messages::footer as f;
+    let mut footer = Footer::new().primary("Enter", f::ENTER_SAVE);
     match mode {
         FormFooterMode::Collapsed => {
             footer = footer.action("\u{2193}", " more options ");
         }
         FormFooterMode::Expanded(FieldKind::Text) => {
-            footer = footer.action("Tab", " next ");
+            footer = footer.action("Tab", f::TAB_NEXT);
         }
         FormFooterMode::Expanded(FieldKind::Toggle) => {
-            footer = footer.action("Space", " toggle ").action("Tab", " next ");
+            footer = footer
+                .action("Space", f::SPACE_TOGGLE)
+                .action("Tab", f::TAB_NEXT);
         }
         FormFooterMode::Expanded(FieldKind::Picker) => {
-            footer = footer.action("Space", " pick ").action("Tab", " next ");
+            footer = footer
+                .action("Space", f::SPACE_PICK)
+                .action("Tab", f::TAB_NEXT);
         }
     }
-    footer.action("Esc", " cancel")
+    footer.action("Esc", f::ESC_CANCEL)
 }
 
 /// Footer for a destructive confirmation. Action-specific verbs both sides.

@@ -60,6 +60,14 @@ pub enum Screen {
     ThemePicker,
     Providers,
     ProviderForm {
+        id: crate::providers::config::ProviderConfigId,
+    },
+    /// Step 1 of the lazy add-second-config flow: ask the user to pick a
+    /// label for the existing (bare) config of `provider` before opening
+    /// the new-config form. The chosen label lives on
+    /// `app.providers.pending_label_migration` until step 2 saves both
+    /// configs together.
+    ProviderLabelMigration {
         provider: String,
     },
     TunnelList {
@@ -148,6 +156,7 @@ impl Screen {
             Screen::ThemePicker => "ThemePicker",
             Screen::Providers => "Providers",
             Screen::ProviderForm { .. } => "ProviderForm",
+            Screen::ProviderLabelMigration { .. } => "ProviderLabelMigration",
             Screen::TunnelList { .. } => "TunnelList",
             Screen::TunnelForm { .. } => "TunnelForm",
             Screen::TunnelHostPicker => "TunnelHostPicker",

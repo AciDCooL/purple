@@ -139,6 +139,9 @@ pub fn handle_key_event(
         Screen::ThemePicker => theme_picker::handle_theme_picker(app, key),
         Screen::Providers => provider::handle_provider_list(app, key, events_tx),
         Screen::ProviderForm { .. } => provider::handle_provider_form(app, key, events_tx),
+        Screen::ProviderLabelMigration { .. } => {
+            provider::handle_label_migration(app, key, events_tx)
+        }
         Screen::TunnelList { .. } => tunnel::handle_tunnel_list(app, key),
         Screen::TunnelForm { .. } => tunnel::handle_tunnel_form(app, key),
         Screen::TunnelHostPicker => tunnel_host_picker::handle_keys(app, key),

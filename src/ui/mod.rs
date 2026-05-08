@@ -120,10 +120,16 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
                 provider_list::render_provider_list(frame, app)
             });
         }
-        Screen::ProviderForm { provider } => {
-            let provider = provider.clone();
+        Screen::ProviderForm { id } => {
+            let provider = id.provider.clone();
             render_overlay(frame, app, anim, |frame, app| {
                 provider_list::render_provider_form(frame, app, &provider)
+            });
+        }
+        Screen::ProviderLabelMigration { provider } => {
+            let provider = provider.clone();
+            render_overlay(frame, app, anim, |frame, app| {
+                provider_list::render_label_migration(frame, app, &provider)
             });
         }
         Screen::TunnelList { alias } => {

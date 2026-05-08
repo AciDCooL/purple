@@ -178,9 +178,9 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "3.6.0",
+  "softwareVersion": "3.7.0",
   "datePublished": "2024-10-01",
-  "dateModified": "2026-05-06",
+  "dateModified": "2026-05-08",
   "softwareRequirements": "macOS or Linux",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
@@ -1046,7 +1046,7 @@ footer .sep { margin: 0 0.3em; }
           <button class="copy-btn copy-inline" id="copy-btn" onclick="copy(this)" style="display:none">copy</button>
         </div>
         <div class="install-output" id="install-output" style="display:none">
-          <div>Downloading purple v3.6.0 for darwin-arm64...</div>
+          <div>Downloading purple v3.7.0 for darwin-arm64...</div>
           <div>Installing to /usr/local/bin/purple... <span class="success">done.</span></div>
         </div>
         <div class="alt-installs" id="alt-installs" style="display:none">
@@ -1173,7 +1173,7 @@ footer .sep { margin: 0 0.3em; }
         <summary>How do I troubleshoot connection problems?</summary>
         <div class="answer">Run with <code>--verbose</code> to enable debug logging, then <code>purple logs --tail</code> in another terminal. Logs are written to <code>~/.purple/purple.log</code> with fault domain prefixes: <code>[external]</code> for remote/tool errors, <code>[config]</code> for local config issues. Set <code>PURPLE_LOG=trace</code> for maximum detail.</div>
       </details>
-      <div class="man-foot"><span>purple v3.6.0</span><span>2026-05-06</span><span>PURPLE(1)</span></div>
+      <div class="man-foot"><span>purple v3.7.0</span><span>2026-05-08</span><span>PURPLE(1)</span></div>
     </div>
   </div>
 
@@ -1442,7 +1442,9 @@ purple --completions zsh            # Generate shell completions
 
 ## Cloud provider sync
 
-Sync servers from cloud providers into ~/.ssh/config. In the TUI, press S to open the provider list. Navigate to a provider and press Enter to open the configuration form. Fill in credentials and confirm to start syncing. Each synced host is tracked via a comment (# purple:provider name:id) so purple knows which hosts belong to which provider.
+Sync servers from cloud providers into ~/.ssh/config. In the TUI, press S to open the provider list. Navigate to a provider and press Enter to open the configuration form. Fill in credentials and confirm to start syncing. Each synced host is tracked via a comment (# purple:provider name:id, or name:label:id when the provider has multiple configs) so purple knows which hosts belong to which config.
+
+Multiple accounts per provider: add a second config of the same provider (e.g. work + personal AWS, or two DigitalOcean teams) by pressing \`a\` in the provider list and giving each config a label. The providers file uses \`[provider:label]\` syntax (e.g. \`[digitalocean:work]\`, \`[digitalocean:personal]\`) and each labeled config syncs in its own lane. CLI: \`purple sync digitalocean\` syncs all DO configs; \`purple sync digitalocean:work\` targets one. \`purple add --label work\` and \`purple provider remove digitalocean:work\` round out the CLI grammar. When you add the second config, purple atomically relabels the existing bare config (your choice of label) and rewrites its host markers in ~/.ssh/config so existing hosts stay owned.
 
 Supported providers: AWS EC2, Azure, DigitalOcean, GCP (Compute Engine), Hetzner, i3D.net, Leaseweb, Linode (Akamai), Oracle Cloud Infrastructure (OCI), OVHcloud, Proxmox VE, Scaleway, Tailscale, TransIP, UpCloud and Vultr. Provider tags and labels are stored separately in # purple:provider_tags (always replaced on sync). User tags in # purple:tags are never touched by sync. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel.
 
@@ -1681,7 +1683,7 @@ A: Press m in the host list to open the theme picker with live preview. 11 built
 
 ## Status
 
-- Current version: 3.6.0 (May 2026)
+- Current version: 3.7.0 (May 2026)
 - Release cadence: approximately bi-weekly
 - Test suite: 6800+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
 - CI: fmt, clippy, build, test on macOS and Linux, cargo-deny, MSRV 1.86 check, rustdoc warnings, site sync, TUI smoke test, design system, message centralization, keybinding invariants and visual regression

@@ -699,6 +699,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
         let effective_role = crate::vault_ssh::resolve_vault_role(
             host.vault_ssh.as_deref(),
             host.provider.as_deref(),
+            host.provider_label.as_deref(),
             &app.providers.config,
         );
         if let Some(ref role) = effective_role {

@@ -136,18 +136,30 @@ pub(super) fn handle_sync(
     remove: bool,
 ) -> Result<()> {
     let provider_config = providers::config::ProviderConfig::load();
-    let sections: Vec<&providers::config::ProviderSection> = if let Some(name) = provider_name {
-        if providers::get_provider(name).is_none() {
-            eprintln!("{}", crate::messages::cli::unknown_provider(name));
-            std::process::exit(1);
-        }
-        match provider_config.section(name) {
-            Some(s) => vec![s],
-            None => {
-                eprintln!("{}", crate::messages::cli::no_config_for(name));
+    // The positional argument accepts either a bare provider name (sync ALL
+    // configs of that provider) or a labeled identifier `provider:label`
+    // (sync exactly that one config). No explicit flag form.
+    let sections: Vec<&providers::config::ProviderSection> = if let Some(arg) = provider_name {
+        let id: providers::config::ProviderConfigId = match arg.parse() {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("{}: {}", arg, e);
                 std::process::exit(1);
             }
+        };
+        if providers::get_provider(&id.provider).is_none() {
+            eprintln!("{}", crate::messages::cli::unknown_provider(&id.provider));
+            std::process::exit(1);
         }
+        let matched: Vec<&providers::config::ProviderSection> = match &id.label {
+            Some(_) => provider_config.section_by_id(&id).into_iter().collect(),
+            None => provider_config.sections_for_provider(&id.provider),
+        };
+        if matched.is_empty() {
+            eprintln!("{}", crate::messages::cli::no_config_for(arg));
+            std::process::exit(1);
+        }
+        matched
     } else {
         let configured = provider_config.configured_providers();
         if configured.is_empty() {
@@ -162,12 +174,12 @@ pub(super) fn handle_sync(
     let mut any_hard_failures = false;
 
     for section in &sections {
-        let provider = match providers::get_provider_with_config(&section.provider, section) {
+        let provider = match providers::get_provider_with_config(section.provider(), section) {
             Some(p) => p,
             None => {
                 eprintln!(
                     "{}",
-                    crate::messages::cli::skipping_unknown_provider(&section.provider)
+                    crate::messages::cli::skipping_unknown_provider(section.provider())
                 );
                 any_failures = true;
                 // Not a hard failure: unknown provider contributes no changes,
@@ -175,7 +187,7 @@ pub(super) fn handle_sync(
                 continue;
             }
         };
-        let display_name = providers::provider_display_name(section.provider.as_str());
+        let display_name = providers::provider_display_name(section.provider());
         let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
         print!("{}", crate::messages::cli::syncing_start(display_name));
         let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -301,6 +313,7 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             verify_tls,
             auto_sync,
             no_auto_sync,
+            label,
         } => {
             let p = match providers::get_provider(&provider) {
                 Some(p) => p,
@@ -547,8 +560,43 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 std::process::exit(1);
             }
 
+            let mut config = providers::config::ProviderConfig::load();
+
+            // Resolve the target ProviderConfigId given --label and the
+            // provider's existing config layout. Rules:
+            //   --label X:    add/update [provider:X]; refuse mix with bare
+            //   no --label:   single bare config OR the only labeled config
+            //                 (if 2+ labeled exist, error: ambiguous)
+            let id: providers::config::ProviderConfigId = match label.as_deref() {
+                Some(l) => {
+                    if let Err(e) = providers::config::validate_label(l) {
+                        eprintln!("{}", crate::messages::cli::invalid_label_flag(&e));
+                        std::process::exit(1);
+                    }
+                    providers::config::ProviderConfigId::labeled(provider.clone(), l)
+                }
+                None => providers::config::ProviderConfigId::bare(provider.clone()),
+            };
+
+            // Refuse to mix bare and labeled configs for the same provider:
+            // mirrors the parser invariant.
+            let existing = config.sections_for_provider(&provider);
+            let has_bare = existing.iter().any(|s| s.id.label.is_none());
+            let has_labeled = existing.iter().any(|s| s.id.label.is_some());
+            if id.label.is_none() && has_labeled {
+                eprintln!("{}", crate::messages::cli::add_requires_label(&provider));
+                std::process::exit(1);
+            }
+            if id.label.is_some() && has_bare {
+                eprintln!(
+                    "{}",
+                    crate::messages::cli::add_label_collides_with_bare(&provider)
+                );
+                std::process::exit(1);
+            }
+
             let section = providers::config::ProviderSection {
-                provider: provider.clone(),
+                id: id.clone(),
                 token,
                 alias_prefix,
                 user,
@@ -564,12 +612,11 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 vault_addr: String::new(),
             };
 
-            let mut config = providers::config::ProviderConfig::load();
             config.set_section(section);
             config
                 .save()
                 .map_err(|e| anyhow::anyhow!("Failed to save: {}", e))?;
-            println!("{}", crate::messages::cli::saved_config(&provider));
+            println!("{}", crate::messages::cli::saved_config(&id.to_string()));
             Ok(())
         }
         ProviderCommands::List => {
@@ -579,23 +626,62 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 println!("{}", crate::messages::cli::NO_PROVIDERS);
             } else {
                 for s in sections {
-                    let display_name = providers::provider_display_name(s.provider.as_str());
-                    println!("  {:<16} {}-*{:>8}", display_name, s.alias_prefix, s.user);
+                    let display_name = providers::provider_display_name(s.provider());
+                    let label_suffix = match &s.id.label {
+                        Some(l) => format!(" ({})", l),
+                        None => String::new(),
+                    };
+                    println!(
+                        "  {:<24} {}-*{:>8}",
+                        format!("{}{}", display_name, label_suffix),
+                        s.alias_prefix,
+                        s.user
+                    );
                 }
             }
             Ok(())
         }
         ProviderCommands::Remove { provider } => {
+            // Accept either `digitalocean` (remove all configs of that
+            // provider) or `digitalocean:work` (remove only that one).
+            let id: providers::config::ProviderConfigId = match provider.parse() {
+                Ok(id) => id,
+                Err(e) => {
+                    eprintln!("{}: {}", provider, e);
+                    std::process::exit(1);
+                }
+            };
             let mut config = providers::config::ProviderConfig::load();
-            if config.section(&provider).is_none() {
-                eprintln!("{}", crate::messages::cli::no_config_to_remove(&provider));
-                std::process::exit(1);
-            }
-            config.remove_section(&provider);
+            let removed = match &id.label {
+                Some(_) => {
+                    if config.section_by_id(&id).is_none() {
+                        eprintln!("{}", crate::messages::cli::no_config_to_remove(&provider));
+                        std::process::exit(1);
+                    }
+                    config.remove_section_by_id(&id);
+                    1
+                }
+                None => {
+                    let count = config.sections_for_provider(&id.provider).len();
+                    if count == 0 {
+                        eprintln!("{}", crate::messages::cli::no_config_to_remove(&provider));
+                        std::process::exit(1);
+                    }
+                    config.remove_section(&id.provider);
+                    count
+                }
+            };
             config
                 .save()
                 .map_err(|e| anyhow::anyhow!("Failed to save: {}", e))?;
-            println!("{}", crate::messages::cli::removed_config(&provider));
+            if removed == 1 {
+                println!("{}", crate::messages::cli::removed_config(&provider));
+            } else {
+                println!(
+                    "{}",
+                    crate::messages::cli::removed_configs(&provider, removed)
+                );
+            }
             Ok(())
         }
     }
@@ -1148,6 +1234,7 @@ pub(super) fn handle_vault_sign_command(
             let role = match vault_ssh::resolve_vault_role(
                 entry.vault_ssh.as_deref(),
                 entry.provider.as_deref(),
+                entry.provider_label.as_deref(),
                 &provider_config,
             ) {
                 Some(r) => r,
@@ -1178,6 +1265,7 @@ pub(super) fn handle_vault_sign_command(
                 vault_ssh::resolve_vault_addr(
                     entry.vault_addr.as_deref(),
                     entry.provider.as_deref(),
+                    entry.provider_label.as_deref(),
                     &provider_config,
                 )
             });
@@ -1233,6 +1321,7 @@ pub(super) fn handle_vault_sign_command(
         let role = vault_ssh::resolve_vault_role(
             entry.vault_ssh.as_deref(),
             entry.provider.as_deref(),
+            entry.provider_label.as_deref(),
             &provider_config,
         )
         .with_context(|| crate::messages::cli::vault_no_role(&alias))?;
@@ -1242,6 +1331,7 @@ pub(super) fn handle_vault_sign_command(
             vault_ssh::resolve_vault_addr(
                 entry.vault_addr.as_deref(),
                 entry.provider.as_deref(),
+                entry.provider_label.as_deref(),
                 &provider_config,
             )
         });

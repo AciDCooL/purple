@@ -36,7 +36,7 @@ fn vault_role_roundtrip_preserves_value() {
     let config = ProviderConfig {
         path_override: Some(tmp.clone()),
         sections: vec![ProviderSection {
-            provider: "aws".to_string(),
+            id: crate::providers::config::ProviderConfigId::bare("aws"),
             token: "abc".to_string(),
             alias_prefix: "aws".to_string(),
             user: "ec2-user".to_string(),
@@ -104,7 +104,7 @@ key=~/.ssh/id_ed25519
     let config = ProviderConfig::parse(content);
     assert_eq!(config.sections.len(), 1);
     let s = &config.sections[0];
-    assert_eq!(s.provider, "digitalocean");
+    assert_eq!(s.provider(), "digitalocean");
     assert_eq!(s.token, "dop_v1_abc123");
     assert_eq!(s.alias_prefix, "do");
     assert_eq!(s.user, "root");
@@ -123,8 +123,8 @@ user=deploy
 ";
     let config = ProviderConfig::parse(content);
     assert_eq!(config.sections.len(), 2);
-    assert_eq!(config.sections[0].provider, "digitalocean");
-    assert_eq!(config.sections[1].provider, "vultr");
+    assert_eq!(config.sections[0].provider(), "digitalocean");
+    assert_eq!(config.sections[1].provider(), "vultr");
     assert_eq!(config.sections[1].user, "deploy");
 }
 
@@ -146,7 +146,7 @@ token=mytoken
 fn test_set_section_add() {
     let mut config = ProviderConfig::default();
     config.set_section(ProviderSection {
-        provider: "vultr".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("vultr"),
         token: "abc".to_string(),
         alias_prefix: "vultr".to_string(),
         user: "root".to_string(),
@@ -168,7 +168,7 @@ fn test_set_section_add() {
 fn test_set_section_replace() {
     let mut config = ProviderConfig::parse("[vultr]\ntoken=old\n");
     config.set_section(ProviderSection {
-        provider: "vultr".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("vultr"),
         token: "new".to_string(),
         alias_prefix: "vultr".to_string(),
         user: "root".to_string(),
@@ -192,7 +192,7 @@ fn test_remove_section() {
     let mut config = ProviderConfig::parse("[vultr]\ntoken=abc\n[linode]\ntoken=xyz\n");
     config.remove_section("vultr");
     assert_eq!(config.sections.len(), 1);
-    assert_eq!(config.sections[0].provider, "linode");
+    assert_eq!(config.sections[0].provider(), "linode");
 }
 
 #[test]
@@ -230,9 +230,9 @@ token=dup
 ";
     let config = ProviderConfig::parse(content);
     assert_eq!(config.sections.len(), 2);
-    assert_eq!(config.sections[0].provider, "vultr");
+    assert_eq!(config.sections[0].provider(), "vultr");
     assert_eq!(config.sections[0].token, "abc");
-    assert_eq!(config.sections[1].provider, "linode");
+    assert_eq!(config.sections[1].provider(), "linode");
 }
 
 #[test]
@@ -321,7 +321,7 @@ fn test_verify_tls_true_variants() {
 fn test_non_proxmox_url_not_written() {
     // url and verify_tls=false must not appear for non-Proxmox providers in saved config
     let section = ProviderSection {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "tok".to_string(),
         alias_prefix: "do".to_string(),
         user: "root".to_string(),
@@ -358,7 +358,7 @@ fn test_proxmox_url_fallback_in_section() {
 
     let mut config = existing;
     config.set_section(ProviderSection {
-        provider: "proxmox".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("proxmox"),
         token: "new".to_string(),
         alias_prefix: "pve".to_string(),
         user: "root".to_string(),
@@ -407,7 +407,7 @@ fn test_auto_sync_not_written_when_default() {
     // non-proxmox with auto_sync=true (default) -> not written
     let mut config = ProviderConfig::default();
     config.set_section(ProviderSection {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "tok".to_string(),
         alias_prefix: "do".to_string(),
         user: "root".to_string(),
@@ -428,7 +428,7 @@ fn test_auto_sync_not_written_when_default() {
     // proxmox with auto_sync=false (default) -> not written
     let mut config2 = ProviderConfig::default();
     config2.set_section(ProviderSection {
-        provider: "proxmox".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("proxmox"),
         token: "tok".to_string(),
         alias_prefix: "pve".to_string(),
         user: "root".to_string(),
@@ -489,7 +489,7 @@ fn test_auto_sync_written_only_when_non_default() {
     // proxmox defaults to false — setting it to true is non-default, so it IS written
     let mut config = ProviderConfig::default();
     config.set_section(ProviderSection {
-        provider: "proxmox".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("proxmox"),
         token: "tok".to_string(),
         alias_prefix: "pve".to_string(),
         user: "root".to_string(),
@@ -551,7 +551,7 @@ fn test_parse_unknown_provider_still_parsed() {
     let content = "[aws]\ntoken=secret\n";
     let config = ProviderConfig::parse(content);
     assert_eq!(config.sections.len(), 1);
-    assert_eq!(config.sections[0].provider, "aws");
+    assert_eq!(config.sections[0].provider(), "aws");
 }
 
 #[test]
@@ -559,7 +559,7 @@ fn test_parse_whitespace_in_section_name() {
     let content = "[ digitalocean ]\ntoken=abc\n";
     let config = ProviderConfig::parse(content);
     assert_eq!(config.sections.len(), 1);
-    assert_eq!(config.sections[0].provider, "digitalocean");
+    assert_eq!(config.sections[0].provider(), "digitalocean");
 }
 
 #[test]
@@ -737,7 +737,7 @@ fn test_auto_sync_override_do_to_false() {
 fn test_set_section_adds_new() {
     let mut config = ProviderConfig::default();
     let section = ProviderSection {
-        provider: "vultr".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("vultr"),
         token: "tok".to_string(),
         alias_prefix: "vultr".to_string(),
         user: "root".to_string(),
@@ -754,7 +754,7 @@ fn test_set_section_adds_new() {
     };
     config.set_section(section);
     assert_eq!(config.sections.len(), 1);
-    assert_eq!(config.sections[0].provider, "vultr");
+    assert_eq!(config.sections[0].provider(), "vultr");
 }
 
 #[test]
@@ -762,7 +762,7 @@ fn test_set_section_replaces_existing() {
     let mut config = ProviderConfig::parse("[vultr]\ntoken=old\n");
     assert_eq!(config.sections[0].token, "old");
     let section = ProviderSection {
-        provider: "vultr".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("vultr"),
         token: "new".to_string(),
         alias_prefix: "vultr".to_string(),
         user: "root".to_string(),
@@ -788,7 +788,7 @@ fn test_remove_section_keeps_others() {
     assert_eq!(config.sections.len(), 2);
     config.remove_section("vultr");
     assert_eq!(config.sections.len(), 1);
-    assert_eq!(config.sections[0].provider, "linode");
+    assert_eq!(config.sections[0].provider(), "linode");
 }
 
 // =========================================================================
@@ -820,9 +820,9 @@ fn test_multiple_providers() {
     let content = "[digitalocean]\ntoken=do-tok\n\n[vultr]\ntoken=vultr-tok\n\n[proxmox]\ntoken=pve-tok\nurl=https://pve:8006\n";
     let config = ProviderConfig::parse(content);
     assert_eq!(config.sections.len(), 3);
-    assert_eq!(config.sections[0].provider, "digitalocean");
-    assert_eq!(config.sections[1].provider, "vultr");
-    assert_eq!(config.sections[2].provider, "proxmox");
+    assert_eq!(config.sections[0].provider(), "digitalocean");
+    assert_eq!(config.sections[1].provider(), "vultr");
+    assert_eq!(config.sections[2].provider(), "proxmox");
     assert_eq!(config.sections[2].url, "https://pve:8006");
 }
 
@@ -856,7 +856,7 @@ fn test_serialize_roundtrip_single_provider() {
     let config = ProviderConfig::parse(content);
     let mut serialized = String::new();
     for section in &config.sections {
-        serialized.push_str(&format!("[{}]\n", section.provider));
+        serialized.push_str(&format!("[{}]\n", section.provider()));
         serialized.push_str(&format!("token={}\n", section.token));
         serialized.push_str(&format!("alias_prefix={}\n", section.alias_prefix));
         serialized.push_str(&format!("user={}\n", section.user));
@@ -1059,7 +1059,7 @@ fn test_unknown_key_ignored() {
 fn test_whitespace_around_section_name() {
     let content = "[  digitalocean  ]\ntoken=abc\n";
     let config = ProviderConfig::parse(content);
-    assert_eq!(config.sections[0].provider, "digitalocean");
+    assert_eq!(config.sections[0].provider(), "digitalocean");
 }
 
 #[test]
@@ -1079,7 +1079,7 @@ fn test_set_section_multiple_adds() {
     let mut config = ProviderConfig::default();
     for name in ["digitalocean", "vultr", "hetzner"] {
         config.set_section(ProviderSection {
-            provider: name.to_string(),
+            id: crate::providers::config::ProviderConfigId::bare(name),
             token: format!("{}-tok", name),
             alias_prefix: name.to_string(),
             user: "root".to_string(),
@@ -1122,7 +1122,7 @@ fn test_compartment_field_round_trip() {
     );
 
     // Save to a temp file and re-parse
-    let tmp = std::env::temp_dir().join("purple_test_compartment_round_trip");
+    let tmp = unique_tmp_path("compartment_round_trip");
     let mut cfg = config;
     cfg.path_override = Some(PathBuf::from(&tmp));
     cfg.save().expect("save failed");
@@ -1162,7 +1162,7 @@ fn test_save_sanitizes_token_with_newline() {
     ));
     let config = ProviderConfig {
         sections: vec![ProviderSection {
-            provider: "digitalocean".to_string(),
+            id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
             token: "abc\ndef".to_string(),
             alias_prefix: "do".to_string(),
             user: "root".to_string(),
@@ -1286,4 +1286,247 @@ fn vault_addr_not_written_when_empty() {
     let content = std::fs::read_to_string(&path).unwrap();
     let _ = std::fs::remove_file(&path);
     assert!(!content.contains("vault_addr"));
+}
+
+// --- ProviderConfigId tests ---
+
+#[test]
+fn provider_config_id_display_bare() {
+    assert_eq!(
+        ProviderConfigId::bare("digitalocean").to_string(),
+        "digitalocean"
+    );
+}
+
+#[test]
+fn provider_config_id_display_labeled() {
+    assert_eq!(
+        ProviderConfigId::labeled("digitalocean", "work").to_string(),
+        "digitalocean:work"
+    );
+}
+
+#[test]
+fn provider_config_id_from_str_bare() {
+    let id: ProviderConfigId = "digitalocean".parse().unwrap();
+    assert_eq!(id.provider, "digitalocean");
+    assert_eq!(id.label, None);
+}
+
+#[test]
+fn provider_config_id_from_str_labeled() {
+    let id: ProviderConfigId = "digitalocean:work".parse().unwrap();
+    assert_eq!(id.provider, "digitalocean");
+    assert_eq!(id.label.as_deref(), Some("work"));
+}
+
+#[test]
+fn provider_config_id_round_trip() {
+    for s in &["aws", "aws:work", "digitalocean:personal", "hetzner-prod"] {
+        let id: ProviderConfigId = s.parse().unwrap();
+        assert_eq!(&id.to_string(), s, "round-trip failed for {}", s);
+    }
+}
+
+#[test]
+fn provider_config_id_from_str_rejects_empty_label() {
+    // "digitalocean:" has an empty label — must be rejected, not coerced to bare.
+    let result: Result<ProviderConfigId, _> = "digitalocean:".parse();
+    assert!(result.is_err(), "empty label should be rejected");
+}
+
+#[test]
+fn provider_config_id_from_str_rejects_empty_provider() {
+    let result: Result<ProviderConfigId, _> = "".parse();
+    assert!(result.is_err());
+    let result: Result<ProviderConfigId, _> = ":work".parse();
+    assert!(result.is_err());
+}
+
+#[test]
+fn provider_config_id_from_str_rejects_invalid_chars() {
+    for input in &[
+        "aws:WORK",       // uppercase
+        "aws:work!",      // special char
+        "aws:work space", // whitespace
+        "aws:-work",      // leading dash
+        "aws:work-",      // trailing dash
+    ] {
+        let result: Result<ProviderConfigId, _> = input.parse();
+        assert!(result.is_err(), "expected error for {}", input);
+    }
+}
+
+#[test]
+fn validate_label_accepts_valid() {
+    for label in &["work", "w", "personal", "prod-1", "a1b2c3", "0"] {
+        validate_label(label).unwrap_or_else(|e| panic!("rejected {}: {}", label, e));
+    }
+}
+
+#[test]
+fn validate_label_rejects_too_long() {
+    let long = "a".repeat(33);
+    assert!(validate_label(&long).is_err());
+}
+
+// --- INI parsing for [provider:label] ---
+
+#[test]
+fn parse_labeled_section_header() {
+    let config = ProviderConfig::parse("[digitalocean:work]\ntoken=abc\n");
+    assert_eq!(config.sections.len(), 1);
+    assert_eq!(config.sections[0].id.provider, "digitalocean");
+    assert_eq!(config.sections[0].id.label.as_deref(), Some("work"));
+}
+
+#[test]
+fn parse_labeled_default_alias_prefix_includes_label() {
+    let config = ProviderConfig::parse("[digitalocean:work]\ntoken=abc\n");
+    assert_eq!(config.sections[0].alias_prefix, "do-work");
+}
+
+#[test]
+fn parse_two_labeled_configs_same_provider() {
+    let config =
+        ProviderConfig::parse("[digitalocean:work]\ntoken=a\n\n[digitalocean:personal]\ntoken=b\n");
+    assert_eq!(config.sections.len(), 2);
+    assert_eq!(config.sections[0].id.label.as_deref(), Some("work"));
+    assert_eq!(config.sections[1].id.label.as_deref(), Some("personal"));
+}
+
+#[test]
+fn parse_rejects_mix_of_bare_and_labeled() {
+    let config = ProviderConfig::parse("[digitalocean]\ntoken=a\n\n[digitalocean:work]\ntoken=b\n");
+    // Bare wins (first), labeled rejected.
+    assert_eq!(config.sections.len(), 1);
+    assert_eq!(config.sections[0].id.label, None);
+}
+
+#[test]
+fn parse_rejects_duplicate_labeled() {
+    let config =
+        ProviderConfig::parse("[digitalocean:work]\ntoken=a\n\n[digitalocean:work]\ntoken=b\n");
+    assert_eq!(config.sections.len(), 1);
+    assert_eq!(config.sections[0].token, "a");
+}
+
+#[test]
+fn parse_skips_invalid_label() {
+    let config = ProviderConfig::parse("[digitalocean:WORK]\ntoken=a\n");
+    assert!(config.sections.is_empty());
+}
+
+// --- save() round-trip with labeled section ---
+
+#[test]
+fn save_labeled_section_round_trip() {
+    let path = unique_tmp_path("labeled_rt");
+    let mut config = ProviderConfig::parse("[digitalocean:work]\ntoken=abc\n");
+    config.path_override = Some(path.clone());
+    config.save().unwrap();
+    let content = std::fs::read_to_string(&path).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert!(content.contains("[digitalocean:work]"));
+    let reparsed = ProviderConfig::parse(&content);
+    assert_eq!(reparsed.sections[0].id.label.as_deref(), Some("work"));
+}
+
+// --- validate() ---
+
+#[test]
+fn validate_accepts_clean_config() {
+    let config = ProviderConfig::parse(
+        "[digitalocean:work]\ntoken=a\nalias_prefix=do-work\n\n[digitalocean:personal]\ntoken=b\nalias_prefix=do-personal\n",
+    );
+    config.validate().unwrap();
+}
+
+#[test]
+fn validate_rejects_duplicate_alias_prefix() {
+    let mut config = ProviderConfig::parse(
+        "[digitalocean:work]\ntoken=a\nalias_prefix=do-shared\n\n[digitalocean:personal]\ntoken=b\n",
+    );
+    // Manually set both to the same prefix.
+    config.sections[1].alias_prefix = "do-shared".to_string();
+    assert!(config.validate().is_err());
+}
+
+// --- API ---
+
+#[test]
+fn section_by_id_finds_exact_match() {
+    let config =
+        ProviderConfig::parse("[digitalocean:work]\ntoken=a\n\n[digitalocean:personal]\ntoken=b\n");
+    let work = config
+        .section_by_id(&ProviderConfigId::labeled("digitalocean", "work"))
+        .unwrap();
+    assert_eq!(work.token, "a");
+    let personal = config
+        .section_by_id(&ProviderConfigId::labeled("digitalocean", "personal"))
+        .unwrap();
+    assert_eq!(personal.token, "b");
+}
+
+#[test]
+fn sections_for_provider_returns_all_configs() {
+    let config =
+        ProviderConfig::parse("[digitalocean:work]\ntoken=a\n\n[digitalocean:personal]\ntoken=b\n");
+    let sections = config.sections_for_provider("digitalocean");
+    assert_eq!(sections.len(), 2);
+}
+
+// --- Coverage gap tests (post-review) ---
+
+#[test]
+fn validate_label_accepts_exact_max_length() {
+    // Boundary: 32 chars must be accepted, 33 rejected (covered elsewhere).
+    let exactly_32 = "a".repeat(32);
+    validate_label(&exactly_32).expect("32 chars must be accepted");
+}
+
+#[test]
+fn validate_rejects_bare_labeled_mix_in_memory() {
+    // Direct in-memory construction can produce a mix that bypasses parse-time
+    // detection. validate() must reject it before save() touches disk.
+    let mut cfg = ProviderConfig::default();
+    cfg.sections.push(ProviderSection {
+        id: ProviderConfigId::bare("digitalocean"),
+        alias_prefix: "do".to_string(),
+        ..ProviderSection::default()
+    });
+    cfg.sections.push(ProviderSection {
+        id: ProviderConfigId::labeled("digitalocean", "work"),
+        alias_prefix: "do-work".to_string(),
+        ..ProviderSection::default()
+    });
+    let err = cfg.validate().expect_err("mix must be rejected");
+    assert!(err.contains("digitalocean"));
+}
+
+#[test]
+fn validate_rejects_duplicate_id() {
+    let mut cfg = ProviderConfig::default();
+    cfg.sections.push(ProviderSection {
+        id: ProviderConfigId::labeled("aws", "work"),
+        alias_prefix: "aws-work".to_string(),
+        ..ProviderSection::default()
+    });
+    cfg.sections.push(ProviderSection {
+        id: ProviderConfigId::labeled("aws", "work"),
+        alias_prefix: "aws-work-2".to_string(),
+        ..ProviderSection::default()
+    });
+    let err = cfg.validate().expect_err("duplicate id must be rejected");
+    assert!(err.contains("duplicate"));
+}
+
+#[test]
+fn parse_rejects_mix_labeled_first_then_bare() {
+    // Symmetric counterpart of parse_rejects_mix_of_bare_and_labeled —
+    // ensures the mix detection works regardless of order.
+    let config = ProviderConfig::parse("[digitalocean:work]\ntoken=a\n\n[digitalocean]\ntoken=b\n");
+    // Labeled wins (first), bare rejected.
+    assert_eq!(config.sections.len(), 1);
+    assert_eq!(config.sections[0].id.label.as_deref(), Some("work"));
 }

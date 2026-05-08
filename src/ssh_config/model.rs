@@ -81,6 +81,11 @@ pub struct HostEntry {
     pub has_provider_tags: bool,
     /// Cloud provider label from purple:provider comment (e.g. "do", "vultr").
     pub provider: Option<String>,
+    /// Provider config label from a 3-segment purple:provider marker
+    /// (`provider:label:server_id`). None for legacy 2-segment markers.
+    /// Used together with `provider` to resolve which labeled config a host
+    /// belongs to in multi-config setups.
+    pub provider_label: Option<String>,
     /// Number of tunnel forwarding directives.
     pub tunnel_count: u16,
     /// Password source from purple:askpass comment (e.g. "keychain", "op://...", "pass:...").
@@ -113,6 +118,7 @@ impl Default for HostEntry {
             provider_tags: Vec::new(),
             has_provider_tags: false,
             provider: None,
+            provider_label: None,
             tunnel_count: 0,
             askpass: None,
             vault_ssh: None,
@@ -802,11 +808,41 @@ impl SshConfigFile {
         String::new()
     }
 
-    /// Set provider on a host block by alias.
-    pub fn set_host_provider(&mut self, alias: &str, provider_name: &str, server_id: &str) {
+    /// Set provider on a host block by alias using a full ProviderConfigId.
+    /// Emits a 3-segment marker when the id has a label, 2-segment otherwise.
+    pub fn set_host_provider_id(
+        &mut self,
+        alias: &str,
+        id: &crate::providers::config::ProviderConfigId,
+        server_id: &str,
+    ) {
         if let Some(block) = self.find_host_block_mut(alias) {
-            block.set_provider(provider_name, server_id);
+            block.set_provider_id(id, server_id);
         }
+    }
+
+    /// Rewrite every 2-segment legacy marker for `provider_name` to a
+    /// 3-segment marker keyed to `(provider_name, label)`. Used by the
+    /// lazy-migration flow so existing hosts of a now-labeled config stay
+    /// owned (and don't get re-claimed or stale-marked) on the next sync.
+    ///
+    /// Only top-level host blocks are rewritten; Include files are read-only
+    /// per the project's invariant. Returns the count of host blocks touched.
+    pub fn rewrite_legacy_markers_to_label(&mut self, provider_name: &str, label: &str) -> usize {
+        let new_id = crate::providers::config::ProviderConfigId::labeled(provider_name, label);
+        let mut rewritten = 0usize;
+        for element in &mut self.elements {
+            if let ConfigElement::HostBlock(block) = element {
+                let Some((id, server_id)) = block.provider_id() else {
+                    continue;
+                };
+                if id.provider == provider_name && id.label.is_none() {
+                    block.set_provider_id(&new_id, &server_id);
+                    rewritten += 1;
+                }
+            }
+        }
+        rewritten
     }
 
     /// Find all hosts with a specific provider, returning (alias, server_id) pairs.
@@ -816,6 +852,54 @@ impl SshConfigFile {
         let mut results = Vec::new();
         Self::collect_provider_hosts(&self.elements, provider_name, &mut results);
         results
+    }
+
+    /// Find hosts owned by an exact `ProviderConfigId`. Used during multi-config sync
+    /// so two labeled configs of the same provider don't claim each other's hosts.
+    /// Legacy 2-segment markers match a bare id (label=None) for backward compatibility.
+    pub fn find_hosts_by_id(
+        &self,
+        id: &crate::providers::config::ProviderConfigId,
+    ) -> Vec<(String, String)> {
+        let mut results = Vec::new();
+        Self::collect_provider_hosts_by_id(&self.elements, id, &mut results);
+        results
+    }
+
+    /// Like `find_hosts_by_provider`, but returns the FULL server_id from the
+    /// raw marker (everything after the first colon), without trying to
+    /// interpret the middle segment as a label. Used by sync of BARE configs
+    /// so server_ids containing colons (Proxmox `qemu:300`) are matched
+    /// against the API response one-to-one instead of being mis-parsed as
+    /// labeled markers.
+    pub fn find_hosts_by_provider_raw(&self, provider_name: &str) -> Vec<(String, String)> {
+        let mut results = Vec::new();
+        Self::collect_provider_hosts_raw(&self.elements, provider_name, &mut results);
+        results
+    }
+
+    fn collect_provider_hosts_raw(
+        elements: &[ConfigElement],
+        provider_name: &str,
+        results: &mut Vec<(String, String)>,
+    ) {
+        for element in elements {
+            match element {
+                ConfigElement::HostBlock(block) => {
+                    if let Some((name, server_id)) = block.provider_raw() {
+                        if name == provider_name {
+                            results.push((block.host_pattern.clone(), server_id));
+                        }
+                    }
+                }
+                ConfigElement::Include(include) => {
+                    for file in &include.resolved_files {
+                        Self::collect_provider_hosts_raw(&file.elements, provider_name, results);
+                    }
+                }
+                ConfigElement::GlobalLine(_) => {}
+            }
+        }
     }
 
     fn collect_provider_hosts(
@@ -835,6 +919,30 @@ impl SshConfigFile {
                 ConfigElement::Include(include) => {
                     for file in &include.resolved_files {
                         Self::collect_provider_hosts(&file.elements, provider_name, results);
+                    }
+                }
+                ConfigElement::GlobalLine(_) => {}
+            }
+        }
+    }
+
+    fn collect_provider_hosts_by_id(
+        elements: &[ConfigElement],
+        id: &crate::providers::config::ProviderConfigId,
+        results: &mut Vec<(String, String)>,
+    ) {
+        for element in elements {
+            match element {
+                ConfigElement::HostBlock(block) => {
+                    if let Some((host_id, server_id)) = block.provider_id() {
+                        if &host_id == id {
+                            results.push((block.host_pattern.clone(), server_id));
+                        }
+                    }
+                }
+                ConfigElement::Include(include) => {
+                    for file in &include.resolved_files {
+                        Self::collect_provider_hosts_by_id(&file.elements, id, results);
                     }
                 }
                 ConfigElement::GlobalLine(_) => {}

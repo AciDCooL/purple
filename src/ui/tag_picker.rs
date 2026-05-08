@@ -38,6 +38,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             if crate::vault_ssh::resolve_vault_role(
                 host.vault_ssh.as_deref(),
                 host.provider.as_deref(),
+                host.provider_label.as_deref(),
                 &app.providers.config,
             )
             .is_some()
@@ -110,9 +111,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_stateful_widget(list, inner, &mut app.ui.tag_picker_state);
 
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     design::Footer::new()
-        .primary("Enter", " select ")
-        .action("Esc", " back")
+        .primary("Enter", fl::ENTER_SELECT)
+        .action("Esc", fl::ESC_CANCEL)
         .render_with_status(frame, footer_area, app);
 }
 

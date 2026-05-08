@@ -70,14 +70,15 @@ pub fn render(frame: &mut Frame, app: &App, index: usize) {
 
     // Footer below the block
     let is_included = host.source_file.is_some();
+    use crate::messages::footer as fl;
     let mut footer_builder = design::Footer::new();
     if !is_included {
-        footer_builder = footer_builder.action("e", " edit ");
+        footer_builder = footer_builder.action("e", fl::ACTION_EDIT);
     }
     let footer_spans = footer_builder
-        .action("T", " tunnels ")
-        .action("r", " snippet ")
-        .action("Esc", " back")
+        .action("T", fl::ACTION_TUNNELS)
+        .action("r", fl::ACTION_SNIPPET)
+        .action("Esc", fl::ESC_BACK)
         .into_spans();
     let footer_area = design::render_overlay_footer(frame, area);
     super::render_footer_with_status(frame, footer_area, footer_spans, app);

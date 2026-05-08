@@ -114,10 +114,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     frame.render_widget(para, inner);
 
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     design::Footer::new()
-        .action(msg::FOOTER_CLOSE_KEYS, msg::FOOTER_CLOSE_LABEL)
-        .action(msg::FOOTER_SCROLL_KEYS, msg::FOOTER_SCROLL_LABEL)
-        .action(msg::FOOTER_TOP_BOTTOM_KEYS, msg::FOOTER_TOP_BOTTOM_LABEL)
+        .action(msg::FOOTER_CLOSE_KEYS, fl::ESC_CLOSE)
+        .action(fl::KEYS_SCROLL, fl::LABEL_SCROLL)
+        .action(fl::KEYS_TOP_BOTTOM, fl::LABEL_TOP_BOTTOM)
         .render_with_status(frame, footer_area, app);
 }
 

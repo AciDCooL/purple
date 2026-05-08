@@ -795,11 +795,12 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &mut App, rows: &[TunnelRow
     // affordance — there is no compact tunnels variant. Drop it from
     // this footer so the keys advertised here are the ones that
     // actually do something on the tunnels overview.
+    use crate::messages::footer as fl;
     let spans = design::Footer::new()
         .primary("Enter", primary_label)
-        .action("/", " search ")
-        .action("s", " sort ")
-        .action(":", " jump ")
+        .action("/", fl::ACTION_SEARCH)
+        .action("s", fl::ACTION_SORT)
+        .action(":", fl::ACTION_JUMP)
         .into_spans();
     super::render_footer_with_help(frame, area, spans, app);
 }

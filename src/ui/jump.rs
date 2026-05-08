@@ -212,11 +212,12 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     design::Footer::new()
-        .primary("Enter", " open ")
-        .action("\u{2191}\u{2193}", " select ")
-        .action("Tab", " next ")
-        .action("Esc", " close")
+        .primary("Enter", fl::ENTER_SELECT)
+        .action("\u{2191}\u{2193}", fl::ARROWS_SELECT)
+        .action("Tab", fl::TAB_NEXT)
+        .action("Esc", fl::ESC_CLOSE)
         .render_with_status(frame, footer_area, app);
 }
 
@@ -632,14 +633,17 @@ mod tests {
     }
 
     #[test]
-    fn jump_footer_advertises_select_next_open_close() {
+    fn jump_footer_advertises_select_next_close() {
+        // Renamed from `..._open_close`: Enter-label normalised to `select`
+        // across pickers per design-system-reference.md (single canonical
+        // verb for "open the focused item's detail").
         let mut app = test_app();
         let backend = ratatui::backend::TestBackend::new(120, 40);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(frame, &mut app)).unwrap();
         let buf = terminal.backend().buffer().clone();
         let text: String = buf.content.iter().map(|c| c.symbol().to_string()).collect();
-        for label in ["select", "next", "open", "close"] {
+        for label in ["select", "next", "close"] {
             assert!(
                 text.contains(label),
                 "footer must advertise '{label}', got: {text:?}"

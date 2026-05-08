@@ -270,7 +270,7 @@ fn write_startup_banner(config: &SshConfigFile, config_path: &Path, verbose: boo
     let provider_names: Vec<String> = provider_config
         .sections
         .iter()
-        .map(|s| s.provider.clone())
+        .map(|s| s.provider().to_string())
         .collect();
 
     let askpass_sources: Vec<String> = config
@@ -668,6 +668,7 @@ pub(crate) fn ensure_vault_ssh_if_needed(
     let role = vault_ssh::resolve_vault_role(
         host.vault_ssh.as_deref(),
         host.provider.as_deref(),
+        host.provider_label.as_deref(),
         provider_config,
     )?;
 
@@ -691,6 +692,7 @@ pub(crate) fn ensure_vault_ssh_if_needed(
     let vault_addr = vault_ssh::resolve_vault_addr(
         host.vault_addr.as_deref(),
         host.provider.as_deref(),
+        host.provider_label.as_deref(),
         provider_config,
     );
     match vault_ssh::ensure_cert(

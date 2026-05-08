@@ -47,7 +47,7 @@ fn make_providers_app_with_do() -> App {
     app.screen = Screen::Providers;
     app.providers.config = test_provider_config();
     app.providers.config.set_section(ProviderSection {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "tok".to_string(),
         alias_prefix: "do".to_string(),
         user: "root".to_string(),
@@ -70,7 +70,7 @@ fn make_providers_app_with_proxmox() -> App {
     app.screen = Screen::Providers;
     app.providers.config = test_provider_config();
     app.providers.config.set_section(ProviderSection {
-        provider: "proxmox".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("proxmox"),
         token: "user@pam!t=secret".to_string(),
         alias_prefix: "pve".to_string(),
         user: "root".to_string(),
@@ -126,7 +126,7 @@ fn test_provider_form_init_existing_do_explicit_false_preserved() {
     app.providers.config = test_provider_config();
     // DO met auto_sync=false (gebruiker heeft het handmatig uitgezet)
     app.providers.config.set_section(ProviderSection {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "tok".to_string(),
         alias_prefix: "do".to_string(),
         user: "root".to_string(),
@@ -178,7 +178,7 @@ fn test_provider_form_init_new_digitalocean_defaults_to_true() {
 fn make_form_app_focused_on(provider: &str, field: ProviderFormField) -> App {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::ProviderForm {
-        provider: provider.to_string(),
+        id: crate::providers::config::ProviderConfigId::bare(provider),
     };
     app.providers.form = ProviderFormFields {
         url: String::new(),
@@ -312,7 +312,7 @@ fn test_submit_provider_form_persists_auto_sync_false() {
     // Submit met auto_sync=false moet de sectie opslaan met auto_sync=false.
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::ProviderForm {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
     app.providers.config = test_provider_config();
     app.providers.form = ProviderFormFields {
@@ -354,7 +354,7 @@ fn test_submit_provider_form_persists_auto_sync_false() {
 fn test_submit_provider_form_persists_auto_sync_true() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::ProviderForm {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
     app.providers.config = test_provider_config();
     app.providers.form = ProviderFormFields {
@@ -395,7 +395,7 @@ fn test_submit_provider_form_persists_vault_role() {
     // identiek aan test_submit_provider_form_persists_auto_sync_*.
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::ProviderForm {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
     app.providers.config = test_provider_config();
     app.providers.form = ProviderFormFields {
@@ -590,7 +590,7 @@ fn test_submit_provider_form_rejects_whitespace_in_user() {
 fn make_gcp_form_app() -> App {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::ProviderForm {
-        provider: "gcp".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("gcp"),
     };
     app.providers.form = ProviderFormFields {
         url: String::new(),
@@ -682,7 +682,7 @@ fn test_provider_form_init_new_gcp_defaults() {
 fn make_azure_form_app() -> App {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::ProviderForm {
-        provider: "azure".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("azure"),
     };
     app.providers.config = test_provider_config();
     app.providers.form = ProviderFormFields {
@@ -761,7 +761,7 @@ fn test_azure_regions_field_accepts_typing() {
 fn make_ovh_form_app() -> App {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::ProviderForm {
-        provider: "ovh".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
     app.providers.form = ProviderFormFields {
         url: String::new(),
@@ -828,7 +828,7 @@ fn test_ovh_picker_select_us() {
     app.ui.region_picker.open = true;
     app.ui.region_picker.cursor = 0;
     app.screen = Screen::ProviderForm {
-        provider: "ovh".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
 
     // Move to "us" (row 3: header=0, eu=1, ca=2, us=3)
@@ -852,7 +852,7 @@ fn test_ovh_picker_space_on_header_toggles_all() {
     app.ui.region_picker.open = true;
     app.ui.region_picker.cursor = 0; // Group header
     app.screen = Screen::ProviderForm {
-        provider: "ovh".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
 
     let (tx, _rx) = mpsc::channel();
@@ -883,7 +883,7 @@ fn test_ovh_picker_enter_selects_and_closes() {
     app.ui.region_picker.open = true;
     app.ui.region_picker.cursor = 0;
     app.screen = Screen::ProviderForm {
-        provider: "ovh".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
 
     let (tx, _rx) = mpsc::channel();
@@ -904,7 +904,7 @@ fn test_ovh_picker_enter_on_header_closes_without_select() {
     app.ui.region_picker.open = true;
     app.ui.region_picker.cursor = 0; // group header
     app.screen = Screen::ProviderForm {
-        provider: "ovh".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
 
     let (tx, _rx) = mpsc::channel();
@@ -921,7 +921,7 @@ fn test_ovh_picker_enter_replaces_previous_selection() {
     app.ui.region_picker.open = true;
     app.ui.region_picker.cursor = 3; // "us"
     app.screen = Screen::ProviderForm {
-        provider: "ovh".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
 
     let (tx, _rx) = mpsc::channel();
@@ -1225,9 +1225,7 @@ fn test_provider_list_esc_cancels_running_syncs() {
 fn test_provider_list_enter_opens_form_with_existing_config() {
     let mut app = make_providers_app_with_do();
     open_provider_form(&mut app, "digitalocean");
-    assert!(
-        matches!(app.screen, Screen::ProviderForm { ref provider } if provider == "digitalocean")
-    );
+    assert!(matches!(app.screen, Screen::ProviderForm { ref id } if id.provider == "digitalocean"));
     assert_eq!(app.providers.form.token, "tok");
     assert_eq!(app.providers.form.alias_prefix, "do");
     assert_eq!(app.providers.form.user, "root");
@@ -1239,7 +1237,7 @@ fn test_provider_list_enter_opens_form_with_defaults() {
     app.screen = Screen::Providers;
     app.providers.config = test_provider_config();
     open_provider_form(&mut app, "vultr");
-    assert!(matches!(app.screen, Screen::ProviderForm { ref provider } if provider == "vultr"));
+    assert!(matches!(app.screen, Screen::ProviderForm { ref id } if id.provider == "vultr"));
     assert_eq!(app.providers.form.token, "");
     assert_eq!(app.providers.form.user, "root");
     assert!(app.providers.form.auto_sync); // vultr default true
@@ -2154,7 +2152,7 @@ fn test_host_list_enter_no_askpass_is_none() {
 fn test_ctrl_p_on_provider_form_does_not_open_password_picker() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::ProviderForm {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
     app.providers.form = crate::app::ProviderFormFields::new();
     let (tx, _rx) = mpsc::channel();
@@ -4119,7 +4117,7 @@ fn test_provider_x_key_opens_scoped_purge() {
     app.screen = Screen::Providers;
     app.providers.config = test_provider_config();
     app.providers.config.set_section(ProviderSection {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "tok".to_string(),
         alias_prefix: "do".to_string(),
         user: "root".to_string(),
@@ -6064,7 +6062,7 @@ fn provider_required_fields_prefix_of_all_fields() {
 fn provider_form_expanded_does_not_trigger_dirty() {
     let mut app = make_app("");
     app.screen = Screen::ProviderForm {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
     app.providers.form = ProviderFormFields::new();
     app.providers.form.token = "tok".to_string();
@@ -6101,7 +6099,7 @@ fn provider_form_tab_from_last_required_expands() {
     // DigitalOcean has one required field: Token
     let mut app = make_app("");
     app.screen = Screen::ProviderForm {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
     app.providers.form = ProviderFormFields::new();
     app.providers.form.token = "tok".to_string();
@@ -6123,7 +6121,7 @@ fn provider_form_collapsed_backtab_wraps() {
     // AWS has 3 required fields: Token, Profile, Regions
     let mut app = make_app("");
     app.screen = Screen::ProviderForm {
-        provider: "aws".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("aws"),
     };
     app.providers.form = ProviderFormFields::new();
     app.providers.form.focused_field = crate::app::ProviderFormField::Token;
@@ -6148,7 +6146,7 @@ fn provider_form_tab_within_collapsed_required() {
     // AWS: Token -> Profile -> Regions (all required)
     let mut app = make_app("");
     app.screen = Screen::ProviderForm {
-        provider: "aws".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("aws"),
     };
     app.providers.form = ProviderFormFields::new();
     app.providers.form.focused_field = crate::app::ProviderFormField::Token;

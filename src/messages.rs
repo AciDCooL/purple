@@ -226,6 +226,26 @@ pub fn provider_removed(display_name: &str) -> String {
     )
 }
 
+pub fn label_invalid(reason: &str) -> String {
+    format!("Invalid name: {}", reason)
+}
+
+pub const LABEL_MUST_DIFFER: &str = "The two names must be different.";
+
+pub const LABEL_MIGRATION_FIELD_CURRENT: &str = " Name for your current config ";
+pub const LABEL_MIGRATION_FIELD_NEW: &str = " Name for the new config ";
+
+pub fn confirm_remove_provider(display: &str) -> String {
+    format!(" Remove {}? ", display)
+}
+
+pub fn confirm_remove_labeled_config(display: &str, label: &str) -> String {
+    format!(" Remove {} ({})? ", display, label)
+}
+
+pub const EXPAND_TO_REMOVE_CONFIG: &str =
+    "Expand the provider and pick a specific config to remove.";
+
 pub fn provider_not_configured(display_name: &str) -> String {
     format!("{} is not configured. Nothing to remove.", display_name)
 }
@@ -1006,6 +1026,7 @@ pub fn jump_more_rows(n: usize) -> String {
 
 #[path = "messages/cli.rs"]
 pub mod cli;
+pub mod footer;
 
 // ── Update messages ─────────────────────────────────────────────────
 

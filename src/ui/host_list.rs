@@ -1345,26 +1345,27 @@ fn footer_spans(
     // directly in the footer — otherwise new users would never know `t`
     // applies to the whole selection. The hint replaces the less-urgent
     // `v` and `:` items to keep the footer one line wide on narrow terms.
+    use crate::messages::footer as fl;
     if selection_active {
         return design::Footer::new()
-            .action("t", " bulk tag ")
-            .action("r", " run ")
-            .action("?", " help ")
-            .action("Esc", " clear")
+            .action("t", fl::ACTION_BULK_TAG)
+            .action("r", fl::ACTION_RUN)
+            .action("?", fl::ACTION_HELP)
+            .action("Esc", fl::ESC_CLEAR)
             .into_spans();
     }
 
     let view_label = if detail_active {
         " compact "
     } else {
-        " detail "
+        fl::ACTION_DETAIL
     };
     let mut spans = design::Footer::new()
-        .primary("Enter", " connect ")
-        .action("/", " search ")
-        .action("#", " tag ")
+        .primary("Enter", fl::ENTER_CONNECT)
+        .action("/", fl::ACTION_SEARCH)
+        .action("#", fl::ACTION_TAG)
         .action("v", view_label)
-        .action(":", " jump ")
+        .action(":", fl::ACTION_JUMP)
         .into_spans();
     if filter_down_only {
         spans.push(Span::raw(design::FOOTER_GAP));
@@ -1374,23 +1375,25 @@ fn footer_spans(
 }
 
 fn pattern_footer_spans(detail_active: bool) -> Vec<Span<'static>> {
+    use crate::messages::footer as fl;
     let view_label = if detail_active {
         " compact "
     } else {
-        " detail "
+        fl::ACTION_DETAIL
     };
     design::Footer::new()
-        .action("/", " search ")
-        .action("#", " tag ")
+        .action("/", fl::ACTION_SEARCH)
+        .action("#", fl::ACTION_TAG)
         .action("v", view_label)
         .into_spans()
 }
 
 fn search_footer_spans() -> Vec<Span<'static>> {
+    use crate::messages::footer as fl;
     let mut spans = design::Footer::new()
-        .primary("Enter", " connect ")
-        .action("Ctrl+E", " edit ")
-        .action("Esc", " cancel ")
+        .primary("Enter", fl::ENTER_CONNECT)
+        .action("Ctrl+E", fl::ACTION_EDIT)
+        .action("Esc", fl::ESC_CANCEL)
         .into_spans();
     // Trailing mode hints share the footer row; rendered with the same gap.
     spans.push(Span::raw(design::FOOTER_GAP));
@@ -1432,9 +1435,10 @@ fn render_tag_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 fn tag_footer_spans() -> Vec<Span<'static>> {
+    use crate::messages::footer as fl;
     let mut spans = design::Footer::new()
-        .primary("Enter", " save ")
-        .action("Esc", " cancel ")
+        .primary("Enter", fl::ENTER_SAVE)
+        .action("Esc", fl::ESC_CANCEL)
         .into_spans();
     spans.push(Span::raw(design::FOOTER_GAP));
     spans.push(Span::styled("comma-separated", theme::muted()));

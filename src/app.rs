@@ -76,7 +76,9 @@ pub use host_state::{
 pub use ping::{
     PingState, PingStatus, classify_ping, ping_sort_key, propagate_ping_to_dependents, status_glyph,
 };
-pub use provider_state::{ProviderState, SyncRecord};
+pub use provider_state::{
+    LabelMigrationField, PendingLabelMigration, ProviderRow, ProviderState, SyncRecord,
+};
 pub use reload_state::{ConflictState, ReloadState};
 pub use screen::{Screen, TopPage, WhatsNewState};
 pub use search::SearchState;
@@ -395,6 +397,7 @@ impl App {
         let role_some = crate::vault_ssh::resolve_vault_role(
             host.vault_ssh.as_deref(),
             host.provider.as_deref(),
+            host.provider_label.as_deref(),
             &self.providers.config,
         )
         .is_some();
@@ -422,6 +425,10 @@ impl App {
     // --- Search methods ---
 
     /// Shim. Routes to `ProviderState::sorted_names`.
+    /// Test-only: production code uses `provider_list_rows()` for the
+    /// tree-style list, so this wrapper exists to keep older test fixtures
+    /// concise.
+    #[cfg(test)]
     pub fn sorted_provider_names(&self) -> Vec<String> {
         self.providers.sorted_names()
     }

@@ -169,7 +169,7 @@ fn test_get_provider_all_names_resolve() {
 #[test]
 fn test_get_provider_with_config_proxmox_uses_url() {
     let section = config::ProviderSection {
-        provider: "proxmox".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("proxmox"),
         token: "user@pam!token=secret".to_string(),
         alias_prefix: "pve-".to_string(),
         user: String::new(),
@@ -191,7 +191,7 @@ fn test_get_provider_with_config_proxmox_uses_url() {
 #[test]
 fn test_get_provider_with_config_non_proxmox_delegates() {
     let section = config::ProviderSection {
-        provider: "digitalocean".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "do-token".to_string(),
         alias_prefix: "do-".to_string(),
         user: String::new(),
@@ -213,7 +213,7 @@ fn test_get_provider_with_config_non_proxmox_delegates() {
 #[test]
 fn test_get_provider_with_config_gcp_uses_project_and_zones() {
     let section = config::ProviderSection {
-        provider: "gcp".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("gcp"),
         token: "sa.json".to_string(),
         alias_prefix: "gcp".to_string(),
         user: String::new(),
@@ -235,7 +235,7 @@ fn test_get_provider_with_config_gcp_uses_project_and_zones() {
 #[test]
 fn test_get_provider_with_config_unknown_returns_none() {
     let section = config::ProviderSection {
-        provider: "unknown_provider".to_string(),
+        id: crate::providers::config::ProviderConfigId::bare("unknown_provider"),
         token: String::new(),
         alias_prefix: String::new(),
         user: String::new(),
@@ -483,7 +483,7 @@ fn test_provider_host_empty_fields() {
 fn test_get_provider_with_config_all_providers() {
     for &name in PROVIDER_NAMES {
         let section = config::ProviderSection {
-            provider: name.to_string(),
+            id: crate::providers::config::ProviderConfigId::bare(name),
             token: "tok".to_string(),
             alias_prefix: "test".to_string(),
             user: String::new(),

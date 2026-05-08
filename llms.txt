@@ -212,7 +212,9 @@ purple --completions zsh            # Generate shell completions
 
 ## Cloud provider sync
 
-Sync servers from cloud providers into ~/.ssh/config. In the TUI, press S to open the provider list. Navigate to a provider and press Enter to open the configuration form. Fill in credentials and confirm to start syncing. Each synced host is tracked via a comment (# purple:provider name:id) so purple knows which hosts belong to which provider.
+Sync servers from cloud providers into ~/.ssh/config. In the TUI, press S to open the provider list. Navigate to a provider and press Enter to open the configuration form. Fill in credentials and confirm to start syncing. Each synced host is tracked via a comment (# purple:provider name:id, or name:label:id when the provider has multiple configs) so purple knows which hosts belong to which config.
+
+Multiple accounts per provider: add a second config of the same provider (e.g. work + personal AWS, or two DigitalOcean teams) by pressing `a` in the provider list and giving each config a label. The providers file uses `[provider:label]` syntax (e.g. `[digitalocean:work]`, `[digitalocean:personal]`) and each labeled config syncs in its own lane. CLI: `purple sync digitalocean` syncs all DO configs; `purple sync digitalocean:work` targets one. `purple add --label work` and `purple provider remove digitalocean:work` round out the CLI grammar. When you add the second config, purple atomically relabels the existing bare config (your choice of label) and rewrites its host markers in ~/.ssh/config so existing hosts stay owned.
 
 Supported providers: AWS EC2, Azure, DigitalOcean, GCP (Compute Engine), Hetzner, i3D.net, Leaseweb, Linode (Akamai), Oracle Cloud Infrastructure (OCI), OVHcloud, Proxmox VE, Scaleway, Tailscale, TransIP, UpCloud and Vultr. Provider tags and labels are stored separately in # purple:provider_tags (always replaced on sync). User tags in # purple:tags are never touched by sync. Provider metadata (region, plan, OS, status. Proxmox: node, type, status) is stored in config comments and displayed in the detail panel.
 
@@ -451,7 +453,7 @@ A: Press m in the host list to open the theme picker with live preview. 11 built
 
 ## Status
 
-- Current version: 3.6.0 (May 2026)
+- Current version: 3.7.0 (May 2026)
 - Release cadence: approximately bi-weekly
 - Test suite: 6800+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
 - CI: fmt, clippy, build, test on macOS and Linux, cargo-deny, MSRV 1.86 check, rustdoc warnings, site sync, TUI smoke test, design system, message centralization, keybinding invariants and visual regression

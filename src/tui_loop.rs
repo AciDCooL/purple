@@ -109,12 +109,11 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
         if !section.auto_sync {
             continue;
         }
-        if !app.providers.syncing.contains_key(&section.provider) {
+        let key = section.id.to_string();
+        if !app.providers.syncing.contains_key(&key) {
             app.providers.reset_batch_if_idle();
             let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            app.providers
-                .syncing
-                .insert(section.provider.clone(), cancel.clone());
+            app.providers.syncing.insert(key, cancel.clone());
             app.providers.batch_total = app
                 .providers
                 .batch_total
@@ -319,6 +318,7 @@ fn lazy_cert_check(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>)
         if vault_ssh::resolve_vault_role(
             selected.vault_ssh.as_deref(),
             selected.provider.as_deref(),
+            selected.provider_label.as_deref(),
             &app.providers.config,
         )
         .is_some()

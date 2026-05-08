@@ -647,9 +647,13 @@ pub fn resolve_pubkey_path(identity_file: &str) -> Result<PathBuf> {
 
 /// Resolve the effective vault role for a host.
 /// Priority: host-level vault_ssh > provider-level vault_role > None.
+///
+/// `provider_label` selects between multiple labeled configs of the same
+/// provider. None means a bare config (legacy 2-segment marker).
 pub fn resolve_vault_role(
     host_vault_ssh: Option<&str>,
     provider_name: Option<&str>,
+    provider_label: Option<&str>,
     provider_config: &crate::providers::config::ProviderConfig,
 ) -> Option<String> {
     if let Some(role) = host_vault_ssh {
@@ -659,7 +663,14 @@ pub fn resolve_vault_role(
     }
 
     if let Some(name) = provider_name {
-        if let Some(section) = provider_config.section(name) {
+        let id = crate::providers::config::ProviderConfigId {
+            provider: name.to_string(),
+            label: provider_label.map(|s| s.to_string()),
+        };
+        let section = provider_config
+            .section_by_id(&id)
+            .or_else(|| provider_config.section(name));
+        if let Some(section) = section {
             if !section.vault_role.is_empty() {
                 return Some(section.vault_role.clone());
             }
@@ -684,6 +695,7 @@ pub fn resolve_vault_role(
 pub fn resolve_vault_addr(
     host_vault_addr: Option<&str>,
     provider_name: Option<&str>,
+    provider_label: Option<&str>,
     provider_config: &crate::providers::config::ProviderConfig,
 ) -> Option<String> {
     if let Some(addr) = host_vault_addr {
@@ -694,7 +706,14 @@ pub fn resolve_vault_addr(
     }
 
     if let Some(name) = provider_name {
-        if let Some(section) = provider_config.section(name) {
+        let id = crate::providers::config::ProviderConfigId {
+            provider: name.to_string(),
+            label: provider_label.map(|s| s.to_string()),
+        };
+        let section = provider_config
+            .section_by_id(&id)
+            .or_else(|| provider_config.section(name));
+        if let Some(section) = section {
             let trimmed = section.vault_addr.trim();
             if !trimmed.is_empty() && is_valid_vault_addr(trimmed) {
                 return Some(normalize_vault_addr(trimmed));

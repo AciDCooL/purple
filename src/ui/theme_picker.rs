@@ -55,9 +55,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     frame.render_stateful_widget(list, inner, &mut app.ui.theme_picker.list);
 
     let footer_area = design::render_overlay_footer(frame, area);
+    use crate::messages::footer as fl;
     design::Footer::new()
-        .primary("Enter", " select ")
-        .action("Esc", " cancel")
+        .primary("Enter", fl::ENTER_SELECT)
+        .action("Esc", fl::ESC_BACK)
         .render_with_status(frame, footer_area, app);
 }
 

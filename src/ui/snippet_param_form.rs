@@ -149,10 +149,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         if app.forms.pending_discard_confirm {
             design::render_discard_prompt(frame, footer_area, app);
         } else {
+            use crate::messages::footer as fl;
             design::Footer::new()
-                .primary("Enter", " run ")
-                .action("Tab", " next ")
-                .action("Esc", " cancel")
+                .primary("Enter", fl::ENTER_RUN)
+                .action("Tab", fl::TAB_NEXT)
+                .action("Esc", fl::ESC_CANCEL)
                 .render_with_status(frame, footer_area, app);
         }
     }

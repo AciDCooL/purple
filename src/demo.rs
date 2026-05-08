@@ -93,35 +93,49 @@ Host aws-cache-eu
 
 # DigitalOcean
 
-Host do-web-ams
+Host do-work-web-ams
   HostName 104.248.38.91
   User deploy
   # purple:tags production,web
-  # purple:provider digitalocean:382010
+  # purple:provider digitalocean:work:382010
   # purple:meta region=ams3,size=s-2vcpu-4gb,image=Ubuntu 22.04,status=active
 
-Host do-staging-ams
+Host do-work-staging-ams
   HostName 104.248.38.92
   User deploy
   LocalForward 5432 localhost:5432
   # purple:tags staging,web
-  # purple:provider digitalocean:382011
+  # purple:provider digitalocean:work:382011
   # purple:meta region=ams3,size=s-2vcpu-4gb,image=Ubuntu 22.04,status=active
 
-Host do-worker-ams
+Host do-work-worker-ams
   HostName 104.248.38.93
   User deploy
   # purple:tags worker
-  # purple:provider digitalocean:382012
+  # purple:provider digitalocean:work:382012
   # purple:meta region=ams3,size=s-1vcpu-2gb,image=Ubuntu 22.04,status=active
 
-Host do-ci-runner
+Host do-work-ci-runner
   HostName 104.248.38.94
   User gitlab
   ProxyJump bastion-ams
   # purple:tags ci
-  # purple:provider digitalocean:382013
+  # purple:provider digitalocean:work:382013
   # purple:meta region=ams3,size=s-4vcpu-8gb,image=Ubuntu 22.04,status=active
+
+Host do-personal-blog
+  HostName 167.99.42.10
+  User root
+  # purple:tags personal,web
+  # purple:provider digitalocean:personal:482001
+  # purple:meta region=ams3,size=s-1vcpu-1gb,image=Ubuntu 22.04,status=active
+
+Host do-personal-mail
+  HostName 167.99.42.11
+  User root
+  # purple:tags personal,mail
+  # purple:provider digitalocean:personal:482002
+  # purple:meta region=fra1,size=s-1vcpu-2gb,image=Ubuntu 22.04,status=active
 
 # Proxmox VE
 
@@ -219,11 +233,17 @@ regions=us-east-1,eu-central-1
 auto_sync=true
 vault_role=ssh-client-signer/sign/engineer
 
-[digitalocean]
-token=dop_v1_demo
-alias_prefix=do
+[digitalocean:work]
+token=dop_v1_demo_work
+alias_prefix=do-work
 user=deploy
 auto_sync=true
+
+[digitalocean:personal]
+token=dop_v1_demo_personal
+alias_prefix=do-personal
+user=root
+auto_sync=false
 
 [proxmox]
 url=https://192.168.1.10:8006
@@ -1267,13 +1287,15 @@ mod tests {
     #[test]
     fn demo_app_has_expected_hosts() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.hosts_state.list.len(), 22);
+        // 22 original + 2 do-personal hosts = 24
+        assert_eq!(app.hosts_state.list.len(), 24);
     }
 
     #[test]
     fn demo_app_has_providers() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.providers.config.configured_providers().len(), 3);
+        // aws + digitalocean:work + digitalocean:personal + proxmox = 4
+        assert_eq!(app.providers.config.configured_providers().len(), 4);
     }
 
     #[test]

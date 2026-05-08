@@ -92,6 +92,28 @@ pub fn removed_config(provider: &str) -> String {
     format!("Removed {} configuration.", provider)
 }
 
+pub fn removed_configs(provider: &str, count: usize) -> String {
+    format!("Removed {} {} configurations.", count, provider)
+}
+
+pub fn invalid_label_flag(reason: &str) -> String {
+    format!("Invalid --label: {}", reason)
+}
+
+pub fn add_requires_label(provider: &str) -> String {
+    format!(
+        "Provider '{}' already has labeled configs. Pass --label to add another.",
+        provider
+    )
+}
+
+pub fn add_label_collides_with_bare(provider: &str) -> String {
+    format!(
+        "Provider '{}' has a bare config. Remove it first or use the TUI add flow which prompts for labels.",
+        provider
+    )
+}
+
 // ── Tunnel CLI ──────────────────────────────────────────────────
 
 pub fn no_tunnels_for(alias: &str) -> String {

@@ -28,6 +28,37 @@
         overlays = [ (import rust-overlay) ];
       });
 
+      # Whitelist source filter: skips docs, screenshots, goldens and
+      # other churn that would invalidate the cache for nothing.
+      filteredSrc = pkgs: pkgs.lib.cleanSourceWith {
+        src = ./.;
+        name = "purple-source";
+        filter = path: type:
+          let
+            rootStr = toString ./.;
+            pathStr = toString path;
+            relPath =
+              if pathStr == rootStr
+              then ""
+              else pkgs.lib.removePrefix (rootStr + "/") pathStr;
+          in
+            (pkgs.lib.cleanSourceFilter path type)
+            && (
+              relPath == ""
+              || pkgs.lib.elem relPath [
+                   "Cargo.toml"
+                   "Cargo.lock"
+                   "build.rs"
+                   "rust-toolchain.toml"
+                 ]
+              || relPath == "src"
+              || pkgs.lib.hasPrefix "src/" relPath
+              || relPath == "tests"
+              || (pkgs.lib.hasPrefix "tests/" relPath
+                  && !pkgs.lib.hasPrefix "tests/visual_golden" relPath)
+            );
+      };
+
       mkPurple = pkgs:
         let
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
@@ -37,7 +68,7 @@
           pname = "purple-ssh";
           version = cargoToml.package.version;
 
-          src = pkgs.lib.cleanSource ./.;
+          src = filteredSrc pkgs;
 
           cargoLock.lockFile = ./Cargo.lock;
 
@@ -51,6 +82,10 @@
           # Use system openssl. Cargo.toml only vendors openssl for
           # cfg(target_env = "musl"); Nix builds against glibc/darwin.
           OPENSSL_NO_VENDOR = 1;
+
+          # Skip LTO inside Nix so the link phase parallelises. Release
+          # binaries via cargo publish keep full LTO from Cargo.toml.
+          CARGO_PROFILE_RELEASE_LTO = "false";
 
           # Tests need $HOME, ~/.ssh, a working ssh binary and serialized
           # PATH manipulation (vault_ssh_tests::PATH_LOCK). The Nix
@@ -104,7 +139,7 @@
         let
           pkgs = pkgsFor.${system};
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          src = pkgs.lib.cleanSource ./.;
+          src = filteredSrc pkgs;
         in {
           package = self.packages.${system}.default;
 

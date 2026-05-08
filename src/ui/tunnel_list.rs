@@ -88,19 +88,20 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
         spans.extend(design::confirm_footer_destructive("delete", "keep").into_spans());
         super::render_footer_with_status(frame, footer_area, spans, app);
     } else {
+        use crate::messages::footer as fl;
         let mut f = design::Footer::new();
         if is_active {
-            f = f.primary("Enter", " stop ");
+            f = f.primary("Enter", fl::ENTER_STOP);
         } else if !app.tunnels.list.is_empty() {
-            f = f.primary("Enter", " start ");
+            f = f.primary("Enter", fl::ENTER_START);
         }
         if !is_readonly {
-            f = f.action("a", " add ");
+            f = f.action("a", fl::ACTION_ADD);
             if !app.tunnels.list.is_empty() {
-                f = f.action("e", " edit ").action("d", " del ");
+                f = f.action("e", fl::ACTION_EDIT).action("d", fl::ACTION_DEL);
             }
         }
-        f = f.action("Esc", " back");
+        f = f.action("Esc", fl::ESC_BACK);
         f.render_with_status(frame, footer_area, app);
     }
 }

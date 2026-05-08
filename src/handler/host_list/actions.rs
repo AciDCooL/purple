@@ -87,6 +87,7 @@ pub(super) fn initiate_bulk_vault_sign(app: &mut App) {
         let Some(role) = crate::vault_ssh::resolve_vault_role(
             e.vault_ssh.as_deref(),
             e.provider.as_deref(),
+            e.provider_label.as_deref(),
             &provider_config,
         ) else {
             continue;
@@ -94,6 +95,7 @@ pub(super) fn initiate_bulk_vault_sign(app: &mut App) {
         let vault_addr = crate::vault_ssh::resolve_vault_addr(
             e.vault_addr.as_deref(),
             e.provider.as_deref(),
+            e.provider_label.as_deref(),
             &provider_config,
         );
         match crate::vault_ssh::resolve_pubkey_path(&e.identity_file) {

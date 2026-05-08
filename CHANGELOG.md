@@ -1,3 +1,15 @@
+## 3.7.0 - 2026-05-08
+
+- feat: Multiple accounts per cloud provider, no juggling.
+- feat: Add a second AWS, DigitalOcean or any cloud account in the providers list. Press `a` on the row, give both configs a label and they live side by side. Existing hosts stay yours.
+- feat: Each labeled config syncs in its own lane. Markers carry the label, so two accounts never claim each other's hosts and a `--remove` on one doesn't touch the other.
+- feat: Vault SSH role and address resolve per labeled config, so work and personal can sign with their own roles in their own Vaults.
+- feat: `purple sync digitalocean:work` targets one config; the bare provider name still syncs all configs of that provider.
+- feat: `purple add --label work` and `purple provider remove digitalocean:work` round out the CLI.
+- change: Faster Nix release builds. CI's `nix flake check` now whitelists the source files it needs and skips LTO, saving ~20 minutes per release.
+- change: `~/.purple/sync_history.tsv` first column now reads `provider[:label]` (e.g. `digitalocean:work`) for labeled configs. Bare configs keep the plain provider name. Scripts grepping the file may need updating.
+- Thanks to @AndreyOkh for suggesting multi-account support.
+
 ## 3.6.0 - 2026-05-06
 
 - feat: Find any host, tunnel or action in one keystroke.

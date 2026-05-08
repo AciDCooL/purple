@@ -3425,7 +3425,11 @@ fn set_host_tags_reaches_multi_alias_block_via_any_token() {
 fn set_host_provider_reaches_multi_alias_block() {
     let input = "Host web-01 web-01.prod\n  User deploy\n";
     let mut config = parse_str(input);
-    config.set_host_provider("web-01", "hetzner", "12345");
+    config.set_host_provider_id(
+        "web-01",
+        &crate::providers::config::ProviderConfigId::bare("hetzner"),
+        "12345",
+    );
     let block = first_block(&config);
     assert_eq!(
         block.provider(),
@@ -3528,4 +3532,522 @@ fn delete_host_undoable_refuses_multi_alias_block() {
     // Config untouched by the refused undoable delete.
     assert!(config.has_host("web-01.prod"));
     assert!(config.has_host("web-01"));
+}
+
+// --- ProviderConfigId marker tests ---
+
+#[test]
+fn marker_legacy_two_segment_parses_as_bare() {
+    let content = "Host server\n  HostName 1.2.3.4\n  # purple:provider digitalocean:12345\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    let (id, server_id) = block.provider_id().unwrap();
+    assert_eq!(id.provider, "digitalocean");
+    assert_eq!(id.label, None);
+    assert_eq!(server_id, "12345");
+}
+
+#[test]
+fn marker_three_segment_parses_as_labeled() {
+    let content = "Host server\n  HostName 1.2.3.4\n  # purple:provider digitalocean:work:12345\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    let (id, server_id) = block.provider_id().unwrap();
+    assert_eq!(id.provider, "digitalocean");
+    assert_eq!(id.label.as_deref(), Some("work"));
+    assert_eq!(server_id, "12345");
+}
+
+#[test]
+fn marker_three_segment_with_invalid_label_falls_back_to_legacy() {
+    // Middle segment that fails label validation (uppercase) is treated as
+    // part of the server_id, not as a label.
+    let content = "Host server\n  HostName 1.2.3.4\n  # purple:provider azure:RES:12345\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    let (id, server_id) = block.provider_id().unwrap();
+    assert_eq!(id.provider, "azure");
+    assert_eq!(id.label, None);
+    assert_eq!(server_id, "RES:12345");
+}
+
+#[test]
+fn set_provider_id_emits_two_segment_when_bare() {
+    use crate::providers::config::ProviderConfigId;
+    let content = "Host server\n  HostName 1.2.3.4\n";
+    let mut config = parse_str(content);
+    let block = match &mut config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    block.set_provider_id(&ProviderConfigId::bare("aws"), "i-abc");
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:i-abc"));
+    assert!(!serialized.contains("aws::"));
+}
+
+#[test]
+fn set_provider_id_emits_three_segment_when_labeled() {
+    use crate::providers::config::ProviderConfigId;
+    let content = "Host server\n  HostName 1.2.3.4\n";
+    let mut config = parse_str(content);
+    let block = match &mut config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    block.set_provider_id(&ProviderConfigId::labeled("aws", "work"), "i-abc");
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:work:i-abc"));
+}
+
+#[test]
+fn marker_round_trip_labeled() {
+    use crate::providers::config::ProviderConfigId;
+    let content = "Host server\n  HostName 1.2.3.4\n";
+    let mut config = parse_str(content);
+    let id = ProviderConfigId::labeled("digitalocean", "personal");
+    if let ConfigElement::HostBlock(b) = &mut config.elements[0] {
+        b.set_provider_id(&id, "67890");
+    }
+    let serialized = config.serialize();
+    let reparsed = parse_str(&serialized);
+    let block = match &reparsed.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    let (parsed_id, server_id) = block.provider_id().unwrap();
+    assert_eq!(parsed_id, id);
+    assert_eq!(server_id, "67890");
+}
+
+#[test]
+fn provider_legacy_getter_drops_label() {
+    // The legacy `provider()` getter must still return (provider, server_id)
+    // for code paths that don't care about the label.
+    let content = "Host server\n  HostName 1.2.3.4\n  # purple:provider aws:work:i-12345\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    let (name, server_id) = block.provider().unwrap();
+    assert_eq!(name, "aws");
+    assert_eq!(server_id, "i-12345");
+}
+
+#[test]
+fn marker_three_segment_keeps_server_id_with_embedded_colon() {
+    // Some provider server_ids may contain ':' (Azure, OCI). The splitn(3)
+    // contract is that the LAST segment carries the entire server_id even
+    // if it has more colons. Without this, a path-like id would be torn.
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:work:us-east-1:i-abc\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    let (id, server_id) = block.provider_id().unwrap();
+    assert_eq!(id.provider, "aws");
+    assert_eq!(id.label.as_deref(), Some("work"));
+    assert_eq!(server_id, "us-east-1:i-abc");
+}
+
+#[test]
+fn host_entry_carries_provider_label_for_three_segment_marker() {
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:work:i-12345\n";
+    let config = parse_str(content);
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].provider.as_deref(), Some("aws"));
+    assert_eq!(entries[0].provider_label.as_deref(), Some("work"));
+}
+
+#[test]
+fn host_entry_provider_label_is_none_for_legacy_marker() {
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:i-12345\n";
+    let config = parse_str(content);
+    let entries = config.host_entries();
+    assert_eq!(entries[0].provider.as_deref(), Some("aws"));
+    assert_eq!(entries[0].provider_label, None);
+}
+
+// --- Malformed marker safety ---
+
+#[test]
+fn marker_empty_middle_segment_returns_none() {
+    // `aws::123` has an empty label — neither a valid labeled marker nor
+    // unambiguous as legacy. Must be treated as malformed (host unowned)
+    // rather than guessing a server_id with a leading colon.
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws::123\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    assert_eq!(
+        block.provider_id(),
+        None,
+        "empty middle segment must not be claimed by any provider"
+    );
+}
+
+#[test]
+fn marker_empty_server_id_returns_none() {
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:work:\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    assert_eq!(block.provider_id(), None);
+}
+
+#[test]
+fn marker_legacy_empty_server_id_returns_none() {
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    assert_eq!(block.provider_id(), None);
+}
+
+#[test]
+fn marker_no_colon_returns_none() {
+    // Single token after the prefix is not a valid marker.
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    assert_eq!(block.provider_id(), None);
+}
+
+#[test]
+fn marker_empty_provider_returns_none() {
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider :work:123\n";
+    let config = parse_str(content);
+    let block = match &config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    assert_eq!(block.provider_id(), None);
+}
+
+// --- set_provider_id overwrite + indentation preservation ---
+
+#[test]
+fn set_provider_id_replaces_existing_legacy_marker() {
+    use crate::providers::config::ProviderConfigId;
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:i-old\n";
+    let mut config = parse_str(content);
+    let block = match &mut config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    block.set_provider_id(&ProviderConfigId::labeled("aws", "work"), "i-new");
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:work:i-new"));
+    assert!(
+        !serialized.contains("aws:i-old"),
+        "old legacy marker must be removed:\n{}",
+        serialized
+    );
+    // Exactly one marker survives.
+    assert_eq!(serialized.matches("# purple:provider").count(), 1);
+}
+
+#[test]
+fn set_provider_id_replaces_existing_labeled_marker() {
+    use crate::providers::config::ProviderConfigId;
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:work:i-old\n";
+    let mut config = parse_str(content);
+    let block = match &mut config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    block.set_provider_id(&ProviderConfigId::labeled("aws", "personal"), "i-new");
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:personal:i-new"));
+    assert!(!serialized.contains("aws:work"));
+    assert_eq!(serialized.matches("# purple:provider").count(), 1);
+}
+
+#[test]
+fn set_provider_id_can_downgrade_labeled_to_bare() {
+    use crate::providers::config::ProviderConfigId;
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:work:i-old\n";
+    let mut config = parse_str(content);
+    let block = match &mut config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    block.set_provider_id(&ProviderConfigId::bare("aws"), "i-new");
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:i-new"));
+    assert!(!serialized.contains("aws:work"));
+}
+
+#[test]
+fn set_provider_id_preserves_tab_indent() {
+    use crate::providers::config::ProviderConfigId;
+    let content = "Host vm\n\tHostName 1.2.3.4\n\t# purple:provider aws:i-old\n";
+    let mut config = parse_str(content);
+    let block = match &mut config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    block.set_provider_id(&ProviderConfigId::labeled("aws", "work"), "i-new");
+    let serialized = config.serialize();
+    // Marker must be tab-indented like the surrounding directives.
+    assert!(
+        serialized.contains("\t# purple:provider aws:work:i-new"),
+        "tab indent not preserved:\n{}",
+        serialized
+    );
+}
+
+#[test]
+fn set_provider_id_preserves_4space_indent() {
+    use crate::providers::config::ProviderConfigId;
+    let content = "Host vm\n    HostName 1.2.3.4\n    # purple:provider aws:i-old\n";
+    let mut config = parse_str(content);
+    let block = match &mut config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    block.set_provider_id(&ProviderConfigId::labeled("aws", "work"), "i-new");
+    let serialized = config.serialize();
+    assert!(
+        serialized.contains("    # purple:provider aws:work:i-new"),
+        "4-space indent not preserved:\n{}",
+        serialized
+    );
+}
+
+#[test]
+fn set_provider_id_dedupes_existing_markers() {
+    // Hand-edited config can have duplicate markers (rare, but possible).
+    // set_provider_id retains only one.
+    use crate::providers::config::ProviderConfigId;
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:i-1\n  # purple:provider aws:work:i-2\n";
+    let mut config = parse_str(content);
+    let block = match &mut config.elements[0] {
+        ConfigElement::HostBlock(b) => b,
+        _ => panic!("expected HostBlock"),
+    };
+    block.set_provider_id(&ProviderConfigId::labeled("aws", "personal"), "i-final");
+    let serialized = config.serialize();
+    assert_eq!(
+        serialized.matches("# purple:provider").count(),
+        1,
+        "duplicate markers must collapse to one:\n{}",
+        serialized
+    );
+    assert!(serialized.contains("aws:personal:i-final"));
+}
+
+// --- find_hosts_by_id recurses into Include files ---
+
+#[test]
+fn find_hosts_by_id_finds_hosts_in_include_files() {
+    use crate::providers::config::ProviderConfigId;
+    let mut included = parse_str(
+        "Host included-vm\n  HostName 5.5.5.5\n  # purple:provider aws:work:i-included\n",
+    );
+    included.path = std::path::PathBuf::from("/tmp/included");
+    let main_content = "Host main-vm\n  HostName 1.1.1.1\n  # purple:provider aws:work:i-main\n";
+    let mut main = parse_str(main_content);
+    main.elements.push(ConfigElement::Include(
+        crate::ssh_config::model::IncludeDirective {
+            raw_line: "Include /tmp/included".to_string(),
+            pattern: "/tmp/included".to_string(),
+            resolved_files: vec![crate::ssh_config::model::IncludedFile {
+                path: std::path::PathBuf::from("/tmp/included"),
+                elements: included.elements,
+            }],
+        },
+    ));
+    let hosts = main.find_hosts_by_id(&ProviderConfigId::labeled("aws", "work"));
+    let aliases: Vec<&str> = hosts.iter().map(|(a, _)| a.as_str()).collect();
+    assert!(aliases.contains(&"main-vm"));
+    assert!(
+        aliases.contains(&"included-vm"),
+        "find_hosts_by_id must recurse into Include files: {:?}",
+        aliases
+    );
+}
+
+#[test]
+fn rewrite_legacy_markers_to_label_migrates_only_matching_provider() {
+    let content = "Host a\n  HostName 1.1.1.1\n  # purple:provider digitalocean:1\n\nHost b\n  HostName 2.2.2.2\n  # purple:provider digitalocean:2\n\nHost c\n  HostName 3.3.3.3\n  # purple:provider aws:i-3\n\nHost d\n  HostName 4.4.4.4\n  # purple:provider digitalocean:work:9\n";
+    let mut config = parse_str(content);
+    let count = config.rewrite_legacy_markers_to_label("digitalocean", "default");
+    assert_eq!(count, 2, "exactly two legacy DO markers must be rewritten");
+
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider digitalocean:default:1"));
+    assert!(serialized.contains("# purple:provider digitalocean:default:2"));
+    // AWS untouched.
+    assert!(serialized.contains("# purple:provider aws:i-3"));
+    // Already-labeled DO host untouched (label "work" stays).
+    assert!(serialized.contains("# purple:provider digitalocean:work:9"));
+    // Legacy 2-segment DO markers must be gone.
+    assert!(!serialized.contains("# purple:provider digitalocean:1\n"));
+    assert!(!serialized.contains("# purple:provider digitalocean:2\n"));
+}
+
+#[test]
+fn provider_label_survives_update_host() {
+    // update_host preserves the existing # purple:provider marker if the
+    // caller didn't override it. The 3-segment form must round-trip.
+    let content = "Host vm\n  HostName 1.2.3.4\n  User old\n  # purple:provider aws:work:i-abc\n";
+    let mut config = parse_str(content);
+    let updated = HostEntry {
+        alias: "vm".to_string(),
+        hostname: "1.2.3.4".to_string(),
+        user: "newuser".to_string(),
+        port: 22,
+        ..Default::default()
+    };
+    config.update_host("vm", &updated);
+    let serialized = config.serialize();
+    assert!(
+        serialized.contains("# purple:provider aws:work:i-abc"),
+        "labeled marker must survive update_host:\n{}",
+        serialized
+    );
+    let entries = config.host_entries();
+    assert_eq!(entries[0].provider.as_deref(), Some("aws"));
+    assert_eq!(entries[0].provider_label.as_deref(), Some("work"));
+    assert_eq!(entries[0].user, "newuser");
+}
+
+#[test]
+fn provider_label_survives_swap_hosts() {
+    let content = "Host a\n  HostName 1.1.1.1\n  # purple:provider aws:work:i-1\n\nHost b\n  HostName 2.2.2.2\n  # purple:provider aws:personal:i-2\n";
+    let mut config = parse_str(content);
+    config.swap_hosts("a", "b");
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:work:i-1"));
+    assert!(serialized.contains("# purple:provider aws:personal:i-2"));
+    let entries = config.host_entries();
+    let a = entries.iter().find(|e| e.alias == "a").unwrap();
+    let b = entries.iter().find(|e| e.alias == "b").unwrap();
+    assert_eq!(a.provider_label.as_deref(), Some("work"));
+    assert_eq!(b.provider_label.as_deref(), Some("personal"));
+}
+
+#[test]
+fn provider_label_survives_delete_undo() {
+    let content = "Host a\n  HostName 1.1.1.1\n  # purple:provider aws:work:i-1\n\nHost b\n  HostName 2.2.2.2\n";
+    let mut config = parse_str(content);
+    let undo = config.delete_host_undoable("a");
+    assert!(undo.is_some());
+    let (element, position) = undo.unwrap();
+    config.insert_host_at(element, position);
+    let serialized = config.serialize();
+    assert!(
+        serialized.contains("# purple:provider aws:work:i-1"),
+        "labeled marker must survive delete + undo:\n{}",
+        serialized
+    );
+    let entries = config.host_entries();
+    let a = entries.iter().find(|e| e.alias == "a").unwrap();
+    assert_eq!(a.provider_label.as_deref(), Some("work"));
+}
+
+#[test]
+fn provider_label_survives_serialize_reparse() {
+    let content = "Host a\n  HostName 1.1.1.1\n  # purple:provider aws:work:i-1\n  # purple:provider_tags prod,db\n  # purple:askpass keychain\n";
+    let config = parse_str(content);
+    let s1 = config.serialize();
+    let reparsed = parse_str(&s1);
+    let entries = reparsed.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].provider.as_deref(), Some("aws"));
+    assert_eq!(entries[0].provider_label.as_deref(), Some("work"));
+    assert_eq!(entries[0].provider_tags, vec!["prod", "db"]);
+    assert_eq!(entries[0].askpass.as_deref(), Some("keychain"));
+    assert_eq!(s1, reparsed.serialize());
+}
+
+#[test]
+fn group_header_survives_one_of_many_label_deletion() {
+    // When multiple labeled configs share one provider group header, hosts
+    // from one labeled config disappear but the others' hosts remain. The
+    // group header must NOT be removed.
+    let content = "# purple:group AWS EC2\n\nHost aws-work-1\n  HostName 1.1.1.1\n  # purple:provider aws:work:i-1\n\nHost aws-personal-1\n  HostName 2.2.2.2\n  # purple:provider aws:personal:i-2\n";
+    let mut config = parse_str(content);
+    // Delete the work host (simulating that config's --remove sync).
+    config.delete_host("aws-work-1");
+    let serialized = config.serialize();
+    assert!(
+        serialized.contains("# purple:group AWS EC2"),
+        "group header must remain while another labeled config still has hosts:\n{}",
+        serialized
+    );
+    assert!(serialized.contains("aws-personal-1"));
+    assert!(!serialized.contains("aws-work-1"));
+}
+
+#[test]
+fn rewrite_legacy_markers_to_label_skips_include_files() {
+    // Include files are read-only by project rule; the helper must not touch them.
+    let mut included =
+        parse_str("Host inc-vm\n  HostName 5.5.5.5\n  # purple:provider digitalocean:99\n");
+    included.path = std::path::PathBuf::from("/tmp/included");
+    let mut main =
+        parse_str("Host top-vm\n  HostName 1.1.1.1\n  # purple:provider digitalocean:1\n");
+    main.elements.push(ConfigElement::Include(
+        crate::ssh_config::model::IncludeDirective {
+            raw_line: "Include /tmp/included".to_string(),
+            pattern: "/tmp/included".to_string(),
+            resolved_files: vec![crate::ssh_config::model::IncludedFile {
+                path: std::path::PathBuf::from("/tmp/included"),
+                elements: included.elements,
+            }],
+        },
+    ));
+    let count = main.rewrite_legacy_markers_to_label("digitalocean", "default");
+    assert_eq!(count, 1, "only top-level marker counted");
+    let serialized = main.serialize();
+    assert!(serialized.contains("# purple:provider digitalocean:default:1"));
+}
+
+#[test]
+fn find_hosts_by_id_does_not_match_other_label_in_include() {
+    use crate::providers::config::ProviderConfigId;
+    let mut included = parse_str(
+        "Host included-vm\n  HostName 5.5.5.5\n  # purple:provider aws:personal:i-other\n",
+    );
+    included.path = std::path::PathBuf::from("/tmp/included");
+    let mut main = parse_str("Host main-vm\n  HostName 1.1.1.1\n");
+    main.elements.push(ConfigElement::Include(
+        crate::ssh_config::model::IncludeDirective {
+            raw_line: "Include /tmp/included".to_string(),
+            pattern: "/tmp/included".to_string(),
+            resolved_files: vec![crate::ssh_config::model::IncludedFile {
+                path: std::path::PathBuf::from("/tmp/included"),
+                elements: included.elements,
+            }],
+        },
+    ));
+    let hosts = main.find_hosts_by_id(&ProviderConfigId::labeled("aws", "work"));
+    assert!(
+        hosts.is_empty(),
+        "label scoping must hold across Include boundary: {:?}",
+        hosts
+    );
 }

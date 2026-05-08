@@ -69,7 +69,7 @@ I wanted one place for all of that. So I built it.
 
 ![fuzzy search](screenshots/search.png)
 
-☁️ **Your ssh config tracks your infra.** Drop in one API token per provider. New VMs land in `~/.ssh/config` the moment they boot. IPs stay current as instances move. Decommissioned hosts dim so you can purge them on your terms. 16 providers including AWS, GCP, Azure, Hetzner, DigitalOcean and Proxmox. See the [wiki](https://github.com/erickochen/purple/wiki/Cloud-Providers) for the full list.
+☁️ **Your ssh config tracks your infra.** Drop in one API token per provider. New VMs land in `~/.ssh/config` the moment they boot. IPs stay current as instances move. Decommissioned hosts dim so you can purge them on your terms. 16 providers including AWS, GCP, Azure, Hetzner, DigitalOcean and Proxmox. Run multiple accounts per provider side by side. See the [wiki](https://github.com/erickochen/purple/wiki/Cloud-Providers) for the full list.
 
 ![cloud providers](screenshots/providers.png)
 

@@ -8,6 +8,7 @@
 
 use std::path::PathBuf;
 
+use purple_ssh::providers::config::{ProviderConfigId, ProviderSection};
 use purple_ssh::ssh_config::model::{ConfigElement, HostBlock, HostEntry, SshConfigFile};
 
 /// Helper: parse a string into an SshConfigFile without touching disk.
@@ -3611,7 +3612,11 @@ fn set_tags_nonexistent_alias_is_noop() {
 fn set_provider_nonexistent_alias_is_noop() {
     let input = "Host alpha\n  HostName a.com\n";
     let mut config = parse_str(input);
-    config.set_host_provider("nonexistent", "digitalocean", "123");
+    config.set_host_provider_id(
+        "nonexistent",
+        &ProviderConfigId::bare("digitalocean"),
+        "123",
+    );
     assert_eq!(config.serialize(), input);
 }
 
@@ -3921,7 +3926,7 @@ fn update_host_equals_separator_with_equals_in_value() {
 // Provider sync integration tests
 // ============================================================================
 
-use purple_ssh::providers::config::ProviderSection;
+// ProviderSection imported at top of file
 use purple_ssh::providers::sync::sync_provider;
 use purple_ssh::providers::{Provider, ProviderError, ProviderHost};
 
@@ -3948,7 +3953,7 @@ impl Provider for TestProvider {
 
 fn test_section(provider: &str, prefix: &str) -> ProviderSection {
     ProviderSection {
-        provider: provider.to_string(),
+        id: ProviderConfigId::bare(provider),
         token: "test".to_string(),
         alias_prefix: prefix.to_string(),
         user: "root".to_string(),
@@ -8517,7 +8522,7 @@ fn set_provider_on_host_with_no_directives() {
 Host emptyhost
 ";
     let mut config = parse_str(content);
-    config.set_host_provider("emptyhost", "aws", "i-12345");
+    config.set_host_provider_id("emptyhost", &ProviderConfigId::bare("aws"), "i-12345");
     let output = config.serialize();
     assert!(
         output.contains("purple:provider aws:i-12345"),
@@ -11905,7 +11910,7 @@ fn set_tags_then_set_provider_then_set_meta_then_set_askpass_all_coexist() {
     let mut config = parse_str(content);
 
     config.set_host_tags("myserver", &["prod".to_string(), "us-east".to_string()]);
-    config.set_host_provider("myserver", "aws", "i-123abc");
+    config.set_host_provider_id("myserver", &ProviderConfigId::bare("aws"), "i-123abc");
     config.set_host_meta(
         "myserver",
         &[("region".to_string(), "us-east-1".to_string())],
@@ -11942,7 +11947,7 @@ fn update_host_rename_preserves_all_annotations() {
 
     // Add all annotation types
     config.set_host_tags("myserver", &["prod".to_string()]);
-    config.set_host_provider("myserver", "aws", "i-123");
+    config.set_host_provider_id("myserver", &ProviderConfigId::bare("aws"), "i-123");
     config.set_host_meta(
         "myserver",
         &[("region".to_string(), "us-east-1".to_string())],
@@ -12450,4 +12455,140 @@ fn roundtrip_preserves_all_purple_comments_together() {
     let config = parse_str(content);
     let output = config.serialize();
     assert_eq_visible(content, &output);
+}
+
+// --- Multi-config provider marker fidelity ---
+
+#[test]
+fn labeled_marker_serialize_byte_identical() {
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:work:i-12345\n";
+    let config = parse_str(content);
+    assert_eq_visible(content, &config.serialize());
+}
+
+#[test]
+fn labeled_marker_after_update_byte_identical_when_only_user_changes() {
+    let content = "Host vm\n  HostName 1.2.3.4\n  User old\n  # purple:provider aws:work:i-1\n";
+    let mut config = parse_str(content);
+    config.update_host(
+        "vm",
+        &purple_ssh::ssh_config::model::HostEntry {
+            alias: "vm".to_string(),
+            hostname: "1.2.3.4".to_string(),
+            user: "newuser".to_string(),
+            port: 22,
+            ..Default::default()
+        },
+    );
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:work:i-1"));
+    let reparsed = parse_str(&serialized);
+    assert_eq_visible(&serialized, &reparsed.serialize());
+}
+
+#[test]
+fn labeled_marker_after_add_host_to_config_byte_identical() {
+    let content = "Host work-1\n  HostName 1.1.1.1\n  # purple:provider aws:work:i-1\n\nHost personal-1\n  HostName 2.2.2.2\n  # purple:provider aws:personal:i-2\n";
+    let mut config = parse_str(content);
+    config.add_host(&purple_ssh::ssh_config::model::HostEntry {
+        alias: "new-host".to_string(),
+        hostname: "3.3.3.3".to_string(),
+        user: "root".to_string(),
+        port: 22,
+        ..Default::default()
+    });
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:work:i-1"));
+    assert!(serialized.contains("# purple:provider aws:personal:i-2"));
+    let reparsed = parse_str(&serialized);
+    assert_eq_visible(&serialized, &reparsed.serialize());
+}
+
+#[test]
+fn labeled_marker_after_delete_other_host_byte_identical() {
+    let content = "Host work-1\n  HostName 1.1.1.1\n  # purple:provider aws:work:i-1\n\nHost personal-1\n  HostName 2.2.2.2\n  # purple:provider aws:personal:i-2\n";
+    let mut config = parse_str(content);
+    config.delete_host("work-1");
+    let serialized = config.serialize();
+    assert!(!serialized.contains("aws:work:i-1"));
+    assert!(serialized.contains("# purple:provider aws:personal:i-2"));
+    let reparsed = parse_str(&serialized);
+    assert_eq_visible(&serialized, &reparsed.serialize());
+}
+
+#[test]
+fn labeled_marker_after_swap_byte_identical() {
+    let content = "Host a\n  HostName 1.1.1.1\n  # purple:provider aws:work:i-1\n\nHost b\n  HostName 2.2.2.2\n  # purple:provider aws:personal:i-2\n";
+    let mut config = parse_str(content);
+    assert!(config.swap_hosts("a", "b"));
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:work:i-1"));
+    assert!(serialized.contains("# purple:provider aws:personal:i-2"));
+    let reparsed = parse_str(&serialized);
+    assert_eq_visible(&serialized, &reparsed.serialize());
+}
+
+#[test]
+fn rewrite_legacy_markers_round_trips() {
+    let content = "Host vm-1\n  HostName 1.1.1.1\n  # purple:provider digitalocean:1\n\nHost vm-2\n  HostName 2.2.2.2\n  # purple:provider digitalocean:2\n";
+    let mut config = parse_str(content);
+    let count = config.rewrite_legacy_markers_to_label("digitalocean", "default");
+    assert_eq!(count, 2);
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider digitalocean:default:1"));
+    assert!(serialized.contains("# purple:provider digitalocean:default:2"));
+    let reparsed = parse_str(&serialized);
+    assert_eq_visible(&serialized, &reparsed.serialize());
+}
+
+#[test]
+fn set_provider_id_round_trips_after_swap_to_labeled() {
+    let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:i-old\n";
+    let mut config = parse_str(content);
+    config.set_host_provider_id("vm", &ProviderConfigId::labeled("aws", "work"), "i-new");
+    let serialized = config.serialize();
+    assert!(serialized.contains("# purple:provider aws:work:i-new"));
+    assert!(!serialized.contains("aws:i-old"));
+    let reparsed = parse_str(&serialized);
+    assert_eq_visible(&serialized, &reparsed.serialize());
+}
+
+#[test]
+fn labeled_marker_with_other_purple_comments_round_trips() {
+    let content = "Host vm\n  HostName 1.2.3.4\n  User deploy\n  IdentityFile ~/.ssh/id_ed25519\n  # purple:tags prod,db\n  # purple:provider aws:work:i-12345\n  # purple:provider_tags fleet,prod\n  # purple:askpass keychain\n  # purple:vault-ssh ssh/sign/admin\n  # purple:vault-addr http://127.0.0.1:8200\n  # purple:meta region=us-east-1,size=t3.medium\n";
+    let config = parse_str(content);
+    assert_eq_visible(content, &config.serialize());
+    let entries = config.host_entries();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].provider.as_deref(), Some("aws"));
+    assert_eq!(entries[0].provider_label.as_deref(), Some("work"));
+    assert_eq!(entries[0].tags, vec!["prod", "db"]);
+    assert_eq!(entries[0].provider_tags, vec!["fleet", "prod"]);
+    assert_eq!(entries[0].askpass.as_deref(), Some("keychain"));
+    assert_eq!(entries[0].vault_ssh.as_deref(), Some("ssh/sign/admin"));
+    assert_eq!(
+        entries[0].vault_addr.as_deref(),
+        Some("http://127.0.0.1:8200")
+    );
+}
+
+#[test]
+fn malformed_labeled_marker_round_trips_with_no_provider_claim() {
+    for malformed in &[
+        "# purple:provider aws::123",
+        "# purple:provider aws:work:",
+        "# purple:provider aws:",
+        "# purple:provider aws",
+    ] {
+        let content = format!("Host vm\n  HostName 1.2.3.4\n  {}\n", malformed);
+        let config = parse_str(&content);
+        assert_eq_visible(&content, &config.serialize());
+        let entries = config.host_entries();
+        assert_eq!(
+            entries[0].provider, None,
+            "malformed marker must not be claimed: {}",
+            malformed
+        );
+        assert_eq!(entries[0].provider_label, None);
+    }
 }

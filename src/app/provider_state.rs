@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::app::ProviderFormBaseline;
 use crate::app::forms::ProviderFormFields;
-use crate::providers::config::ProviderConfig;
+use crate::providers::config::{ProviderConfig, ProviderConfigId};
 
 /// Record of the last sync result for a provider.
 #[derive(Debug, Clone)]
@@ -117,8 +117,79 @@ pub struct ProviderState {
     /// when providers complete and leave `syncing`.
     pub batch_total: usize,
     pub pending_delete: Option<String>,
+    /// When deleting a single labeled config, this carries the full id.
+    /// `pending_delete` is used for whole-provider delete (header confirm).
+    pub pending_delete_id: Option<ProviderConfigId>,
     pub sync_history: HashMap<String, SyncRecord>,
     pub form_baseline: Option<ProviderFormBaseline>,
+    /// Provider names that are expanded in the tree-style provider list.
+    /// Only matters when a provider has 2+ labeled configs.
+    pub expanded_providers: HashSet<String>,
+    /// In-progress lazy migration: when adding a 2nd config of a provider
+    /// that currently has a single bare config, we first prompt for a label
+    /// for the existing config. The chosen label lives here until the new
+    /// config form is saved (then both writes happen atomically). When the
+    /// user cancels the new config form, this is dropped and nothing is
+    /// written.
+    pub pending_label_migration: Option<PendingLabelMigration>,
+}
+
+/// State carried between step 1 (label both configs) and step 2
+/// (fill in the new labeled config form) of the lazy-migration add flow.
+#[derive(Debug, Clone)]
+pub struct PendingLabelMigration {
+    pub provider: String,
+    /// User-chosen label for the EXISTING (currently bare) config.
+    pub existing_label: String,
+    /// User-chosen label for the NEW config being added.
+    pub new_label: String,
+    /// Which field has focus in the label-migration screen.
+    pub focused: LabelMigrationField,
+    /// Cursor position (char index) within the focused field's value.
+    pub cursor_pos: usize,
+}
+
+impl PendingLabelMigration {
+    /// Get the focused field's value.
+    pub fn focused_value(&self) -> &str {
+        match self.focused {
+            LabelMigrationField::Existing => &self.existing_label,
+            LabelMigrationField::New => &self.new_label,
+        }
+    }
+
+    /// Get the focused field's value mutably.
+    pub fn focused_value_mut(&mut self) -> &mut String {
+        match self.focused {
+            LabelMigrationField::Existing => &mut self.existing_label,
+            LabelMigrationField::New => &mut self.new_label,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelMigrationField {
+    Existing,
+    New,
+}
+
+/// One row in the tree-style provider list.
+#[derive(Debug, Clone)]
+pub enum ProviderRow {
+    /// Provider group header. `config_count` 0 = unconfigured, 1 = single
+    /// config (bare or labeled), 2+ = group that can be expanded.
+    Header { name: String, config_count: usize },
+    /// One labeled config under an expanded header.
+    Leaf { id: ProviderConfigId },
+}
+
+impl ProviderRow {
+    pub fn provider_name(&self) -> &str {
+        match self {
+            ProviderRow::Header { name, .. } => name,
+            ProviderRow::Leaf { id } => &id.provider,
+        }
+    }
 }
 
 impl ProviderState {
@@ -158,8 +229,11 @@ impl Default for ProviderState {
             batch_stale: 0,
             batch_total: 0,
             pending_delete: None,
+            pending_delete_id: None,
             sync_history: HashMap::new(),
             form_baseline: None,
+            expanded_providers: HashSet::new(),
+            pending_label_migration: None,
         }
     }
 }
@@ -174,6 +248,34 @@ impl ProviderState {
         }
     }
 
+    /// One row in the provider list, in display order.
+    /// Each provider is a `Header`. When the provider has 2+ labeled configs
+    /// AND is in `expanded_providers`, its `Leaf` rows follow immediately.
+    /// When the provider has 0 or 1 config, no leaves are emitted.
+    pub fn provider_list_rows(&self) -> Vec<ProviderRow> {
+        let mut rows = Vec::new();
+        for name in self.sorted_names() {
+            let configs = self.config.sections_for_provider(&name);
+            rows.push(ProviderRow::Header {
+                name: name.clone(),
+                config_count: configs.len(),
+            });
+            if configs.len() >= 2 && self.expanded_providers.contains(&name) {
+                let mut sorted = configs.clone();
+                sorted.sort_by(|a, b| {
+                    a.id.label
+                        .as_deref()
+                        .unwrap_or("")
+                        .cmp(b.id.label.as_deref().unwrap_or(""))
+                });
+                for s in sorted {
+                    rows.push(ProviderRow::Leaf { id: s.id.clone() });
+                }
+            }
+        }
+        rows
+    }
+
     /// Provider names sorted by last sync (most recent first), then configured,
     /// then unconfigured. Includes any unknown provider names found in the
     /// config file (e.g. typos or future providers).
@@ -185,15 +287,30 @@ impl ProviderState {
             .collect();
         // Append configured providers not in the known list so they are visible and removable
         for section in &self.config.sections {
-            if !names.contains(&section.provider) {
-                names.push(section.provider.clone());
+            let name = section.provider().to_string();
+            if !names.contains(&name) {
+                names.push(name);
             }
         }
+        // For multi-config providers the sync_history keys are the full id
+        // ("digitalocean:work"), not the bare name. Take the MAX timestamp
+        // across any history entry whose key matches this provider so the
+        // recency sort works for both single and multi-config layouts.
+        let max_ts = |provider: &str| -> u64 {
+            self.sync_history
+                .iter()
+                .filter(|(k, _)| {
+                    k.as_str() == provider || k.split_once(':').is_some_and(|(p, _)| p == provider)
+                })
+                .map(|(_, r)| r.timestamp)
+                .max()
+                .unwrap_or(0)
+        };
         names.sort_by(|a, b| {
             let conf_a = self.config.section(a.as_str()).is_some();
             let conf_b = self.config.section(b.as_str()).is_some();
-            let ts_a = self.sync_history.get(a.as_str()).map_or(0, |r| r.timestamp);
-            let ts_b = self.sync_history.get(b.as_str()).map_or(0, |r| r.timestamp);
+            let ts_a = max_ts(a.as_str());
+            let ts_b = max_ts(b.as_str());
             // Configured first (by most recent sync), then unconfigured alphabetically
             conf_b.cmp(&conf_a).then(ts_b.cmp(&ts_a)).then(a.cmp(b))
         });
@@ -227,13 +344,13 @@ mod tests {
 
         let mut state = ProviderState::default();
         state.config.sections.push(ProviderSection {
-            provider: "vultr".to_string(),
+            id: crate::providers::config::ProviderConfigId::bare("vultr"),
             token: "tok".to_string(),
             alias_prefix: "vultr".to_string(),
             ..ProviderSection::default()
         });
         state.config.sections.push(ProviderSection {
-            provider: "digitalocean".to_string(),
+            id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
             token: "tok".to_string(),
             alias_prefix: "do".to_string(),
             ..ProviderSection::default()
@@ -276,7 +393,7 @@ mod tests {
 
         let mut state = ProviderState::default();
         state.config.sections.push(ProviderSection {
-            provider: "someday_provider".to_string(),
+            id: crate::providers::config::ProviderConfigId::bare("someday_provider"),
             token: "tok".to_string(),
             alias_prefix: "x".to_string(),
             ..ProviderSection::default()

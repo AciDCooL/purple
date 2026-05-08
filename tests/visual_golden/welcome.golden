@@ -1,7 +1,7 @@
 ╭─────────────────────╭──────────────────────────────────────────────────────╮─────────────────────╮
 │  purple       hosts │                                                      │                     │
 ╰─────────────────────│                                                      │─────────────────────╯
-╭ 22 ── ●20 ✖2 ───────│                                                      │─────────────────────╮
+╭ 24 ── ●16 ✖2 ○6 ────│                                                      │─────────────────────╮
 │     NAME            │                              ╮                       │               LAST▾ │
 │─────────────────────│                 ╭─╮╷ ╷╭─ ╭─╮ │ ╭─╮                   │─────────────────────│
 │▌  ● bastion-ams     │                 │ ││ ││  │ │ │ ├─╯                   │                <1m  │
@@ -13,19 +13,19 @@
 │   ● aws-worker-eu   │            Your SSH config, supercharged.            │ aws             6h  │
 │   ● aws-batch-us    │                                                      │aws              7h  │
 │   ● aws-ml-eu       │                                                      │                 8h  │
-│   ● do-web-ams      │              Press  ?  anytime for help.             │gitalocean      10h  │
-│   ● do-staging-ams  │                                                      │alocean         11h  │
-│   ● do-worker-ams   │                                                      │an              12h  │
-│   ● do-ci-runner    │          22 hosts loaded from ~/.ssh/config.         │                13h  │
-│   ● pve-web-01      │                                                      │mox             14h  │
-│   ● pve-web-02      │        Your original config has been backed up       │mox             15h  │
-│   ● pve-db-01       │             to ~/.purple/config.original             │ proxmox        16h  │
-│   ● pve-db-02       │                                                      │ proxmox        17h  │
-│   ● pve-redis       │                    Enter  continue                   │oxmox           18h  │
-│   ● pve-mail        │                                                      │xmox            19h  │
-│   ● pve-monitor     │                                                      │al proxmox      20h  │
-│   ✖ aws-cache-eu    │                                                      │                 9h  │
-│   ✖ pve-backup      │                                                      │roxmox          21h  │
+│   ● pve-web-01      │              Press  ?  anytime for help.             │mox             14h  │
+│   ● pve-web-02      │                                                      │mox             15h  │
+│   ● pve-db-01       │                                                      │ proxmox        16h  │
+│   ● pve-db-02       │          22 hosts loaded from ~/.ssh/config.         │ proxmox        17h  │
+│   ● pve-redis       │                                                      │oxmox           18h  │
+│   ● pve-mail        │        Your original config has been backed up       │xmox            19h  │
+│   ● pve-monitor     │             to ~/.purple/config.original             │al proxmox      20h  │
+│   ○ do-work-web-ams │                                                      │gitalocean        -  │
+│   ○ do-work-staging-│                    Enter  continue                   │alocean           -  │
+│   ○ do-work-worker-a│                                                      │an                -  │
+│   ○ do-work-ci-runne│                                                      │                  -  │
+│   ○ do-personal-blog│                                                      │talocean          -  │
+│   ○ do-personal-mail│                                                      │italocean         -  │
 ╰─────────────────────│                                                      │─────── getpurple.sh ╯
  Enter  connect    /  ╰──────────────────────────────────────────────────────╯               ?  more
 ---STYLES---
@@ -1556,26 +1556,26 @@
 (99,25) fg=DarkGray bg=Reset mod=DIM
 (0,26) fg=DarkGray bg=Reset mod=DIM
 (1,26) fg=DarkGray bg=Reset mod=DIM
-(2,26) fg=DarkGray bg=Reset mod=DIM
-(3,26) fg=DarkGray bg=Reset mod=DIM
-(4,26) fg=DarkGray bg=Reset mod=BOLD|DIM
-(5,26) fg=DarkGray bg=Reset mod=BOLD|DIM
-(6,26) fg=DarkGray bg=Reset mod=DIM
-(7,26) fg=DarkGray bg=Reset mod=DIM
-(8,26) fg=DarkGray bg=Reset mod=DIM
-(9,26) fg=DarkGray bg=Reset mod=DIM
-(10,26) fg=DarkGray bg=Reset mod=DIM
-(11,26) fg=DarkGray bg=Reset mod=DIM
-(12,26) fg=DarkGray bg=Reset mod=DIM
-(13,26) fg=DarkGray bg=Reset mod=DIM
-(14,26) fg=DarkGray bg=Reset mod=DIM
-(15,26) fg=DarkGray bg=Reset mod=DIM
-(16,26) fg=DarkGray bg=Reset mod=DIM
-(17,26) fg=DarkGray bg=Reset mod=DIM
-(18,26) fg=DarkGray bg=Reset mod=DIM
-(19,26) fg=DarkGray bg=Reset mod=DIM
-(20,26) fg=DarkGray bg=Reset mod=DIM
-(21,26) fg=DarkGray bg=Reset mod=DIM
+(2,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(3,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(4,26) fg=DarkGray bg=Reset mod=DIM
+(5,26) fg=DarkGray bg=Reset mod=DIM
+(6,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(7,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(8,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(9,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(10,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(11,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(12,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(13,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(14,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(15,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(16,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(17,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(18,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(19,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(20,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(21,26) fg=DarkGray bg=Reset mod=BOLD|DIM
 (22,26) fg=Reset bg=Reset mod=DIM
 (77,26) fg=Reset bg=Reset mod=DIM
 (78,26) fg=DarkGray bg=Reset mod=DIM
@@ -1602,26 +1602,26 @@
 (99,26) fg=DarkGray bg=Reset mod=DIM
 (0,27) fg=DarkGray bg=Reset mod=DIM
 (1,27) fg=DarkGray bg=Reset mod=DIM
-(2,27) fg=DarkGray bg=Reset mod=DIM
-(3,27) fg=DarkGray bg=Reset mod=DIM
-(4,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(5,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(6,27) fg=DarkGray bg=Reset mod=DIM
-(7,27) fg=DarkGray bg=Reset mod=DIM
-(8,27) fg=DarkGray bg=Reset mod=DIM
-(9,27) fg=DarkGray bg=Reset mod=DIM
-(10,27) fg=DarkGray bg=Reset mod=DIM
-(11,27) fg=DarkGray bg=Reset mod=DIM
-(12,27) fg=DarkGray bg=Reset mod=DIM
-(13,27) fg=DarkGray bg=Reset mod=DIM
-(14,27) fg=DarkGray bg=Reset mod=DIM
-(15,27) fg=DarkGray bg=Reset mod=DIM
-(16,27) fg=DarkGray bg=Reset mod=DIM
-(17,27) fg=DarkGray bg=Reset mod=DIM
-(18,27) fg=DarkGray bg=Reset mod=DIM
-(19,27) fg=DarkGray bg=Reset mod=DIM
-(20,27) fg=DarkGray bg=Reset mod=DIM
-(21,27) fg=DarkGray bg=Reset mod=DIM
+(2,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(3,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(4,27) fg=DarkGray bg=Reset mod=DIM
+(5,27) fg=DarkGray bg=Reset mod=DIM
+(6,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(7,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(8,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(9,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(10,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(11,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(12,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(13,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(14,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(15,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(16,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(17,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(18,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(19,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(20,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(21,27) fg=DarkGray bg=Reset mod=BOLD|DIM
 (22,27) fg=Reset bg=Reset mod=DIM
 (77,27) fg=Reset bg=Reset mod=DIM
 (78,27) fg=DarkGray bg=Reset mod=DIM
