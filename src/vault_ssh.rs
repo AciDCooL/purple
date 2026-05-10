@@ -590,10 +590,21 @@ pub fn ensure_cert(
     let status = check_cert_validity(&check_path);
 
     if !needs_renewal(&status) {
-        info!("Vault SSH certificate cache hit for {}", alias);
+        info!(
+            "Vault SSH certificate cache hit: alias={} role={} path={}",
+            alias,
+            role,
+            check_path.display()
+        );
         return Ok(check_path);
     }
 
+    log::debug!(
+        "Vault SSH certificate cache miss: alias={} role={} status={:?} -> signing",
+        alias,
+        role,
+        status
+    );
     let result = sign_certificate(role, pubkey_path, alias, vault_addr)?;
     Ok(result.cert_path)
 }

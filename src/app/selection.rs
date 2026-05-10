@@ -597,7 +597,7 @@ impl App {
     /// (which clears `multi_select`).
     pub fn bulk_tag_apply(&mut self) -> Result<BulkTagApplyResult, String> {
         if self.forms.bulk_tag_editor.aliases.is_empty() {
-            return Err("No hosts selected.".to_string());
+            return Err(crate::messages::BULK_TAG_NO_HOSTS_SELECTED.to_string());
         }
         let aliases = self.forms.bulk_tag_editor.aliases.clone();
         let rows = self.forms.bulk_tag_editor.rows.clone();

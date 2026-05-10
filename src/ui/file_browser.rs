@@ -397,7 +397,7 @@ fn render_confirm_dialog(
     // Stakes test: scp transfer is a material action (network bytes, may
     // overwrite remote files). Action verbs make the choice clearer.
     let footer_area = design::render_overlay_footer(frame, dialog_area);
-    let footer_line = design::confirm_footer_destructive("copy", "cancel").to_line();
+    let footer_line = design::confirm_footer_destructive("copy", "skip").to_line();
     frame.render_widget(Paragraph::new(footer_line), footer_area);
 }
 

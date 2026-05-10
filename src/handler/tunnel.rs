@@ -151,7 +151,7 @@ pub(super) fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
             } else if !app.tunnels.list.is_empty() {
                 // Start
                 if app.demo_mode {
-                    app.notify(crate::messages::DEMO_TUNNELS_DISABLED);
+                    app.notify_warning(crate::messages::DEMO_TUNNELS_DISABLED);
                     return;
                 }
                 let askpass = app

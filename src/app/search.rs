@@ -78,6 +78,12 @@ impl App {
 
     /// Apply the current search query to filter hosts.
     pub fn apply_filter(&mut self) {
+        log::debug!(
+            "[purple] apply_filter: query={:?} down_only={} scope={}",
+            self.search.query.as_deref().unwrap_or(""),
+            self.ping.filter_down_only,
+            self.search.scope_indices.as_ref().map_or(0, |s| s.len())
+        );
         // Filtered index lists drive the search-mode render path which also
         // consumes the render cache; recompute fresh.
         self.hosts_state.render_cache.invalidate();

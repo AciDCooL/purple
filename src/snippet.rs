@@ -160,16 +160,16 @@ impl SnippetStore {
 /// no `#`, no `[`, no `]`, no control characters.
 pub fn validate_name(name: &str) -> Result<(), String> {
     if name.trim().is_empty() {
-        return Err("Snippet name cannot be empty.".to_string());
+        return Err(crate::messages::SNIPPET_NAME_EMPTY.to_string());
     }
     if name != name.trim() {
-        return Err("Snippet name cannot have leading or trailing whitespace.".to_string());
+        return Err(crate::messages::SNIPPET_NAME_WHITESPACE.to_string());
     }
     if name.contains('#') || name.contains('[') || name.contains(']') {
-        return Err("Snippet name cannot contain #, [ or ].".to_string());
+        return Err(crate::messages::SNIPPET_NAME_INVALID_CHARS.to_string());
     }
     if name.contains(|c: char| c.is_control()) {
-        return Err("Snippet name cannot contain control characters.".to_string());
+        return Err(crate::messages::SNIPPET_NAME_CONTROL_CHARS.to_string());
     }
     Ok(())
 }
@@ -177,10 +177,10 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 /// Validate a snippet command: non-empty, no control characters (except tab).
 pub fn validate_command(command: &str) -> Result<(), String> {
     if command.trim().is_empty() {
-        return Err("Command cannot be empty.".to_string());
+        return Err(crate::messages::SNIPPET_COMMAND_EMPTY.to_string());
     }
     if command.contains(|c: char| c.is_control() && c != '\t') {
-        return Err("Command cannot contain control characters.".to_string());
+        return Err(crate::messages::SNIPPET_COMMAND_CONTROL_CHARS.to_string());
     }
     Ok(())
 }

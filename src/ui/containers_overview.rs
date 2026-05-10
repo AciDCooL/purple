@@ -526,10 +526,10 @@ fn state_glyph(
         "dead" => (design::ICON_ERROR, theme::error()),
         "exited" => match parse_exit_code_from_status(status) {
             Some(code) if code != 0 => (design::ICON_ERROR, theme::warning()),
-            _ => ("\u{25CB}", theme::muted()),
+            _ => (design::ICON_STOPPED, theme::muted()),
         },
-        "paused" | "restarting" => ("\u{25D0}", theme::warning()),
-        _ => ("\u{25CB}", theme::muted()),
+        "paused" | "restarting" => (design::ICON_PAUSED, theme::warning()),
+        _ => (design::ICON_STOPPED, theme::muted()),
     }
 }
 
@@ -1323,22 +1323,34 @@ fn push_state_dots(
         ),
         theme::muted(),
     ));
-    spans.push(Span::styled("\u{25CF} ", theme::online_dot()));
+    spans.push(Span::styled(
+        format!("{} ", design::ICON_ONLINE),
+        theme::online_dot(),
+    ));
     spans.push(Span::styled(
         format!("{} running  ", running),
         theme::bold(),
     ));
-    spans.push(Span::styled("\u{25CB} ", theme::muted()));
+    spans.push(Span::styled(
+        format!("{} ", design::ICON_STOPPED),
+        theme::muted(),
+    ));
     spans.push(Span::styled(format!("{} exited  ", exited), theme::bold()));
     if dead > 0 {
-        spans.push(Span::styled("\u{2717} ", theme::error()));
+        spans.push(Span::styled(
+            format!("{} ", design::ICON_ERROR),
+            theme::error(),
+        ));
         spans.push(Span::styled(format!("{} dead", dead), theme::error()));
     }
     if paused > 0 {
         if dead > 0 {
             spans.push(Span::raw("  "));
         }
-        spans.push(Span::styled("\u{25D0} ", theme::warning()));
+        spans.push(Span::styled(
+            format!("{} ", design::ICON_PAUSED),
+            theme::warning(),
+        ));
         spans.push(Span::styled(format!("{} paused", paused), theme::warning()));
     }
     design::section_line(lines, spans, box_width);
@@ -1361,18 +1373,18 @@ fn push_ping_field(
     );
     let value_spans: Vec<Span<'static>> = match app.ping.status.get(alias) {
         Some(crate::app::PingStatus::Reachable { rtt_ms }) => vec![
-            Span::styled("\u{25CF} ", theme::online_dot()),
+            Span::styled(format!("{} ", design::ICON_ONLINE), theme::online_dot()),
             Span::styled(host_list::format_rtt(*rtt_ms), theme::online_dot()),
         ],
         Some(crate::app::PingStatus::Slow { rtt_ms }) => vec![
-            Span::styled("\u{25CB} ", theme::warning()),
+            Span::styled(format!("{} ", design::ICON_STOPPED), theme::warning()),
             Span::styled(
                 format!("slow {}", host_list::format_rtt(*rtt_ms)),
                 theme::warning(),
             ),
         ],
         Some(crate::app::PingStatus::Unreachable) => vec![
-            Span::styled("\u{2717} ", theme::error()),
+            Span::styled(format!("{} ", design::ICON_ERROR), theme::error()),
             Span::styled("unreachable", theme::error()),
         ],
         Some(crate::app::PingStatus::Checking) => {
@@ -1551,9 +1563,9 @@ fn build_detail_lines(
     );
 
     let (glyph, glyph_style) = if running {
-        ("\u{25CF}", theme::online_dot_pulsing(spinner_tick))
+        (design::ICON_ONLINE, theme::online_dot_pulsing(spinner_tick))
     } else {
-        ("\u{25CB}", theme::muted())
+        (design::ICON_STOPPED, theme::muted())
     };
     let state_text = if running {
         row.status.clone()
@@ -2034,7 +2046,7 @@ fn build_detail_lines(
             design::section_line(
                 &mut lines,
                 vec![
-                    Span::styled("  \u{25CB} ", theme::muted()),
+                    Span::styled(format!("  {} ", design::ICON_STOPPED), theme::muted()),
                     Span::styled("host", theme::muted()),
                 ],
                 box_width,
@@ -2059,7 +2071,7 @@ fn build_detail_lines(
                     design::section_line(
                         &mut lines,
                         vec![
-                            Span::styled("  \u{25CF} ", theme::muted()),
+                            Span::styled(format!("  {} ", design::ICON_ONLINE), theme::muted()),
                             Span::styled(net_label, theme::bold()),
                         ],
                         box_width,
@@ -2651,13 +2663,13 @@ mod tests {
     #[test]
     fn state_glyph_exited_with_zero_code_uses_hollow_circle() {
         let (glyph, _) = state_glyph("exited", None, "Exited (0) 1m ago", 0);
-        assert_eq!(glyph, "\u{25CB}");
+        assert_eq!(glyph, design::ICON_STOPPED);
     }
 
     #[test]
     fn state_glyph_paused_uses_half_circle() {
         let (glyph, _) = state_glyph("paused", None, "Paused", 0);
-        assert_eq!(glyph, "\u{25D0}");
+        assert_eq!(glyph, design::ICON_PAUSED);
     }
 
     #[test]

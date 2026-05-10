@@ -13,9 +13,7 @@ pub const DESCRIPTION_CONTROL_CHARS: &str = "Description contains control charac
 
 pub use super::contains_control_chars as control_chars;
 
-pub fn welcome(alias: &str) -> String {
-    format!("Welcome aboard, {}!", alias)
-}
+pub use super::welcome_aboard as welcome;
 
 // ── Import ──────────────────────────────────────────────────────
 

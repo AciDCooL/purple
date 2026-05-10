@@ -176,7 +176,7 @@ pub(super) fn handle_provider_list(
         }
         KeyCode::Char('s') => {
             if app.demo_mode {
-                app.notify(crate::messages::DEMO_SYNC_DISABLED);
+                app.notify_warning(crate::messages::DEMO_SYNC_DISABLED);
                 return;
             }
             let row = match app
@@ -812,7 +812,7 @@ pub(super) fn handle_provider_form(
 
 fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_PROVIDER_CHANGES_DISABLED);
+        app.notify_warning(crate::messages::DEMO_PROVIDER_CHANGES_DISABLED);
         app.set_screen(Screen::Providers);
         return;
     }

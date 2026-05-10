@@ -1056,6 +1056,10 @@ impl App {
                 .iter()
                 .any(|(path, old_mtime)| reload_state::get_mtime(path) != *old_mtime);
         if changed {
+            log::debug!(
+                "[config] check_config_changed: mtime drift detected on {} -> reloading",
+                self.reload.config_path.display()
+            );
             if let Ok(new_config) = SshConfigFile::parse(&self.reload.config_path) {
                 let before_aliases = self.snapshot_alias_set();
                 self.hosts_state.ssh_config = new_config;

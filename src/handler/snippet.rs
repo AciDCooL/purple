@@ -160,7 +160,7 @@ fn run_or_prompt_params(
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_EXECUTION_DISABLED);
+        app.notify_warning(crate::messages::DEMO_EXECUTION_DISABLED);
         return;
     }
     let params = crate::snippet::parse_params(&snippet.command);

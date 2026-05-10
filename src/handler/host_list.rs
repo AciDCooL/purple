@@ -111,7 +111,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                     app.notify_warning(crate::messages::stale_host(&hint));
                 }
                 if app.demo_mode {
-                    app.notify(crate::messages::DEMO_CONNECTION_DISABLED);
+                    app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
                     return;
                 }
                 app.pending_connect = Some((alias, askpass));
@@ -728,7 +728,7 @@ pub(super) fn handle_host_list_search(
                     app.notify_warning(crate::messages::stale_host(&hint));
                 }
                 if app.demo_mode {
-                    app.notify(crate::messages::DEMO_CONNECTION_DISABLED);
+                    app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
                     return;
                 }
                 app.pending_connect = Some((alias, askpass));

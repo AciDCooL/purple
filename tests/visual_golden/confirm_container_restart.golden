@@ -18,7 +18,7 @@
 │   ● postgres      │                                                          │                   │
 │   ● prometheus    │                                                          │                   │
 │   ● redis         ╰──────────────────────────────────────────────────────────╯                   │
-│  ── db-primary ─── y  restart    n/Esc  cancel                                ─────────────────  │
+│  ── db-primary ─── y  restart    n/Esc  keep                                  ─────────────────  │
 │   ● pg-exporter         prometheuscommunity/postgres-exporter:0.15         30d                   │
 │   ● pgbouncer           pgbouncer:1.21                                     30d                   │
 │   ● postgres-primary    postgres:16-alpine                                 30d                   │
@@ -1722,8 +1722,6 @@
 (43,20) fg=Reset bg=Reset mod=DIM
 (44,20) fg=Reset bg=Reset mod=DIM
 (45,20) fg=Reset bg=Reset mod=DIM
-(46,20) fg=Reset bg=Reset mod=DIM
-(47,20) fg=Reset bg=Reset mod=DIM
 (80,20) fg=DarkGray bg=Reset mod=DIM
 (81,20) fg=DarkGray bg=Reset mod=DIM
 (82,20) fg=DarkGray bg=Reset mod=DIM

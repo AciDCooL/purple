@@ -134,6 +134,13 @@ pub const ICON_WARNING: &str = "\u{26A0}";
 /// warning sign so the user can tell at a glance whether something is
 /// recoverable (warning) or has gone wrong (error).
 pub const ICON_ERROR: &str = "\u{2716}";
+/// Paused / restarting container glyph (U+25D0, left half-filled circle).
+/// Used for transitional states where the container is neither cleanly
+/// running nor cleanly stopped.
+pub const ICON_PAUSED: &str = "\u{25D0}";
+/// Stopped / inactive container glyph (U+25CB, empty circle). Used for
+/// "exited cleanly" and for unknown / not-yet-seen states.
+pub const ICON_STOPPED: &str = "\u{25CB}";
 
 // ---------------------------------------------------------------------------
 // List rendering tokens

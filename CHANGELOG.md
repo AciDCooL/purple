@@ -1,3 +1,14 @@
+## 3.10.0 - 2026-05-10
+
+- feat: Smoother prompts, sharper logs, easier troubleshooting.
+- feat: Container confirms use action verbs both sides ("restart"/"keep", "stop"/"keep") so the choice is unambiguous before you press y or n.
+- feat: Container restart and stop land as a green success toast, just like every other user-initiated action.
+- feat: Demo-mode hints render as yellow warnings, so a blocked action looks blocked.
+- feat: `purple --verbose` records every state change. Preferences saves, CLI flow, SSH config writes, form submits, filter and sort, vault thread and config reload all show up in `~/.purple/purple.log`.
+- feat: A complete Troubleshooting wiki page documents every fault domain, every log string and every recovery step.
+- change: Every prompt now reads in purple's voice, including form validation and stale-host warnings.
+- change: Pre-commit gates catch footer-keycap drift and generic confirm verbs ("yes"/"no"/"cancel") before they ship.
+
 ## 3.9.0 - 2026-05-10
 
 - feat: Manage every container in your fleet from one tab.

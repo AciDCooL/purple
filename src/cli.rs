@@ -21,6 +21,12 @@ pub(super) fn handle_quick_add(
     alias: Option<&str>,
     key: Option<&str>,
 ) -> Result<()> {
+    log::info!(
+        "[purple] cli add: target={} alias={:?} key={:?}",
+        target,
+        alias,
+        key
+    );
     let parsed = quick_add::parse_target(target).map_err(|e| anyhow::anyhow!(e))?;
 
     let alias_str = alias.map(|a| a.to_string()).unwrap_or_else(|| {
@@ -84,7 +90,9 @@ pub(super) fn handle_quick_add(
     };
 
     config.add_host(&entry);
+    log::debug!("[config] cli add: writing ssh config (alias={})", alias_str);
     config.write()?;
+    log::info!("[purple] cli add: host added alias={}", alias_str);
     println!("{}", crate::messages::cli::welcome(&alias_str));
     Ok(())
 }
@@ -95,6 +103,15 @@ pub(super) fn handle_import(
     known_hosts: bool,
     group: Option<&str>,
 ) -> Result<()> {
+    log::info!(
+        "[purple] cli import: source={} group={:?}",
+        if known_hosts {
+            "known_hosts".to_string()
+        } else {
+            file.unwrap_or("(missing)").to_string()
+        },
+        group
+    );
     let result = if known_hosts {
         import::import_from_known_hosts(&mut config, group)
     } else if let Some(path) = file {
@@ -108,8 +125,19 @@ pub(super) fn handle_import(
     match result {
         Ok((imported, skipped, parse_failures, read_errors)) => {
             if imported > 0 {
+                log::debug!(
+                    "[config] cli import: writing ssh config ({} new hosts)",
+                    imported
+                );
                 config.write()?;
             }
+            log::info!(
+                "[purple] cli import: imported={} skipped={} parse_failures={} read_errors={}",
+                imported,
+                skipped,
+                parse_failures,
+                read_errors
+            );
             println!("{}", crate::messages::imported_hosts(imported, skipped));
             if parse_failures > 0 {
                 eprintln!(
@@ -135,6 +163,12 @@ pub(super) fn handle_sync(
     dry_run: bool,
     remove: bool,
 ) -> Result<()> {
+    log::info!(
+        "[purple] cli sync: provider={:?} dry_run={} remove={}",
+        provider_name,
+        dry_run,
+        remove
+    );
     let provider_config = providers::config::ProviderConfig::load();
     // The positional argument accepts either a bare provider name (sync ALL
     // configs of that provider) or a labeled identifier `provider:label`
@@ -177,6 +211,10 @@ pub(super) fn handle_sync(
         let provider = match providers::get_provider_with_config(section.provider(), section) {
             Some(p) => p,
             None => {
+                log::warn!(
+                    "[config] cli sync: skipping unknown provider '{}'",
+                    section.provider()
+                );
                 eprintln!(
                     "{}",
                     crate::messages::cli::skipping_unknown_provider(section.provider())
@@ -188,6 +226,11 @@ pub(super) fn handle_sync(
             }
         };
         let display_name = providers::provider_display_name(section.provider());
+        log::debug!(
+            "[external] cli sync: starting provider={} label={:?}",
+            section.provider(),
+            section.id.label
+        );
         let is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
         print!("{}", crate::messages::cli::syncing_start(display_name));
         let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -282,20 +325,26 @@ pub(super) fn handle_sync(
 
     if any_changes && !dry_run {
         if any_hard_failures {
+            log::warn!("[config] cli sync: skipping ssh config write due to hard failures");
             eprintln!("{}", crate::messages::cli::SYNC_SKIP_WRITE);
         } else {
+            log::debug!("[config] cli sync: writing ssh config");
             config.write()?;
+            log::info!("[purple] cli sync: ssh config written");
         }
     }
 
     if any_failures {
+        log::warn!("[purple] cli sync: completed with failures (exit 1)");
         std::process::exit(1);
     }
 
+    log::info!("[purple] cli sync: completed successfully");
     Ok(())
 }
 
 pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
+    log::info!("[purple] cli provider: dispatch");
     match command {
         ProviderCommands::Add {
             provider,
@@ -691,6 +740,7 @@ pub(super) fn handle_tunnel_command(
     mut config: SshConfigFile,
     command: TunnelCommands,
 ) -> Result<()> {
+    log::info!("[purple] cli tunnel: dispatch");
     match command {
         TunnelCommands::List { alias } => {
             if let Some(alias) = alias {
@@ -749,10 +799,20 @@ pub(super) fn handle_tunnel_command(
                 std::process::exit(1);
             }
             config.add_forward(&alias, key, &value);
+            log::debug!(
+                "[config] cli tunnel add: writing ssh config (alias={})",
+                alias
+            );
             if let Err(e) = config.write() {
+                log::warn!("[config] cli tunnel add: write failed: {}", e);
                 eprintln!("{}", crate::messages::cli::save_config_failed(&e));
                 std::process::exit(1);
             }
+            log::info!(
+                "[purple] cli tunnel add: forward={} alias={}",
+                forward,
+                alias
+            );
             println!("{}", crate::messages::cli::added_forward(&forward, &alias));
             Ok(())
         }
@@ -779,10 +839,20 @@ pub(super) fn handle_tunnel_command(
                 );
                 std::process::exit(1);
             }
+            log::debug!(
+                "[config] cli tunnel remove: writing ssh config (alias={})",
+                alias
+            );
             if let Err(e) = config.write() {
+                log::warn!("[config] cli tunnel remove: write failed: {}", e);
                 eprintln!("{}", crate::messages::cli::save_config_failed(&e));
                 std::process::exit(1);
             }
+            log::info!(
+                "[purple] cli tunnel remove: forward={} alias={}",
+                forward,
+                alias
+            );
             println!(
                 "{}",
                 crate::messages::cli::removed_forward(&forward, &alias)
@@ -790,12 +860,14 @@ pub(super) fn handle_tunnel_command(
             Ok(())
         }
         TunnelCommands::Start { alias } => {
+            log::info!("[purple] cli tunnel start: alias={}", alias);
             if !config.has_host(&alias) {
                 eprintln!("{}", crate::messages::cli::host_not_found(&alias));
                 std::process::exit(1);
             }
             let tunnels = config.find_tunnel_directives(&alias);
             if tunnels.is_empty() {
+                log::warn!("[purple] cli tunnel start: no forwards for alias={}", alias);
                 eprintln!("{}", crate::messages::cli::no_forwards(&alias));
                 std::process::exit(1);
             }
@@ -851,6 +923,7 @@ pub(super) fn prompt_hidden_input(prompt: &str) -> Result<Option<String>> {
 /// mtime alongside its status, enabling mtime-based lazy invalidation when
 /// an external actor (CLI, another purple instance) rewrites the cert.
 pub(super) fn handle_password_command(command: PasswordCommands) -> Result<()> {
+    log::info!("[purple] cli password: dispatch");
     match command {
         PasswordCommands::Set { alias } => {
             let password =
@@ -886,6 +959,7 @@ pub(super) fn handle_snippet_command(
     command: SnippetCommands,
     config_path: &Path,
 ) -> Result<()> {
+    log::info!("[purple] cli snippet: dispatch");
     match command {
         SnippetCommands::List => {
             let store = snippet::SnippetStore::load();
@@ -1164,6 +1238,7 @@ pub(super) fn handle_logs_command(tail: bool, clear: bool) -> Result<()> {
 }
 
 pub(super) fn handle_theme_command(command: ThemeCommands) -> Result<()> {
+    log::info!("[purple] cli theme: dispatch");
     match command {
         ThemeCommands::List => {
             let current = preferences::load_theme().unwrap_or_else(|| "Purple".to_string());
@@ -1215,6 +1290,12 @@ pub(super) fn handle_vault_sign_command(
     all: bool,
     cli_vault_addr: Option<String>,
 ) -> Result<()> {
+    log::info!(
+        "[purple] cli vault sign: alias={:?} all={} vault_addr={:?}",
+        alias,
+        all,
+        cli_vault_addr
+    );
     if let Some(ref addr) = cli_vault_addr {
         if !vault_ssh::is_valid_vault_addr(addr) {
             anyhow::bail!(

@@ -91,11 +91,14 @@ impl StatusCenter {
             self.push_toast(msg);
             return;
         }
+        let text = text.into();
         if self.status.as_ref().is_some_and(|s| s.sticky) {
-            log::debug!("background status suppressed (sticky active)");
+            log::debug!(
+                "[purple] background status suppressed (sticky active, dropped: {})",
+                text
+            );
             return;
         }
-        let text = text.into();
         log::debug!("footer <- Info: {}", text);
         self.status = Some(StatusMessage {
             text,

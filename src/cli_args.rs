@@ -46,7 +46,14 @@ pub struct Cli {
     pub theme: Option<String>,
 
     /// Enable verbose logging (debug level)
-    #[arg(long)]
+    #[arg(
+        long,
+        long_help = "Enable verbose logging (debug level).\n\n\
+                     Logs are written to ~/.purple/purple.log (rotates at 5MB).\n\
+                     Tail with `purple logs --tail` or open the file directly.\n\n\
+                     Set PURPLE_LOG=trace|debug|info|warn|error to override the\n\
+                     level without --verbose. PURPLE_LOG takes precedence."
+    )]
     pub verbose: bool,
 
     #[command(subcommand)]

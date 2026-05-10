@@ -15,14 +15,27 @@ impl SshConfigFile {
     /// purple processes or background sync threads.
     pub fn write(&self) -> Result<()> {
         if crate::demo_flag::is_demo() {
+            debug!("[purple] ssh_config.write skipped (demo mode)");
             return Ok(());
         }
         // Resolve symlinks so we write through to the real file
         let target_path = fs::canonicalize(&self.path).unwrap_or_else(|_| self.path.clone());
+        debug!(
+            "[config] ssh_config.write: target={} elements={}",
+            target_path.display(),
+            self.elements.len()
+        );
 
         // Acquire advisory lock (blocks until available)
-        let _lock =
-            fs_util::FileLock::acquire(&target_path).context("Failed to acquire config lock")?;
+        let _lock = fs_util::FileLock::acquire(&target_path)
+            .inspect_err(|e| {
+                debug!(
+                    "[config] ssh_config.write: lock acquire failed: {} ({})",
+                    target_path.display(),
+                    e
+                );
+            })
+            .context("Failed to acquire config lock")?;
 
         // Create backup if the file exists, keep only last 5
         if self.path.exists() {
@@ -42,6 +55,12 @@ impl SshConfigFile {
                 err
             })
             .with_context(|| format!("Failed to write SSH config to {}", target_path.display()))?;
+
+        debug!(
+            "[config] ssh_config.write: wrote {} bytes to {}",
+            content.len(),
+            target_path.display()
+        );
 
         // Lock released on drop
         Ok(())

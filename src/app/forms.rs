@@ -401,30 +401,24 @@ impl HostForm {
         let alias = self.alias.trim();
         if alias.is_empty() {
             return Err(if self.is_pattern {
-                "Pattern can't be empty.".to_string()
+                crate::messages::HOST_PATTERN_EMPTY.to_string()
             } else {
-                "Alias can't be empty. Every host needs a name!".to_string()
+                crate::messages::HOST_ALIAS_EMPTY.to_string()
             });
         }
         if self.is_pattern && !crate::ssh_config::model::is_host_pattern(alias) {
-            return Err("Pattern needs a wildcard (*, ?, [) or multiple hosts.".to_string());
+            return Err(crate::messages::HOST_PATTERN_NEEDS_WILDCARD.to_string());
         } else if !self.is_pattern {
             if alias.contains(char::is_whitespace) {
-                return Err("Alias can't contain whitespace. Keep it simple.".to_string());
+                return Err(crate::messages::HOST_ALIAS_WHITESPACE.to_string());
             }
             if alias.contains('#') {
-                return Err(
-                    "Alias can't contain '#'. That's a comment character in SSH config."
-                        .to_string(),
-                );
+                return Err(crate::messages::HOST_ALIAS_HASH.to_string());
             }
             // Catches *, ?, [, ! — whitespace overlap with the check above is intentional
             // (user gets the more specific whitespace message first)
             if crate::ssh_config::model::is_host_pattern(alias) {
-                return Err(
-                    "Alias can't contain pattern characters. That creates a match pattern, not a host."
-                        .to_string(),
-                );
+                return Err(crate::messages::HOST_ALIAS_PATTERN_CHARS.to_string());
             }
         }
         // Reject control characters in all fields
@@ -445,35 +439,28 @@ impl HostForm {
         ];
         for (value, name) in &fields {
             if value.chars().any(|c| c.is_control()) {
-                return Err(format!(
-                    "{} contains control characters. That's not going to work.",
-                    name
-                ));
+                return Err(crate::messages::field_control_chars(name));
             }
         }
         if !self.is_pattern && self.hostname.trim().is_empty() {
-            return Err("Hostname can't be empty. Where should we connect to?".to_string());
+            return Err(crate::messages::HOST_HOSTNAME_EMPTY.to_string());
         }
         if self.hostname.trim().contains(char::is_whitespace) {
-            return Err("Hostname can't contain whitespace.".to_string());
+            return Err(crate::messages::HOST_HOSTNAME_WHITESPACE.to_string());
         }
         if self.user.trim().contains(char::is_whitespace) {
-            return Err("User can't contain whitespace.".to_string());
+            return Err(crate::messages::USER_NO_WHITESPACE.to_string());
         }
         let port: u16 = self
             .port
             .parse()
-            .map_err(|_| "That's not a port number. Ports are 1-65535, not poetry.".to_string())?;
+            .map_err(|_| crate::messages::HOST_PORT_INVALID.to_string())?;
         if port == 0 {
-            return Err("Port 0? Bold choice, but no. Try 1-65535.".to_string());
+            return Err(crate::messages::HOST_PORT_ZERO.to_string());
         }
         let vault_role = self.vault_ssh.trim();
         if !vault_role.is_empty() && !crate::vault_ssh::is_valid_role(vault_role) {
-            return Err(
-                "Vault SSH role: only letters, digits, /, _ and - are allowed \
-                 (e.g. ssh-client-signer/sign/my-role)."
-                    .to_string(),
-            );
+            return Err(crate::messages::HOST_VAULT_ROLE_INVALID.to_string());
         }
         // vault_addr is only meaningful when a vault role is set. If the
         // user typed an address but then cleared the role we treat it as
@@ -482,9 +469,7 @@ impl HostForm {
         if !vault_role.is_empty() {
             let addr = self.vault_addr.trim();
             if !addr.is_empty() && !crate::vault_ssh::is_valid_vault_addr(addr) {
-                return Err("Vault SSH address: must be a non-empty URL without spaces \
-                     or control characters (e.g. http://127.0.0.1:8200)."
-                    .to_string());
+                return Err(crate::messages::HOST_VAULT_ADDR_INVALID.to_string());
             }
         }
         Ok(())
@@ -1017,30 +1002,30 @@ impl TunnelForm {
         ];
         for (value, name) in &fields {
             if value.chars().any(|c| c.is_control()) {
-                return Err(format!("{} contains control characters.", name));
+                return Err(crate::messages::field_control_chars_short(name));
             }
         }
         let port: u16 = self
             .bind_port
             .parse()
-            .map_err(|_| "Bind port must be 1-65535.".to_string())?;
+            .map_err(|_| crate::messages::TUNNEL_BIND_PORT_INVALID.to_string())?;
         if port == 0 {
-            return Err("Bind port can't be 0.".to_string());
+            return Err(crate::messages::TUNNEL_BIND_PORT_ZERO.to_string());
         }
         if self.tunnel_type != TunnelType::Dynamic {
             let host = self.remote_host.trim();
             if host.is_empty() {
-                return Err("Remote host can't be empty.".to_string());
+                return Err(crate::messages::TUNNEL_REMOTE_HOST_EMPTY.to_string());
             }
             if host.contains(char::is_whitespace) {
-                return Err("Remote host can't contain spaces.".to_string());
+                return Err(crate::messages::TUNNEL_REMOTE_HOST_SPACES.to_string());
             }
             let rport: u16 = self
                 .remote_port
                 .parse()
-                .map_err(|_| "Remote port must be 1-65535.".to_string())?;
+                .map_err(|_| crate::messages::TUNNEL_REMOTE_PORT_INVALID.to_string())?;
             if rport == 0 {
-                return Err("Remote port can't be 0.".to_string());
+                return Err(crate::messages::TUNNEL_REMOTE_PORT_ZERO.to_string());
             }
         }
         Ok(())
@@ -1218,7 +1203,7 @@ impl SnippetForm {
         crate::snippet::validate_name(&self.name)?;
         crate::snippet::validate_command(&self.command)?;
         if self.description.contains(|c: char| c.is_control()) {
-            return Err("Description contains control characters.".to_string());
+            return Err(crate::messages::SNIPPET_DESCRIPTION_CONTROL_CHARS.to_string());
         }
         Ok(())
     }

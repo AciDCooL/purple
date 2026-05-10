@@ -279,12 +279,14 @@ fn start_vault_bulk_sign(
         });
     match spawn_result {
         Ok(handle) => {
+            log::info!("[purple] vault sign thread: spawned");
             app.vault.sign_thread = Some(handle);
         }
         Err(e) => {
             // Spawn failed (e.g. OS thread limit). Clear the cancel flag and
             // surface the error. otherwise the status bar is stuck at
             // "Signing 0/N" with no way for the user to recover.
+            log::warn!("[purple] vault sign thread: spawn failed: {}", e);
             app.vault.signing_cancel = None;
             app.vault.sign_thread = None;
             app.notify_error(crate::messages::vault_spawn_failed(&e));
@@ -334,7 +336,7 @@ pub(super) fn handle_confirm_host_key_reset(app: &mut App, key: KeyEvent) {
                     Ok(result) if result.status.success() => {
                         app.notify(crate::messages::removed_host_key(&hostname));
                         if app.demo_mode {
-                            app.notify(crate::messages::DEMO_CONNECTION_DISABLED);
+                            app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
                         } else {
                             app.pending_connect = Some((alias, askpass));
                         }

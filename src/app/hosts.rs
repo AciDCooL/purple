@@ -17,9 +17,9 @@ impl App {
         };
         if duplicate {
             return Err(if self.forms.host.is_pattern {
-                format!("Pattern '{}' already exists.", alias)
+                crate::messages::pattern_already_exists(&alias)
             } else {
-                format!("'{}' already exists. Aliases must be unique.", alias)
+                crate::messages::host_alias_already_exists(&alias)
             });
         }
         let len_before = self.hosts_state.ssh_config.elements.len();
@@ -53,7 +53,7 @@ impl App {
             // user-set custom path.
             if crate::should_write_certificate_file(&entry.certificate_file) {
                 let cert_path = crate::vault_ssh::cert_path_for(&alias)
-                    .map_err(|e| format!("Failed to resolve cert path: {}", e))?;
+                    .map_err(|e| crate::messages::cert_path_resolve_failed(&e))?;
                 // The host block was just upserted above, so the alias MUST
                 // exist. Assert the invariant to catch regressions early.
                 let wired = self
@@ -69,7 +69,7 @@ impl App {
         }
         if let Err(e) = self.hosts_state.ssh_config.write() {
             self.hosts_state.ssh_config.elements.truncate(len_before);
-            return Err(format!("Failed to save: {}", e));
+            return Err(crate::messages::failed_to_save(&e));
         }
         // Form submit writes the full config including any pending vault mutations
         self.pending_vault_config_write = false;
@@ -80,7 +80,7 @@ impl App {
         // immediately. No-op when the new host has no vault role or when
         // running in demo mode.
         self.refresh_cert_cache(&alias);
-        Ok(format!("Welcome aboard, {}!", alias))
+        Ok(crate::messages::welcome_aboard(&alias))
     }
 
     /// Edit an existing host from the current form. Returns status message.
@@ -94,9 +94,9 @@ impl App {
         };
         if !exists {
             return Err(if self.forms.host.is_pattern {
-                "Pattern no longer exists.".to_string()
+                crate::messages::PATTERN_NO_LONGER_EXISTS.to_string()
             } else {
-                "Host no longer exists.".to_string()
+                crate::messages::HOST_NO_LONGER_EXISTS.to_string()
             });
         }
         let duplicate = if self.forms.host.is_pattern {
@@ -106,9 +106,9 @@ impl App {
         };
         if duplicate {
             return Err(if self.forms.host.is_pattern {
-                format!("Pattern '{}' already exists.", alias)
+                crate::messages::pattern_already_exists(&alias)
             } else {
-                format!("'{}' already exists. Aliases must be unique.", alias)
+                crate::messages::host_alias_already_exists(&alias)
             });
         }
         let old_entry = if self.forms.host.is_pattern {
@@ -170,7 +170,7 @@ impl App {
         if entry.vault_ssh.is_some() {
             if crate::should_write_certificate_file(&old_entry.certificate_file) {
                 let cert_path = crate::vault_ssh::cert_path_for(&entry.alias)
-                    .map_err(|e| format!("Failed to resolve cert path: {}", e))?;
+                    .map_err(|e| crate::messages::cert_path_resolve_failed(&e))?;
                 // Synchronous mutation: the host block was just updated, so
                 // the alias MUST exist. Assert the invariant.
                 let wired = self
@@ -237,7 +237,7 @@ impl App {
                     .ssh_config
                     .set_host_certificate_file(&old_entry.alias, "");
             }
-            return Err(format!("Failed to save: {}", e));
+            return Err(crate::messages::failed_to_save(&e));
         }
         // Form submit writes the full config including any pending vault mutations
         self.pending_vault_config_write = false;

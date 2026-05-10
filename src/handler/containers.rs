@@ -197,7 +197,7 @@ pub(super) fn handle_containers(
         KeyCode::Char('R') => {
             // Refresh container list
             if app.demo_mode {
-                app.notify(crate::messages::DEMO_CONTAINER_REFRESH_DISABLED);
+                app.notify_warning(crate::messages::DEMO_CONTAINER_REFRESH_DISABLED);
                 return Ok(());
             }
             if let Some(ref mut state) = app.container_state {
@@ -257,7 +257,7 @@ fn container_action(
         return;
     }
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
         return;
     }
     let Some(runtime) = state.runtime else {

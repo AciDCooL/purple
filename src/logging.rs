@@ -136,6 +136,17 @@ pub struct BannerInfo<'a> {
     pub term: &'a str,
     pub colorterm: &'a str,
     pub level: &'a str,
+    /// Theme currently in effect (loaded from preferences or `--theme`).
+    pub theme: &'a str,
+    /// Total number of host entries parsed from the SSH config.
+    pub hosts: usize,
+    /// Total number of patterns (wildcard / multi-alias `Host` lines).
+    pub patterns: usize,
+    /// Total number of snippets loaded from the snippet store.
+    pub snippets: usize,
+    /// Comma-separated list of env vars that affect proxy behaviour (HTTP_PROXY,
+    /// HTTPS_PROXY, NO_PROXY) when any are set. `"none"` when none are present.
+    pub proxy_env: &'a str,
 }
 
 /// Write startup banner directly to log file, bypassing level filters.
@@ -169,9 +180,21 @@ pub fn write_banner(info: &BannerInfo<'_>) {
          \x20   os={os} arch={arch} config={}\n\
          \x20   ssh={}\n\
          \x20   term={} colorterm={}\n\
+         \x20   theme={}\n\
+         \x20   hosts={} patterns={} snippets={}\n\
          \x20   providers={providers_joined}\n\
-         \x20   askpass={askpass_joined}\n",
-        info.version, info.config_path, info.ssh_version, info.term, info.colorterm,
+         \x20   askpass={askpass_joined}\n\
+         \x20   proxy_env={}\n",
+        info.version,
+        info.config_path,
+        info.ssh_version,
+        info.term,
+        info.colorterm,
+        info.theme,
+        info.hosts,
+        info.patterns,
+        info.snippets,
+        info.proxy_env,
     );
     if let Some(vault_info) = info.vault_ssh_info {
         banner.push_str(&format!("    vault_ssh={vault_info}\n"));
@@ -363,12 +386,21 @@ mod tests {
             term: "xterm-256color",
             colorterm: "truecolor",
             level: "warn",
+            theme: "Purple",
+            hosts: 42,
+            patterns: 3,
+            snippets: 7,
+            proxy_env: "none",
         };
 
         // Verify the banner struct fields are accessible and well-formed
         assert_eq!(info.version, "0.0.0-test");
         assert_eq!(info.providers.len(), 1);
         assert!(info.vault_ssh_info.is_some());
+        assert_eq!(info.theme, "Purple");
+        assert_eq!(info.hosts, 42);
+        assert_eq!(info.snippets, 7);
+        assert_eq!(info.proxy_env, "none");
 
         // We can't easily redirect log_path() in a unit test, but we can
         // verify the format_now_utc helper used by write_banner

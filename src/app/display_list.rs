@@ -215,6 +215,12 @@ impl App {
 
     /// Rebuild the display list based on the current sort mode and group_by toggle.
     pub fn apply_sort(&mut self) {
+        log::debug!(
+            "[purple] apply_sort: mode={} group_by={:?} hosts={}",
+            self.hosts_state.sort_mode.to_key(),
+            self.hosts_state.group_by,
+            self.hosts_state.list.len()
+        );
         // Preserve currently selected host or pattern across sort changes
         let selected_alias = self
             .selected_host()

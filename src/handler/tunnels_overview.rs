@@ -65,7 +65,7 @@ fn toggle_tunnel(app: &mut App) {
         return;
     }
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_TUNNELS_DISABLED);
+        app.notify_warning(crate::messages::DEMO_TUNNELS_DISABLED);
         return;
     }
     let askpass = app

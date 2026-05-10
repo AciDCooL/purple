@@ -35,7 +35,7 @@ pub fn render_restart(frame: &mut Frame, app: &mut App) {
         project.as_deref(),
         uptime.as_deref(),
         crate::messages::CONTAINER_RESTART_BODY,
-        ("restart", "cancel"),
+        ("restart", "keep"),
     );
 }
 
@@ -65,7 +65,7 @@ pub fn render_stack(frame: &mut Frame, app: &mut App) {
         identity,
         members,
         crate::messages::CONTAINER_STACK_RESTART_BODY,
-        ("restart", "cancel"),
+        ("restart", "keep"),
     );
 }
 
@@ -88,7 +88,7 @@ pub fn render_host_restart_all(frame: &mut Frame, app: &mut App) {
         identity,
         members,
         crate::messages::CONTAINER_HOST_RESTART_ALL_BODY,
-        ("restart", "cancel"),
+        ("restart", "keep"),
     );
 }
 
@@ -109,7 +109,7 @@ pub fn render_host_stop_all(frame: &mut Frame, app: &mut App) {
         identity,
         members,
         crate::messages::CONTAINER_HOST_STOP_ALL_BODY,
-        ("stop", "cancel"),
+        ("stop", "keep"),
     );
 }
 
@@ -177,7 +177,7 @@ pub fn render_stop(frame: &mut Frame, app: &mut App) {
         project.as_deref(),
         uptime.as_deref(),
         crate::messages::CONTAINER_STOP_BODY,
-        ("stop", "cancel"),
+        ("stop", "keep"),
     );
 }
 

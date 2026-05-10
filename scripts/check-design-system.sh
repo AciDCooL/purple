@@ -334,4 +334,91 @@ if [ -n "$BAD_EXIT" ]; then
     exit 1
 fi
 
+# 17. theme::footer_key() may only appear in approved files.
+#
+# Design system rule: footer_key() renders the inverted keycap style.
+# Legitimate uses are footer action chips (built via design::Footer) and
+# content-level keycap hints (welcome screen, confirm-dialog Enter/?/I
+# hints, host-list tag-mode `tag:` / `tag=` labels). Applying footer_key()
+# to regular prose creates a keycap look-alike that the user mistakes for
+# a pressable hint.
+#
+# Files allowed to call `theme::footer_key()`:
+# - design.rs              the Footer builder uses it for action chips
+# - mod.rs                 legacy helpers + jump bar footer
+# - theme.rs               function definition
+# - host_list.rs           content-level "tag:" / "tag=" mode hints
+# - confirm_dialog.rs      content-level Enter / ? / I keycap hints
+if grep -rEn 'theme::footer_key\(\)' src/ui/ --include='*.rs' \
+    | grep -v 'design\.rs' \
+    | grep -v 'mod\.rs' \
+    | grep -v 'theme\.rs' \
+    | grep -v 'host_list\.rs' \
+    | grep -v 'confirm_dialog\.rs' \
+    | grep -v '_tests\.rs' \
+    | grep -q .; then
+    echo "ERROR: theme::footer_key() used outside the approved files."
+    echo "       Keycap styling is reserved for footer action chips and"
+    echo "       documented content-level hints. Move action chips through"
+    echo "       design::Footer; for new keycap-looking content, extend the"
+    echo "       allowlist in scripts/check-design-system.sh check 17."
+    grep -rEn 'theme::footer_key\(\)' src/ui/ --include='*.rs' \
+        | grep -v 'design\.rs' \
+        | grep -v 'mod\.rs' \
+        | grep -v 'theme\.rs' \
+        | grep -v 'host_list\.rs' \
+        | grep -v 'confirm_dialog\.rs' \
+        | grep -v '_tests\.rs'
+    exit 1
+fi
+
+# 18. confirm_footer_destructive verbs must be action verbs on both sides.
+#
+# Stakes test for destructive confirm dialogs: render action verbs on both
+# yes and no chips so the user understands what each choice does without
+# re-reading the prompt. Generic placeholders (yes/no/y/n/ok) break that
+# contract: the no-side reads like "abandon" instead of like the action
+# that will happen on the system if the user picks it.
+#
+# Canonical pairs: (delete,keep), (sign,skip), (purge,keep), (reset,keep),
+# (import,skip), (restart,keep), (stop,keep), (copy,skip), (discard,keep).
+python3 - <<'PY' || exit 1
+import re, sys, os
+
+ROOT = "src/ui"
+BANNED = {"yes", "no", "y", "n", "ok", "cancel"}
+violations = []
+
+for dirpath, _, files in os.walk(ROOT):
+    for fn in files:
+        if not fn.endswith(".rs"):
+            continue
+        if "test" in fn or fn == "design.rs":
+            continue
+        path = os.path.join(dirpath, fn)
+        with open(path) as f:
+            text = f.read()
+        for m in re.finditer(
+            r'confirm_footer_destructive\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)',
+            text,
+        ):
+            yes_verb, no_verb = m.group(1), m.group(2)
+            offenders = [v for v in (yes_verb, no_verb) if v in BANNED]
+            if offenders:
+                violations.append(
+                    f"{path}: confirm_footer_destructive({yes_verb!r}, {no_verb!r}) "
+                    f"uses generic verb(s) {offenders}. Pick action verbs both sides."
+                )
+
+if violations:
+    print("ERROR: confirm-footer verb pair violation(s):")
+    for v in violations:
+        print("  " + v)
+    print()
+    print("  Stakes test: destructive confirms render action verbs both")
+    print("  sides (e.g. 'delete'/'keep', 'sign'/'skip'). Generic verbs")
+    print("  like 'yes'/'no'/'cancel' break that contract.")
+    sys.exit(1)
+PY
+
 echo "Design system checks: OK"

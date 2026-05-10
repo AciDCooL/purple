@@ -145,7 +145,10 @@ pub fn load_sort_mode() -> SortMode {
 
 /// Save sort mode to ~/.purple/preferences.
 pub fn save_sort_mode(mode: SortMode) -> io::Result<()> {
-    save_value("sort_mode", mode.to_key())
+    log::debug!("[purple] saving sort_mode={}", mode.to_key());
+    save_value("sort_mode", mode.to_key()).inspect_err(|e| {
+        log::warn!("[config] failed to save sort_mode={}: {}", mode.to_key(), e);
+    })
 }
 
 /// Load group_by from ~/.purple/preferences. New `group_by` key takes precedence
@@ -211,7 +214,10 @@ fn remove_value(key: &str) -> io::Result<()> {
 
 /// Save group_by to ~/.purple/preferences.
 pub fn save_group_by(mode: &crate::app::GroupBy) -> io::Result<()> {
-    save_value("group_by", &mode.to_key())?;
+    log::debug!("[purple] saving group_by={}", mode.to_key());
+    save_value("group_by", &mode.to_key()).inspect_err(|e| {
+        log::warn!("[config] failed to save group_by={}: {}", mode.to_key(), e);
+    })?;
     // Best-effort cleanup: group_by key takes precedence on load, so
     // a leftover group_by_provider key is harmless if removal fails.
     let _ = remove_value("group_by_provider");
@@ -230,13 +236,14 @@ pub fn load_view_mode() -> ViewMode {
 
 /// Save view mode to ~/.purple/preferences.
 pub fn save_view_mode(mode: ViewMode) -> io::Result<()> {
-    save_value(
-        "view_mode",
-        match mode {
-            ViewMode::Compact => "compact",
-            ViewMode::Detailed => "detailed",
-        },
-    )
+    let value = match mode {
+        ViewMode::Compact => "compact",
+        ViewMode::Detailed => "detailed",
+    };
+    log::debug!("[purple] saving view_mode={}", value);
+    save_value("view_mode", value).inspect_err(|e| {
+        log::warn!("[config] failed to save view_mode={}: {}", value, e);
+    })
 }
 
 /// Containers-tab sort order. Separate key from the host-list `sort_mode`
@@ -249,7 +256,14 @@ pub fn load_containers_sort_mode() -> ContainersSortMode {
 }
 
 pub fn save_containers_sort_mode(mode: ContainersSortMode) -> io::Result<()> {
-    save_value("containers_sort_mode", mode.to_key())
+    log::debug!("[purple] saving containers_sort_mode={}", mode.to_key());
+    save_value("containers_sort_mode", mode.to_key()).inspect_err(|e| {
+        log::warn!(
+            "[config] failed to save containers_sort_mode={}: {}",
+            mode.to_key(),
+            e
+        );
+    })
 }
 
 /// Containers-tab detail panel toggle. Separate key so the host-list
@@ -266,13 +280,18 @@ pub fn load_containers_view_mode() -> ViewMode {
 }
 
 pub fn save_containers_view_mode(mode: ViewMode) -> io::Result<()> {
-    save_value(
-        "containers_view_mode",
-        match mode {
-            ViewMode::Compact => "compact",
-            ViewMode::Detailed => "detailed",
-        },
-    )
+    let value = match mode {
+        ViewMode::Compact => "compact",
+        ViewMode::Detailed => "detailed",
+    };
+    log::debug!("[purple] saving containers_view_mode={}", value);
+    save_value("containers_view_mode", value).inspect_err(|e| {
+        log::warn!(
+            "[config] failed to save containers_view_mode={}: {}",
+            value,
+            e
+        );
+    })
 }
 
 /// Aliases whose containers group is currently folded in the
@@ -294,12 +313,21 @@ pub fn save_containers_collapsed_hosts(
     aliases: &std::collections::HashSet<String>,
 ) -> io::Result<()> {
     if aliases.is_empty() {
+        log::debug!("[purple] clearing containers_collapsed_hosts");
         let _ = remove_value("containers_collapsed_hosts");
         return Ok(());
     }
     let mut sorted: Vec<&str> = aliases.iter().map(|s| s.as_str()).collect();
     sorted.sort_unstable();
-    save_value("containers_collapsed_hosts", &sorted.join(","))
+    let joined = sorted.join(",");
+    log::debug!(
+        "[purple] saving containers_collapsed_hosts={} ({} aliases)",
+        joined,
+        sorted.len()
+    );
+    save_value("containers_collapsed_hosts", &joined).inspect_err(|e| {
+        log::warn!("[config] failed to save containers_collapsed_hosts: {}", e);
+    })
 }
 
 /// Load global askpass default from ~/.purple/preferences.
@@ -309,7 +337,10 @@ pub fn load_askpass_default() -> Option<String> {
 
 /// Save global askpass default to ~/.purple/preferences.
 pub fn save_askpass_default(source: &str) -> io::Result<()> {
-    save_value("askpass", source)
+    log::debug!("[purple] saving askpass default={}", source);
+    save_value("askpass", source).inspect_err(|e| {
+        log::warn!("[config] failed to save askpass={}: {}", source, e);
+    })
 }
 
 /// Load slow threshold from ~/.purple/preferences. Returns 200 if missing or invalid.
@@ -322,7 +353,10 @@ pub fn load_slow_threshold() -> u16 {
 /// Save slow threshold to ~/.purple/preferences.
 #[allow(dead_code)]
 pub fn save_slow_threshold(ms: u16) -> io::Result<()> {
-    save_value("slow_threshold_ms", &ms.to_string())
+    log::debug!("[purple] saving slow_threshold_ms={}", ms);
+    save_value("slow_threshold_ms", &ms.to_string()).inspect_err(|e| {
+        log::warn!("[config] failed to save slow_threshold_ms={}: {}", ms, e);
+    })
 }
 
 /// Load theme name from ~/.purple/preferences. Returns None if missing.
@@ -332,7 +366,10 @@ pub fn load_theme() -> Option<String> {
 
 /// Save theme name to ~/.purple/preferences.
 pub fn save_theme(name: &str) -> io::Result<()> {
-    save_value("theme", name)
+    log::debug!("[purple] saving theme={}", name);
+    save_value("theme", name).inspect_err(|e| {
+        log::warn!("[config] failed to save theme={}: {}", name, e);
+    })
 }
 
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";

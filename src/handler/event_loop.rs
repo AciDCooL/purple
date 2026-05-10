@@ -642,9 +642,12 @@ pub(crate) fn drive_refresh_batch(app: &mut App, alias: &str, events_tx: &mpsc::
     // Update progress / completion notification.
     if queue_remaining == 0 && still_in_flight == 0 {
         app.containers_overview.refresh_batch = None;
+        // Clear the sticky progress footer set by notify_progress so the
+        // success toast is the only thing the user sees after the batch.
+        app.status_center.status = None;
         app.notify(crate::messages::container_refresh_complete(total));
     } else {
-        app.notify_background(crate::messages::container_refresh_progress(
+        app.notify_progress(crate::messages::container_refresh_progress(
             completed, total,
         ));
     }
@@ -842,7 +845,7 @@ pub(crate) fn handle_container_action_complete(
         None
     };
     if let Some((refresh_alias, askpass, cached_runtime)) = should_refresh {
-        app.notify_background(crate::messages::container_action_complete(action.as_str()));
+        app.notify(crate::messages::container_action_complete(action.as_str()));
         let has_tunnel = app.tunnels.active.contains_key(&refresh_alias);
         // Mark in-flight so the scroll-driven auto-refresh does not
         // double-spawn for the same alias while this post-action
@@ -946,7 +949,15 @@ pub(crate) fn handle_vault_sign_all_done(
     app.vault.signing_cancel = None;
     // Join the background thread now that it has finished.
     if let Some(handle) = app.vault.sign_thread.take() {
+        log::debug!("[purple] vault sign thread: joining");
         let _ = handle.join();
+        log::info!(
+            "[purple] vault sign thread: joined (signed={} failed={} skipped={} cancelled={})",
+            signed,
+            failed,
+            skipped,
+            cancelled
+        );
     }
     if let Some(msg) = aborted_message {
         app.notify_sticky_error(msg);

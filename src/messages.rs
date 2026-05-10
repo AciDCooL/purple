@@ -29,8 +29,17 @@ pub const DEMO_PROVIDER_CHANGES_DISABLED: &str = "Demo mode. Provider config cha
 
 // ── Stale host ──────────────────────────────────────────────────────
 
+/// Compose a "Stale host." warning with an optional hint clause.
+/// Trims the hint, drops a trailing period to avoid doubling, and uses
+/// a space separator so the result reads as one sentence. With an empty
+/// hint the bare "Stale host." remains.
 pub fn stale_host(hint: &str) -> String {
-    format!("Stale host.{}", hint)
+    let trimmed = hint.trim().trim_end_matches('.');
+    if trimmed.is_empty() {
+        "Stale host.".to_string()
+    } else {
+        format!("Stale host. {}.", trimmed)
+    }
 }
 
 // ── Host list ───────────────────────────────────────────────────────
@@ -131,6 +140,93 @@ pub const HOST_NOT_FOUND_IN_CONFIG: &str = "Host not found in config.";
 
 pub const SMART_PARSED: &str = "Smart-parsed that for you. Check the fields.";
 pub const LOOKS_LIKE_ADDRESS: &str = "Looks like an address. Suggested as Host.";
+
+// ── Form validation (HostForm) ──────────────────────────────────────
+//
+// Surfaced via `notify_error(msg)` after `HostForm::validate()`. All
+// strings live here so the central message audit (`check-messages.sh`)
+// covers them and so the wording stays consistent with the rest of the
+// TUI copy.
+
+pub const HOST_ALIAS_EMPTY: &str = "Alias can't be empty. Every host needs a name!";
+pub const HOST_PATTERN_EMPTY: &str = "Pattern can't be empty.";
+pub const HOST_PATTERN_NEEDS_WILDCARD: &str =
+    "Pattern needs a wildcard (*, ?, [) or multiple hosts.";
+pub const HOST_ALIAS_WHITESPACE: &str = "Alias can't contain whitespace. Keep it simple.";
+pub const HOST_ALIAS_HASH: &str =
+    "Alias can't contain '#'. That's a comment character in SSH config.";
+pub const HOST_ALIAS_PATTERN_CHARS: &str =
+    "Alias can't contain pattern characters. That creates a match pattern, not a host.";
+pub const HOST_HOSTNAME_EMPTY: &str = "Hostname can't be empty. Where should we connect to?";
+pub const HOST_HOSTNAME_WHITESPACE: &str = "Hostname can't contain whitespace.";
+pub const HOST_PORT_INVALID: &str = "That's not a port number. Ports are 1-65535, not poetry.";
+pub const HOST_PORT_ZERO: &str = "Port 0? Bold choice, but no. Try 1-65535.";
+pub const HOST_VAULT_ROLE_INVALID: &str = "Vault SSH role: only letters, digits, /, _ and - \
+     are allowed (e.g. ssh-client-signer/sign/my-role).";
+pub const HOST_VAULT_ADDR_INVALID: &str = "Vault SSH address: must be a non-empty URL \
+     without spaces or control characters (e.g. http://127.0.0.1:8200).";
+
+/// Long-form "{} contains control characters." used by `HostForm::validate`
+/// where the toast doubles as guidance ("that's not going to work").
+pub fn field_control_chars(name: &str) -> String {
+    format!(
+        "{} contains control characters. That's not going to work.",
+        name
+    )
+}
+
+// ── Form validation (TunnelForm) ────────────────────────────────────
+
+pub const TUNNEL_BIND_PORT_INVALID: &str = "Bind port must be 1-65535.";
+pub const TUNNEL_BIND_PORT_ZERO: &str = "Bind port can't be 0.";
+pub const TUNNEL_REMOTE_HOST_EMPTY: &str = "Remote host can't be empty.";
+pub const TUNNEL_REMOTE_HOST_SPACES: &str = "Remote host can't contain spaces.";
+pub const TUNNEL_REMOTE_PORT_INVALID: &str = "Remote port must be 1-65535.";
+pub const TUNNEL_REMOTE_PORT_ZERO: &str = "Remote port can't be 0.";
+
+/// Short form of `field_control_chars` used by TunnelForm where the
+/// toast is purely informational and does not need the guidance suffix.
+pub fn field_control_chars_short(name: &str) -> String {
+    format!("{} contains control characters.", name)
+}
+
+// ── Form validation (SnippetForm + snippet store) ───────────────────
+
+pub const SNIPPET_NAME_EMPTY: &str = "Snippet name cannot be empty.";
+pub const SNIPPET_NAME_WHITESPACE: &str =
+    "Snippet name cannot have leading or trailing whitespace.";
+pub const SNIPPET_NAME_INVALID_CHARS: &str = "Snippet name cannot contain #, [ or ].";
+pub const SNIPPET_NAME_CONTROL_CHARS: &str = "Snippet name cannot contain control characters.";
+pub const SNIPPET_COMMAND_EMPTY: &str = "Command cannot be empty.";
+pub const SNIPPET_COMMAND_CONTROL_CHARS: &str = "Command cannot contain control characters.";
+pub const SNIPPET_DESCRIPTION_CONTROL_CHARS: &str = "Description contains control characters.";
+
+// ── Host CRUD (add / edit) ──────────────────────────────────────────
+
+pub fn pattern_already_exists(alias: &str) -> String {
+    format!("Pattern '{}' already exists.", alias)
+}
+
+pub fn host_alias_already_exists(alias: &str) -> String {
+    format!("'{}' already exists. Aliases must be unique.", alias)
+}
+
+pub const PATTERN_NO_LONGER_EXISTS: &str = "Pattern no longer exists.";
+pub const HOST_NO_LONGER_EXISTS: &str = "Host no longer exists.";
+
+pub fn cert_path_resolve_failed(e: &impl std::fmt::Display) -> String {
+    format!("Failed to resolve cert path: {}", e)
+}
+
+/// Toast shown after a host is added through the TUI form. The CLI
+/// `purple add` flow shares this string via `messages::cli::welcome`.
+pub fn welcome_aboard(alias: &str) -> String {
+    format!("Welcome aboard, {}!", alias)
+}
+
+// ── Bulk tag editor ─────────────────────────────────────────────────
+
+pub const BULK_TAG_NO_HOSTS_SELECTED: &str = "No hosts selected.";
 
 // ── Confirm delete ──────────────────────────────────────────────────
 
@@ -1409,6 +1505,42 @@ pub mod whats_new;
 
 #[path = "messages/whats_new_toast.rs"]
 pub mod whats_new_toast;
+
+#[cfg(test)]
+mod stale_host_tests {
+    use super::stale_host;
+
+    #[test]
+    fn empty_hint_returns_bare_sentence() {
+        assert_eq!(stale_host(""), "Stale host.");
+    }
+
+    #[test]
+    fn empty_after_trim_returns_bare_sentence() {
+        assert_eq!(stale_host("   "), "Stale host.");
+    }
+
+    #[test]
+    fn provider_hint_is_appended_with_space_and_period() {
+        assert_eq!(
+            stale_host("Gone from DigitalOcean"),
+            "Stale host. Gone from DigitalOcean."
+        );
+    }
+
+    #[test]
+    fn trailing_period_in_hint_is_not_doubled() {
+        assert_eq!(
+            stale_host("Gone from DigitalOcean."),
+            "Stale host. Gone from DigitalOcean."
+        );
+    }
+
+    #[test]
+    fn leading_space_in_hint_is_trimmed() {
+        assert_eq!(stale_host(" Gone from AWS"), "Stale host. Gone from AWS.");
+    }
+}
 
 #[cfg(test)]
 mod relative_age_tests {

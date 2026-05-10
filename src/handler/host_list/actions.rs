@@ -68,7 +68,7 @@ pub(super) fn initiate_bulk_vault_sign(app: &mut App) {
         return;
     }
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_VAULT_SIGNING_DISABLED);
+        app.notify_warning(crate::messages::DEMO_VAULT_SIGNING_DISABLED);
         return;
     }
     // Cancel any in-progress vault signing thread
@@ -174,7 +174,7 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
         return;
     }
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_FILE_BROWSER_DISABLED);
+        app.notify_warning(crate::messages::DEMO_FILE_BROWSER_DISABLED);
         return;
     }
     let Some(host) = app.selected_host() else {

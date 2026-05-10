@@ -279,14 +279,22 @@ fn open_picker_for_focused_field(app: &mut App) {
 }
 
 pub(super) fn submit_form(app: &mut App) {
+    log::debug!(
+        "[purple] host form submit: screen={:?} alias='{}' is_pattern={}",
+        std::mem::discriminant(&app.screen),
+        app.forms.host.alias,
+        app.forms.host.is_pattern
+    );
     // Check for external config changes since form was opened
     if app.config_changed_since_form_open() {
+        log::warn!("[purple] host form submit: external config change, aborting");
         app.notify_warning(crate::messages::CONFIG_CHANGED_EXTERNALLY);
         return;
     }
 
     // Validate
     if let Err(msg) = app.forms.host.validate() {
+        log::warn!("[purple] host form validate failed: {}", msg);
         app.notify_error(msg);
         return;
     }

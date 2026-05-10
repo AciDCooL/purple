@@ -8945,6 +8945,36 @@ fn containers_overview_enter_in_demo_mode_shows_disabled_toast() {
     assert!(app.pending_container_exec.is_none());
     let toast = app.status_center.toast.as_ref().expect("toast");
     assert!(toast.text.contains("Demo mode"));
+    // Demo guards report a blocked action, so the toast must carry the
+    // Warning severity, not Success. Mismatched severity here would tell
+    // the user the action succeeded when it was actually skipped.
+    assert_eq!(toast.class, crate::app::MessageClass::Warning);
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn containers_overview_K_in_demo_mode_emits_warning_toast() {
+    let mut app = make_containers_overview_app();
+    app.demo_mode = true;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('K')), &tx);
+    let toast = app.status_center.toast.as_ref().expect("toast");
+    assert!(toast.text.contains("Demo mode"));
+    assert_eq!(toast.class, crate::app::MessageClass::Warning);
+}
+
+#[test]
+fn container_refresh_progress_uses_sticky_progress_class() {
+    // The refresh progress must survive a concurrent sticky error so
+    // the user never loses sight of an active R batch. Sticky+Progress
+    // is the only routing that satisfies both constraints.
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
+    let footer = app.status_center.status.as_ref().expect("progress footer");
+    assert!(footer.text.contains("Refreshing"));
+    assert_eq!(footer.class, crate::app::MessageClass::Progress);
+    assert!(footer.sticky, "refresh progress must be sticky");
 }
 
 #[test]
@@ -9377,6 +9407,60 @@ fn refresh_batch_completes_cleanly_on_last_listing() {
     let toast = app.status_center.toast.as_ref().expect("completion toast");
     assert!(toast.text.contains("Refreshed"));
     assert!(toast.text.contains("2 hosts"));
+}
+
+#[test]
+fn container_action_complete_emits_success_toast() {
+    // A finished Restart/Stop is a user-initiated outcome, so it must
+    // surface as a Success toast — not the Info footer (which is for
+    // background events the user did not explicitly trigger).
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.container_state = Some(make_container_state(
+        "web",
+        vec![make_container("abc123", "nginx", "running")],
+    ));
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::event_loop::handle_container_action_complete(
+        &mut app,
+        "web".to_string(),
+        crate::containers::ContainerAction::Restart,
+        Ok(()),
+        &tx,
+    );
+    let toast = app
+        .status_center
+        .toast
+        .as_ref()
+        .expect("container action toast");
+    assert_eq!(toast.class, crate::app::MessageClass::Success);
+    assert!(toast.text.contains("restart"));
+}
+
+#[test]
+fn refresh_batch_completion_clears_sticky_progress_and_uses_success_toast() {
+    // notify_progress put a sticky "Refreshing X/Y hosts…" in the footer
+    // at batch start. The completion path must clear that footer so the
+    // user does not see a stale "Refreshing" line sitting next to the
+    // success toast.
+    let mut app = make_containers_overview_app();
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue: std::collections::VecDeque::new(),
+        in_flight: 1,
+        total: 2,
+        completed: 1,
+        in_flight_aliases: ["web".to_string()].into_iter().collect(),
+    });
+    // Seed the sticky progress message as the live batch would.
+    app.notify_progress(crate::messages::container_refresh_progress(1, 2));
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::event_loop::drive_refresh_batch(&mut app, "web", &tx);
+
+    assert!(
+        app.status_center.status.is_none(),
+        "sticky progress footer must be cleared on batch completion"
+    );
+    let toast = app.status_center.toast.as_ref().expect("completion toast");
+    assert_eq!(toast.class, crate::app::MessageClass::Success);
 }
 
 #[test]

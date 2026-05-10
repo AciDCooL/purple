@@ -346,7 +346,7 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
             completed: 0,
             in_flight_aliases,
         });
-        app.notify_background(crate::messages::container_refresh_progress(0, total));
+        app.notify_progress(crate::messages::container_refresh_progress(0, total));
         let tx = events_tx.clone();
         std::thread::spawn(move || {
             // 800ms initial pause so the spinner is unmistakable
@@ -410,7 +410,7 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         completed: 0,
         in_flight_aliases,
     });
-    app.notify_background(crate::messages::container_refresh_progress(0, total));
+    app.notify_progress(crate::messages::container_refresh_progress(0, total));
 
     let config_path = app.reload.config_path.clone();
     let bw_session = app.bw_session.clone();
@@ -461,7 +461,7 @@ fn selected_running_row_with_runtime(
     Option<String>,
 )> {
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
+        app.notify_warning(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
         return None;
     }
     let row = selected_container_row(app)?;
@@ -580,7 +580,7 @@ fn open_stop_confirm(app: &mut App) {
 /// "actions disabled" toast.
 fn open_host_restart_all_confirm(app: &mut App, alias: &str) {
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
         return;
     }
     let members = host_running_members(app, alias);
@@ -603,7 +603,7 @@ fn open_host_restart_all_confirm(app: &mut App, alias: &str) {
 /// running container on the host.
 fn open_host_stop_all_confirm(app: &mut App, alias: &str) {
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
         return;
     }
     let members = host_running_members(app, alias);
@@ -624,7 +624,7 @@ fn open_host_stop_all_confirm(app: &mut App, alias: &str) {
 
 fn open_stack_restart_confirm(app: &mut App) {
     if app.demo_mode {
-        app.notify(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
         return;
     }
     let Some(row) = selected_container_row(app) else {
@@ -850,7 +850,7 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender
         }
         KeyCode::Char('a') => {
             if app.demo_mode {
-                app.notify(crate::messages::DEMO_CONTAINER_REFRESH_DISABLED);
+                app.notify_warning(crate::messages::DEMO_CONTAINER_REFRESH_DISABLED);
                 return;
             }
             app.ui.container_host_picker_state.select(Some(0));

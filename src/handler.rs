@@ -330,11 +330,13 @@ fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
     app.notify(msg);
 }
 
-/// Build a provider hint string for stale host messages, e.g. " gone from DigitalOcean".
+/// Build a provider hint clause for stale host messages, e.g. "Gone from DigitalOcean".
+/// Returned without surrounding whitespace or trailing punctuation so the
+/// caller composes the final sentence via `messages::stale_host`.
 pub(super) fn stale_provider_hint(host: &crate::ssh_config::model::HostEntry) -> String {
     host.provider
         .as_ref()
-        .map(|p| format!(" gone from {}", crate::providers::provider_display_name(p)))
+        .map(|p| format!("Gone from {}", crate::providers::provider_display_name(p)))
         .unwrap_or_default()
 }
 

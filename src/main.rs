@@ -312,6 +312,11 @@ fn write_startup_banner(config: &SshConfigFile, config_path: &Path, verbose: boo
     let ssh_version = logging::detect_ssh_version();
     let term = std::env::var("TERM").unwrap_or_else(|_| "unset".to_string());
     let colorterm = std::env::var("COLORTERM").unwrap_or_else(|_| "unset".to_string());
+    let theme = preferences::load_theme().unwrap_or_else(|| "Purple".to_string());
+    let hosts = config.host_entries().len();
+    let patterns = config.pattern_entries().len();
+    let snippets = crate::snippet::SnippetStore::load().snippets.len();
+    let proxy_env = collect_proxy_env();
 
     logging::write_banner(&logging::BannerInfo {
         version: env!("CARGO_PKG_VERSION"),
@@ -323,7 +328,29 @@ fn write_startup_banner(config: &SshConfigFile, config_path: &Path, verbose: boo
         term: &term,
         colorterm: &colorterm,
         level: &level_str,
+        theme: &theme,
+        hosts,
+        patterns,
+        snippets,
+        proxy_env: &proxy_env,
     });
+}
+
+/// Build a compact string describing the proxy-related env vars in effect.
+/// Returns `"none"` when none of HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY
+/// are set. Only var names are recorded; values may contain credentials.
+fn collect_proxy_env() -> String {
+    let names = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
+    let set: Vec<&str> = names
+        .iter()
+        .copied()
+        .filter(|k| std::env::var(k).map(|v| !v.is_empty()).unwrap_or(false))
+        .collect();
+    if set.is_empty() {
+        "none".to_string()
+    } else {
+        set.join(",")
+    }
 }
 
 /// Direct-connect mode (`purple --connect <alias>`): resolve askpass and
