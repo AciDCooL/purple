@@ -38,16 +38,25 @@ impl StatusCenter {
         }
     }
 
-    /// Push a toast message. Success toasts replace the current toast
-    /// immediately (last-write-wins). Warning and Error toasts are queued
-    /// (max `TOAST_QUEUE_MAX`) so they are never lost.
+    /// Push a toast message. Success replaces any active toast immediately
+    /// (last-write-wins). Warning and Error promote over an active Success
+    /// toast and queue only behind another Warning or Error, so a user-
+    /// initiated guard ("Demo mode. X disabled.") is never starved by a
+    /// background hint that held the slot. The queue is capped at
+    /// `TOAST_QUEUE_MAX` to bound memory.
     pub(crate) fn push_toast(&mut self, msg: StatusMessage) {
         log::debug!("toast <- {:?}: {}", msg.class, msg.text);
         if msg.class == MessageClass::Success {
-            // Success replaces any active toast and clears the queue.
             self.toast = Some(msg);
             self.toast_queue.clear();
-        } else if self.toast.is_some() {
+            return;
+        }
+        // Warning + Error path.
+        let active_blocks = self
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.class != MessageClass::Success);
+        if active_blocks {
             if self.toast_queue.len() >= crate::ui::design::TOAST_QUEUE_MAX {
                 if let Some(dropped) = self.toast_queue.front() {
                     log::debug!("toast queue full, dropping: {}", dropped.text);
@@ -56,6 +65,13 @@ impl StatusCenter {
             }
             self.toast_queue.push_back(msg);
         } else {
+            if let Some(ref dropped) = self.toast {
+                log::debug!(
+                    "toast promoted: replacing Success '{}' with {:?}",
+                    dropped.text,
+                    msg.class
+                );
+            }
             self.toast = Some(msg);
         }
     }

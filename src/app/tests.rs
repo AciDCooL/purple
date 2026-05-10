@@ -6230,14 +6230,16 @@ fn notify_background_works_when_no_sticky() {
 }
 
 #[test]
-fn notify_background_error_goes_to_toast_even_with_sticky_and_existing_toast() {
+fn notify_background_error_promotes_over_success_and_leaves_footer_alone() {
     let mut app = make_app("");
-    // Sticky progress in footer
+    // Sticky progress in footer.
     app.notify_progress("Signing...");
-    // First toast already active
+    // First toast already active (an informational Success).
     app.notify("Copied host");
     assert!(app.status_center.toast.is_some());
-    // Background error should queue to toast, not touch footer
+    // A background error must reach the user immediately. It promotes
+    // over the Success toast (Success was just discoverability; the
+    // Error is more urgent) and never touches the footer sticky.
     app.notify_background_error("Sync failed");
     assert_eq!(
         app.status_center.status.as_ref().unwrap().text,
@@ -6246,14 +6248,25 @@ fn notify_background_error_goes_to_toast_even_with_sticky_and_existing_toast() {
     assert!(app.status_center.status.as_ref().unwrap().sticky);
     assert_eq!(
         app.status_center.toast.as_ref().unwrap().text,
-        "Copied host"
-    );
-    assert_eq!(app.status_center.toast_queue.len(), 1);
-    assert_eq!(
-        app.status_center.toast_queue.front().unwrap().text,
         "Sync failed"
     );
-    assert!(app.status_center.toast_queue.front().unwrap().is_error());
+    assert!(app.status_center.toast.as_ref().unwrap().is_error());
+    assert!(app.status_center.toast_queue.is_empty());
+}
+
+#[test]
+fn warning_promotes_over_active_success_toast() {
+    // Demo-mode and similar user-initiated guards arrive as Warning
+    // toasts. They must replace a held Success toast (e.g. the seeded
+    // "What's new" hint on startup) so the user sees the response to
+    // their keystroke instead of a stale informational message.
+    let mut app = make_app("");
+    app.notify("v3.10.0 installed. press n for what's new");
+    app.notify_warning("Demo mode. Connection disabled.");
+    let toast = app.status_center.toast.as_ref().expect("toast");
+    assert_eq!(toast.text, "Demo mode. Connection disabled.");
+    assert_eq!(toast.class, crate::app::MessageClass::Warning);
+    assert!(app.status_center.toast_queue.is_empty());
 }
 
 #[test]
