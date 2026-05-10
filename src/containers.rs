@@ -137,23 +137,52 @@ pub fn validate_container_id(id: &str) -> Result<(), String> {
 // Combined SSH command + output parsing
 // ---------------------------------------------------------------------------
 
-/// Build the SSH command string for listing containers.
+/// Build the SSH command string for listing containers. Output is the
+/// container NDJSON, then the `##purple:engine##` sentinel, then the
+/// daemon version on its own line. The version subcall is suffixed with
+/// `|| true` so its failure cannot mask a `docker ps` error: the chain
+/// surfaces ps's exit code, while a missing version line just yields
+/// `engine_version: None` downstream.
 ///
 /// - `Some(Docker)` / `Some(Podman)`: direct listing for the known runtime.
 /// - `None`: combined detection + listing with sentinel markers in one SSH call.
 pub fn container_list_command(runtime: Option<ContainerRuntime>) -> String {
     match runtime {
-        Some(ContainerRuntime::Docker) => "docker ps -a --format '{{json .}}'".to_string(),
-        Some(ContainerRuntime::Podman) => "podman ps -a --format '{{json .}}'".to_string(),
+        Some(ContainerRuntime::Docker) => concat!(
+            "docker ps -a --format '{{json .}}' && ",
+            "echo '##purple:engine##' && ",
+            "{ docker version --format '{{.Server.Version}}' 2>/dev/null || true; }"
+        )
+        .to_string(),
+        Some(ContainerRuntime::Podman) => concat!(
+            "podman ps -a --format '{{json .}}' && ",
+            "echo '##purple:engine##' && ",
+            "{ podman version --format '{{.Server.Version}}' 2>/dev/null || true; }"
+        )
+        .to_string(),
         None => concat!(
             "if command -v docker >/dev/null 2>&1; then ",
-            "echo '##purple:docker##' && docker ps -a --format '{{json .}}'; ",
+            "echo '##purple:docker##' && docker ps -a --format '{{json .}}' && ",
+            "echo '##purple:engine##' && ",
+            "{ docker version --format '{{.Server.Version}}' 2>/dev/null || true; }; ",
             "elif command -v podman >/dev/null 2>&1; then ",
-            "echo '##purple:podman##' && podman ps -a --format '{{json .}}'; ",
+            "echo '##purple:podman##' && podman ps -a --format '{{json .}}' && ",
+            "echo '##purple:engine##' && ",
+            "{ podman version --format '{{.Server.Version}}' 2>/dev/null || true; }; ",
             "else echo '##purple:none##'; fi"
         )
         .to_string(),
     }
+}
+
+/// Parsed result of a container listing command. `engine_version` is the
+/// daemon's `Server.Version` (best-effort, `None` when the version sub-call
+/// failed or the remote runtime predates the engine sentinel).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContainerListing {
+    pub runtime: ContainerRuntime,
+    pub engine_version: Option<String>,
+    pub containers: Vec<ContainerInfo>,
 }
 
 /// Parse the stdout of a container listing command.
@@ -161,40 +190,59 @@ pub fn container_list_command(runtime: Option<ContainerRuntime>) -> String {
 /// When sentinels are present (combined detection run): extract runtime from
 /// the sentinel line, parse remaining lines as NDJSON. When `caller_runtime`
 /// is provided (subsequent run with known runtime): parse all lines as NDJSON.
+/// In both cases, `##purple:engine##` splits the listing from the optional
+/// trailing daemon version line.
 pub fn parse_container_output(
     output: &str,
     caller_runtime: Option<ContainerRuntime>,
-) -> Result<(ContainerRuntime, Vec<ContainerInfo>), String> {
-    if let Some(sentinel_line) = output.lines().find(|l| l.trim().starts_with("##purple:")) {
-        let sentinel = sentinel_line.trim();
-        if sentinel == "##purple:none##" {
+) -> Result<ContainerListing, String> {
+    let runtime = match output
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("##purple:") && (*l != "##purple:engine##"))
+    {
+        Some("##purple:none##") => {
             return Err(crate::messages::CONTAINER_RUNTIME_MISSING.to_string());
         }
-        let runtime = if sentinel == "##purple:docker##" {
-            ContainerRuntime::Docker
-        } else if sentinel == "##purple:podman##" {
-            ContainerRuntime::Podman
-        } else {
-            return Err(crate::messages::container_unknown_sentinel(sentinel));
-        };
-        let containers: Vec<ContainerInfo> = output
-            .lines()
-            .filter(|l| !l.trim().starts_with("##purple:"))
-            .filter_map(|line| {
-                let t = line.trim();
-                if t.is_empty() {
-                    return None;
-                }
-                serde_json::from_str(t).ok()
-            })
-            .collect();
-        return Ok((runtime, containers));
-    }
+        Some("##purple:docker##") => ContainerRuntime::Docker,
+        Some("##purple:podman##") => ContainerRuntime::Podman,
+        Some(other) => return Err(crate::messages::container_unknown_sentinel(other)),
+        None => match caller_runtime {
+            Some(rt) => rt,
+            None => return Err("No sentinel found and no runtime provided.".to_string()),
+        },
+    };
 
-    match caller_runtime {
-        Some(rt) => Ok((rt, parse_container_ps(output))),
-        None => Err("No sentinel found and no runtime provided.".to_string()),
+    let mut listing_buf = String::new();
+    // Bound the version capture to the first non-empty post-sentinel line.
+    // A trailing logout banner or MOTD after `docker version` would
+    // otherwise concat into the cached engine_version and surface as
+    // "25.0.3\n-- session closed --" in the Runtime field.
+    let mut engine_version: Option<String> = None;
+    let mut after_engine = false;
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed == "##purple:engine##" {
+            after_engine = true;
+            continue;
+        }
+        if trimmed.starts_with("##purple:") {
+            continue;
+        }
+        if after_engine {
+            if !trimmed.is_empty() && engine_version.is_none() {
+                engine_version = Some(trimmed.to_string());
+            }
+        } else {
+            listing_buf.push_str(line);
+            listing_buf.push('\n');
+        }
     }
+    Ok(ContainerListing {
+        runtime,
+        engine_version,
+        containers: parse_container_ps(&listing_buf),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -254,7 +302,7 @@ fn friendly_container_error(stderr: &str, code: Option<i32>) -> String {
 pub fn fetch_containers(
     ctx: &SshContext<'_>,
     cached_runtime: Option<ContainerRuntime>,
-) -> Result<(ContainerRuntime, Vec<ContainerInfo>), ContainerError> {
+) -> Result<ContainerListing, ContainerError> {
     let command = container_list_command(cached_runtime);
     let result = crate::snippet::run_snippet(
         ctx.alias,
@@ -302,9 +350,7 @@ pub fn spawn_container_listing<F>(
     cached_runtime: Option<ContainerRuntime>,
     send: F,
 ) where
-    F: FnOnce(String, Result<(ContainerRuntime, Vec<ContainerInfo>), ContainerError>)
-        + Send
-        + 'static,
+    F: FnOnce(String, Result<ContainerListing, ContainerError>) + Send + 'static,
 {
     std::thread::spawn(move || {
         let borrowed = SshContext {
@@ -372,34 +418,573 @@ pub fn spawn_container_action<F>(
 }
 
 // ---------------------------------------------------------------------------
+// ContainerInspect: subset of `docker inspect` output we surface in the UI
+// ---------------------------------------------------------------------------
+
+/// Parsed subset of `docker inspect <id>` (or `podman inspect`). Only the
+/// fields purple's container detail panel renders are extracted; the rest
+/// of the JSON document is discarded so cache size stays bounded.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ContainerInspect {
+    pub exit_code: i32,
+    pub oom_killed: bool,
+    pub started_at: String,
+    pub finished_at: String,
+    pub created_at: String,
+    /// `Some("healthy" | "unhealthy" | "starting")` when the image defines
+    /// a HEALTHCHECK. `None` when no healthcheck is configured.
+    pub health: Option<String>,
+    pub restart_count: u32,
+    pub command: Option<Vec<String>>,
+    pub entrypoint: Option<Vec<String>>,
+    pub env_count: usize,
+    pub mount_count: usize,
+    pub networks: Vec<NetworkInfo>,
+    // Audit-relevant fields surfaced in the right-side detail panel.
+    pub image_digest: Option<String>,
+    pub restart_policy: Option<String>,
+    pub user: Option<String>,
+    pub privileged: bool,
+    pub readonly_rootfs: bool,
+    pub apparmor_profile: Option<String>,
+    pub seccomp_profile: Option<String>,
+    pub cap_add: Vec<String>,
+    pub cap_drop: Vec<String>,
+    pub mounts: Vec<MountInfo>,
+    pub compose_project: Option<String>,
+    pub compose_service: Option<String>,
+    // Lifecycle / runtime details surfaced in the LIFECYCLE card.
+    pub pid: Option<u32>,
+    pub stop_signal: Option<String>,
+    pub stop_timeout: Option<u32>,
+    // App identity from OCI image labels (visible in APP card).
+    pub image_version: Option<String>,
+    pub image_revision: Option<String>,
+    pub image_source: Option<String>,
+    pub working_dir: Option<String>,
+    pub hostname: Option<String>,
+    // Resource constraints (RESOURCES card). 0 / None means unlimited.
+    pub memory_limit: Option<u64>,
+    pub cpu_limit_nanos: Option<u64>,
+    pub pids_limit: Option<i64>,
+    pub log_driver: Option<String>,
+    // Network mode (NETWORK card): bridge / host / none / container:xyz.
+    pub network_mode: Option<String>,
+    // Healthcheck definition + recent stats (HEALTH card when present).
+    pub health_test: Option<Vec<String>>,
+    pub health_interval_ns: Option<u64>,
+    pub health_failing_streak: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NetworkInfo {
+    pub name: String,
+    pub ip_address: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MountInfo {
+    pub source: String,
+    pub destination: String,
+    pub read_only: bool,
+}
+
+/// Build the SSH command string for inspecting a single container.
+pub fn container_inspect_command(runtime: ContainerRuntime, container_id: &str) -> String {
+    format!("{} inspect {}", runtime.as_str(), container_id)
+}
+
+/// Translate a non-zero docker/podman exit code into a short
+/// human-readable hint. Returns `None` for codes without a well-known
+/// meaning so the UI can fall back to the bare number. Exit 0 has no
+/// entry because the detail panel only annotates failed exits.
+/// Sources: docker docs + Linux signal table.
+pub fn exit_code_meaning(code: i32) -> Option<&'static str> {
+    match code {
+        1 => Some("application error"),
+        125 => Some("docker run failed"),
+        126 => Some("command not executable"),
+        127 => Some("command not found"),
+        130 => Some("interrupted (SIGINT)"),
+        137 => Some("killed (SIGKILL / OOM)"),
+        139 => Some("segfault (SIGSEGV)"),
+        143 => Some("terminated (SIGTERM)"),
+        _ => None,
+    }
+}
+
+/// Parse `docker inspect <id>` stdout into `ContainerInspect`. The command
+/// always returns a JSON array; we take the first element. Missing fields
+/// degrade to defaults rather than fail so a partial response still
+/// renders something useful.
+pub fn parse_container_inspect(output: &str) -> Result<ContainerInspect, String> {
+    let trimmed = output.trim();
+    if trimmed.is_empty() {
+        return Err(crate::messages::CONTAINER_INSPECT_EMPTY.to_string());
+    }
+    let value: serde_json::Value = serde_json::from_str(trimmed)
+        .map_err(|e| crate::messages::container_inspect_parse_failed(&e.to_string()))?;
+    let entry = value
+        .as_array()
+        .and_then(|a| a.first())
+        .ok_or_else(|| crate::messages::CONTAINER_INSPECT_EMPTY.to_string())?;
+
+    let state = &entry["State"];
+    let config = &entry["Config"];
+    let network_settings = &entry["NetworkSettings"];
+
+    let exit_code = state["ExitCode"].as_i64().unwrap_or(0) as i32;
+    let oom_killed = state["OOMKilled"].as_bool().unwrap_or(false);
+    let started_at = state["StartedAt"].as_str().unwrap_or("").to_string();
+    let finished_at = state["FinishedAt"].as_str().unwrap_or("").to_string();
+    let health = state
+        .get("Health")
+        .and_then(|h| h.get("Status"))
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string());
+    let restart_count = entry["RestartCount"].as_u64().unwrap_or(0) as u32;
+
+    let command = config["Cmd"].as_array().map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect()
+    });
+    let entrypoint = config["Entrypoint"].as_array().map(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect()
+    });
+    let env_count = config["Env"].as_array().map(|arr| arr.len()).unwrap_or(0);
+    let mount_count = entry["Mounts"].as_array().map(|arr| arr.len()).unwrap_or(0);
+
+    let networks = network_settings
+        .get("Networks")
+        .and_then(|n| n.as_object())
+        .map(|map| {
+            map.iter()
+                .map(|(name, cfg)| NetworkInfo {
+                    name: name.clone(),
+                    ip_address: cfg
+                        .get("IPAddress")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let host_config = &entry["HostConfig"];
+
+    let image_digest = entry["Image"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let restart_policy = host_config
+        .get("RestartPolicy")
+        .and_then(|p| p.get("Name"))
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty() && *s != "no")
+        .map(|s| s.to_string());
+    let user = config["User"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let privileged = host_config["Privileged"].as_bool().unwrap_or(false);
+    let readonly_rootfs = host_config["ReadonlyRootfs"].as_bool().unwrap_or(false);
+    let apparmor_profile = host_config["AppArmorProfile"]
+        .as_str()
+        .or_else(|| entry["AppArmorProfile"].as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let seccomp_profile = host_config["SecurityOpt"].as_array().and_then(|arr| {
+        arr.iter()
+            .filter_map(|v| v.as_str())
+            .find_map(|s| s.strip_prefix("seccomp=").map(|v| v.to_string()))
+    });
+    let cap_add = host_config["CapAdd"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let cap_drop = host_config["CapDrop"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mounts = entry["Mounts"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .map(|m| MountInfo {
+                    source: m["Source"].as_str().unwrap_or("").to_string(),
+                    destination: m["Destination"].as_str().unwrap_or("").to_string(),
+                    read_only: !m["RW"].as_bool().unwrap_or(true),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let labels = config.get("Labels").and_then(|l| l.as_object());
+    let label = |key: &str| {
+        labels
+            .and_then(|l| l.get(key))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    };
+    let compose_project = label("com.docker.compose.project");
+    let compose_service = label("com.docker.compose.service");
+    let image_version = label("org.opencontainers.image.version");
+    let image_revision = label("org.opencontainers.image.revision");
+    let image_source = label("org.opencontainers.image.source");
+
+    let created_at = entry["Created"].as_str().unwrap_or("").to_string();
+    // State.Pid is `0` when the container is not running. Drop the zero so
+    // the UI does not render a misleading "pid 0" row for exited rows.
+    let pid = state["Pid"].as_u64().filter(|n| *n > 0).map(|n| n as u32);
+    let hostname = config["Hostname"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let working_dir = config["WorkingDir"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let stop_signal = config["StopSignal"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let stop_timeout = config["StopTimeout"].as_u64().map(|n| n as u32);
+
+    let network_mode = host_config["NetworkMode"]
+        .as_str()
+        .filter(|s| !s.is_empty() && *s != "default")
+        .map(|s| s.to_string());
+    // HostConfig.Memory is bytes, 0 = unlimited (drop). Same for NanoCpus.
+    let memory_limit = host_config["Memory"].as_u64().filter(|n| *n > 0);
+    let cpu_limit_nanos = host_config["NanoCpus"].as_u64().filter(|n| *n > 0);
+    // PidsLimit is i64. 0 or -1 means unlimited; drop both.
+    let pids_limit = host_config["PidsLimit"].as_i64().filter(|n| *n > 0);
+    // LogConfig.Type defaults to "json-file" on docker. Always carry it
+    // so the renderer can decide whether to surface "Logs" only when
+    // non-default.
+    let log_driver = host_config
+        .get("LogConfig")
+        .and_then(|l| l.get("Type"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let healthcheck = config.get("Healthcheck");
+    let health_test = healthcheck
+        .and_then(|h| h.get("Test"))
+        .and_then(|t| t.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty());
+    let health_interval_ns = healthcheck
+        .and_then(|h| h.get("Interval"))
+        .and_then(|v| v.as_u64())
+        .filter(|n| *n > 0);
+    let health_failing_streak = state
+        .get("Health")
+        .and_then(|h| h.get("FailingStreak"))
+        .and_then(|v| v.as_u64())
+        .map(|n| n as u32);
+
+    Ok(ContainerInspect {
+        exit_code,
+        oom_killed,
+        started_at,
+        finished_at,
+        created_at,
+        health,
+        restart_count,
+        command,
+        entrypoint,
+        env_count,
+        mount_count,
+        networks,
+        image_digest,
+        restart_policy,
+        user,
+        privileged,
+        readonly_rootfs,
+        apparmor_profile,
+        seccomp_profile,
+        cap_add,
+        cap_drop,
+        mounts,
+        compose_project,
+        compose_service,
+        pid,
+        stop_signal,
+        stop_timeout,
+        image_version,
+        image_revision,
+        image_source,
+        working_dir,
+        hostname,
+        memory_limit,
+        cpu_limit_nanos,
+        pids_limit,
+        log_driver,
+        network_mode,
+        health_test,
+        health_interval_ns,
+        health_failing_streak,
+    })
+}
+
+/// Parse a Docker `Up …` status string into a compact uptime label.
+/// Returns `None` for any non-running state (Exited, Created, Restarting,
+/// Paused without an `Up` prefix, empty). Cells render `<1m` for
+/// sub-minute uptimes, `1m` / `5m` / `12h` / `5w` / `3mo` / `2y` otherwise.
+/// Format follows Docker's `units.HumanDuration`.
+pub fn parse_uptime_from_status(s: &str) -> Option<String> {
+    let body = s.strip_prefix("Up ")?;
+    let body = body.split('(').next()?.trim();
+    if body == "Less than a second" {
+        return Some("<1m".to_string());
+    }
+    if body == "About a minute" {
+        return Some("1m".to_string());
+    }
+    if body == "About an hour" {
+        return Some("1h".to_string());
+    }
+    let mut parts = body.split_whitespace();
+    let count: u64 = parts.next()?.parse().ok()?;
+    let unit = parts.next()?;
+    let suffix = match unit {
+        "second" | "seconds" => return Some("<1m".to_string()),
+        "minute" | "minutes" => "m",
+        "hour" | "hours" => "h",
+        "day" | "days" => "d",
+        "week" | "weeks" => "w",
+        "month" | "months" => "mo",
+        "year" | "years" => "y",
+        _ => return None,
+    };
+    Some(format!("{count}{suffix}"))
+}
+
+/// Synchronously fetch + parse `container inspect`. Validates the
+/// container ID before issuing the SSH call.
+pub fn fetch_container_inspect(
+    ctx: &SshContext<'_>,
+    runtime: ContainerRuntime,
+    container_id: &str,
+) -> Result<ContainerInspect, String> {
+    validate_container_id(container_id)?;
+    let command = container_inspect_command(runtime, container_id);
+    let result = crate::snippet::run_snippet(
+        ctx.alias,
+        ctx.config_path,
+        &command,
+        ctx.askpass,
+        ctx.bw_session,
+        true,
+        ctx.has_tunnel,
+    );
+    match result {
+        Ok(r) if r.status.success() => parse_container_inspect(&r.stdout),
+        Ok(r) => Err(crate::messages::container_command_failed(
+            r.status.code().unwrap_or(1),
+        )),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Spawn a background thread to run `container inspect`. Mirrors the
+/// `spawn_container_listing` pattern so the call site looks identical.
+pub fn spawn_container_inspect_listing<F>(
+    ctx: OwnedSshContext,
+    runtime: ContainerRuntime,
+    container_id: String,
+    send: F,
+) where
+    F: FnOnce(String, String, Result<ContainerInspect, String>) + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let borrowed = SshContext {
+            alias: &ctx.alias,
+            config_path: &ctx.config_path,
+            askpass: ctx.askpass.as_deref(),
+            bw_session: ctx.bw_session.as_deref(),
+            has_tunnel: ctx.has_tunnel,
+        };
+        let result = fetch_container_inspect(&borrowed, runtime, &container_id);
+        send(ctx.alias, container_id, result);
+    });
+}
+
+/// Build the `<runtime> logs --tail <n> <id>` command. The
+/// `--tail` cap is enforced server-side so the SSH stream stays
+/// bounded even on a noisy container.
+pub fn container_logs_command(
+    runtime: ContainerRuntime,
+    container_id: &str,
+    tail: usize,
+) -> String {
+    format!("{} logs --tail {} {}", runtime.as_str(), tail, container_id)
+}
+
+/// Synchronously fetch logs and split into lines. Returns the raw
+/// captured stdout split on `\n` so the renderer does not have to
+/// re-parse. Empty trailing lines are dropped.
+pub fn fetch_container_logs(
+    ctx: &SshContext<'_>,
+    runtime: ContainerRuntime,
+    container_id: &str,
+    tail: usize,
+) -> Result<Vec<String>, String> {
+    validate_container_id(container_id)?;
+    let command = container_logs_command(runtime, container_id, tail);
+    let result = crate::snippet::run_snippet(
+        ctx.alias,
+        ctx.config_path,
+        &command,
+        ctx.askpass,
+        ctx.bw_session,
+        true,
+        ctx.has_tunnel,
+    );
+    match result {
+        Ok(r) if r.status.success() => Ok(parse_log_output(&r.stdout, &r.stderr)),
+        Ok(r) => Err(crate::messages::container_command_failed(
+            r.status.code().unwrap_or(1),
+        )),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Merge stdout (app logs) and stderr (errors) into a single chronological
+/// stream. Many container runtimes split levels across the two streams;
+/// re-interleaving them is closer to what `docker logs` shows on a TTY.
+/// Trailing blank lines are stripped from each stream before merging so a
+/// stdout block that ends in a newline does not introduce a phantom empty
+/// row between the two streams.
+pub(crate) fn parse_log_output(stdout: &str, stderr: &str) -> Vec<String> {
+    let mut lines: Vec<String> = stdout.lines().map(|s| s.to_string()).collect();
+    while lines.last().map(|s| s.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+    for s in stderr.lines() {
+        lines.push(s.to_string());
+    }
+    while lines.last().map(|s| s.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+    lines
+}
+
+/// Spawn a background thread to run `container logs`. Same shape as
+/// `spawn_container_inspect_listing`.
+pub fn spawn_container_logs_fetch<F>(
+    ctx: OwnedSshContext,
+    runtime: ContainerRuntime,
+    container_id: String,
+    container_name: String,
+    tail: usize,
+    send: F,
+) where
+    F: FnOnce(String, String, String, Result<Vec<String>, String>) + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let borrowed = SshContext {
+            alias: &ctx.alias,
+            config_path: &ctx.config_path,
+            askpass: ctx.askpass.as_deref(),
+            bw_session: ctx.bw_session.as_deref(),
+            has_tunnel: ctx.has_tunnel,
+        };
+        let result = fetch_container_logs(&borrowed, runtime, &container_id, tail);
+        send(ctx.alias, container_id, container_name, result);
+    });
+}
+
+// ---------------------------------------------------------------------------
 // JSON lines cache
 // ---------------------------------------------------------------------------
 
-/// A cached container listing for a single host.
+/// A cached container listing for a single host. `engine_version` is the
+/// daemon's `Server.Version` captured during the last refresh, surfaced in
+/// the host detail panel; `None` means the version sub-call did not return
+/// or the cache was written by an older purple build.
 #[derive(Debug, Clone)]
 pub struct ContainerCacheEntry {
     pub timestamp: u64,
     pub runtime: ContainerRuntime,
+    pub engine_version: Option<String>,
     pub containers: Vec<ContainerInfo>,
 }
 
-/// Serde helper for a single JSON line in the cache file.
+/// Serde helper for a single JSON line in the cache file. `engine_version`
+/// uses `serde(default)` so cache files written before this field existed
+/// still deserialize cleanly.
 #[derive(Serialize, Deserialize)]
 struct CacheLine {
     alias: String,
     timestamp: u64,
     runtime: ContainerRuntime,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    engine_version: Option<String>,
     containers: Vec<ContainerInfo>,
+}
+
+// Test-only thread-local override for the cache file path.
+// Mirrors `preferences::set_path_override` so unit tests can write
+// to a tempdir instead of polluting the real `~/.purple/`.
+#[cfg(test)]
+thread_local! {
+    static PATH_OVERRIDE: std::cell::RefCell<Option<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub fn set_path_override(path: std::path::PathBuf) {
+    PATH_OVERRIDE.with(|p| *p.borrow_mut() = Some(path));
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+pub fn clear_path_override() {
+    PATH_OVERRIDE.with(|p| *p.borrow_mut() = None);
+}
+
+fn cache_path() -> Option<std::path::PathBuf> {
+    // Tests MUST opt in via `set_path_override` before any code
+    // path that loads or saves the cache. Falling through to the
+    // production path lets a forgotten override pollute (and in
+    // the orphan-prune branch of `reload_hosts`, wipe) the user's
+    // real `~/.purple/container_cache.jsonl`.
+    #[cfg(test)]
+    {
+        PATH_OVERRIDE.with(|p| p.borrow().clone())
+    }
+    #[cfg(not(test))]
+    {
+        dirs::home_dir().map(|h| h.join(".purple").join("container_cache.jsonl"))
+    }
 }
 
 /// Load container cache from `~/.purple/container_cache.jsonl`.
 /// Malformed lines are silently ignored. Duplicate aliases: last-write-wins.
 pub fn load_container_cache() -> HashMap<String, ContainerCacheEntry> {
     let mut map = HashMap::new();
-    let Some(home) = dirs::home_dir() else {
+    let Some(path) = cache_path() else {
         return map;
     };
-    let path = home.join(".purple").join("container_cache.jsonl");
     let Ok(content) = std::fs::read_to_string(&path) else {
         return map;
     };
@@ -414,6 +999,7 @@ pub fn load_container_cache() -> HashMap<String, ContainerCacheEntry> {
                 ContainerCacheEntry {
                     timestamp: entry.timestamp,
                     runtime: entry.runtime,
+                    engine_version: entry.engine_version,
                     containers: entry.containers,
                 },
             );
@@ -436,6 +1022,7 @@ pub fn parse_container_cache_content(content: &str) -> HashMap<String, Container
                 ContainerCacheEntry {
                     timestamp: entry.timestamp,
                     runtime: entry.runtime,
+                    engine_version: entry.engine_version,
                     containers: entry.containers,
                 },
             );
@@ -449,16 +1036,16 @@ pub fn save_container_cache(cache: &HashMap<String, ContainerCacheEntry>) {
     if crate::demo_flag::is_demo() {
         return;
     }
-    let Some(home) = dirs::home_dir() else {
+    let Some(path) = cache_path() else {
         return;
     };
-    let path = home.join(".purple").join("container_cache.jsonl");
     let mut lines = Vec::with_capacity(cache.len());
     for (alias, entry) in cache {
         let line = CacheLine {
             alias: alias.clone(),
             timestamp: entry.timestamp,
             runtime: entry.runtime,
+            engine_version: entry.engine_version.clone(),
             containers: entry.containers.clone(),
         };
         if let Ok(s) = serde_json::to_string(&line) {
@@ -494,12 +1081,35 @@ pub fn truncate_str(s: &str, max: usize) -> String {
 // Relative time
 // ---------------------------------------------------------------------------
 
+/// Format a duration in seconds as a compact label (`12s`, `5m`,
+/// `2h`, `3d`). Used for the in-border staleness badge where width
+/// is precious and the surrounding label (`synced`) already says
+/// "ago" without the suffix.
+pub fn format_uptime_short(seconds: u64) -> String {
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        format!("{}m", seconds / 60)
+    } else if seconds < 86400 {
+        format!("{}h", seconds / 3600)
+    } else {
+        format!("{}d", seconds / 86400)
+    }
+}
+
 /// Format a Unix timestamp as a human-readable relative time string.
+/// Honours `demo_flag::now_secs()` when demo mode is active so visual
+/// regression goldens stay byte-stable across long-running test
+/// processes (same pattern as `history::format_time_ago`).
 pub fn format_relative_time(timestamp: u64) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = if crate::demo_flag::is_demo() {
+        crate::demo_flag::now_secs()
+    } else {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+    };
     let diff = now.saturating_sub(timestamp);
     if diff < 60 {
         "just now".to_string()

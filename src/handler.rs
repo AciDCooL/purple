@@ -10,7 +10,11 @@ use crate::ssh_config::model::HostEntry;
 
 mod bulk_tag_editor;
 mod confirm;
+mod container_exec_prompt;
+pub(crate) mod container_host_picker;
+pub(crate) mod container_logs;
 mod containers;
+pub(crate) mod containers_overview;
 pub(crate) mod event_loop;
 mod file_browser;
 mod help;
@@ -120,12 +124,32 @@ pub fn handle_key_event(
 
     match &app.screen {
         Screen::HostList => {
-            if matches!(app.top_page, crate::app::TopPage::Tunnels) {
-                tunnels_overview::handle_keys(app, key);
-            } else if app.search.query.is_some() {
-                host_list::handle_host_list_search(app, key, events_tx);
-            } else {
-                host_list::handle_host_list(app, key, events_tx);
+            match app.top_page {
+                crate::app::TopPage::Tunnels => tunnels_overview::handle_keys(app, key),
+                crate::app::TopPage::Containers => {
+                    containers_overview::handle_keys(app, key, events_tx);
+                }
+                crate::app::TopPage::Hosts => {
+                    if app.search.query.is_some() {
+                        host_list::handle_host_list_search(app, key, events_tx);
+                    } else {
+                        host_list::handle_host_list(app, key, events_tx);
+                    }
+                }
+            }
+            // Containers tab data load: every key event that lands on
+            // the tab triggers three lazy refreshes for the row under
+            // the cursor: `docker inspect` (per-container, 30s TTL),
+            // `docker logs --tail` for the LOGS card (same TTL), and
+            // `docker ps` for the host listing (per-host, 30s TTL).
+            // All three respect demo mode and shutdown internally.
+            if matches!(app.top_page, crate::app::TopPage::Containers)
+                && matches!(app.screen, Screen::HostList)
+            {
+                containers_overview::ensure_inspect_for_selected(app, events_tx);
+                containers_overview::ensure_logs_for_selected(app, events_tx);
+                containers_overview::ensure_list_for_selected_host(app, events_tx);
+                containers_overview::ensure_inspect_for_host_header(app, events_tx);
             }
         }
         Screen::AddHost | Screen::EditHost { .. } => host_form::handle_form(app, key),
@@ -145,6 +169,7 @@ pub fn handle_key_event(
         Screen::TunnelList { .. } => tunnel::handle_tunnel_list(app, key),
         Screen::TunnelForm { .. } => tunnel::handle_tunnel_form(app, key),
         Screen::TunnelHostPicker => tunnel_host_picker::handle_keys(app, key),
+        Screen::ContainerHostPicker => container_host_picker::handle_keys(app, key, events_tx),
         Screen::SnippetPicker { .. } => snippet::handle_snippet_picker(app, key, events_tx),
         Screen::SnippetForm { .. } => snippet::handle_snippet_form(app, key),
         Screen::SnippetOutput { .. } => snippet::handle_snippet_output(app, key),
@@ -181,6 +206,15 @@ pub fn handle_key_event(
         }
         Screen::FileBrowser { .. } => file_browser::handle_file_browser(app, key, events_tx),
         Screen::Containers { .. } => containers::handle_containers(app, key, events_tx)?,
+        Screen::ContainerLogs { .. } => container_logs::handle_keys(app, key, events_tx),
+        Screen::ConfirmContainerRestart { .. } => {
+            confirm::handle_confirm_container_restart(app, key)
+        }
+        Screen::ConfirmContainerStop { .. } => confirm::handle_confirm_container_stop(app, key),
+        Screen::ContainerExecPrompt { .. } => container_exec_prompt::handle_keys(app, key),
+        Screen::ConfirmStackRestart { .. } => confirm::handle_confirm_stack_restart(app, key),
+        Screen::ConfirmHostRestartAll { .. } => confirm::handle_confirm_host_restart_all(app, key),
+        Screen::ConfirmHostStopAll { .. } => confirm::handle_confirm_host_stop_all(app, key),
         Screen::Welcome {
             known_hosts_count, ..
         } => {

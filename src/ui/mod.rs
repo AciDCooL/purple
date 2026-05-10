@@ -1,6 +1,11 @@
 mod bulk_tag_editor;
 pub(crate) mod confirm_dialog;
+pub(crate) mod container_action_confirm;
+pub(crate) mod container_exec_prompt;
+pub(crate) mod container_host_picker;
+pub(crate) mod container_logs;
 pub(crate) mod containers;
+pub(crate) mod containers_overview;
 pub(crate) mod design;
 mod detail_panel;
 mod file_browser;
@@ -70,6 +75,9 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
     match app.top_page {
         TopPage::Hosts => host_list::render(frame, app, anim.spinner_tick, detail_progress),
         TopPage::Tunnels => tunnels_overview::render(frame, app, anim),
+        TopPage::Containers => {
+            containers_overview::render(frame, app, anim.spinner_tick, detail_progress)
+        }
     }
     if let Some(s) = status {
         app.status_center.status = Some(s);
@@ -152,6 +160,40 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         }
         Screen::TunnelHostPicker => {
             render_overlay(frame, app, anim, tunnel_host_picker::render);
+        }
+        Screen::ContainerHostPicker => {
+            render_overlay(frame, app, anim, container_host_picker::render);
+        }
+        Screen::ContainerLogs { .. } => {
+            render_overlay(frame, app, anim, container_logs::render);
+        }
+        Screen::ConfirmContainerRestart { .. } => {
+            render_overlay(frame, app, anim, container_action_confirm::render_restart);
+        }
+        Screen::ConfirmContainerStop { .. } => {
+            render_overlay(frame, app, anim, container_action_confirm::render_stop);
+        }
+        Screen::ContainerExecPrompt { .. } => {
+            render_overlay(frame, app, anim, container_exec_prompt::render);
+        }
+        Screen::ConfirmStackRestart { .. } => {
+            render_overlay(frame, app, anim, container_action_confirm::render_stack);
+        }
+        Screen::ConfirmHostRestartAll { .. } => {
+            render_overlay(
+                frame,
+                app,
+                anim,
+                container_action_confirm::render_host_restart_all,
+            );
+        }
+        Screen::ConfirmHostStopAll { .. } => {
+            render_overlay(
+                frame,
+                app,
+                anim,
+                container_action_confirm::render_host_stop_all,
+            );
         }
         Screen::SnippetPicker { .. } => {
             render_overlay(frame, app, anim, snippet_picker::render);

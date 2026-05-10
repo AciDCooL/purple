@@ -233,10 +233,18 @@ impl AnimationState {
             app.welcome_opened = None;
         }
 
-        // Detail panel toggle
+        // Detail panel toggle. Branched on `top_page` so the same
+        // `v` keybinding drives the right view_mode for the active
+        // tab. Only one detail panel is animating at a time, so a
+        // single `detail_anim` slot suffices.
         if app.detail_toggle_pending {
             app.detail_toggle_pending = false;
-            let opening = app.hosts_state.view_mode == crate::app::ViewMode::Detailed;
+            let opening = match app.top_page {
+                crate::app::TopPage::Containers => {
+                    app.containers_overview.view_mode == crate::app::ViewMode::Detailed
+                }
+                _ => app.hosts_state.view_mode == crate::app::ViewMode::Detailed,
+            };
             let start_progress =
                 self.detail_anim_progress()
                     .unwrap_or(if opening { 0.0 } else { 1.0 });

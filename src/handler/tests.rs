@@ -26,6 +26,11 @@ fn make_app(content: &str) -> App {
     // Set preferences override BEFORE App::new so PingState::from_preferences
     // reads the per-test path, never the real ~/.purple/preferences.
     crate::preferences::set_path_override(scratch.join("preferences"));
+    // Same pattern for the container cache: `App::new` calls
+    // `load_container_cache`, and `reload_hosts` writes via
+    // `save_container_cache`. Without the override both would touch
+    // the real ~/.purple/container_cache.jsonl during parallel test runs.
+    crate::containers::set_path_override(scratch.join("container_cache.jsonl"));
     let config = SshConfigFile {
         elements: SshConfigFile::parse_content(content),
         path: scratch.join("test_config"),
@@ -4262,6 +4267,7 @@ fn test_shift_c_loads_cache() {
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
             runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
             containers: vec![make_container("abc", "nginx", "running")],
         },
     );
@@ -5484,17 +5490,21 @@ fn shift_tab_on_host_list_switches_pages() {
         &tx,
     );
 
-    assert_eq!(app.top_page, crate::app::TopPage::Tunnels);
+    // Three-tab cycle: Hosts <- Containers <- Tunnels <- Hosts.
+    assert_eq!(app.top_page, crate::app::TopPage::Containers);
     assert!(matches!(app.screen, Screen::HostList));
 }
 
 #[test]
-fn tab_twice_returns_to_hosts_page() {
+fn tab_three_times_returns_to_hosts_page() {
     let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
     assert_eq!(app.top_page, crate::app::TopPage::Hosts);
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    assert_eq!(app.top_page, crate::app::TopPage::Tunnels);
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    assert_eq!(app.top_page, crate::app::TopPage::Containers);
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
 
     assert_eq!(app.top_page, crate::app::TopPage::Hosts);
@@ -6598,7 +6608,7 @@ fn jump_enter_on_tunnel_hit_switches_to_tunnels_page_and_selects_row() {
 }
 
 #[test]
-fn jump_enter_on_container_hit_opens_container_screen() {
+fn jump_enter_on_container_hit_lands_on_global_containers_tab() {
     let mut app = make_app("Host beta\n  HostName beta.example\n");
     // Seed a cached container for `beta` so collect_jump_candidates
     // surfaces it; Enter then dispatches the matching hit.
@@ -6607,6 +6617,7 @@ fn jump_enter_on_container_hit_opens_container_screen() {
         crate::containers::ContainerCacheEntry {
             timestamp: 0,
             runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
             containers: vec![crate::containers::ContainerInfo {
                 id: "abc".into(),
                 names: "nginx".into(),
@@ -6637,7 +6648,26 @@ fn jump_enter_on_container_hit_opens_container_screen() {
     }
     let (tx, _rx) = mpsc::channel();
     handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
-    assert!(matches!(app.screen, Screen::Containers { ref alias } if alias == "beta"));
+    // New behaviour: stay on the global containers tab and land the
+    // cursor on the picked container's row in the visible list,
+    // instead of opening the legacy per-host overlay.
+    assert!(matches!(app.screen, Screen::HostList));
+    assert_eq!(app.top_page, crate::app::TopPage::Containers);
+    let visible = crate::ui::containers_overview::visible_items(&app);
+    let selected_idx = app
+        .ui
+        .containers_overview_state
+        .selected()
+        .expect("cursor must be placed on a row");
+    let row = visible
+        .get(selected_idx)
+        .and_then(|i| match i {
+            crate::ui::containers_overview::ContainerListItem::Container(r) => Some(r),
+            _ => None,
+        })
+        .expect("cursor must land on a Container row, not a header");
+    assert_eq!(row.alias, "beta");
+    assert_eq!(row.id, "abc");
 }
 
 #[test]
@@ -8608,6 +8638,1448 @@ fn esc_hint_does_not_displace_active_sticky_error_toast() {
     );
 }
 
+// =========================================================================
+// Containers overview: navigation and Tab cycling
+// =========================================================================
+
+fn make_containers_overview_app() -> App {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n\nHost db\n  HostName 2.2.2.2\n");
+    // App::new loads ~/.purple/container_cache.jsonl from disk. Clear so
+    // host-environment cache state cannot leak into the test set.
+    app.container_cache.clear();
+    app.container_cache.insert(
+        "web".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 100,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![
+                make_container("c1", "nginx", "running"),
+                make_container("c2", "redis", "exited"),
+            ],
+        },
+    );
+    app.container_cache.insert(
+        "db".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 100,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![make_container("c3", "postgres", "running")],
+        },
+    );
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::HostList;
+    // Default sort = AlphaHost interleaves host headers with
+    // container rows. Item layout for this fixture:
+    //   [0] HostHeader(db)
+    //   [1] Container(db/postgres)      <- first container
+    //   [2] HostHeader(web)
+    //   [3] Container(web/nginx)
+    //   [4] Container(web/redis)
+    // Park cursor on the first container so tests start from a
+    // selectable row (headers are skipped by handler navigation).
+    app.ui.containers_overview_state.select(Some(1));
+    app
+}
+
+#[test]
+fn containers_overview_j_advances_cursor() {
+    // Items: [0]Header(db) [1]postgres [2]Header(web) [3]nginx [4]redis.
+    // Headers are now selectable (bulk K/S, fold/unfold) so `j` from
+    // idx 1 lands on the next item, the host divider at idx 2.
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
+    assert_eq!(app.ui.containers_overview_state.selected(), Some(2));
+}
+
+#[test]
+fn containers_overview_g_jumps_to_top() {
+    let mut app = make_containers_overview_app();
+    app.ui.containers_overview_state.select(Some(4));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
+    // Headers are valid selection targets; `g` snaps to the very
+    // first row, which is the db host divider at idx 0.
+    assert_eq!(app.ui.containers_overview_state.selected(), Some(0));
+}
+
+#[test]
+fn containers_overview_capital_g_jumps_to_bottom() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('G')), &tx);
+    // Last non-header item: idx 4 (web/redis) in our fixture.
+    assert_eq!(app.ui.containers_overview_state.selected(), Some(4));
+}
+
+#[test]
+fn containers_overview_s_cycles_sort_mode() {
+    let mut app = make_containers_overview_app();
+    assert_eq!(
+        app.containers_overview.sort_mode,
+        crate::app::ContainersSortMode::AlphaHost
+    );
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
+    assert_eq!(
+        app.containers_overview.sort_mode,
+        crate::app::ContainersSortMode::AlphaContainer
+    );
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
+    assert_eq!(
+        app.containers_overview.sort_mode,
+        crate::app::ContainersSortMode::AlphaHost
+    );
+}
+
+#[test]
+fn containers_overview_colon_opens_jump_in_containers_mode() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(':')), &tx);
+    let mode = app
+        .jump
+        .as_ref()
+        .map(|p| p.mode)
+        .expect("jump bar must be open");
+    assert_eq!(mode, crate::app::JumpMode::Containers);
+}
+
+#[test]
+fn containers_overview_s_persists_sort_mode_to_preferences() {
+    // Regression: `s` used to flip in-memory only, so a restart would
+    // drop back to AlphaHost. Verify the persisted value matches the
+    // in-memory value after each flip.
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
+    assert_eq!(
+        crate::preferences::load_containers_sort_mode(),
+        crate::app::ContainersSortMode::AlphaContainer
+    );
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
+    assert_eq!(
+        crate::preferences::load_containers_sort_mode(),
+        crate::app::ContainersSortMode::AlphaHost
+    );
+}
+
+#[test]
+fn containers_overview_s_keeps_cursor_on_same_alias_after_flip() {
+    // Regression: capturing selected_alias() AFTER flipping sort_mode
+    // resolves the cursor index against the new ordering and picks a
+    // different row. Cursor must stay on the alias the user pressed `s`
+    // while looking at.
+    //
+    // AlphaHost item layout (our fixture):
+    //   [0] Header(db)  [1] postgres  [2] Header(web)  [3] nginx  [4] redis
+    // Park the cursor on web/nginx (idx 3).
+    let mut app = make_containers_overview_app();
+    app.ui.containers_overview_state.select(Some(3));
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
+
+    // After flip → AlphaContainer mode (no host headers). The cursor
+    // must land on a Container row whose alias is still "web" — the
+    // exact index changes because the ordering is now by container
+    // name (alphabetical: nginx, postgres, redis).
+    let items = crate::ui::containers_overview::visible_items(&app);
+    let idx = app
+        .ui
+        .containers_overview_state
+        .selected()
+        .expect("cursor selected");
+    let row = items[idx]
+        .as_container()
+        .expect("cursor must point at a Container row, not a header");
+    assert_eq!(row.alias, "web");
+}
+
+#[test]
+fn containers_overview_tab_advances_to_hosts() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    // Containers -> Hosts (cycle: Hosts -> Tunnels -> Containers -> Hosts).
+    assert!(matches!(app.top_page, crate::app::TopPage::Hosts));
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn containers_overview_back_tab_returns_to_tunnels() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(
+        &mut app,
+        KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
+        &tx,
+    );
+    assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
+}
+
+#[test]
+fn containers_overview_slash_opens_search() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    assert_eq!(app.search.query.as_deref(), Some(""));
+    // Cursor snaps to the first row, which can be a header now that
+    // dividers are selectable. AlphaHost mode places the db header at
+    // idx 0.
+    assert_eq!(app.ui.containers_overview_state.selected(), Some(0));
+}
+
+#[test]
+fn containers_overview_search_filters_rows() {
+    let mut app = make_containers_overview_app();
+    app.search.query = Some(String::new());
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('p')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('o')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('t')), &tx);
+    let rows = crate::ui::containers_overview::visible_rows(&app);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "postgres");
+}
+
+#[test]
+fn containers_overview_enter_queues_exec_for_running_container() {
+    let mut app = make_containers_overview_app();
+    // AlphaHost asc → first row is db/postgres (running).
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    let req = app
+        .pending_container_exec
+        .as_ref()
+        .expect("Enter must queue a container-exec request");
+    assert_eq!(req.alias, "db");
+    assert_eq!(req.container_name, "postgres");
+    assert_eq!(req.container_id, "c3");
+    // Screen must stay on the overview — drain happens in the main loop.
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn containers_overview_enter_on_stopped_container_warns_and_does_nothing() {
+    let mut app = make_containers_overview_app();
+    // Items: [0]Header(db) [1]postgres [2]Header(web) [3]nginx [4]redis.
+    // redis is the exited container (idx 4 in items).
+    app.ui.containers_overview_state.select(Some(4));
+    let items = crate::ui::containers_overview::visible_items(&app);
+    let row = items
+        .into_iter()
+        .nth(4)
+        .and_then(|i| match i {
+            crate::ui::containers_overview::ContainerListItem::Container(r) => Some(r),
+            _ => None,
+        })
+        .expect("idx 4 must be a container row");
+    assert_eq!(row.name, "redis");
+    assert_eq!(row.state, "exited");
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+
+    assert!(app.pending_container_exec.is_none());
+    let toast = app
+        .status_center
+        .toast
+        .as_ref()
+        .expect("warning toast for stopped container");
+    assert!(toast.text.contains("redis"));
+    assert!(toast.text.contains("not running"));
+}
+
+#[test]
+fn containers_overview_enter_rejects_unsafe_container_id() {
+    // Regression: a corrupt or hostile `docker ps` JSON could in
+    // theory inject shell metacharacters into row.id. The handler
+    // must validate before queueing the exec request.
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.container_cache.clear();
+    app.container_cache.insert(
+        "web".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 100,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![crate::containers::ContainerInfo {
+                id: "abc;rm -rf /".to_string(),
+                names: "evil".to_string(),
+                image: "img".to_string(),
+                state: "running".to_string(),
+                status: "Up".to_string(),
+                ports: String::new(),
+            }],
+        },
+    );
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::HostList;
+    // Items: [0]Header(web) [1]Container(web/evil). Park cursor on
+    // the container, not the header.
+    app.ui.containers_overview_state.select(Some(1));
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+
+    assert!(
+        app.pending_container_exec.is_none(),
+        "exec must not queue for an ID that fails validate_container_id"
+    );
+    assert!(
+        app.status_center.toast.is_some(),
+        "user-facing error toast expected"
+    );
+}
+
+#[test]
+fn containers_overview_enter_in_demo_mode_shows_disabled_toast() {
+    let mut app = make_containers_overview_app();
+    app.demo_mode = true;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.pending_container_exec.is_none());
+    let toast = app.status_center.toast.as_ref().expect("toast");
+    assert!(toast.text.contains("Demo mode"));
+}
+
+#[test]
+fn containers_overview_q_quits() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+    assert!(!app.running);
+}
+
+#[test]
+fn containers_overview_inspect_complete_caches_result() {
+    let mut app = make_containers_overview_app();
+    let inspect = crate::containers::ContainerInspect {
+        exit_code: 0,
+        oom_killed: false,
+        started_at: "2026-05-09T08:00:00Z".to_string(),
+        finished_at: String::new(),
+        health: Some("healthy".to_string()),
+        restart_count: 0,
+        command: Some(vec!["nginx".to_string()]),
+        entrypoint: None,
+        env_count: 5,
+        mount_count: 1,
+        networks: vec![],
+        image_digest: None,
+        restart_policy: None,
+        user: None,
+        privileged: false,
+        readonly_rootfs: false,
+        apparmor_profile: None,
+        seccomp_profile: None,
+        cap_add: Vec::new(),
+        cap_drop: Vec::new(),
+        mounts: Vec::new(),
+        compose_project: None,
+        compose_service: None,
+        ..Default::default()
+    };
+    app.containers_overview
+        .inspect_cache
+        .in_flight
+        .insert("c1".to_string());
+
+    crate::handler::event_loop::handle_container_inspect_complete(
+        &mut app,
+        "web".to_string(),
+        "c1".to_string(),
+        Ok(inspect.clone()),
+    );
+
+    let entry = app
+        .containers_overview
+        .inspect_cache
+        .entries
+        .get("c1")
+        .expect("cached");
+    assert_eq!(
+        entry.result.as_ref().unwrap().health,
+        Some("healthy".to_string())
+    );
+    assert!(
+        !app.containers_overview
+            .inspect_cache
+            .in_flight
+            .contains("c1"),
+        "in_flight marker must be cleared on completion"
+    );
+}
+
+#[test]
+fn containers_overview_inspect_complete_stores_error() {
+    let mut app = make_containers_overview_app();
+    app.containers_overview
+        .inspect_cache
+        .in_flight
+        .insert("c2".to_string());
+
+    crate::handler::event_loop::handle_container_inspect_complete(
+        &mut app,
+        "web".to_string(),
+        "c2".to_string(),
+        Err("permission denied".to_string()),
+    );
+
+    let entry = app
+        .containers_overview
+        .inspect_cache
+        .entries
+        .get("c2")
+        .expect("cached");
+    assert_eq!(
+        entry.result.as_ref().err().map(|s| s.as_str()),
+        Some("permission denied")
+    );
+    assert!(
+        !app.containers_overview
+            .inspect_cache
+            .in_flight
+            .contains("c2")
+    );
+}
+
+#[test]
+fn containers_overview_logs_tail_complete_caches_result() {
+    let mut app = make_containers_overview_app();
+    app.containers_overview
+        .logs_cache
+        .in_flight
+        .insert("c1".to_string());
+
+    crate::handler::event_loop::handle_container_logs_tail_complete(
+        &mut app,
+        "web".to_string(),
+        "c1".to_string(),
+        Ok(vec!["line one".to_string(), "line two".to_string()]),
+    );
+
+    let entry = app
+        .containers_overview
+        .logs_cache
+        .entries
+        .get("c1")
+        .expect("cached");
+    assert_eq!(entry.result.as_ref().unwrap().len(), 2);
+    assert!(
+        !app.containers_overview.logs_cache.in_flight.contains("c1"),
+        "in_flight marker must be cleared on completion"
+    );
+}
+
+#[test]
+fn containers_overview_logs_tail_complete_stores_error() {
+    let mut app = make_containers_overview_app();
+    app.containers_overview
+        .logs_cache
+        .in_flight
+        .insert("c2".to_string());
+
+    crate::handler::event_loop::handle_container_logs_tail_complete(
+        &mut app,
+        "web".to_string(),
+        "c2".to_string(),
+        Err("permission denied".to_string()),
+    );
+
+    let entry = app
+        .containers_overview
+        .logs_cache
+        .entries
+        .get("c2")
+        .expect("cached");
+    assert_eq!(
+        entry.result.as_ref().err().map(|s| s.as_str()),
+        Some("permission denied")
+    );
+    assert!(!app.containers_overview.logs_cache.in_flight.contains("c2"));
+}
+
+#[test]
+fn containers_overview_logs_tail_complete_drops_orphan_host() {
+    // Race guard: the host disappeared from the config between the
+    // logs-fetch spawn and the result arrival. The result must NOT
+    // land in the cache, but the in-flight marker must clear.
+    let mut app = make_containers_overview_app();
+    app.containers_overview
+        .logs_cache
+        .in_flight
+        .insert("orphan".to_string());
+
+    crate::handler::event_loop::handle_container_logs_tail_complete(
+        &mut app,
+        "ghost-host-not-in-config".to_string(),
+        "orphan".to_string(),
+        Ok(vec!["should be dropped".to_string()]),
+    );
+
+    assert!(
+        !app.containers_overview
+            .logs_cache
+            .entries
+            .contains_key("orphan"),
+        "orphan result must not be cached"
+    );
+    assert!(
+        !app.containers_overview
+            .logs_cache
+            .in_flight
+            .contains("orphan"),
+        "in_flight marker still cleared even when result dropped"
+    );
+}
+
+#[test]
+fn containers_overview_inspect_cache_fresh_within_ttl() {
+    let mut app = make_containers_overview_app();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let inspect = crate::containers::ContainerInspect {
+        exit_code: 0,
+        oom_killed: false,
+        started_at: String::new(),
+        finished_at: String::new(),
+        health: None,
+        restart_count: 0,
+        command: None,
+        entrypoint: None,
+        env_count: 0,
+        mount_count: 0,
+        networks: vec![],
+        image_digest: None,
+        restart_policy: None,
+        user: None,
+        privileged: false,
+        readonly_rootfs: false,
+        apparmor_profile: None,
+        seccomp_profile: None,
+        cap_add: Vec::new(),
+        cap_drop: Vec::new(),
+        mounts: Vec::new(),
+        compose_project: None,
+        compose_service: None,
+        ..Default::default()
+    };
+    app.containers_overview.inspect_cache.entries.insert(
+        "c3".to_string(),
+        crate::app::InspectCacheEntry {
+            timestamp: now,
+            result: Ok(inspect),
+        },
+    );
+    assert!(
+        app.containers_overview
+            .inspect_cache
+            .fresh("c3", now)
+            .is_some(),
+        "cache should be fresh at t=0"
+    );
+    assert!(
+        app.containers_overview
+            .inspect_cache
+            .fresh("c3", now + 60)
+            .is_none(),
+        "cache should be stale after TTL window"
+    );
+}
+
+#[test]
+fn containers_overview_first_esc_arms_quit_hint() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(app.running);
+    assert!(app.esc_quit_hint_shown);
+    let toast = app.status_center.toast.as_ref().expect("hint toast");
+    assert!(toast.text.contains("q"));
+}
+
+#[test]
+fn containers_overview_refresh_all_starts_capped_batch() {
+    // Cache has 2 hosts; CAP=4 so both should fire in the initial wave.
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
+
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("R must start a batch");
+    assert_eq!(batch.total, 2);
+    assert_eq!(batch.completed, 0);
+    assert_eq!(
+        batch.in_flight, 2,
+        "both hosts should be in flight under cap"
+    );
+    assert!(batch.queue.is_empty(), "queue is empty when total <= cap");
+}
+
+#[test]
+fn containers_overview_refresh_all_caps_in_flight_at_max_parallel() {
+    // Build 10-host cache; R should leave 4 in flight and 6 queued.
+    let mut app = make_containers_overview_app();
+    app.container_cache.clear();
+    for i in 0..10 {
+        app.container_cache.insert(
+            format!("h{}", i),
+            crate::containers::ContainerCacheEntry {
+                timestamp: 100,
+                runtime: crate::containers::ContainerRuntime::Docker,
+                engine_version: None,
+                containers: vec![],
+            },
+        );
+    }
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
+
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("R must start a batch");
+    assert_eq!(batch.total, 10);
+    assert_eq!(batch.in_flight, crate::app::REFRESH_MAX_PARALLEL);
+    assert_eq!(batch.queue.len(), 10 - crate::app::REFRESH_MAX_PARALLEL);
+}
+
+#[test]
+fn containers_overview_refresh_all_in_demo_mode_starts_synthetic_batch() {
+    // Demo mode runs a synthetic refresh so reviewers see the same
+    // progress footer and freshness flip as a live SSH batch. The
+    // batch is staged immediately on the keypress; the worker thread
+    // posts ContainerListing events afterwards.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = true;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("synthetic batch staged");
+    assert_eq!(batch.in_flight, batch.total);
+    assert!(batch.total > 0);
+    let footer = app.status_center.status.as_ref().expect("progress footer");
+    assert!(footer.text.contains("Refreshing"));
+    assert!(!footer.text.contains("Demo mode"));
+    assert!(app.status_center.toast.is_none());
+}
+
+#[test]
+fn containers_overview_refresh_all_on_empty_cache_warns() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.container_cache.clear();
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::HostList;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
+    assert!(app.containers_overview.refresh_batch.is_none());
+    let toast = app.status_center.toast.as_ref().expect("toast");
+    assert!(toast.text.contains("No cached hosts"));
+}
+
+#[test]
+fn containers_overview_refresh_all_rejects_concurrent_batch() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
+    assert!(app.containers_overview.refresh_batch.is_some());
+
+    // Press R again while batch active.
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
+    let toast = app.status_center.toast.as_ref().expect("toast");
+    assert!(toast.text.contains("already in progress"));
+}
+
+#[test]
+fn containers_overview_a_opens_picker_in_real_mode() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    assert!(matches!(app.screen, Screen::ContainerHostPicker));
+    assert_eq!(app.ui.container_host_picker_state.selected(), Some(0));
+    assert!(app.ui.container_host_picker_query.is_empty());
+}
+
+#[test]
+fn containers_overview_a_in_demo_mode_shows_toast() {
+    let mut app = make_containers_overview_app();
+    app.demo_mode = true;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    let toast = app.status_center.toast.as_ref().expect("toast");
+    assert!(toast.text.contains("Demo mode"));
+}
+
+#[test]
+fn container_host_picker_filters_to_uncached_only() {
+    // make_containers_overview_app caches "web" and "db". We only have
+    // those two hosts in hosts_state, so picker should be empty.
+    let app = make_containers_overview_app();
+    let uncached = crate::handler::container_host_picker::uncached_aliases(&app);
+    assert!(uncached.is_empty(), "all hosts already cached");
+
+    // Add a third host with no cache.
+    let mut app = make_app(
+        "Host web\n  HostName 1.2.3.4\n\nHost db\n  HostName 2.2.2.2\n\nHost api\n  HostName 3.3.3.3\n",
+    );
+    app.container_cache.clear();
+    app.container_cache.insert(
+        "web".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 100,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![],
+        },
+    );
+    let uncached = crate::handler::container_host_picker::uncached_aliases(&app);
+    // Cached: web. Uncached: db, api.
+    assert_eq!(uncached.len(), 2);
+    assert!(uncached.contains(&"db".to_string()));
+    assert!(uncached.contains(&"api".to_string()));
+    assert!(!uncached.contains(&"web".to_string()));
+}
+
+#[test]
+fn refresh_batch_completes_cleanly_on_last_listing() {
+    // Final listing of a 2-host batch: queue empty, last in-flight
+    // alias arrives, batch should clear and emit the success toast.
+    let mut app = make_containers_overview_app();
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue: std::collections::VecDeque::new(),
+        in_flight: 1,
+        total: 2,
+        completed: 1,
+        in_flight_aliases: ["web".to_string()].into_iter().collect(),
+    });
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::event_loop::drive_refresh_batch(&mut app, "web", &tx);
+
+    assert!(
+        app.containers_overview.refresh_batch.is_none(),
+        "batch must clear after last listing"
+    );
+    let toast = app.status_center.toast.as_ref().expect("completion toast");
+    assert!(toast.text.contains("Refreshed"));
+    assert!(toast.text.contains("2 hosts"));
+}
+
+#[test]
+fn refresh_batch_ignores_non_batch_listing() {
+    // Listing for an alias that is NOT in the batch's in_flight set
+    // (e.g. host-list `C` or `a`-add running in parallel) must not
+    // touch the batch counters.
+    let mut app = make_containers_overview_app();
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue: std::collections::VecDeque::new(),
+        in_flight: 1,
+        total: 2,
+        completed: 1,
+        in_flight_aliases: ["web".to_string()].into_iter().collect(),
+    });
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::event_loop::drive_refresh_batch(&mut app, "intruder", &tx);
+
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("batch must NOT clear");
+    assert_eq!(batch.in_flight, 1);
+    assert_eq!(batch.completed, 1);
+    assert!(batch.in_flight_aliases.contains("web"));
+    assert!(!batch.in_flight_aliases.contains("intruder"));
+}
+
+#[test]
+fn refresh_batch_decrements_completed_increments_on_match() {
+    // Mid-batch listing: queue still has one item but spawn would
+    // touch SSH which we cannot do in unit tests. Pre-fill the queue
+    // empty so we exercise just the decrement+complete count path
+    // without triggering a spawn.
+    let mut app = make_containers_overview_app();
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue: std::collections::VecDeque::new(),
+        in_flight: 2,
+        total: 2,
+        completed: 0,
+        in_flight_aliases: ["web".to_string(), "db".to_string()].into_iter().collect(),
+    });
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::event_loop::drive_refresh_batch(&mut app, "web", &tx);
+
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("batch still active (db pending)");
+    assert_eq!(batch.in_flight, 1);
+    assert_eq!(batch.completed, 1);
+    assert!(!batch.in_flight_aliases.contains("web"));
+    assert!(batch.in_flight_aliases.contains("db"));
+}
+
+#[test]
+fn refresh_batch_no_op_when_no_batch_active() {
+    let mut app = make_containers_overview_app();
+    assert!(app.containers_overview.refresh_batch.is_none());
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::event_loop::drive_refresh_batch(&mut app, "web", &tx);
+    assert!(app.containers_overview.refresh_batch.is_none());
+}
+
+#[test]
+fn container_listing_dropped_for_alias_no_longer_in_config() {
+    // Race regression: a `docker ps` thread can return after the
+    // host was deleted via Confirm-Delete + reload_hosts. The
+    // listing handler must drop the result instead of resurrecting
+    // the orphan in the cache.
+    let mut app = make_app(""); // empty config — alias "ghost" is NOT in hosts_state.list
+    app.container_cache.clear();
+    let result: Result<crate::containers::ContainerListing, crate::containers::ContainerError> =
+        Ok(crate::containers::ContainerListing {
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![make_container("c1", "nginx", "running")],
+        });
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::event_loop::handle_container_listing(
+        &mut app,
+        "ghost".to_string(),
+        result,
+        &tx,
+    );
+    assert!(
+        !app.container_cache.contains_key("ghost"),
+        "late listing for a removed host must not repopulate the cache"
+    );
+}
+
+#[test]
+fn container_inspect_complete_dropped_for_alias_no_longer_in_config() {
+    let mut app = make_app("");
+    app.container_cache.clear();
+    let inspect = crate::containers::ContainerInspect {
+        exit_code: 0,
+        oom_killed: false,
+        started_at: String::new(),
+        finished_at: String::new(),
+        health: None,
+        restart_count: 0,
+        command: None,
+        entrypoint: None,
+        env_count: 0,
+        mount_count: 0,
+        networks: vec![],
+        image_digest: None,
+        restart_policy: None,
+        user: None,
+        privileged: false,
+        readonly_rootfs: false,
+        apparmor_profile: None,
+        seccomp_profile: None,
+        cap_add: Vec::new(),
+        cap_drop: Vec::new(),
+        mounts: Vec::new(),
+        compose_project: None,
+        compose_service: None,
+        ..Default::default()
+    };
+    crate::handler::event_loop::handle_container_inspect_complete(
+        &mut app,
+        "ghost".to_string(),
+        "c1".to_string(),
+        Ok(inspect),
+    );
+    assert!(
+        !app.containers_overview
+            .inspect_cache
+            .entries
+            .contains_key("c1"),
+        "late inspect for a removed host must not be cached"
+    );
+}
+
+#[test]
+fn reload_hosts_drops_orphan_container_cache_entries() {
+    // Manual delete / stale purge / external edit all funnel
+    // through reload_hosts. A host that is no longer in
+    // hosts_state.list must lose its container_cache entry so
+    // ~/.purple/container_cache.jsonl does not accumulate orphans.
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    app.container_cache.clear();
+    app.container_cache.insert(
+        "alive".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 100,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![],
+        },
+    );
+    app.container_cache.insert(
+        "ghost".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 100,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![],
+        },
+    );
+
+    app.reload_hosts();
+
+    assert!(app.container_cache.contains_key("alive"));
+    assert!(
+        !app.container_cache.contains_key("ghost"),
+        "orphan host must be pruned"
+    );
+}
+
+#[test]
+fn reload_hosts_drops_orphan_inspect_cache_entries() {
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    app.container_cache.clear();
+    app.container_cache.insert(
+        "alive".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 100,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![make_container("alive-c1", "nginx", "running")],
+        },
+    );
+    // Inspect entry whose container ID no longer exists (host
+    // removed externally between purple sessions).
+    let inspect = crate::containers::ContainerInspect {
+        exit_code: 0,
+        oom_killed: false,
+        started_at: String::new(),
+        finished_at: String::new(),
+        health: None,
+        restart_count: 0,
+        command: None,
+        entrypoint: None,
+        env_count: 0,
+        mount_count: 0,
+        networks: vec![],
+        image_digest: None,
+        restart_policy: None,
+        user: None,
+        privileged: false,
+        readonly_rootfs: false,
+        apparmor_profile: None,
+        seccomp_profile: None,
+        cap_add: Vec::new(),
+        cap_drop: Vec::new(),
+        mounts: Vec::new(),
+        compose_project: None,
+        compose_service: None,
+        ..Default::default()
+    };
+    app.containers_overview.inspect_cache.entries.insert(
+        "alive-c1".to_string(),
+        crate::app::InspectCacheEntry {
+            timestamp: 0,
+            result: Ok(inspect.clone()),
+        },
+    );
+    app.containers_overview.inspect_cache.entries.insert(
+        "ghost-c1".to_string(),
+        crate::app::InspectCacheEntry {
+            timestamp: 0,
+            result: Ok(inspect),
+        },
+    );
+
+    app.reload_hosts();
+
+    assert!(
+        app.containers_overview
+            .inspect_cache
+            .entries
+            .contains_key("alive-c1")
+    );
+    assert!(
+        !app.containers_overview
+            .inspect_cache
+            .entries
+            .contains_key("ghost-c1"),
+        "inspect entries with no container in the host cache must be pruned"
+    );
+}
+
+#[test]
+fn auto_fetch_new_hosts_only_fetches_queued_aliases() {
+    // Only the alias that was explicitly pushed to the queue must be
+    // fetched. Pre-existing cache-missing hosts must be left alone —
+    // the regression we are guarding against is the askpass storm
+    // when sync confirmed an inventory of pre-existing hosts on
+    // first run.
+    let mut app = make_app("Host queued\n  HostName 1.1.1.1\n\nHost ignored\n  HostName 2.2.2.2\n");
+    app.container_cache.clear();
+    app.pending_container_fetch_aliases
+        .push("queued".to_string());
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
+
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("auto-fetch must start a batch for the queued alias");
+    assert_eq!(batch.total, 1);
+    assert_eq!(batch.in_flight, 1);
+    assert_eq!(
+        batch.in_flight_aliases.iter().cloned().collect::<Vec<_>>(),
+        vec!["queued".to_string()]
+    );
+    assert!(
+        app.pending_container_fetch_aliases.is_empty(),
+        "queue must be drained"
+    );
+}
+
+#[test]
+fn auto_fetch_new_hosts_dedupes_aliases() {
+    // Multiple triggers (e.g. form save + sync) may push the same
+    // alias before the next drain; the helper must dedupe so we do
+    // not spawn parallel SSH for the same host.
+    let mut app = make_app("Host dup\n  HostName 1.1.1.1\n");
+    app.container_cache.clear();
+    app.pending_container_fetch_aliases.extend([
+        "dup".to_string(),
+        "dup".to_string(),
+        "dup".to_string(),
+    ]);
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
+
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("auto-fetch must start a batch for the queued alias");
+    assert_eq!(batch.total, 1);
+    assert_eq!(batch.in_flight, 1);
+}
+
+#[test]
+fn auto_fetch_new_hosts_skips_alias_with_existing_cache() {
+    // A parallel `C` press (or earlier auto-fetch) may have
+    // populated the cache between push and drain. Skip it.
+    let mut app = make_app("Host already\n  HostName 1.1.1.1\n");
+    app.container_cache.clear();
+    app.container_cache.insert(
+        "already".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 100,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![],
+        },
+    );
+    app.pending_container_fetch_aliases
+        .push("already".to_string());
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
+    assert!(app.containers_overview.refresh_batch.is_none());
+}
+
+#[test]
+fn auto_fetch_new_hosts_skips_unknown_alias() {
+    // Race guard: the alias may have been deleted between push and
+    // drain (manual delete, stale purge, external edit).
+    let mut app = make_app("Host real\n  HostName 1.1.1.1\n");
+    app.container_cache.clear();
+    app.pending_container_fetch_aliases
+        .push("ghost".to_string());
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
+    assert!(app.containers_overview.refresh_batch.is_none());
+}
+
+#[test]
+fn auto_fetch_new_hosts_skips_host_without_hostname() {
+    // Placeholder entries (Host with no HostName) cannot be SSH'd.
+    let mut app = make_app("Host placeholder\n  User root\n");
+    app.container_cache.clear();
+    app.pending_container_fetch_aliases
+        .push("placeholder".to_string());
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
+    assert!(app.containers_overview.refresh_batch.is_none());
+}
+
+#[test]
+fn auto_fetch_new_hosts_no_op_in_demo_mode() {
+    let mut app = make_app("Host a\n  HostName 1.1.1.1\n");
+    app.container_cache.clear();
+    app.demo_mode = true;
+    app.pending_container_fetch_aliases.push("a".to_string());
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
+    assert!(app.containers_overview.refresh_batch.is_none());
+    // Queue is still drained (cleared) so a second tick does not retry.
+    assert!(app.pending_container_fetch_aliases.is_empty());
+}
+
+#[test]
+fn auto_fetch_new_hosts_no_op_when_queue_empty() {
+    // No queued aliases means nothing should fire even if the cache
+    // is empty for every host. This is the regression guard for the
+    // first-run askpass storm.
+    let mut app = make_app("Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n");
+    app.container_cache.clear();
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
+    assert!(app.containers_overview.refresh_batch.is_none());
+}
+
+#[test]
+fn auto_fetch_new_hosts_dedupes_mixed_queue() {
+    // Realistic shape: a sync that adds two hosts where one was
+    // accidentally double-emitted. Both unique aliases must end up
+    // in the batch exactly once.
+    let mut app = make_app("Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n");
+    app.container_cache.clear();
+    app.pending_container_fetch_aliases
+        .extend(["a".to_string(), "a".to_string(), "b".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("auto-fetch must start a batch for unique aliases");
+    assert_eq!(batch.total, 2);
+    assert!(batch.in_flight_aliases.contains("a"));
+    assert!(batch.in_flight_aliases.contains("b"));
+}
+
+#[test]
+fn queue_new_aliases_since_pushes_only_new() {
+    // Snapshot before adding "fresh"; queueing must only push that
+    // alias, never the pre-existing "old".
+    let mut app = make_app("Host old\n  HostName 1.1.1.1\n");
+    let before = app.snapshot_alias_set();
+    // Simulate a reload that added a new host.
+    app.hosts_state
+        .list
+        .push(crate::ssh_config::model::HostEntry {
+            alias: "fresh".to_string(),
+            hostname: "2.2.2.2".to_string(),
+            ..Default::default()
+        });
+    app.queue_new_aliases_since(&before);
+    assert_eq!(
+        app.pending_container_fetch_aliases,
+        vec!["fresh".to_string()]
+    );
+}
+
+#[test]
+fn queue_new_aliases_since_no_op_when_unchanged() {
+    // Regression guard: a sync that confirms an existing inventory
+    // (same aliases before/after) must not push anything. This is
+    // the core invariant behind the askpass-storm fix.
+    let mut app = make_app("Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n");
+    let before = app.snapshot_alias_set();
+    app.queue_new_aliases_since(&before);
+    assert!(app.pending_container_fetch_aliases.is_empty());
+}
+
+#[test]
+fn refresh_selected_host_marks_alias_in_flight() {
+    // `r` keypress and the post-key auto-list must not double-spawn
+    // for the same host. The fix is to insert into auto_list_in_flight
+    // before spawning so the auto helper short-circuits.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
+    // Cursor parks on idx 1 = postgres on host db.
+    assert!(
+        app.containers_overview.auto_list_in_flight.contains("db"),
+        "`r` must mark the alias in-flight to dedup the auto-list helper"
+    );
+}
+
+#[test]
+fn ensure_list_for_selected_host_marks_in_flight_for_stale_cache() {
+    // Stale entry (timestamp=100, well beyond LIST_CACHE_TTL_SECS): the
+    // helper must spawn a refresh and mark the alias as in-flight so
+    // a follow-up scroll within the same window does not re-fire.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
+    // Cursor parks on idx 1 = postgres on host db.
+    assert!(
+        app.containers_overview.auto_list_in_flight.contains("db"),
+        "stale cache must trigger an in-flight marker"
+    );
+}
+
+#[test]
+fn ensure_list_for_selected_host_skips_when_fresh() {
+    // Fresh entry (timestamp=now): the helper must short-circuit.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    if let Some(entry) = app.container_cache.get_mut("db") {
+        entry.timestamp = now;
+    }
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
+    assert!(
+        !app.containers_overview.auto_list_in_flight.contains("db"),
+        "fresh cache must not trigger a refresh"
+    );
+}
+
+#[test]
+fn ensure_list_for_selected_host_dedupes_in_flight() {
+    // An alias already marked in-flight must not get a second spawn,
+    // even if the cache is stale.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    app.containers_overview
+        .auto_list_in_flight
+        .insert("db".to_string());
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
+    // Still exactly one entry — the helper did not double-insert.
+    assert_eq!(app.containers_overview.auto_list_in_flight.len(), 1);
+}
+
+#[test]
+fn ensure_list_for_selected_host_skips_when_alias_in_batch() {
+    // While an `R` batch is running for this alias, the auto helper
+    // must yield to the batch so the completion handler can drive
+    // the counters cleanly.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    let mut in_flight_aliases = std::collections::HashSet::new();
+    in_flight_aliases.insert("db".to_string());
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue: std::collections::VecDeque::new(),
+        in_flight: 1,
+        total: 1,
+        completed: 0,
+        in_flight_aliases,
+    });
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
+    assert!(
+        !app.containers_overview.auto_list_in_flight.contains("db"),
+        "auto helper must not spawn while batch already covers the alias"
+    );
+}
+
+#[test]
+fn ensure_list_for_selected_host_no_op_in_demo_mode() {
+    let mut app = make_containers_overview_app();
+    app.demo_mode = true;
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
+    assert!(app.containers_overview.auto_list_in_flight.is_empty());
+}
+
+#[test]
+fn ensure_list_for_selected_host_no_op_during_shutdown() {
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    app.running = false;
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
+    assert!(app.containers_overview.auto_list_in_flight.is_empty());
+}
+
+#[test]
+fn handle_container_listing_clears_auto_list_in_flight() {
+    // The completion handler must drop the in-flight marker so the
+    // next scroll past the freshness window can re-fire. Without
+    // this the alias would be stuck "in flight" forever from the
+    // helper's POV.
+    let mut app = make_containers_overview_app();
+    app.containers_overview
+        .auto_list_in_flight
+        .insert("db".to_string());
+    let (tx, _rx) = mpsc::channel();
+    super::event_loop::handle_container_listing(
+        &mut app,
+        "db".to_string(),
+        Ok(crate::containers::ContainerListing {
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![make_container("c3", "postgres", "running")],
+        }),
+        &tx,
+    );
+    assert!(
+        !app.containers_overview.auto_list_in_flight.contains("db"),
+        "in-flight marker must be cleared on listing arrival"
+    );
+}
+
+#[test]
+fn handle_container_listing_clears_auto_list_in_flight_on_error() {
+    // Symmetric to the Ok path: an Err result must also drop the
+    // marker, otherwise a transient SSH failure would lock the alias
+    // out of future scroll-driven refreshes.
+    let mut app = make_containers_overview_app();
+    app.containers_overview
+        .auto_list_in_flight
+        .insert("db".to_string());
+    let (tx, _rx) = mpsc::channel();
+    super::event_loop::handle_container_listing(
+        &mut app,
+        "db".to_string(),
+        Err(crate::containers::ContainerError {
+            runtime: None,
+            message: "ssh: connect refused".to_string(),
+        }),
+        &tx,
+    );
+    assert!(
+        !app.containers_overview.auto_list_in_flight.contains("db"),
+        "Err result must also clear the in-flight marker"
+    );
+}
+
+#[test]
+fn handle_container_listing_no_panic_when_alias_not_in_flight() {
+    // Documents the no-panic guarantee: a listing whose alias was
+    // never marked (e.g. a stray result from a deleted host or an
+    // unrelated trigger) must not crash the handler.
+    let mut app = make_containers_overview_app();
+    assert!(app.containers_overview.auto_list_in_flight.is_empty());
+    let (tx, _rx) = mpsc::channel();
+    super::event_loop::handle_container_listing(
+        &mut app,
+        "db".to_string(),
+        Ok(crate::containers::ContainerListing {
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![make_container("c3", "postgres", "running")],
+        }),
+        &tx,
+    );
+    assert!(app.containers_overview.auto_list_in_flight.is_empty());
+}
+
+#[test]
+fn ensure_list_for_selected_host_refreshes_when_cursor_on_header() {
+    // Header rows resolve to the host alias directly, so parking the
+    // cursor on a divider must still keep that host's container
+    // listing fresh. Reverses the prior "header rows are inert" rule
+    // now that dividers are first-class selection targets.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    // Force the cache for `db` stale enough that the helper wants to
+    // re-fetch (TTL is 30s; timestamp 100 in the fixture is far in
+    // the past).
+    let _ = app.container_cache.get("db");
+    // Items[0] is HostHeader(db) in the fixture's AlphaHost layout.
+    app.ui.containers_overview_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
+    assert!(
+        app.containers_overview.auto_list_in_flight.contains("db"),
+        "header rows must trigger a refresh for their host"
+    );
+}
+
+#[test]
+fn ensure_inspect_for_host_header_marks_running_first_then_others() {
+    // Cursor parked on the web host header. The fixture seeds web with
+    // c1 (running) and c2 (exited). Pre-fetch must mark BOTH as in_flight
+    // because the fanout (10) exceeds the fixture container count, and
+    // the running one should be enqueued first.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    // Items[2] is HostHeader(web) in the fixture's AlphaHost layout.
+    app.ui.containers_overview_state.select(Some(2));
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
+    let in_flight = &app.containers_overview.inspect_cache.in_flight;
+    assert!(
+        in_flight.contains("c1"),
+        "running container must be enqueued for inspect on host-header land"
+    );
+    assert!(
+        in_flight.contains("c2"),
+        "non-running containers also enqueue when fanout has room"
+    );
+}
+
+#[test]
+fn ensure_inspect_for_host_header_skips_when_cursor_not_on_header() {
+    // Cursor parks on the postgres container row in the fixture. The
+    // helper must no-op: it only fires when the cursor sits on a
+    // host-header, otherwise the per-row `ensure_inspect_for_selected`
+    // owns that responsibility.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    app.ui.containers_overview_state.select(Some(1));
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
+    assert!(
+        app.containers_overview.inspect_cache.in_flight.is_empty(),
+        "no inspect threads must spawn when cursor is on a container row"
+    );
+}
+
+#[test]
+fn ensure_inspect_for_host_header_no_op_in_demo_mode() {
+    let mut app = make_containers_overview_app();
+    app.demo_mode = true;
+    app.ui.containers_overview_state.select(Some(2));
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
+    assert!(app.containers_overview.inspect_cache.in_flight.is_empty());
+}
+
+#[test]
+fn ensure_inspect_for_host_header_dedups_on_repeated_call() {
+    // Second call must not double-spawn. In-flight set tracks each
+    // container ID once; rapid key events that re-fire the helper while
+    // the original threads are still running cannot pile up extra SSH
+    // sessions for the same id.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = false;
+    app.ui.containers_overview_state.select(Some(2));
+    let (tx, _rx) = mpsc::channel();
+    super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
+    let first = app.containers_overview.inspect_cache.in_flight.len();
+    super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
+    let second = app.containers_overview.inspect_cache.in_flight.len();
+    assert_eq!(
+        first, second,
+        "in_flight set must not grow on a repeated call against the same host"
+    );
+    assert!(first > 0, "first call must seed at least one in-flight id");
+}
+
 #[test]
 fn esc_hint_flag_is_shared_between_host_list_and_tunnels_overview() {
     let mut app = make_app("Host test\n  HostName test.com\n  LocalForward 8080 localhost:80\n");
@@ -8629,4 +10101,721 @@ fn esc_hint_flag_is_shared_between_host_list_and_tunnels_overview() {
         app.status_center.toast.is_none(),
         "second-tab idle Esc must not re-surface the hint"
     );
+
+    // And again on the containers tab — same flag, same silence.
+    app.top_page = crate::app::TopPage::Containers;
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(app.running);
+    assert!(
+        app.status_center.toast.is_none(),
+        "third-tab idle Esc must not re-surface the hint"
+    );
+}
+
+// --- Container actions: K (restart), S (stop), e (exec), l (logs) ----
+
+#[test]
+#[allow(non_snake_case)]
+fn containers_overview_K_opens_restart_confirm() {
+    let mut app = make_containers_overview_app();
+    // Cursor parks on db/postgres (running).
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('K')), &tx);
+    assert!(
+        matches!(app.screen, Screen::ConfirmContainerRestart { .. }),
+        "expected ConfirmContainerRestart, got {:?}",
+        app.screen
+    );
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn containers_overview_S_opens_stop_confirm() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('S')), &tx);
+    assert!(matches!(app.screen, Screen::ConfirmContainerStop { .. }));
+}
+
+#[test]
+fn containers_overview_e_opens_exec_prompt() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
+    assert!(matches!(app.screen, Screen::ContainerExecPrompt { .. }));
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn containers_overview_K_on_header_opens_host_restart_all() {
+    // Cursor on a host-divider row routes K to the bulk-restart-host
+    // confirm dialog instead of the per-container restart.
+    let mut app = make_containers_overview_app();
+    // Items[0] is HostHeader(db); only one running container (postgres).
+    app.ui.containers_overview_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('K')), &tx);
+    let Screen::ConfirmHostRestartAll {
+        ref alias,
+        ref members,
+    } = app.screen
+    else {
+        panic!("expected ConfirmHostRestartAll, got {:?}", app.screen);
+    };
+    assert_eq!(alias, "db");
+    assert_eq!(members.len(), 1, "only postgres is running on db");
+    assert_eq!(members[0].container_name, "postgres");
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn containers_overview_S_on_header_opens_host_stop_all() {
+    let mut app = make_containers_overview_app();
+    // Items[2] is HostHeader(web); web has nginx running, redis exited.
+    app.ui.containers_overview_state.select(Some(2));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('S')), &tx);
+    let Screen::ConfirmHostStopAll {
+        ref alias,
+        ref members,
+    } = app.screen
+    else {
+        panic!("expected ConfirmHostStopAll, got {:?}", app.screen);
+    };
+    assert_eq!(alias, "web");
+    assert_eq!(
+        members.len(),
+        1,
+        "exited containers must not be queued for stop"
+    );
+    assert_eq!(members[0].container_name, "nginx");
+}
+
+#[test]
+fn containers_overview_l_on_header_warns_single_target() {
+    // l (logs) on a host-divider row is a no-op with a guidance toast,
+    // because logs apply to a single container.
+    let mut app = make_containers_overview_app();
+    app.ui.containers_overview_state.select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('l')), &tx);
+    assert!(
+        matches!(app.screen, Screen::HostList),
+        "header rows must not open the logs overlay"
+    );
+    assert!(
+        app.status_center.toast.is_some(),
+        "user must see a hint about needing a single container"
+    );
+}
+
+#[test]
+fn containers_overview_space_on_header_toggles_collapse() {
+    // In-memory contract: Space on a host-divider row folds the group;
+    // Space again unfolds. Disk persistence lives in the preferences
+    // module tests, since the demo flag set by `build_demo_app` blocks
+    // the persistence path here.
+    let mut app = make_containers_overview_app();
+    app.ui.containers_overview_state.select(Some(0)); // db header
+    let (tx, _rx) = mpsc::channel();
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
+    assert!(
+        app.containers_overview.collapsed_hosts.contains("db"),
+        "first Space folds the group"
+    );
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
+    assert!(
+        !app.containers_overview.collapsed_hosts.contains("db"),
+        "second Space unfolds the group"
+    );
+}
+
+#[test]
+fn containers_overview_v_toggles_view_mode_and_arms_animation() {
+    // In-memory contract: v flips view_mode and queues the
+    // detail-panel animation. Disk persistence is exercised by the
+    // preferences module's own tests, not from here, because the
+    // global demo flag (set by `build_demo_app`) short-circuits the
+    // disk-write path.
+    let mut app = make_containers_overview_app();
+    assert_eq!(
+        app.containers_overview.view_mode,
+        crate::app::ViewMode::Detailed
+    );
+    let (tx, _rx) = mpsc::channel();
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('v')), &tx);
+    assert_eq!(
+        app.containers_overview.view_mode,
+        crate::app::ViewMode::Compact
+    );
+    assert!(
+        app.detail_toggle_pending,
+        "v must arm the detail-panel animation so the next render eases the panel out"
+    );
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('v')), &tx);
+    assert_eq!(
+        app.containers_overview.view_mode,
+        crate::app::ViewMode::Detailed,
+        "v toggles back"
+    );
+}
+
+#[test]
+fn containers_overview_l_queues_logs_fetch_and_opens_overlay() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('l')), &tx);
+    assert!(matches!(app.screen, Screen::ContainerLogs { .. }));
+    assert!(
+        app.pending_container_logs.is_some(),
+        "expected pending fetch request"
+    );
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn containers_overview_K_on_exited_does_not_open_confirm() {
+    let mut app = make_containers_overview_app();
+    // Move cursor to web/redis (state="exited", index 4 in fixture).
+    app.ui.containers_overview_state.select(Some(4));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('K')), &tx);
+    assert!(
+        matches!(app.screen, Screen::HostList),
+        "exited container must not transition to confirm"
+    );
+}
+
+#[test]
+#[allow(non_snake_case)]
+fn containers_overview_K_in_demo_mode_blocks() {
+    let mut app = make_containers_overview_app();
+    app.demo_mode = true;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('K')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn containers_overview_ctrl_k_with_compose_label_opens_stack_confirm() {
+    let mut app = make_containers_overview_app();
+    // Seed an inspect entry with compose_project so the stack
+    // confirm has something to anchor on.
+    let make_inspect = |project: &str| crate::containers::ContainerInspect {
+        exit_code: 0,
+        oom_killed: false,
+        started_at: String::new(),
+        finished_at: String::new(),
+        health: None,
+        restart_count: 0,
+        command: None,
+        entrypoint: None,
+        env_count: 0,
+        mount_count: 0,
+        networks: vec![],
+        image_digest: None,
+        restart_policy: None,
+        user: None,
+        privileged: false,
+        readonly_rootfs: false,
+        apparmor_profile: None,
+        seccomp_profile: None,
+        cap_add: Vec::new(),
+        cap_drop: Vec::new(),
+        mounts: Vec::new(),
+        compose_project: Some(project.to_string()),
+        compose_service: None,
+        ..Default::default()
+    };
+    app.containers_overview.inspect_cache.entries.insert(
+        "c3".to_string(),
+        crate::app::InspectCacheEntry {
+            timestamp: 100,
+            result: Ok(make_inspect("db-stack")),
+        },
+    );
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, ctrl_key('k'), &tx);
+    assert!(
+        matches!(app.screen, Screen::ConfirmStackRestart { .. }),
+        "expected ConfirmStackRestart, got {:?}",
+        app.screen
+    );
+}
+
+#[test]
+fn containers_overview_ctrl_k_without_compose_label_warns_and_stays() {
+    let mut app = make_containers_overview_app();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, ctrl_key('k'), &tx);
+    // No inspect entry seeded, so the helper warns and keeps the
+    // user on the overview rather than guessing a project name.
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(app.status_center.toast.is_some());
+}
+
+// --- Container restart confirm dialog --------------------------------
+
+#[test]
+fn confirm_container_restart_y_enqueues_action_and_returns() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmContainerRestart {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        project: None,
+        uptime: Some("2d".to_string()),
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert_eq!(app.pending_container_actions.len(), 1);
+    let req = &app.pending_container_actions[0];
+    assert_eq!(req.alias, "db");
+    assert_eq!(req.container_id, "c3");
+    assert_eq!(req.action, crate::containers::ContainerAction::Restart);
+}
+
+#[test]
+fn confirm_container_restart_n_cancels_without_enqueue() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmContainerRestart {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        project: None,
+        uptime: None,
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(app.pending_container_actions.is_empty());
+}
+
+#[test]
+fn confirm_container_restart_stray_key_ignored() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmContainerRestart {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        project: None,
+        uptime: None,
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('t')), &tx);
+    // Route_confirm_key returns Ignored for non-y/n/Esc keys, so
+    // the screen must stay on the confirm dialog.
+    assert!(
+        matches!(app.screen, Screen::ConfirmContainerRestart { .. }),
+        "stray key must not transition; got {:?}",
+        app.screen
+    );
+    assert!(app.pending_container_actions.is_empty());
+}
+
+// --- Container stop confirm dialog -----------------------------------
+
+#[test]
+fn confirm_container_stop_y_enqueues_stop_action() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmContainerStop {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        project: None,
+        uptime: Some("2d".to_string()),
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert_eq!(app.pending_container_actions.len(), 1);
+    assert_eq!(
+        app.pending_container_actions[0].action,
+        crate::containers::ContainerAction::Stop
+    );
+}
+
+#[test]
+fn confirm_container_stop_stray_key_ignored() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmContainerStop {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        project: None,
+        uptime: None,
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
+    assert!(matches!(app.screen, Screen::ConfirmContainerStop { .. }));
+}
+
+// --- Stack restart confirm dialog ------------------------------------
+
+#[test]
+fn confirm_stack_restart_y_enqueues_one_action_per_member() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmStackRestart {
+        alias: "web".to_string(),
+        project: "web-stack".to_string(),
+        members: vec![
+            crate::app::StackMember {
+                container_id: "c1".to_string(),
+                container_name: "nginx".to_string(),
+                uptime: Some("5d".to_string()),
+            },
+            crate::app::StackMember {
+                container_id: "cextra".to_string(),
+                container_name: "sidecar".to_string(),
+                uptime: Some("5d".to_string()),
+            },
+        ],
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    // Both members were running on alias "web" which exists in the
+    // fixture cache; both are enqueued.
+    assert_eq!(app.pending_container_actions.len(), 2);
+    assert_eq!(app.pending_container_actions[0].container_id, "c1");
+    assert_eq!(app.pending_container_actions[1].container_id, "cextra");
+}
+
+#[test]
+fn confirm_stack_restart_stray_key_ignored() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmStackRestart {
+        alias: "web".to_string(),
+        project: "web-stack".to_string(),
+        members: vec![],
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+    assert!(matches!(app.screen, Screen::ConfirmStackRestart { .. }));
+}
+
+// --- Exec prompt -----------------------------------------------------
+
+#[test]
+fn exec_prompt_enter_with_command_queues_exec_and_returns() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerExecPrompt {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        query: "ls -la".to_string(),
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    let queued = app
+        .pending_container_exec
+        .as_ref()
+        .expect("exec request queued");
+    assert_eq!(queued.command.as_deref(), Some("ls -la"));
+}
+
+#[test]
+fn exec_prompt_enter_empty_query_is_no_op() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerExecPrompt {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        query: String::new(),
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(matches!(app.screen, Screen::ContainerExecPrompt { .. }));
+    assert!(app.pending_container_exec.is_none());
+}
+
+#[test]
+fn exec_prompt_enter_with_control_char_warns_and_does_not_queue() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerExecPrompt {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        query: "rm -rf /\nrm -rf /".to_string(),
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    // Embedded newline is a control char; the prompt rejects it.
+    assert!(matches!(app.screen, Screen::ContainerExecPrompt { .. }));
+    assert!(app.pending_container_exec.is_none());
+    assert!(app.status_center.toast.is_some());
+}
+
+#[test]
+fn exec_prompt_char_input_capped_at_512() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerExecPrompt {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        query: "x".repeat(512),
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    if let Screen::ContainerExecPrompt { query, .. } = &app.screen {
+        assert_eq!(
+            query.chars().count(),
+            512,
+            "buffer must not grow past the cap"
+        );
+    } else {
+        panic!("expected ContainerExecPrompt, got {:?}", app.screen);
+    }
+}
+
+// --- Logs handler keys -----------------------------------------------
+
+#[test]
+fn logs_overlay_esc_closes_to_host_list() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerLogs {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        body: vec!["one".to_string(), "two".to_string()],
+        fetched_at: 100,
+        error: None,
+        scroll: 0,
+        last_render_height: 0,
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn logs_overlay_q_closes_to_host_list() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerLogs {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        body: vec![],
+        fetched_at: 0,
+        error: None,
+        scroll: 0,
+        last_render_height: 0,
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn logs_overlay_g_resets_scroll_and_capital_g_jumps_to_tail() {
+    // Tail anchoring: with a 100-line body and a 24-row visible area,
+    // the bottom of the body must align with the bottom of the
+    // viewport, so scroll lands at 100 - 24 = 76.
+    let mut app = make_containers_overview_app();
+    let body: Vec<String> = (0..100).map(|i| format!("line {}", i)).collect();
+    app.screen = Screen::ContainerLogs {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        body,
+        fetched_at: 100,
+        error: None,
+        scroll: 50,
+        last_render_height: 24,
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
+    if let Screen::ContainerLogs { scroll, .. } = &app.screen {
+        assert_eq!(*scroll, 0);
+    } else {
+        panic!("expected ContainerLogs");
+    }
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('G')), &tx);
+    if let Screen::ContainerLogs { scroll, .. } = &app.screen {
+        assert_eq!(*scroll, 76, "G must tail-anchor: body.len() - height");
+    } else {
+        panic!("expected ContainerLogs");
+    }
+}
+
+#[test]
+fn logs_overlay_capital_g_clamps_when_body_fits_in_viewport() {
+    // 3-line body in a 24-row viewport: scroll stays at 0 because the
+    // tail position (3 - 24 saturating) is 0.
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerLogs {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        body: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        fetched_at: 100,
+        error: None,
+        scroll: 1,
+        last_render_height: 24,
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('G')), &tx);
+    if let Screen::ContainerLogs { scroll, .. } = &app.screen {
+        assert_eq!(*scroll, 0);
+    } else {
+        panic!("expected ContainerLogs");
+    }
+}
+
+// --- handle_container_logs_complete ---------------------------------
+
+#[test]
+fn logs_complete_ok_populates_body_and_anchors_to_tail() {
+    // 100-line body in a 24-row viewport: scroll = 100 - 24 = 76 so
+    // the last log line sits at the bottom of the visible area instead
+    // of being painted alone at the top.
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerLogs {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        body: vec![],
+        fetched_at: 0,
+        error: None,
+        scroll: 0,
+        last_render_height: 24,
+    };
+    let lines: Vec<String> = (0..100).map(|i| format!("line {}", i)).collect();
+    crate::handler::event_loop::handle_container_logs_complete(
+        &mut app,
+        "db".to_string(),
+        "c3".to_string(),
+        "postgres".to_string(),
+        Ok(lines),
+    );
+    if let Screen::ContainerLogs {
+        body,
+        scroll,
+        error,
+        fetched_at,
+        ..
+    } = &app.screen
+    {
+        assert_eq!(body.len(), 100);
+        assert_eq!(*scroll, 76, "scroll must tail-anchor (body.len() - height)");
+        assert!(error.is_none());
+        assert!(*fetched_at > 0, "fetched_at must be set");
+    } else {
+        panic!("expected ContainerLogs, got {:?}", app.screen);
+    }
+}
+
+#[test]
+fn logs_complete_ok_keeps_scroll_zero_when_body_fits_viewport() {
+    // 3-line body in a 24-row viewport saturates to scroll = 0.
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerLogs {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        body: vec![],
+        fetched_at: 0,
+        error: None,
+        scroll: 0,
+        last_render_height: 24,
+    };
+    crate::handler::event_loop::handle_container_logs_complete(
+        &mut app,
+        "db".to_string(),
+        "c3".to_string(),
+        "postgres".to_string(),
+        Ok(vec!["a".to_string(), "b".to_string(), "c".to_string()]),
+    );
+    if let Screen::ContainerLogs { scroll, .. } = &app.screen {
+        assert_eq!(*scroll, 0);
+    } else {
+        panic!("expected ContainerLogs");
+    }
+}
+
+#[test]
+fn logs_complete_err_clears_body_and_records_error() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerLogs {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        body: vec!["leftover".to_string()],
+        fetched_at: 0,
+        error: None,
+        scroll: 5,
+        last_render_height: 24,
+    };
+    crate::handler::event_loop::handle_container_logs_complete(
+        &mut app,
+        "db".to_string(),
+        "c3".to_string(),
+        "postgres".to_string(),
+        Err("permission denied".to_string()),
+    );
+    if let Screen::ContainerLogs {
+        body,
+        scroll,
+        error,
+        fetched_at,
+        ..
+    } = &app.screen
+    {
+        assert!(body.is_empty());
+        assert_eq!(*scroll, 0);
+        assert_eq!(error.as_deref(), Some("permission denied"));
+        assert!(*fetched_at > 0, "even on error, fetched_at must reset");
+    } else {
+        panic!("expected ContainerLogs");
+    }
+}
+
+#[test]
+fn logs_complete_dropped_when_screen_is_host_list() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::HostList;
+    crate::handler::event_loop::handle_container_logs_complete(
+        &mut app,
+        "db".to_string(),
+        "c3".to_string(),
+        "postgres".to_string(),
+        Ok(vec!["should not land".to_string()]),
+    );
+    assert!(
+        matches!(app.screen, Screen::HostList),
+        "screen must be unchanged"
+    );
+}
+
+#[test]
+fn logs_complete_dropped_when_container_id_differs() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerLogs {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        body: vec![],
+        fetched_at: 0,
+        error: None,
+        scroll: 0,
+        last_render_height: 0,
+    };
+    crate::handler::event_loop::handle_container_logs_complete(
+        &mut app,
+        "db".to_string(),
+        "different-id".to_string(),
+        "other".to_string(),
+        Ok(vec!["wrong target".to_string()]),
+    );
+    if let Screen::ContainerLogs { body, .. } = &app.screen {
+        assert!(body.is_empty(), "stale fetch must not populate the overlay");
+    } else {
+        panic!("expected ContainerLogs to remain");
+    }
 }

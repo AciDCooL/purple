@@ -29,14 +29,19 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // host-list content when the user opened help from the Tunnels tab.
     let is_tunnels_tab =
         matches!(return_screen, Screen::HostList) && matches!(app.top_page, TopPage::Tunnels);
-    let is_host_list =
-        !is_tunnels_tab && matches!(return_screen, Screen::HostList | Screen::Welcome { .. });
-    // Both top-level tabs share the same overlay chrome: logo, version,
+    let is_containers_tab =
+        matches!(return_screen, Screen::HostList) && matches!(app.top_page, TopPage::Containers);
+    let is_host_list = !is_tunnels_tab
+        && !is_containers_tab
+        && matches!(return_screen, Screen::HostList | Screen::Welcome { .. });
+    // All top-level tabs share the same overlay chrome: logo, version,
     // wiki/issues info block, two-column body. Sub-screens use a
     // smaller compact layout.
-    let is_main_view = is_host_list || is_tunnels_tab;
+    let is_main_view = is_host_list || is_tunnels_tab || is_containers_tab;
     let title_text = if is_tunnels_tab {
         "Tunnels"
+    } else if is_containers_tab {
+        "Containers"
     } else {
         context_title(return_screen)
     };
@@ -46,6 +51,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         host_list_columns()
     } else if is_tunnels_tab {
         tunnels_overview_columns()
+    } else if is_containers_tab {
+        containers_overview_columns()
     } else {
         let lines = match return_screen {
             Screen::FileBrowser { .. } => file_browser_lines(),
@@ -460,10 +467,65 @@ fn tunnels_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         blank(),                         // row 9 padding
         section_header("NAVIGATE TABS"), // row 10 ↔ col1 ACTIONS
         blank(),
-        help_line_short("Tab", "switch to hosts"),
+        help_line_short("Tab", "switch tabs"),
         help_line_short("n", "what's new"),
         blank(),
         help_line_short("q", "quit"), // row 15 ↔ col1 `:`
+    ];
+
+    (col1, col2)
+}
+
+fn containers_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    let col1 = vec![
+        blank(),
+        section_header("NAVIGATE"),
+        blank(),
+        help_line("j/k ↑↓", "up / down"),
+        help_line("PgDn/PgUp", "page down / up"),
+        help_line("g/G", "top / bottom"),
+        help_line("/", "search"),
+        help_line("Esc", "clear search"),
+        help_line("v", "toggle detail panel"),
+        help_line("Space", "fold / unfold host group"),
+        blank(),
+        blank(),
+        section_header("ACTIONS"),
+        blank(),
+        help_line("Enter", "shell into container"),
+        help_line("l", "logs (last 200 lines)"),
+        help_line("K", "kick (restart)"),
+        help_line("Ctrl-K", "kick whole stack"),
+        help_line("S", "stop"),
+        help_line("e", "exec one-off command"),
+        help_line("s", "cycle sort"),
+        blank(),
+        help_line(":", "jump (search anything)"),
+    ];
+
+    let col2 = vec![
+        blank(),
+        section_header("ON HOST DIVIDER"),
+        blank(),
+        help_line_short("K", "restart running on host"),
+        help_line_short("S", "stop running on host"),
+        help_line_short("r", "refresh listing"),
+        help_line_short("Space/Enter", "fold group"),
+        blank(),
+        blank(),
+        section_header("REFRESH"),
+        blank(),
+        help_line_short("r", "refresh host"),
+        help_line_short("R", "refresh all"),
+        help_line_short("a", "add host"),
+        blank(),
+        blank(),
+        section_header("NAVIGATE TABS"),
+        blank(),
+        help_line_short("Tab", "switch tabs"),
+        help_line_short("n", "what's new"),
+        blank(),
+        help_line_short("q", "quit"),
     ];
 
     (col1, col2)
@@ -935,7 +997,7 @@ mod tests {
             "search",
             "cycle sort",
             "jump (search anything)",
-            "switch to hosts",
+            "switch tabs",
         ] {
             assert!(
                 text.contains(desc),
@@ -995,6 +1057,62 @@ mod tests {
         assert!(
             text.contains("github.com/erickochen/purple/issues"),
             "tunnels-tab help must render issues info block"
+        );
+    }
+
+    #[test]
+    fn containers_overview_columns_cover_tab_specific_shortcuts() {
+        let (col1, col2) = containers_overview_columns();
+        let text: String = col1
+            .iter()
+            .chain(col2.iter())
+            .map(|l| l.to_string())
+            .collect();
+        for desc in &[
+            "shell into container",
+            "search",
+            "cycle sort",
+            "jump (search anything)",
+            "switch tabs",
+            "refresh host",
+            "refresh all",
+            "add host",
+        ] {
+            assert!(
+                text.contains(desc),
+                "containers-overview help missing '{desc}'"
+            );
+        }
+    }
+
+    #[test]
+    fn help_on_containers_tab_renders_tab_columns() {
+        let mut app = help_test_app(Screen::HostList);
+        app.top_page = TopPage::Containers;
+        let text = render_to_text(&mut app, 100, 40);
+        assert!(
+            text.contains("REFRESH"),
+            "containers-tab help must show REFRESH section header"
+        );
+        assert!(
+            text.contains("refresh host"),
+            "containers-tab help must show 'r' shortcut"
+        );
+        assert!(
+            text.contains("refresh all"),
+            "containers-tab help must show 'R' shortcut"
+        );
+        assert!(
+            text.contains("add host"),
+            "containers-tab help must show 'a' shortcut"
+        );
+        assert!(
+            text.contains("shell into container"),
+            "containers-tab help should show Enter shortcut"
+        );
+        assert!(
+            !text.contains("MANAGE TUNNELS"),
+            "containers-tab help must not show tunnels section headers"
         );
     }
 

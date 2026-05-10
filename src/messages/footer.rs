@@ -1,14 +1,14 @@
 //! Canonical footer keycap labels.
 //!
 //! Single source of truth for the text shown next to every keycap in TUI
-//! footers. Inline strings in `src/ui/*.rs` are forbidden — every footer
+//! footers. Inline strings in `src/ui/*.rs` are forbidden. every footer
 //! must reference these constants so the same key in different screens
 //! shows the same label.
 //!
 //! Categories follow the design-system-reference.md "Footer keycap" rule:
-//! - `back`   — leaves a navigated overlay and returns to its parent
-//! - `cancel` — discards form/picker input or selection state
-//! - `close`  — closes a self-contained info overlay (no state)
+//! - `back`  . leaves a navigated overlay and returns to its parent
+//! - `cancel`. discards form/picker input or selection state
+//! - `close` . closes a self-contained info overlay (no state)
 //!
 //! All values include the surrounding spaces the `Footer` builder expects
 //! (` select `, not `select`).
@@ -56,6 +56,10 @@ pub const ENTER_RUN: &str = " run ";
 /// File-browser copy.
 pub const ENTER_COPY: &str = " copy ";
 
+/// Drop into an interactive shell on the selected resource (containers
+/// overview Enter. `ssh -t … docker exec -it … sh`).
+pub const ENTER_SHELL: &str = " shell ";
+
 /// Provider list: expand a multi-config row.
 pub const ENTER_EXPAND: &str = " expand ";
 
@@ -88,6 +92,16 @@ pub const ACTION_REFRESH: &str = " refresh ";
 pub const ACTION_RESTART: &str = " restart ";
 pub const ACTION_START: &str = " start ";
 pub const ACTION_STOP: &str = " stop ";
+pub const ACTION_LOGS: &str = " logs ";
+
+/// Logs overlay footer keycaps. Kept here so the design-system gate
+/// (`./scripts/check-design-system.sh`) does not flag inline literals
+/// at the call sites.
+pub const ACTION_BACK: &str = " back ";
+pub const ACTION_TOP: &str = " top ";
+pub const ACTION_BOTTOM: &str = " bottom ";
+pub const ACTION_SCROLL: &str = " scroll ";
+pub const ACTION_PAGE: &str = " page ";
 pub const ACTION_ALL: &str = " all ";
 
 // --- Tab / arrow / Space ---

@@ -6,96 +6,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::UnicodeWidthStr;
 
+use super::design::{
+    self, BOX_BL, BOX_V, section_close, section_field, section_line, section_open,
+    section_open_notitle,
+};
 use super::host_list::format_rtt;
-
-// Box-drawing characters for section cards
-const BOX_TL: &str = "\u{256D}"; // ╭
-const BOX_TR: &str = "\u{256E}"; // ╮
-const BOX_BL: &str = "\u{2570}"; // ╰
-const BOX_BR: &str = "\u{256F}"; // ╯
-const BOX_H: &str = "\u{2500}"; // ─
-const BOX_V: &str = "\u{2502}"; // │
-
-/// Push the opening line of a section card: ╭─ TITLE ───╮
-fn section_open(lines: &mut Vec<Line<'static>>, title: &str, width: usize) {
-    // prefix: "╭─ " border, then TITLE in bold, then " " — split styling
-    let border_prefix = format!("{}\u{2500} ", BOX_TL);
-    let title_suffix = " ";
-    let prefix_width = border_prefix.width() + title.width() + title_suffix.width();
-    let fill = width.saturating_sub(prefix_width).saturating_sub(1); // -1 for TR char
-    lines.push(Line::from(vec![
-        Span::styled(border_prefix, theme::border()),
-        Span::styled(title.to_string(), theme::bold()),
-        Span::styled(title_suffix, theme::border()),
-        Span::styled(BOX_H.repeat(fill), theme::border()),
-        Span::styled(BOX_TR, theme::border()),
-    ]));
-}
-
-/// Push the opening line of a section card without a title: ╭───────╮
-fn section_open_notitle(lines: &mut Vec<Line<'static>>, width: usize) {
-    let fill = width.saturating_sub(2); // -1 for TL, -1 for TR
-    lines.push(Line::from(vec![
-        Span::styled(BOX_TL, theme::border()),
-        Span::styled(BOX_H.repeat(fill), theme::border()),
-        Span::styled(BOX_TR, theme::border()),
-    ]));
-}
-
-/// Push a content row wrapped in box side characters: │ <spans...> │
-/// Pads content to fill `width` columns (right-aligns the closing │).
-fn section_line(lines: &mut Vec<Line<'static>>, spans: Vec<Span<'static>>, width: usize) {
-    let mut full_spans: Vec<Span<'static>> =
-        vec![Span::styled(format!("{} ", BOX_V), theme::border())];
-    let content_width: usize = full_spans.iter().map(|s| s.content.width()).sum::<usize>()
-        + spans.iter().map(|s| s.content.width()).sum::<usize>();
-    full_spans.extend(spans);
-    // Pad to align the right │ border
-    let closing_offset = 1; // the │ character
-    let padding = width
-        .saturating_sub(content_width)
-        .saturating_sub(closing_offset);
-    if padding > 0 {
-        full_spans.push(Span::raw(" ".repeat(padding)));
-    }
-    full_spans.push(Span::styled(BOX_V, theme::border()));
-    lines.push(Line::from(full_spans));
-}
-
-/// Push the closing line of a section card: ╰───────╯
-fn section_close(lines: &mut Vec<Line<'static>>, width: usize) {
-    let fill = width.saturating_sub(2); // -1 for BL, -1 for BR
-    lines.push(Line::from(vec![
-        Span::styled(BOX_BL, theme::border()),
-        Span::styled(BOX_H.repeat(fill), theme::border()),
-        Span::styled(BOX_BR, theme::border()),
-    ]));
-}
-
-/// Push a label+value field row inside a section card.
-fn section_field(
-    lines: &mut Vec<Line<'static>>,
-    label: &str,
-    value: &str,
-    max_value_width: usize,
-    box_width: usize,
-) {
-    let display = if max_value_width > 0 && value.width() > max_value_width {
-        super::truncate(value, max_value_width)
-    } else {
-        value.to_string()
-    };
-    let spans = vec![
-        Span::styled(
-            format!("{:<width$}", label, width = LABEL_WIDTH),
-            theme::muted(),
-        ),
-        Span::styled(display, theme::bold()),
-    ];
-    section_line(lines, spans, box_width);
-}
-
-use super::design;
 use super::theme;
 use crate::app::App;
 use crate::history::ConnectionHistory;

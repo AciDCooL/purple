@@ -107,7 +107,7 @@ pub(super) fn handle_confirm_vault_sign(
 ) {
     // Vault Sign is a destructive/material action: signing N certificates
     // hits Vault, may take time and is hard to reverse. Stray keys must NOT
-    // cancel — use `route_confirm_key` so only y/Y/n/N/Esc are honored.
+    // cancel. use `route_confirm_key` so only y/Y/n/N/Esc are honored.
     // History: an earlier `_ => app.screen = Screen::HostList` catch-all
     // could be triggered by any keypress next to `y` (e.g. fat-fingered
     // `t` or `u`), silently aborting a bulk sign.
@@ -173,7 +173,7 @@ fn start_vault_bulk_sign(
                 // Otherwise mark it in-flight for the duration of this iteration.
                 {
                     // If the mutex is poisoned a worker thread panicked while holding
-                    // the lock. Recover the inner value without clearing — clearing
+                    // the lock. Recover the inner value without clearing. clearing
                     // the whole set would make every in-flight alias simultaneously
                     // eligible for re-signing, risking duplicate cert writes.
                     let mut set = match in_flight.lock() {
@@ -283,7 +283,7 @@ fn start_vault_bulk_sign(
         }
         Err(e) => {
             // Spawn failed (e.g. OS thread limit). Clear the cancel flag and
-            // surface the error — otherwise the status bar is stuck at
+            // surface the error. otherwise the status bar is stuck at
             // "Signing 0/N" with no way for the user to recover.
             app.vault.signing_cancel = None;
             app.vault.sign_thread = None;
@@ -297,7 +297,7 @@ pub(super) fn remove_in_flight(
     alias: &str,
 ) {
     // On mutex poison, recover the inner value and remove only the target alias.
-    // Do NOT clear the entire set — other in-flight aliases are still owned by
+    // Do NOT clear the entire set. other in-flight aliases are still owned by
     // live worker iterations and clearing them would allow duplicate signs.
     let mut guard = match set.lock() {
         Ok(g) => g,
@@ -307,7 +307,7 @@ pub(super) fn remove_in_flight(
 }
 
 pub(super) fn handle_confirm_host_key_reset(app: &mut App, key: KeyEvent) {
-    // Host key reset wipes the host's known_hosts entry — uniform y/n/Esc
+    // Host key reset wipes the host's known_hosts entry. uniform y/n/Esc
     // contract via the central router so stray keys cannot trigger it.
     match super::route_confirm_key(key) {
         super::ConfirmAction::Yes => {
@@ -355,4 +355,201 @@ pub(super) fn handle_confirm_host_key_reset(app: &mut App, key: KeyEvent) {
         }
         super::ConfirmAction::Ignored => {}
     }
+}
+
+/// Confirm handler for `K` (kick = restart). On Yes, queues a
+/// `ContainerActionKind::Restart` request; the main loop picks it
+/// up, fires the SSH command, and emits a result event. On No or
+/// Esc, the screen drops without side effects.
+pub(super) fn handle_confirm_container_restart(app: &mut App, key: KeyEvent) {
+    match super::route_confirm_key(key) {
+        super::ConfirmAction::Yes => {
+            if let Screen::ConfirmContainerRestart {
+                ref alias,
+                ref container_id,
+                ref container_name,
+                ..
+            } = app.screen
+            {
+                queue_container_action(
+                    app,
+                    alias.clone(),
+                    container_id.clone(),
+                    container_name.clone(),
+                    crate::containers::ContainerAction::Restart,
+                );
+            }
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::No => {
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::Ignored => {}
+    }
+}
+
+/// Confirm handler for `S` (stop). Same shape as restart; the action
+/// kind differs and so does the destructive wording in the dialog
+/// body.
+pub(super) fn handle_confirm_container_stop(app: &mut App, key: KeyEvent) {
+    match super::route_confirm_key(key) {
+        super::ConfirmAction::Yes => {
+            if let Screen::ConfirmContainerStop {
+                ref alias,
+                ref container_id,
+                ref container_name,
+                ..
+            } = app.screen
+            {
+                queue_container_action(
+                    app,
+                    alias.clone(),
+                    container_id.clone(),
+                    container_name.clone(),
+                    crate::containers::ContainerAction::Stop,
+                );
+            }
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::No => {
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::Ignored => {}
+    }
+}
+
+/// Confirm handler for `Ctrl-K` (stack kick). Iterates the stored
+/// member list and queues a Restart for each through the same drain
+/// mechanism that powers single-container restart. The drain
+/// processes one request per tick, giving a sequential cadence.
+pub(super) fn handle_confirm_stack_restart(app: &mut App, key: KeyEvent) {
+    match super::route_confirm_key(key) {
+        super::ConfirmAction::Yes => {
+            if let Screen::ConfirmStackRestart {
+                ref alias,
+                ref members,
+                ..
+            } = app.screen
+            {
+                let alias = alias.clone();
+                let members = members.clone();
+                for m in members {
+                    queue_container_action(
+                        app,
+                        alias.clone(),
+                        m.container_id,
+                        m.container_name,
+                        crate::containers::ContainerAction::Restart,
+                    );
+                }
+            }
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::No => {
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::Ignored => {}
+    }
+}
+
+/// Confirm handler for `K` on a host-divider row in the containers
+/// overview. Iterates every running container of the host and queues
+/// a Restart, regardless of compose project. Mirrors the stack-restart
+/// drain. one request per tick keeps remote SSH sane.
+pub(super) fn handle_confirm_host_restart_all(app: &mut App, key: KeyEvent) {
+    match super::route_confirm_key(key) {
+        super::ConfirmAction::Yes => {
+            if let Screen::ConfirmHostRestartAll {
+                ref alias,
+                ref members,
+            } = app.screen
+            {
+                let alias = alias.clone();
+                let members = members.clone();
+                for m in members {
+                    queue_container_action(
+                        app,
+                        alias.clone(),
+                        m.container_id,
+                        m.container_name,
+                        crate::containers::ContainerAction::Restart,
+                    );
+                }
+            }
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::No => {
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::Ignored => {}
+    }
+}
+
+/// Confirm handler for `S` on a host-divider row. Stops every running
+/// container on the host. Same drain shape as host-restart.
+pub(super) fn handle_confirm_host_stop_all(app: &mut App, key: KeyEvent) {
+    match super::route_confirm_key(key) {
+        super::ConfirmAction::Yes => {
+            if let Screen::ConfirmHostStopAll {
+                ref alias,
+                ref members,
+            } = app.screen
+            {
+                let alias = alias.clone();
+                let members = members.clone();
+                for m in members {
+                    queue_container_action(
+                        app,
+                        alias.clone(),
+                        m.container_id,
+                        m.container_name,
+                        crate::containers::ContainerAction::Stop,
+                    );
+                }
+            }
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::No => {
+            app.set_screen(Screen::HostList);
+        }
+        super::ConfirmAction::Ignored => {}
+    }
+}
+
+fn queue_container_action(
+    app: &mut App,
+    alias: String,
+    container_id: String,
+    container_name: String,
+    action: crate::containers::ContainerAction,
+) {
+    let Some(entry) = app.container_cache.get(&alias) else {
+        log::debug!(
+            "[purple] container_action: queue aborted, no cache for alias={}",
+            alias
+        );
+        return;
+    };
+    let runtime = entry.runtime;
+    let askpass = app
+        .hosts_state
+        .list
+        .iter()
+        .find(|h| h.alias == alias)
+        .and_then(|h| h.askpass.clone());
+    log::info!(
+        "[purple] container_action queued: alias={} id={} action={:?}",
+        alias,
+        container_id,
+        action
+    );
+    app.pending_container_actions
+        .push_back(crate::app::ContainerActionRequest {
+            alias,
+            askpass,
+            runtime,
+            container_id,
+            container_name,
+            action,
+        });
 }

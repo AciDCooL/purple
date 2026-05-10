@@ -667,9 +667,10 @@ mod tests {
 
     #[test]
     fn empty_state_action_top_n_round_robins_categories() {
-        // The top-N must NOT be six host actions in a row; we want a
-        // taste of every category. With ~6 categories and the cap at 6,
-        // each visible action should come from a distinct category.
+        // Hosts mode (default): the top-N must NOT be six host actions
+        // in a row; we want a taste of every category. With ~6
+        // categories and the cap at 6, each visible action should come
+        // from a distinct category.
         let mut app = test_app();
         app.recompute_jump_hits();
         let groups = app.jump.as_ref().unwrap().empty_state_groups();
@@ -694,5 +695,152 @@ mod tests {
             categories.len() >= 4,
             "top-{cap} should sample at least 4 distinct categories, got {categories:?}"
         );
+    }
+
+    #[test]
+    fn empty_state_biases_containers_actions_when_opened_from_containers_tab() {
+        // Tab-aware empty state: the first three slots must surface
+        // `Containers:` actions when the bar is opened with
+        // `JumpMode::Containers` so the user sees tab-relevant actions
+        // before the cross-tab hub menu.
+        let mut app = test_app();
+        app.jump = Some(JumpState::for_mode(crate::app::JumpMode::Containers));
+        app.recompute_jump_hits();
+        let actions = app
+            .jump
+            .as_ref()
+            .unwrap()
+            .empty_state_groups()
+            .into_iter()
+            .find(|(l, _)| *l == "ACTIONS")
+            .map(|(_, h)| h)
+            .unwrap_or_default();
+        let leading_categories: Vec<String> = actions
+            .iter()
+            .take(3)
+            .filter_map(|h| match h {
+                crate::app::JumpHit::Action(a) => {
+                    Some(a.label.split_once(':').map(|(c, _)| c.trim().to_string())?)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            leading_categories,
+            vec![
+                "Containers".to_string(),
+                "Containers".to_string(),
+                "Containers".to_string()
+            ],
+            "first three slots must be Containers actions on the containers tab"
+        );
+    }
+
+    #[test]
+    fn empty_state_biases_tunnel_actions_when_opened_from_tunnels_tab() {
+        let mut app = test_app();
+        app.jump = Some(JumpState::for_mode(crate::app::JumpMode::Tunnels));
+        app.recompute_jump_hits();
+        let actions = app
+            .jump
+            .as_ref()
+            .unwrap()
+            .empty_state_groups()
+            .into_iter()
+            .find(|(l, _)| *l == "ACTIONS")
+            .map(|(_, h)| h)
+            .unwrap_or_default();
+        let leading_categories: Vec<String> = actions
+            .iter()
+            .take(3)
+            .filter_map(|h| match h {
+                crate::app::JumpHit::Action(a) => {
+                    Some(a.label.split_once(':').map(|(c, _)| c.trim().to_string())?)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            leading_categories,
+            vec![
+                "Tunnels".to_string(),
+                "Tunnels".to_string(),
+                "Tunnels".to_string()
+            ],
+            "first three slots must be Tunnels actions on the tunnels tab"
+        );
+    }
+
+    #[test]
+    fn empty_state_hosts_mode_keeps_hub_distribution() {
+        // Hosts (default) mode is the discovery hub. The first three
+        // slots must each come from a different category, NOT three
+        // Hosts actions in a row.
+        let mut app = test_app();
+        app.jump = Some(JumpState::for_mode(crate::app::JumpMode::Hosts));
+        app.recompute_jump_hits();
+        let actions = app
+            .jump
+            .as_ref()
+            .unwrap()
+            .empty_state_groups()
+            .into_iter()
+            .find(|(l, _)| *l == "ACTIONS")
+            .map(|(_, h)| h)
+            .unwrap_or_default();
+        let leading_categories: Vec<String> = actions
+            .iter()
+            .take(3)
+            .filter_map(|h| match h {
+                crate::app::JumpHit::Action(a) => {
+                    Some(a.label.split_once(':').map(|(c, _)| c.trim().to_string())?)
+                }
+                _ => None,
+            })
+            .collect();
+        let unique: std::collections::HashSet<&String> = leading_categories.iter().collect();
+        assert_eq!(
+            unique.len(),
+            3,
+            "hosts mode must keep hub distribution: 3 distinct categories in first 3 slots, got {leading_categories:?}"
+        );
+    }
+
+    #[test]
+    fn visible_hits_and_empty_state_groups_agree_on_actions() {
+        // Regression: the navigation cursor (`visible_hits`) must walk
+        // the same action list the renderer (`empty_state_groups`) shows.
+        // The shared `empty_state_actions` helper guarantees this; this
+        // test pins the invariant against future refactors.
+        for mode in [
+            crate::app::JumpMode::Hosts,
+            crate::app::JumpMode::Tunnels,
+            crate::app::JumpMode::Containers,
+        ] {
+            let mut app = test_app();
+            app.jump = Some(JumpState::for_mode(mode));
+            app.recompute_jump_hits();
+            let visible = app.jump.as_ref().unwrap().visible_hits();
+            let group_actions = app
+                .jump
+                .as_ref()
+                .unwrap()
+                .empty_state_groups()
+                .into_iter()
+                .find(|(l, _)| *l == "ACTIONS")
+                .map(|(_, h)| h)
+                .unwrap_or_default();
+            // visible_hits prepends recents; with no seeded recents the
+            // tail should equal the rendered ACTIONS list.
+            let visible_actions: Vec<_> = visible
+                .iter()
+                .filter(|h| matches!(h, crate::app::JumpHit::Action(_)))
+                .cloned()
+                .collect();
+            assert_eq!(
+                visible_actions, group_actions,
+                "visible_hits actions must equal empty_state_groups ACTIONS for mode {mode:?}"
+            );
+        }
     }
 }

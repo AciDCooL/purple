@@ -454,6 +454,9 @@ fn apply_saved_sort(app: &mut App) {
     app.hosts_state.sort_mode = saved;
     app.hosts_state.group_by = group;
     app.hosts_state.view_mode = preferences::load_view_mode();
+    app.containers_overview.view_mode = preferences::load_containers_view_mode();
+    app.containers_overview.sort_mode = preferences::load_containers_sort_mode();
+    app.containers_overview.collapsed_hosts = preferences::load_containers_collapsed_hosts();
     // Clear stale tag preference if the tag no longer exists in any host
     if app.clear_stale_group_tag() {
         if let Err(e) = preferences::save_group_by(&app.hosts_state.group_by) {

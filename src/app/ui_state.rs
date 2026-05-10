@@ -59,6 +59,7 @@ pub struct UiSelection {
     pub provider_list_state: ListState,
     pub tunnel_list_state: ListState,
     pub tunnels_overview_state: ListState,
+    pub containers_overview_state: ListState,
     /// Cursor for the host picker reached from the tunnels overview when
     /// adding a new tunnel. Indexes into the editable-hosts slice built at
     /// render time (hosts from included files are excluded).
@@ -67,6 +68,11 @@ pub struct UiSelection {
     /// mode: every printable keystroke appends to the query and shrinks the
     /// candidate set. Empty string means "show all".
     pub tunnel_host_picker_query: String,
+    /// Cursor + live query for the containers-tab `a` host picker.
+    /// Mirrors the tunnel host picker pair; kept separate so the two
+    /// pickers can be open back-to-back without state bleed.
+    pub container_host_picker_state: ListState,
+    pub container_host_picker_query: String,
     pub snippet_picker_state: ListState,
     pub snippet_search: Option<String>,
     pub region_picker: RegionPickerState,

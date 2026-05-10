@@ -133,11 +133,35 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
             }
         }
         JumpHit::Container(c) => {
-            app.top_page = TopPage::Hosts;
-            app.select_host_by_alias(&c.alias);
-            app.screen = Screen::Containers {
-                alias: c.alias.clone(),
-            };
+            // Land on the global containers tab with the cursor on the
+            // picked container row. Falls back to the host-divider row
+            // when the container's group is currently folded; falls
+            // through to the first visible row when the cache no
+            // longer carries the container.
+            app.top_page = TopPage::Containers;
+            app.screen = Screen::HostList;
+            let target_idx = crate::ui::containers_overview::position_of_container(
+                app,
+                &c.alias,
+                &c.container_id,
+            )
+            .or_else(|| {
+                crate::ui::containers_overview::visible_items(app)
+                    .iter()
+                    .position(|item| match item {
+                        crate::ui::containers_overview::ContainerListItem::HostHeader {
+                            alias,
+                            ..
+                        } => alias == &c.alias,
+                        _ => false,
+                    })
+            })
+            .or_else(|| {
+                crate::ui::containers_overview::first_visible_index(
+                    &crate::ui::containers_overview::visible_items(app),
+                )
+            });
+            app.ui.containers_overview_state.select(target_idx);
         }
         JumpHit::Snippet(_s) => {
             // The snippet picker requires at least one target host. If the
@@ -178,6 +202,11 @@ fn execute_action(
         JumpActionTarget::Tunnels => {
             app.top_page = TopPage::Tunnels;
             super::tunnels_overview::handle_keys(app, key);
+        }
+        JumpActionTarget::Containers => {
+            app.top_page = TopPage::Containers;
+            app.screen = Screen::HostList;
+            super::containers_overview::handle_keys(app, key, events_tx);
         }
     }
 }

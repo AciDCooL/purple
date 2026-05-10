@@ -364,4 +364,11 @@ pub(super) fn submit_form(app: &mut App) {
     app.set_screen(Screen::HostList);
     app.select_host_by_alias(&target_alias);
     app.flush_pending_vault_write();
+    // Form save may have introduced a new host (Add) or renamed an
+    // existing one (Edit). Queue exactly the saved alias for the
+    // initial container-cache fetch. Drained next tick by the main
+    // loop. Only this alias is fetched: prevents an unrelated
+    // cache-missing host from triggering an unwanted SSH connection
+    // when the user edits an existing host.
+    app.pending_container_fetch_aliases.push(target_alias);
 }

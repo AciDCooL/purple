@@ -73,7 +73,7 @@ I wanted one place for all of that. So I built it.
 
 ![cloud providers](screenshots/providers.png)
 
-🐳 **Containers over SSH.** Docker and Podman. Start, stop, restart. No agent on the remote, no extra ports. Just SSH.
+🐳 **Manage every container in your fleet from one tab.** Every Docker and Podman container grouped per host. Shell in, stream logs, restart, stop, exec or kick a whole compose stack member by member. No remote agent, no extra ports. Just SSH.
 
 ![containers](screenshots/containers.png)
 

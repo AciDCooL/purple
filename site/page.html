@@ -3,28 +3,28 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>purple - Terminal SSH Manager and Tunnel Monitor in Rust</title>
-<meta name="description" content="Open-source terminal SSH manager in Rust. Keeps ~/.ssh/config in sync with your cloud infra across 16 cloud providers. Fuzzy host search, live tunnel monitoring, scp, Docker over SSH.">
-<meta name="keywords" content="ssh manager, ssh client, ssh config editor, terminal ssh manager, tui ssh, rust ssh tui, ratatui, termius alternative, sshs alternative, ssh bookmarks manager, cloud ssh sync, multi-cloud ssh inventory, ssh tunnel manager, live ssh tunnel monitoring, ssh tunnel dashboard, real-time ssh tunnel, ssh tunnel throughput, ssh swimlane, sftp client, scp file transfer, docker over ssh, podman over ssh, agentless container management, portainer alternative, hashicorp vault ssh, short-lived ssh certificates, mcp server, model context protocol, claude code ssh, claude desktop ssh, mcpb bundle, ssh mcp server, ai agent ssh tool, mcp audit log, devops, sysadmin, homelab">
+<title>purple - Terminal SSH, Tunnel and Container Manager in Rust</title>
+<meta name="description" content="Open-source terminal SSH manager in Rust. Cloud sync across 16 providers. Fuzzy host search, live tunnel monitoring and fleet-wide Docker and Podman container management.">
+<meta name="keywords" content="ssh manager, ssh client, ssh config editor, terminal ssh manager, tui ssh, rust ssh tui, ratatui, termius alternative, sshs alternative, ssh bookmarks manager, cloud ssh sync, multi-cloud ssh inventory, ssh tunnel manager, live ssh tunnel monitoring, ssh tunnel dashboard, real-time ssh tunnel, ssh tunnel throughput, ssh swimlane, sftp client, scp file transfer, docker over ssh, podman over ssh, multi-host docker management, docker fleet management, manage docker across servers, compose stack restart, docker logs over ssh, docker exec over ssh, agentless container management, lazydocker alternative, portainer alternative, hashicorp vault ssh, short-lived ssh certificates, mcp server, model context protocol, claude code ssh, claude desktop ssh, mcpb bundle, ssh mcp server, ai agent ssh tool, mcp audit log, devops, sysadmin, homelab">
 <meta name="robots" content="index, follow">
 <meta name="author" content="Eric Kochen">
 <meta name="color-scheme" content="dark">
-<meta property="og:title" content="purple - Terminal SSH Manager and Tunnel Monitor in Rust">
-<meta property="og:description" content="Open-source terminal SSH manager in Rust. Keeps ~/.ssh/config in sync with your cloud infra across 16 cloud providers. Fuzzy host search, live tunnel monitoring, scp, Docker over SSH.">
+<meta property="og:title" content="purple - Terminal SSH, Tunnel and Container Manager in Rust">
+<meta property="og:description" content="Open-source terminal SSH manager in Rust. Cloud sync across 16 providers. Fuzzy host search, live tunnel monitoring and fleet-wide Docker and Podman container management.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://getpurple.sh">
 <meta property="og:image" content="https://raw.githubusercontent.com/erickochen/purple/master/preview.png">
 <meta property="og:image:type" content="image/png">
-<meta property="og:image:alt" content="purple terminal SSH manager showing host list with search, cloud sync, live tunnel monitoring and detail panel">
+<meta property="og:image:alt" content="purple terminal SSH manager showing host list with search, cloud sync, live tunnel monitoring, fleet-wide container management and detail panel">
 <meta property="og:image:width" content="3264">
 <meta property="og:image:height" content="1960">
 <meta property="og:locale" content="en_US">
 <meta property="og:site_name" content="purple">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="purple - Terminal SSH Manager and Tunnel Monitor in Rust">
-<meta name="twitter:description" content="Open-source terminal SSH manager in Rust. Keeps ~/.ssh/config in sync with your cloud infra across 16 cloud providers. Fuzzy host search, live tunnel monitoring, scp, Docker over SSH.">
+<meta name="twitter:title" content="purple - Terminal SSH, Tunnel and Container Manager in Rust">
+<meta name="twitter:description" content="Open-source terminal SSH manager in Rust. Cloud sync across 16 providers. Fuzzy host search, live tunnel monitoring and fleet-wide Docker and Podman container management.">
 <meta name="twitter:image" content="https://raw.githubusercontent.com/erickochen/purple/master/preview.png">
-<meta name="twitter:image:alt" content="purple terminal SSH manager showing host list with search, cloud sync, live tunnel monitoring and detail panel">
+<meta name="twitter:image:alt" content="purple terminal SSH manager showing host list with search, cloud sync, live tunnel monitoring, fleet-wide container management and detail panel">
 <link rel="canonical" href="https://getpurple.sh">
 <link rel="alternate" hreflang="en" href="https://getpurple.sh">
 <link rel="alternate" hreflang="x-default" href="https://getpurple.sh">
@@ -35,16 +35,16 @@
   "@type": "SoftwareApplication",
   "name": "purple",
   "alternateName": "purple-ssh",
-  "description": "Open-source terminal SSH manager and SSH config editor written in Rust. Keeps ~/.ssh/config in sync with your cloud infra: spin up a VM on AWS, Azure, GCP, Hetzner, Proxmox, OCI or 10 other cloud providers and it appears in your host list, destroy it and the entry dims. No more hand-editing ssh config after every Terraform run. Search, connect to and manage hundreds of SSH hosts from a single TUI. Live SSH tunnel monitoring shows throughput, channel events and the apps moving bytes for every active forward (Local, Remote, Dynamic SOCKS) on a dedicated Tunnels page reachable with Tab. Transfers files via scp, manages Docker and Podman containers over SSH, signs short-lived HashiCorp Vault SSH certificates and exposes an MCP server for AI agents. Edits ~/.ssh/config with round-trip fidelity.",
+  "description": "Open-source terminal SSH manager and SSH config editor written in Rust. Keeps ~/.ssh/config in sync with your cloud infra: spin up a VM on AWS, Azure, GCP, Hetzner, Proxmox, OCI or 10 other cloud providers and it appears in your host list, destroy it and the entry dims. No more hand-editing ssh config after every Terraform run. Search, connect to and manage hundreds of SSH hosts from a single TUI. Live SSH tunnel monitoring shows throughput, channel events and the apps moving bytes for every active forward (Local, Remote, Dynamic SOCKS) on a dedicated Tunnels page reachable with Tab. Manages Docker and Podman containers fleet-wide on a dedicated Containers page: shell in, stream logs, restart, stop, exec or cycle a whole compose stack. Transfers files via scp, signs short-lived HashiCorp Vault SSH certificates and exposes an MCP server for AI agents. Edits ~/.ssh/config with round-trip fidelity.",
   "applicationCategory": "DeveloperApplication",
   "applicationSubCategory": "Terminal User Interface",
   "operatingSystem": "macOS, Linux",
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "3.8.0",
+  "softwareVersion": "3.9.0",
   "datePublished": "2024-10-01",
-  "dateModified": "2026-05-08",
+  "dateModified": "2026-05-10",
   "softwareRequirements": "macOS or Linux",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
@@ -59,7 +59,7 @@
     "name": "Eric Kochen",
     "url": "https://github.com/erickochen"
   },
-  "keywords": "SSH, SSH client, SSH server manager, SSH command palette, SSH fuzzy search, SSH command bar, terminal SSH search, SSH tunnel monitor, live SSH tunnel monitoring, real-time SSH tunnel, SSH tunnel dashboard, SSH tunnel throughput, SSH swimlane, Docker, Podman, container management, Docker TUI, Portainer alternative, SSH bookmarks, SSH launcher, TUI, terminal user interface, cloud sync, file transfer, DevOps, sysadmin, multi-cloud, open source",
+  "keywords": "SSH, SSH client, SSH server manager, SSH command palette, SSH fuzzy search, SSH command bar, terminal SSH search, SSH tunnel monitor, live SSH tunnel monitoring, real-time SSH tunnel, SSH tunnel dashboard, SSH tunnel throughput, SSH swimlane, Docker, Podman, container management, Docker TUI, multi-host docker management, docker fleet management, manage docker across servers, compose stack restart, docker logs over ssh, docker exec over ssh, lazydocker alternative, Portainer alternative, SSH bookmarks, SSH launcher, TUI, terminal user interface, cloud sync, file transfer, DevOps, sysadmin, multi-cloud, open source",
   "screenshot": "https://raw.githubusercontent.com/erickochen/purple/master/demo.gif",
   "featureList": [
     "Jump: universal fuzzy search bar across hosts, tunnels, containers, snippets and actions, with field-prefix syntax (user:, host:, proxy:, vault:, tag:)",
@@ -67,7 +67,7 @@
     "Fuzzy search across hosts",
     "Host tagging and filtering",
     "Live SSH tunnel monitoring with throughput, channel events and per-client process roster",
-    "Container management via SSH (Docker and Podman) with start, stop and restart",
+    "Dedicated Containers tab for fleet-wide Docker and Podman management over SSH: shell in, stream logs, restart, stop, exec, compose stack restart, parallel refresh-all, with a detail panel surfacing image digest, restart policy, mounts, network and healthcheck",
     "Command snippets with multi-host and parallel execution",
     "Remote file explorer with dual-pane local/remote browsing and scp transfer",
     "Cloud provider sync: AWS EC2, Azure, DigitalOcean, GCP (Compute Engine), Hetzner, i3D.net, Leaseweb, Linode (Akamai), Oracle Cloud Infrastructure (OCI), OVHcloud, Proxmox VE, Scaleway, Tailscale, TransIP, UpCloud, Vultr",
@@ -211,10 +211,18 @@
     },
     {
       "@type": "Question",
+      "name": "How do I manage Docker containers across multiple servers from one terminal?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Press Tab from the Hosts page until you reach purple's dedicated Containers page. Every Docker and Podman container across your fleet appears in one list, grouped per host. The detail panel summarises engine version, runtime, sync age and running counts when the cursor sits on a divider. Enter shells in. l tails the last 200 log lines. K restarts. S stops. e runs a one-off command. Ctrl-K cycles a compose stack member by member. R refreshes every host in parallel (max four at a time). Auto-detects Docker or Podman. No agent. No web UI. No extra ports."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "Can I manage Docker or Podman containers with purple?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes. Press C on any host to list all containers over SSH. Start, stop and restart without leaving the TUI. Purple auto-detects Docker or Podman on the remote host. No agent. No web UI. No extra ports."
+        "text": "Yes. The Containers page lists every container across every cached host in one view, grouped per host. Enter shells in. l tails logs. K restarts. S stops. e runs a one-off command. Ctrl-K cycles a whole compose stack member by member. K or S on a host divider sweeps every running container on that host at once. The detail panel reads docker inspect once and remembers, so image digest, restart policy, mounts, network and healthcheck render instantly. Per-host C overlay still works on the Hosts page. Auto-detects Docker or Podman. No agent, no web UI, no extra ports."
       }
     },
     {
@@ -294,7 +302,7 @@
       "name": "Is purple a Portainer alternative?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "For container visibility and basic lifecycle control (start, stop, restart) over SSH, yes. Press C on any host to see its containers. No agent to install, no web UI to host, no ports to open. Works with Docker and Podman. Purple does not provide container creation, registry management or role-based access control."
+        "text": "For container visibility and lifecycle control (shell, logs, restart, stop, exec, stack restart) over SSH, yes. The Containers tab lists every container across every host, grouped per host. No agent to install, no web UI to host, no ports to open. Works with Docker and Podman. Purple does not provide container creation, registry management or role-based access control."
       }
     },
     {
@@ -302,7 +310,7 @@
       "name": "How does purple compare to Lazydocker?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Lazydocker manages Docker locally on the host where it is installed. purple manages containers on remote servers over SSH from your local machine. Use Lazydocker for single-host local management. Use purple for multi-host remote management across your fleet."
+        "text": "Lazydocker is built for one local host. purple's Containers page lists every container across every cached SSH host in one view: shell in, stream logs, restart, stop, exec or cycle a whole compose stack. R refreshes the whole fleet in parallel. K or S on a host divider sweeps every running container on that host at once. The detail panel reads docker inspect once and remembers, so image digest, restart policy, mounts, network and healthcheck render instantly. Use Lazydocker for single-host local management. Use purple for fleet-wide remote management."
       }
     },
     {
@@ -910,7 +918,7 @@ footer .sep { margin: 0 0.3em; }
           <button class="copy-btn copy-inline" id="copy-btn" onclick="copy(this)" style="display:none">copy</button>
         </div>
         <div class="install-output" id="install-output" style="display:none">
-          <div>Downloading purple v3.8.0 for darwin-arm64...</div>
+          <div>Downloading purple v3.9.0 for darwin-arm64...</div>
           <div>Installing to /usr/local/bin/purple... <span class="success">done.</span></div>
         </div>
         <div class="alt-installs" id="alt-installs" style="display:none">
@@ -929,7 +937,7 @@ footer .sep { margin: 0 0.3em; }
     <video autoplay loop muted playsinline
            width="1920" height="900"
            poster="https://raw.githubusercontent.com/erickochen/purple/master/demo.gif"
-           aria-label="purple terminal SSH client demo: searching hosts, managing containers, transferring files and syncing cloud providers">
+           aria-label="purple terminal SSH client demo: searching hosts, monitoring live SSH tunnels, managing containers across the fleet, transferring files and syncing cloud providers">
       <source src="https://raw.githubusercontent.com/erickochen/purple/master/demo.webm" type="video/webm">
       <img src="https://raw.githubusercontent.com/erickochen/purple/master/demo.gif"
            alt="purple terminal SSH client demo" loading="lazy" decoding="async" width="1920" height="900">
@@ -953,7 +961,7 @@ footer .sep { margin: 0 0.3em; }
     </div>
     <div class="feat">
       <span class="feat-icon">🐳</span>
-      <span class="feat-text"><strong>See and control containers remotely.</strong> Docker and Podman over plain SSH. Start, stop, restart without installing anything on the remote.</span>
+      <span class="feat-text"><strong>Manage every container in your fleet from one tab.</strong> Dedicated Containers page. Every Docker and Podman container grouped per host. Shell in, stream logs, restart, stop, exec or cycle a whole compose stack member by member. <code>Tab</code> from the Hosts page.</span>
     </div>
     <div class="feat">
       <span class="feat-icon">🚇</span>
@@ -1026,8 +1034,12 @@ footer .sep { margin: 0 0.3em; }
         <div class="answer">No. Your config never leaves your machine. Provider sync calls cloud APIs to fetch server lists. The TUI checks GitHub for new releases on startup (cached 24 hours). That's it.</div>
       </details>
       <details>
-        <summary>Can I manage Docker containers with purple?</summary>
-        <div class="answer">Yes. Press <code>C</code> on any host to list all containers over SSH. Start, stop, restart. Auto-detects Docker or Podman. No agent, no web UI, no extra ports.</div>
+        <summary>How do I manage Docker containers across multiple servers from one terminal?</summary>
+        <div class="answer">Press <code>Tab</code> from the Hosts page until you reach the dedicated Containers page. Every Docker and Podman container across your fleet appears in one list, grouped per host. The detail panel summarises engine version, runtime, sync age and running counts when the cursor sits on a divider. <code>Enter</code> shells in. <code>l</code> tails the last 200 log lines. <code>K</code> restarts. <code>S</code> stops. <code>e</code> runs a one-off command. <code>Ctrl-K</code> cycles a compose stack member by member. <code>R</code> refreshes every host in parallel. No agent, no web UI, no extra ports. Auto-detects Docker or Podman.</div>
+      </details>
+      <details>
+        <summary>Can purple replace Lazydocker for multi-host workflows?</summary>
+        <div class="answer">Yes. Lazydocker is built for one local host. purple's Containers page lists every container across every cached SSH host in one view: shell in, stream logs, restart, stop, exec or cycle a whole compose stack. <code>R</code> refreshes the whole fleet in parallel. <code>K</code> or <code>S</code> on a host divider sweeps every running container on that host at once. The detail panel reads <code>docker inspect</code> once and remembers, so image digest, restart policy, mounts, network and healthcheck render instantly as you arrow through.</div>
       </details>
       <details>
         <summary>Can AI assistants use purple?</summary>
@@ -1037,7 +1049,7 @@ footer .sep { margin: 0 0.3em; }
         <summary>How do I troubleshoot connection problems?</summary>
         <div class="answer">Run with <code>--verbose</code> to enable debug logging, then <code>purple logs --tail</code> in another terminal. Logs are written to <code>~/.purple/purple.log</code> with fault domain prefixes: <code>[external]</code> for remote/tool errors, <code>[config]</code> for local config issues. Set <code>PURPLE_LOG=trace</code> for maximum detail.</div>
       </details>
-      <div class="man-foot"><span>purple v3.8.0</span><span>2026-05-08</span><span>PURPLE(1)</span></div>
+      <div class="man-foot"><span>purple v3.9.0</span><span>2026-05-10</span><span>PURPLE(1)</span></div>
     </div>
   </div>
 

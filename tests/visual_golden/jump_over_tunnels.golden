@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels                                                                 │
+│  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   FORWARD                                     SPEED     UPTIME    LAST▾ │
@@ -11,13 +11,13 @@
 │   ○ monito│  │ █ Find anything                                                   │  │        2h  │
 │   ○ pve-db│  ╰───────────────────────────────────────────────────────────────────╯  │       16h  │
 │   ○ pve-re│                                                                         │       18h  │
-│   ○ pve-mo│   Actions   6 of 29                                                     │       20h  │
-│   ○ pve-mo│   Hosts: Add host                                                   a   │       20h  │
-│   ○ do-wor│   Tunnels: Manage tunnels                                           T   │         —  │
+│   ○ pve-mo│   Actions   6 of 32                                                     │       20h  │
+│   ○ pve-mo│   Tunnels: Add tunnel                                               a   │       20h  │
+│   ○ do-wor│   Tunnels: Edit tunnel                                              e   │         —  │
+│           │   Tunnels: Delete tunnel                                            d   │            │
+│           │   Hosts: Add host                                                   a   │            │
+│           │   Tunnels: Manage tunnels                                           T   │            │
 │           │   Containers: List containers                                       C   │            │
-│           │   Files: Browse remote files                                        F   │            │
-│           │   Vault: Sign certificate                                           V   │            │
-│           │   Keys: Manage SSH keys                                             K   │            │
 │           │                                                                         │            │
 │           ╰─────────────────────────────────────────────────────────────────────────╯            │
 │            Enter  select    ↑↓  select    Tab  next    Esc  close                                │
@@ -1187,6 +1187,10 @@
 (28,14) fg=Reset bg=Reset mod=BOLD
 (29,14) fg=Reset bg=Reset mod=BOLD
 (30,14) fg=Reset bg=Reset mod=BOLD
+(31,14) fg=Reset bg=Reset mod=BOLD
+(32,14) fg=Reset bg=Reset mod=BOLD
+(33,14) fg=Reset bg=Reset mod=BOLD
+(34,14) fg=Reset bg=Reset mod=BOLD
 (82,14) fg=Magenta bg=Reset mod=BOLD
 (86,14) fg=Reset bg=Reset mod=DIM
 (87,14) fg=DarkGray bg=Reset mod=DIM
@@ -1235,9 +1239,6 @@
 (33,15) fg=Reset bg=Reset mod=BOLD
 (34,15) fg=Reset bg=Reset mod=BOLD
 (35,15) fg=Reset bg=Reset mod=BOLD
-(36,15) fg=Reset bg=Reset mod=BOLD
-(37,15) fg=Reset bg=Reset mod=BOLD
-(38,15) fg=Reset bg=Reset mod=BOLD
 (82,15) fg=Magenta bg=Reset mod=BOLD
 (86,15) fg=Reset bg=Reset mod=DIM
 (87,15) fg=DarkGray bg=Reset mod=DIM
@@ -1288,11 +1289,6 @@
 (35,16) fg=Reset bg=Reset mod=BOLD
 (36,16) fg=Reset bg=Reset mod=BOLD
 (37,16) fg=Reset bg=Reset mod=BOLD
-(38,16) fg=Reset bg=Reset mod=BOLD
-(39,16) fg=Reset bg=Reset mod=BOLD
-(40,16) fg=Reset bg=Reset mod=BOLD
-(41,16) fg=Reset bg=Reset mod=BOLD
-(42,16) fg=Reset bg=Reset mod=BOLD
 (82,16) fg=Magenta bg=Reset mod=BOLD
 (86,16) fg=Reset bg=Reset mod=DIM
 (87,16) fg=DarkGray bg=Reset mod=DIM
@@ -1336,17 +1332,6 @@
 (28,17) fg=Reset bg=Reset mod=BOLD
 (29,17) fg=Reset bg=Reset mod=BOLD
 (30,17) fg=Reset bg=Reset mod=BOLD
-(31,17) fg=Reset bg=Reset mod=BOLD
-(32,17) fg=Reset bg=Reset mod=BOLD
-(33,17) fg=Reset bg=Reset mod=BOLD
-(34,17) fg=Reset bg=Reset mod=BOLD
-(35,17) fg=Reset bg=Reset mod=BOLD
-(36,17) fg=Reset bg=Reset mod=BOLD
-(37,17) fg=Reset bg=Reset mod=BOLD
-(38,17) fg=Reset bg=Reset mod=BOLD
-(39,17) fg=Reset bg=Reset mod=BOLD
-(40,17) fg=Reset bg=Reset mod=BOLD
-(41,17) fg=Reset bg=Reset mod=BOLD
 (82,17) fg=Magenta bg=Reset mod=BOLD
 (86,17) fg=Reset bg=Reset mod=DIM
 (87,17) fg=DarkGray bg=Reset mod=DIM
@@ -1447,6 +1432,12 @@
 (34,19) fg=Reset bg=Reset mod=BOLD
 (35,19) fg=Reset bg=Reset mod=BOLD
 (36,19) fg=Reset bg=Reset mod=BOLD
+(37,19) fg=Reset bg=Reset mod=BOLD
+(38,19) fg=Reset bg=Reset mod=BOLD
+(39,19) fg=Reset bg=Reset mod=BOLD
+(40,19) fg=Reset bg=Reset mod=BOLD
+(41,19) fg=Reset bg=Reset mod=BOLD
+(42,19) fg=Reset bg=Reset mod=BOLD
 (82,19) fg=Magenta bg=Reset mod=BOLD
 (86,19) fg=Reset bg=Reset mod=DIM
 (87,19) fg=DarkGray bg=Reset mod=DIM

@@ -1,0 +1,1385 @@
+//! Key handler for the global Containers tab (top_page = Containers).
+//!
+//! Routes navigation (j/k/g/G/PgUp/PgDn/Tab), search (`/`), sort (`s`),
+//! detail-panel toggle (`v`), group fold (`Space`/`Enter` on a host
+//! divider), refresh (`r`/`R`), add-host (`a`) and the destructive
+//! actions (`Enter` shell, `K` restart, `S` stop, `e` exec, `l` logs,
+//! `Ctrl-K` stack restart). Single-target actions (Enter shell, l, e)
+//! gate on `selected_container_row`; host-scoped actions (K, S, r,
+//! fold) accept either a container row or a divider row, with the
+//! divider variant queuing a bulk action against every running
+//! container on the host.
+//!
+//! Enter queues an interactive shell session into the selected
+//! container; the main loop drains `pending_container_exec` and spawns
+//! `ssh -t <alias> <runtime> exec -it <id> sh -c 'bash || sh'`.
+
+use std::sync::mpsc;
+
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+use crate::app::{App, JumpMode, Screen, ViewMode};
+use crate::containers::ContainerRuntime;
+use crate::event::AppEvent;
+use crate::preferences;
+
+/// Alias of the container under the cursor, or `None` when the
+/// cursor lands on a host-divider row. Pair with `selected_header_alias`
+/// to resolve the alias for either kind of selectable row.
+fn selected_container_alias(app: &App) -> Option<String> {
+    selected_container_row(app).map(|row| row.alias)
+}
+
+/// Move cursor to the next visible item, header or container, wrapping
+/// at the end. Headers are valid selection targets so the user can
+/// drive bulk actions and group folding from a divider row.
+fn select_next(app: &mut App) {
+    let items = crate::ui::containers_overview::visible_items(app);
+    let total = items.len();
+    if total == 0 {
+        app.ui.containers_overview_state.select(None);
+        return;
+    }
+    let cur = app.ui.containers_overview_state.selected().unwrap_or(0);
+    let next = if cur + 1 >= total { 0 } else { cur + 1 };
+    app.ui.containers_overview_state.select(Some(next));
+}
+
+/// Move cursor to the previous visible item, header or container,
+/// wrapping at the start.
+fn select_prev(app: &mut App) {
+    let items = crate::ui::containers_overview::visible_items(app);
+    let total = items.len();
+    if total == 0 {
+        app.ui.containers_overview_state.select(None);
+        return;
+    }
+    let cur = app.ui.containers_overview_state.selected().unwrap_or(0);
+    let prev = if cur == 0 { total - 1 } else { cur - 1 };
+    app.ui.containers_overview_state.select(Some(prev));
+}
+
+/// Index of the first/last visible item in the current list,
+/// regardless of whether the row is a host divider or a container.
+/// `g`/`G` use these to jump to the extremes.
+fn first_visible_idx(app: &App) -> Option<usize> {
+    let items = crate::ui::containers_overview::visible_items(app);
+    if items.is_empty() { None } else { Some(0) }
+}
+
+fn last_visible_idx(app: &App) -> Option<usize> {
+    let items = crate::ui::containers_overview::visible_items(app);
+    if items.is_empty() {
+        None
+    } else {
+        Some(items.len() - 1)
+    }
+}
+
+/// Alias under the cursor when the cursor is parked on a host-divider
+/// row. Returns `None` for container rows or when the list is empty.
+fn selected_header_alias(app: &App) -> Option<String> {
+    let sel = app.ui.containers_overview_state.selected()?;
+    let items = crate::ui::containers_overview::visible_items(app);
+    items.into_iter().nth(sel).and_then(|i| match i {
+        crate::ui::containers_overview::ContainerListItem::HostHeader { alias, .. } => Some(alias),
+        _ => None,
+    })
+}
+
+/// `Space` keypress: if the cursor sits on a host-divider row, fold or
+/// unfold that group. Persists the new state to preferences. Outside a
+/// header row this is a no-op (fall-through to the literal-space arm
+/// in search mode is handled separately by `handle_search_keys`).
+fn toggle_collapse_for_selected_host(app: &mut App) {
+    let Some(alias) = selected_header_alias(app) else {
+        return;
+    };
+    let was_collapsed = app
+        .containers_overview
+        .collapsed_hosts
+        .contains(alias.as_str());
+    if was_collapsed {
+        app.containers_overview.collapsed_hosts.remove(&alias);
+    } else {
+        app.containers_overview
+            .collapsed_hosts
+            .insert(alias.clone());
+    }
+    if let Err(e) =
+        preferences::save_containers_collapsed_hosts(&app.containers_overview.collapsed_hosts)
+    {
+        log::warn!("[config] Failed to persist containers collapsed hosts: {e}");
+    }
+}
+
+/// Build a `Vec<StackMember>` of every running container on `alias`.
+/// Used to seed the bulk-action confirm dialogs the user opens with K
+/// or S while the cursor is on a host-divider row.
+fn host_running_members(app: &App, alias: &str) -> Vec<crate::app::StackMember> {
+    app.container_cache
+        .get(alias)
+        .into_iter()
+        .flat_map(|entry| entry.containers.iter())
+        .filter(|c| c.state.eq_ignore_ascii_case("running"))
+        .map(|c| crate::app::StackMember {
+            container_id: c.id.clone(),
+            container_name: c.names.trim_start_matches('/').to_string(),
+            uptime: crate::containers::parse_uptime_from_status(&c.status),
+        })
+        .collect()
+}
+
+/// The container under the cursor, or `None` when the cursor lands
+/// on a host-divider row or nothing is selected. Action keys that
+/// only make sense for a single container (Enter shell, K, S, l, e,
+/// the inspect-detail trigger) gate their behaviour on this. The
+/// host-aware actions (`r`, fold, bulk K/S) consult the helpers in
+/// pairs (`selected_container_alias` + `selected_header_alias`).
+fn selected_container_row(app: &App) -> Option<crate::ui::containers_overview::ContainerRow> {
+    let sel = app.ui.containers_overview_state.selected()?;
+    let items = crate::ui::containers_overview::visible_items(app);
+    items.into_iter().nth(sel).and_then(|i| match i {
+        crate::ui::containers_overview::ContainerListItem::Container(row) => Some(row),
+        _ => None,
+    })
+}
+
+/// Spawn one `docker ps` listing for `alias`. Used by both `r`
+/// (single refresh) and the batch driver. Look-ups (`askpass`,
+/// `cached_runtime`, `has_tunnel`) live in the caller so the batch
+/// path can build queue items without re-borrowing `app` for every
+/// pop.
+fn spawn_refresh(
+    config_path: std::path::PathBuf,
+    bw_session: Option<String>,
+    item: crate::app::RefreshQueueItem,
+    events_tx: &mpsc::Sender<AppEvent>,
+) {
+    let ctx = crate::ssh_context::OwnedSshContext {
+        alias: item.alias,
+        config_path,
+        askpass: item.askpass,
+        bw_session,
+        has_tunnel: item.has_tunnel,
+    };
+    let tx = events_tx.clone();
+    crate::containers::spawn_container_listing(ctx, item.cached_runtime, move |a, result| {
+        let _ = tx.send(AppEvent::ContainerListing { alias: a, result });
+    });
+}
+
+/// `r` keypress: refresh the cache for the host under the cursor.
+/// Works whether the cursor is on a container row (use its host) or a
+/// host-divider row (use that alias directly).
+fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
+    let Some(alias) = selected_container_alias(app).or_else(|| selected_header_alias(app)) else {
+        return;
+    };
+    if app.demo_mode {
+        // Synthetic refresh: post a ContainerListing event for this
+        // host built from the cached entry. The standard handler
+        // bumps the cache timestamp to now, clearing the staleness
+        // banner. Short delay so the in-flight toast is visible.
+        let Some(entry) = app.container_cache.get(&alias).cloned() else {
+            return;
+        };
+        app.notify(crate::messages::container_refreshing(&alias));
+        app.containers_overview
+            .auto_list_in_flight
+            .insert(alias.clone());
+        let tx = events_tx.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            let listing = crate::containers::ContainerListing {
+                runtime: entry.runtime,
+                engine_version: entry.engine_version.clone(),
+                containers: entry.containers.clone(),
+            };
+            let _ = tx.send(AppEvent::ContainerListing {
+                alias,
+                result: Ok(listing),
+            });
+        });
+        return;
+    }
+    let cached_runtime = app.container_cache.get(&alias).map(|e| e.runtime);
+    let askpass = app
+        .hosts_state
+        .list
+        .iter()
+        .find(|h| h.alias == alias)
+        .and_then(|h| h.askpass.clone());
+    let has_tunnel = app.tunnels.active.contains_key(&alias);
+    log::debug!("[purple] container refresh: alias={}", alias);
+    app.notify(crate::messages::container_refreshing(&alias));
+    // Mark the alias as in-flight so the post-key auto-refresh in
+    // `ensure_list_for_selected_host` does not spawn a second
+    // `docker ps` for the same host on the very same keystroke.
+    app.containers_overview
+        .auto_list_in_flight
+        .insert(alias.clone());
+    spawn_refresh(
+        app.reload.config_path.clone(),
+        app.bw_session.clone(),
+        crate::app::RefreshQueueItem {
+            alias,
+            askpass,
+            cached_runtime,
+            has_tunnel,
+        },
+        events_tx,
+    );
+}
+
+/// Drain `pending_container_fetch_aliases` and queue a `docker ps`
+/// for each survivor through the shared `RefreshBatch` driver.
+/// Filters: alias still in config, non-empty hostname, no cache
+/// entry yet, deduped within the drain. Demo mode + empty drain
+/// are no-ops. The drain happens unconditionally so a second tick
+/// does not retry the same items.
+pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
+    let drained: Vec<String> = std::mem::take(&mut app.pending_container_fetch_aliases);
+    if app.demo_mode || drained.is_empty() {
+        return;
+    }
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut new_items: std::collections::VecDeque<crate::app::RefreshQueueItem> =
+        std::collections::VecDeque::new();
+    for alias in drained {
+        if !seen.insert(alias.clone()) {
+            continue;
+        }
+        if app.container_cache.contains_key(&alias) {
+            continue;
+        }
+        let Some(host) = app.hosts_state.list.iter().find(|h| h.alias == alias) else {
+            continue;
+        };
+        if host.hostname.is_empty() {
+            continue;
+        }
+        let askpass = host.askpass.clone();
+        let has_tunnel = app.tunnels.active.contains_key(&alias);
+        new_items.push_back(crate::app::RefreshQueueItem {
+            alias,
+            askpass,
+            cached_runtime: None, // first fetch. runtime is detected on the SSH side
+            has_tunnel,
+        });
+    }
+    if new_items.is_empty() {
+        return;
+    }
+    log::debug!(
+        "[purple] container auto-fetch: queued {} new host(s)",
+        new_items.len()
+    );
+
+    if let Some(batch) = app.containers_overview.refresh_batch.as_mut() {
+        // Concurrent batch in flight (manual `R` already running):
+        // append the new hosts to the existing queue. The driver
+        // picks them up as in-flight slots free. `total` becomes
+        // "what is done + what is in flight + what is queued" so
+        // the progress toast stays consistent.
+        batch.queue.extend(new_items);
+        batch.total = batch.completed + batch.in_flight + batch.queue.len();
+        return;
+    }
+
+    let total = new_items.len();
+    let initial: Vec<crate::app::RefreshQueueItem> = (0..crate::app::REFRESH_MAX_PARALLEL
+        .min(total))
+        .filter_map(|_| new_items.pop_front())
+        .collect();
+    let in_flight = initial.len();
+    let in_flight_aliases: std::collections::HashSet<String> =
+        initial.iter().map(|i| i.alias.clone()).collect();
+
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue: new_items,
+        in_flight,
+        total,
+        completed: 0,
+        in_flight_aliases,
+    });
+
+    let config_path = app.reload.config_path.clone();
+    let bw_session = app.bw_session.clone();
+    for item in initial {
+        spawn_refresh(config_path.clone(), bw_session.clone(), item, events_tx);
+    }
+}
+
+/// `R` keypress: queue every host that already has a cache entry for
+/// a windowed-concurrency refresh. The batch is driven by the
+/// completion handler in `event_loop.rs`, which pops the next queued
+/// item every time a listing returns.
+fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
+    if app.containers_overview.refresh_batch.is_some() {
+        app.notify_warning(crate::messages::REFRESH_BATCH_ALREADY_RUNNING);
+        return;
+    }
+    if app.demo_mode {
+        // Synthetic batch refresh for the demo: stage the same
+        // RefreshBatch the real flow uses so the progress toast and
+        // divider spinners render identically, then spawn a worker
+        // that posts a ContainerListing event per host with a short
+        // stagger. The standard handler bumps each entry's timestamp
+        // to now, clearing every staleness banner in turn.
+        let snapshots: Vec<(String, crate::containers::ContainerCacheEntry)> = app
+            .container_cache
+            .iter()
+            .map(|(a, e)| (a.clone(), e.clone()))
+            .collect();
+        let total = snapshots.len();
+        if total == 0 {
+            app.notify_warning(crate::messages::REFRESH_NOTHING_TO_REFRESH);
+            return;
+        }
+        let in_flight_aliases: std::collections::HashSet<String> =
+            snapshots.iter().map(|(a, _)| a.clone()).collect();
+        app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+            queue: std::collections::VecDeque::new(),
+            in_flight: total,
+            total,
+            completed: 0,
+            in_flight_aliases,
+        });
+        app.notify_background(crate::messages::container_refresh_progress(0, total));
+        let tx = events_tx.clone();
+        std::thread::spawn(move || {
+            // 800ms initial pause so the spinner is unmistakable
+            // before any host flips to fresh, then 200ms between
+            // each completion so the progress toast ticks visibly.
+            std::thread::sleep(std::time::Duration::from_millis(800));
+            for (alias, entry) in snapshots.into_iter() {
+                let listing = crate::containers::ContainerListing {
+                    runtime: entry.runtime,
+                    engine_version: entry.engine_version.clone(),
+                    containers: entry.containers.clone(),
+                };
+                let _ = tx.send(AppEvent::ContainerListing {
+                    alias,
+                    result: Ok(listing),
+                });
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+        });
+        return;
+    }
+    let mut queue: std::collections::VecDeque<crate::app::RefreshQueueItem> =
+        std::collections::VecDeque::new();
+    for (alias, entry) in &app.container_cache {
+        let askpass = app
+            .hosts_state
+            .list
+            .iter()
+            .find(|h| h.alias == *alias)
+            .and_then(|h| h.askpass.clone());
+        let has_tunnel = app.tunnels.active.contains_key(alias);
+        queue.push_back(crate::app::RefreshQueueItem {
+            alias: alias.clone(),
+            askpass,
+            cached_runtime: Some(entry.runtime),
+            has_tunnel,
+        });
+    }
+    let total = queue.len();
+    if total == 0 {
+        app.notify_warning(crate::messages::REFRESH_NOTHING_TO_REFRESH);
+        return;
+    }
+    log::info!("[purple] container refresh-all: queued {} hosts", total);
+
+    // Pop up to MAX_PARALLEL items and spawn them immediately. Build
+    // the in_flight_aliases set in lock-step so the batch driver can
+    // ignore listings that arrive from non-batch triggers.
+    let initial_batch: Vec<crate::app::RefreshQueueItem> = (0..crate::app::REFRESH_MAX_PARALLEL
+        .min(total))
+        .filter_map(|_| queue.pop_front())
+        .collect();
+    let in_flight = initial_batch.len();
+    let in_flight_aliases: std::collections::HashSet<String> =
+        initial_batch.iter().map(|i| i.alias.clone()).collect();
+
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue,
+        in_flight,
+        total,
+        completed: 0,
+        in_flight_aliases,
+    });
+    app.notify_background(crate::messages::container_refresh_progress(0, total));
+
+    let config_path = app.reload.config_path.clone();
+    let bw_session = app.bw_session.clone();
+    for item in initial_batch {
+        spawn_refresh(config_path.clone(), bw_session.clone(), item, events_tx);
+    }
+}
+
+/// Queue an `ssh -t <alias> docker exec -it <id> sh -c 'bash || sh'`
+/// session for the row under the cursor. The main loop drains
+/// `pending_container_exec` on the next tick. same pattern as the
+/// host-list Enter → `pending_connect` flow.
+///
+/// Skips with a toast when:
+/// - the container is not running (`docker exec` would fail),
+/// - the cache has no runtime for the host (we cannot pick docker vs
+///   podman),
+/// - demo mode is active.
+fn exec_into_selected_container(app: &mut App) {
+    let Some((row, runtime, askpass)) = selected_running_row_with_runtime(app) else {
+        return;
+    };
+    log::info!(
+        "[purple] container exec queued: alias={} container={} id={}",
+        row.alias,
+        row.name,
+        row.id
+    );
+    app.pending_container_exec = Some(crate::app::ContainerExecRequest {
+        alias: row.alias,
+        askpass,
+        runtime,
+        container_id: row.id,
+        container_name: row.name,
+        command: None,
+    });
+}
+
+/// Resolve the cursor to a row, validate that it is running, and
+/// resolve runtime + askpass + stale-host hint. Used as the prelude
+/// for `l`, `K`, `S`, and `e`. Returns `None` (with a toast already
+/// emitted by the called helpers) when any precondition fails.
+fn selected_running_row_with_runtime(
+    app: &mut App,
+) -> Option<(
+    crate::ui::containers_overview::ContainerRow,
+    crate::containers::ContainerRuntime,
+    Option<String>,
+)> {
+    if app.demo_mode {
+        app.notify(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
+        return None;
+    }
+    let row = selected_container_row(app)?;
+    if !row.state.eq_ignore_ascii_case("running") {
+        app.notify_warning(crate::messages::container_not_running(&row.name));
+        return None;
+    }
+    if let Err(e) = crate::containers::validate_container_id(&row.id) {
+        app.notify_error(e);
+        return None;
+    }
+    let entry = app.container_cache.get(&row.alias)?;
+    let runtime = entry.runtime;
+    let (askpass, stale_hint) = app
+        .hosts_state
+        .list
+        .iter()
+        .find(|h| h.alias == row.alias)
+        .map(|h| {
+            let hint = h.stale.as_ref().map(|_| super::stale_provider_hint(h));
+            (h.askpass.clone(), hint)
+        })
+        .unwrap_or((None, None));
+    if let Some(hint) = stale_hint {
+        app.notify_warning(crate::messages::stale_host(&hint));
+    }
+    Some((row, runtime, askpass))
+}
+
+fn queue_logs_fetch_for_selected(app: &mut App) {
+    let Some((row, runtime, askpass)) = selected_running_row_with_runtime(app) else {
+        return;
+    };
+    log::info!(
+        "[purple] container_logs queued: alias={} container={} id={}",
+        row.alias,
+        row.name,
+        row.id
+    );
+    app.pending_container_logs = Some(crate::app::ContainerLogsRequest {
+        alias: row.alias.clone(),
+        askpass,
+        runtime,
+        container_id: row.id.clone(),
+        container_name: row.name.clone(),
+    });
+    // Open the overlay immediately with an empty body so the user
+    // sees a loading placeholder while the SSH call runs. The result
+    // event populates `body` and clears the placeholder.
+    app.set_screen(Screen::ContainerLogs {
+        alias: row.alias,
+        container_id: row.id,
+        container_name: row.name,
+        body: Vec::new(),
+        fetched_at: 0,
+        error: None,
+        scroll: 0,
+        last_render_height: 0,
+    });
+}
+
+fn open_restart_confirm(app: &mut App) {
+    let Some((row, _runtime, _askpass)) = selected_running_row_with_runtime(app) else {
+        return;
+    };
+    let project = app
+        .containers_overview
+        .inspect_cache
+        .entries
+        .get(&row.id)
+        .and_then(|e| e.result.as_ref().ok())
+        .and_then(|i| i.compose_project.clone());
+    log::debug!(
+        "[purple] container_restart: confirm opened alias={} id={}",
+        row.alias,
+        row.id
+    );
+    app.set_screen(Screen::ConfirmContainerRestart {
+        alias: row.alias,
+        container_id: row.id,
+        container_name: row.name,
+        project,
+        uptime: row.uptime,
+    });
+}
+
+fn open_stop_confirm(app: &mut App) {
+    let Some((row, _runtime, _askpass)) = selected_running_row_with_runtime(app) else {
+        return;
+    };
+    let project = app
+        .containers_overview
+        .inspect_cache
+        .entries
+        .get(&row.id)
+        .and_then(|e| e.result.as_ref().ok())
+        .and_then(|i| i.compose_project.clone());
+    log::debug!(
+        "[purple] container_stop: confirm opened alias={} id={}",
+        row.alias,
+        row.id
+    );
+    app.set_screen(Screen::ConfirmContainerStop {
+        alias: row.alias,
+        container_id: row.id,
+        container_name: row.name,
+        project,
+        uptime: row.uptime,
+    });
+}
+
+/// `K` on a host-divider row: confirm-then-queue a Restart for every
+/// running container on the host. Aborts with a toast when the host
+/// has nothing to restart so the user is not staring at an empty
+/// confirm dialog. Demo mode short-circuits with the standard
+/// "actions disabled" toast.
+fn open_host_restart_all_confirm(app: &mut App, alias: &str) {
+    if app.demo_mode {
+        app.notify(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+        return;
+    }
+    let members = host_running_members(app, alias);
+    if members.is_empty() {
+        app.notify_warning(crate::messages::container_host_no_running(alias));
+        return;
+    }
+    log::debug!(
+        "[purple] container_restart_all: confirm opened alias={} members={}",
+        alias,
+        members.len()
+    );
+    app.set_screen(Screen::ConfirmHostRestartAll {
+        alias: alias.to_string(),
+        members,
+    });
+}
+
+/// `S` on a host-divider row: confirm-then-queue a Stop for every
+/// running container on the host.
+fn open_host_stop_all_confirm(app: &mut App, alias: &str) {
+    if app.demo_mode {
+        app.notify(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+        return;
+    }
+    let members = host_running_members(app, alias);
+    if members.is_empty() {
+        app.notify_warning(crate::messages::container_host_no_running(alias));
+        return;
+    }
+    log::debug!(
+        "[purple] container_stop_all: confirm opened alias={} members={}",
+        alias,
+        members.len()
+    );
+    app.set_screen(Screen::ConfirmHostStopAll {
+        alias: alias.to_string(),
+        members,
+    });
+}
+
+fn open_stack_restart_confirm(app: &mut App) {
+    if app.demo_mode {
+        app.notify(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+        return;
+    }
+    let Some(row) = selected_container_row(app) else {
+        return;
+    };
+    // Resolve the compose-project label from the inspect cache. The
+    // entry exists when the user has the detail panel open on the
+    // selected row (the auto-fetch ensures one is in flight). When
+    // it is missing the user typed Ctrl-K too soon. degrade to a
+    // toast rather than guessing a project name.
+    let Some(project) = app
+        .containers_overview
+        .inspect_cache
+        .entries
+        .get(&row.id)
+        .and_then(|e| e.result.as_ref().ok())
+        .and_then(|i| i.compose_project.clone())
+    else {
+        app.notify_warning(crate::messages::container_stack_unknown(&row.name));
+        return;
+    };
+    // Walk every container of this host and pick the running members
+    // that share the same compose_project. Rows with no inspect entry
+    // (cache TTL race) are excluded; the user can re-trigger after a
+    // refresh.
+    let members: Vec<crate::app::StackMember> = app
+        .container_cache
+        .get(&row.alias)
+        .into_iter()
+        .flat_map(|entry| entry.containers.iter())
+        .filter(|c| c.state.eq_ignore_ascii_case("running"))
+        .filter_map(|c| {
+            let inspect = app
+                .containers_overview
+                .inspect_cache
+                .entries
+                .get(&c.id)?
+                .result
+                .as_ref()
+                .ok()?;
+            if inspect.compose_project.as_deref() != Some(project.as_str()) {
+                return None;
+            }
+            Some(crate::app::StackMember {
+                container_id: c.id.clone(),
+                container_name: c.names.trim_start_matches('/').to_string(),
+                uptime: crate::containers::parse_uptime_from_status(&c.status),
+            })
+        })
+        .collect();
+    if members.is_empty() {
+        app.notify_warning(crate::messages::container_stack_no_running(&project));
+        return;
+    }
+    log::debug!(
+        "[purple] stack_restart: confirm opened alias={} project={} members={}",
+        row.alias,
+        project,
+        members.len()
+    );
+    app.set_screen(Screen::ConfirmStackRestart {
+        alias: row.alias,
+        project,
+        members,
+    });
+}
+
+fn open_exec_prompt(app: &mut App) {
+    let Some((row, _runtime, _askpass)) = selected_running_row_with_runtime(app) else {
+        return;
+    };
+    log::debug!(
+        "[purple] container_exec_prompt: opened alias={} id={}",
+        row.alias,
+        row.id
+    );
+    app.set_screen(Screen::ContainerExecPrompt {
+        alias: row.alias,
+        container_id: row.id,
+        container_name: row.name,
+        query: String::new(),
+    });
+}
+
+/// Handle a key event while the user is on the Containers tab. The
+/// inspect-fetch trigger lives in `handler.rs::handle_main_screen`
+/// because it needs the sender after this returns; refresh and add
+/// (`r`/`R`/`a`) need the sender directly to spawn listings.
+pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
+    if app.search.query.is_some() {
+        handle_search_keys(app, key);
+        return;
+    }
+
+    match key.code {
+        // Ctrl-k restarts the whole compose stack of the selected
+        // container. Crossterm delivers Ctrl-k as `Char('k')` with
+        // the CONTROL modifier on every modern terminal; this arm
+        // MUST precede the plain `Char('k')` (=select_prev) below
+        // because match arms are walked top-down and the bare arm
+        // would otherwise swallow the keystroke.
+        KeyCode::Char('k') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            open_stack_restart_confirm(app);
+        }
+        // Legacy terminal fallback: `^K` arrives as the C0 control
+        // codepoint with no modifier set.
+        KeyCode::Char('\u{000B}') => {
+            open_stack_restart_confirm(app);
+        }
+        KeyCode::Char('j') | KeyCode::Down => select_next(app),
+        KeyCode::Char('k') | KeyCode::Up => select_prev(app),
+        KeyCode::PageDown => {
+            for _ in 0..10 {
+                select_next(app);
+            }
+        }
+        KeyCode::PageUp => {
+            for _ in 0..10 {
+                select_prev(app);
+            }
+        }
+        KeyCode::Char('g') => {
+            if let Some(idx) = first_visible_idx(app) {
+                app.ui.containers_overview_state.select(Some(idx));
+            }
+        }
+        KeyCode::Char('G') => {
+            if let Some(idx) = last_visible_idx(app) {
+                app.ui.containers_overview_state.select(Some(idx));
+            }
+        }
+        KeyCode::Char('/') => {
+            app.search.query = Some(String::new());
+            // Snap to the first non-header item; pre-search list may
+            // start with a host divider in AlphaHost mode.
+            app.ui
+                .containers_overview_state
+                .select(first_visible_idx(app));
+        }
+        KeyCode::Char('s') => {
+            // Capture the alias under the cursor BEFORE flipping the
+            // sort: visible_items() reads app.containers_overview.sort_mode,
+            // so resolving the cursor after the mutation would pick a
+            // different row. Track whether the cursor sat on a header
+            // so we can land back on the divider rather than its first
+            // child container after the flip. AlphaContainer mode has
+            // no headers so a `prefer_header` request gracefully falls
+            // back to the alias's first container.
+            let was_header = selected_header_alias(app).is_some();
+            let pinned = selected_container_alias(app).or_else(|| selected_header_alias(app));
+            let new_mode = app.containers_overview.sort_mode.next();
+            app.containers_overview.sort_mode = new_mode;
+            match pinned {
+                Some(alias) => reposition_cursor_on(app, &alias, was_header),
+                None => app
+                    .ui
+                    .containers_overview_state
+                    .select(first_visible_idx(app)),
+            }
+            if let Err(e) = preferences::save_containers_sort_mode(new_mode) {
+                log::warn!("[config] Failed to persist containers sort mode: {e}");
+                app.notify_error(crate::messages::sorted_by_save_failed(new_mode.label(), &e));
+            } else {
+                app.notify(crate::messages::sorted_by(new_mode.label()));
+            }
+        }
+        KeyCode::Char(':') => {
+            log::debug!("jump: opened from containers overview");
+            app.open_jump(JumpMode::Containers);
+        }
+        KeyCode::Tab => {
+            app.top_page = app.top_page.next();
+            app.search.query = None;
+        }
+        KeyCode::BackTab => {
+            app.top_page = app.top_page.prev();
+            app.search.query = None;
+        }
+        KeyCode::Enter => {
+            // Enter on a host-divider row toggles the group fold,
+            // mirroring Space, so the user has a one-handed shortcut
+            // either via Space (consistent with bulk pickers) or the
+            // most-natural list activation key.
+            if selected_header_alias(app).is_some() {
+                toggle_collapse_for_selected_host(app);
+            } else {
+                exec_into_selected_container(app);
+            }
+        }
+        KeyCode::Char('l') => {
+            if selected_header_alias(app).is_some() {
+                app.notify(crate::messages::container_action_needs_single("Logs"));
+            } else {
+                queue_logs_fetch_for_selected(app);
+            }
+        }
+        KeyCode::Char('K') => {
+            if let Some(alias) = selected_header_alias(app) {
+                open_host_restart_all_confirm(app, &alias);
+            } else {
+                open_restart_confirm(app);
+            }
+        }
+        KeyCode::Char('S') => {
+            if let Some(alias) = selected_header_alias(app) {
+                open_host_stop_all_confirm(app, &alias);
+            } else {
+                open_stop_confirm(app);
+            }
+        }
+        KeyCode::Char('e') => {
+            if selected_header_alias(app).is_some() {
+                app.notify(crate::messages::container_action_needs_single("Exec"));
+            } else {
+                open_exec_prompt(app);
+            }
+        }
+        KeyCode::Char('r') => {
+            refresh_selected_host(app, events_tx);
+        }
+        KeyCode::Char('R') => {
+            refresh_all_hosts(app, events_tx);
+        }
+        KeyCode::Char('a') => {
+            if app.demo_mode {
+                app.notify(crate::messages::DEMO_CONTAINER_REFRESH_DISABLED);
+                return;
+            }
+            app.ui.container_host_picker_state.select(Some(0));
+            app.ui.container_host_picker_query.clear();
+            app.set_screen(Screen::ContainerHostPicker);
+        }
+        KeyCode::Char('n') => {
+            super::whats_new::dismiss_whats_new_toast(app);
+            app.set_screen(Screen::WhatsNew(crate::app::WhatsNewState::default()));
+        }
+        KeyCode::Char('v') => {
+            let new_mode = if app.containers_overview.view_mode == ViewMode::Compact {
+                ViewMode::Detailed
+            } else {
+                ViewMode::Compact
+            };
+            app.containers_overview.view_mode = new_mode;
+            app.detail_toggle_pending = true;
+            app.ui.detail_scroll = 0;
+            if let Err(e) = preferences::save_containers_view_mode(new_mode) {
+                log::warn!("[config] Failed to persist containers view mode: {e}");
+            }
+        }
+        KeyCode::Char(' ') => {
+            toggle_collapse_for_selected_host(app);
+        }
+        KeyCode::Char('?') => {
+            // return_screen = HostList because TopPage::Containers shares
+            // the HostList screen variant; the help dispatcher reads
+            // app.top_page to pick the tab-specific column content.
+            app.set_screen(Screen::Help {
+                return_screen: Box::new(Screen::HostList),
+            });
+        }
+        KeyCode::Char('q') => {
+            app.running = false;
+        }
+        KeyCode::Esc
+            if !app.esc_quit_hint_shown
+                && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky) =>
+        {
+            log::debug!("[purple] esc on idle containers overview, showing quit hint toast");
+            app.notify(crate::messages::ESC_QUIT_HINT);
+            app.esc_quit_hint_shown = true;
+        }
+        _ => {}
+    }
+}
+
+/// Re-anchor the cursor on `alias` after a layout-changing event
+/// (sort flip, fold toggle). When `prefer_header` is true the cursor
+/// lands on the host-divider row for `alias`; otherwise it lands on
+/// the first container belonging to that host. Falls back to the
+/// first visible row in either order when the alias has disappeared.
+fn reposition_cursor_on(app: &mut App, alias: &str, prefer_header: bool) {
+    let items = crate::ui::containers_overview::visible_items(app);
+    if items.is_empty() {
+        app.ui.containers_overview_state.select(None);
+        return;
+    }
+    let header_pos = items.iter().position(|i| match i {
+        crate::ui::containers_overview::ContainerListItem::HostHeader { alias: a, .. } => {
+            a == alias
+        }
+        _ => false,
+    });
+    let container_pos = items.iter().position(|i| match i {
+        crate::ui::containers_overview::ContainerListItem::Container(row) => row.alias == alias,
+        _ => false,
+    });
+    let new_idx = if prefer_header {
+        header_pos.or(container_pos)
+    } else {
+        container_pos.or(header_pos)
+    }
+    .unwrap_or(0);
+    app.ui.containers_overview_state.select(Some(new_idx));
+}
+
+/// If the cursor points at a container whose `docker inspect` data is
+/// missing or stale and no fetch is in flight, spawn one. Demo mode is
+/// skipped: the demo seeds the cache directly with deterministic data so
+/// the panel renders without SSH.
+///
+/// Called from `handler.rs` after every key event that lands the user
+/// on the Containers tab. covers fresh entry via Tab as well as
+/// in-tab navigation. Bursts on rapid scroll: the in-flight set dedups
+/// per container ID, the 30s cache TTL prevents repeats, but a first
+/// pass through 50 rows still fans out 50 SSH threads. Acceptable
+/// because container IDs are unique, threads are cheap, and OpenSSH's
+/// ControlMaster amortises connection setup. Revisit if real-world
+/// usage shows lag.
+pub(super) fn ensure_inspect_for_selected(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
+    if app.demo_mode || !app.running {
+        // !running guard: once `q` flips it, the app is shutting down
+        // and a new fetch would deliver into a dead receiver.
+        return;
+    }
+    let Some((alias, container_id, runtime)) = selected_inspect_target(app) else {
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if app
+        .containers_overview
+        .inspect_cache
+        .fresh(&container_id, now)
+        .is_some()
+    {
+        return;
+    }
+    if app
+        .containers_overview
+        .inspect_cache
+        .in_flight
+        .contains(&container_id)
+    {
+        return;
+    }
+    app.containers_overview
+        .inspect_cache
+        .in_flight
+        .insert(container_id.clone());
+
+    let askpass = app
+        .hosts_state
+        .list
+        .iter()
+        .find(|h| h.alias == alias)
+        .and_then(|h| h.askpass.clone());
+    let has_tunnel = app.tunnels.active.contains_key(&alias);
+    let ctx = crate::ssh_context::OwnedSshContext {
+        alias,
+        config_path: app.reload.config_path.clone(),
+        askpass,
+        bw_session: app.bw_session.clone(),
+        has_tunnel,
+    };
+    let tx = events_tx.clone();
+    crate::containers::spawn_container_inspect_listing(
+        ctx,
+        runtime,
+        container_id,
+        move |alias, container_id, result| {
+            let _ = tx.send(AppEvent::ContainerInspectComplete {
+                alias,
+                container_id,
+                result: Box::new(result),
+            });
+        },
+    );
+}
+
+/// Resolve the (alias, container_id, runtime) tuple for the row under
+/// the cursor. `None` when no row is selected, when the host has no
+/// runtime cached yet (so we cannot pick docker vs podman), or when the
+/// selected row's data has gone stale between frames.
+fn selected_inspect_target(app: &App) -> Option<(String, String, ContainerRuntime)> {
+    let row = selected_container_row(app)?;
+    let entry = app.container_cache.get(&row.alias)?;
+    Some((row.alias, row.id, entry.runtime))
+}
+
+/// Prefetch `docker inspect` for every container in a fresh listing
+/// so HEALTH and inspect-sourced detail cards populate without
+/// per-row scroll. Dedup via the existing in-flight set + TTL.
+pub(crate) fn prefetch_inspect_for_listing(
+    app: &mut App,
+    alias: &str,
+    runtime: ContainerRuntime,
+    containers: &[crate::containers::ContainerInfo],
+    events_tx: &mpsc::Sender<AppEvent>,
+) {
+    if app.demo_mode || !app.running {
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let askpass = app
+        .hosts_state
+        .list
+        .iter()
+        .find(|h| h.alias == alias)
+        .and_then(|h| h.askpass.clone());
+    let has_tunnel = app.tunnels.active.contains_key(alias);
+    let config_path = app.reload.config_path.clone();
+    let bw_session = app.bw_session.clone();
+    for c in containers {
+        // Skip containers that already have a fresh inspect or a
+        // pending fetch. A new SSH thread per container would
+        // amortise OK against ControlMaster, but no point firing
+        // when the existing trigger already covers it.
+        if app
+            .containers_overview
+            .inspect_cache
+            .fresh(&c.id, now)
+            .is_some()
+        {
+            continue;
+        }
+        if app
+            .containers_overview
+            .inspect_cache
+            .in_flight
+            .contains(&c.id)
+        {
+            continue;
+        }
+        app.containers_overview
+            .inspect_cache
+            .in_flight
+            .insert(c.id.clone());
+        let ctx = crate::ssh_context::OwnedSshContext {
+            alias: alias.to_string(),
+            config_path: config_path.clone(),
+            askpass: askpass.clone(),
+            bw_session: bw_session.clone(),
+            has_tunnel,
+        };
+        let tx = events_tx.clone();
+        crate::containers::spawn_container_inspect_listing(
+            ctx,
+            runtime,
+            c.id.clone(),
+            move |alias, container_id, result| {
+                let _ = tx.send(AppEvent::ContainerInspectComplete {
+                    alias,
+                    container_id,
+                    result: Box::new(result),
+                });
+            },
+        );
+    }
+}
+
+/// Equivalent of `ensure_inspect_for_selected` for the LOGS card: spawn
+/// `docker logs --tail N` for the row under the cursor when the cache
+/// is stale and no fetch is in flight. Same per-keystroke trigger
+/// shape so logs and inspect refresh in lockstep.
+pub(super) fn ensure_logs_for_selected(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
+    if app.demo_mode || !app.running {
+        return;
+    }
+    let Some((alias, container_id, runtime)) = selected_inspect_target(app) else {
+        return;
+    };
+    // Resolve the container name once so the event carries it back for
+    // the toast / log line, mirroring the existing inspect path.
+    let container_name = app
+        .container_cache
+        .get(&alias)
+        .and_then(|e| e.containers.iter().find(|c| c.id == container_id))
+        .map(|c| c.names.clone())
+        .unwrap_or_default();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if app
+        .containers_overview
+        .logs_cache
+        .fresh(&container_id, now)
+        .is_some()
+    {
+        return;
+    }
+    if app
+        .containers_overview
+        .logs_cache
+        .in_flight
+        .contains(&container_id)
+    {
+        return;
+    }
+    app.containers_overview
+        .logs_cache
+        .in_flight
+        .insert(container_id.clone());
+
+    let askpass = app
+        .hosts_state
+        .list
+        .iter()
+        .find(|h| h.alias == alias)
+        .and_then(|h| h.askpass.clone());
+    let has_tunnel = app.tunnels.active.contains_key(&alias);
+    let ctx = crate::ssh_context::OwnedSshContext {
+        alias,
+        config_path: app.reload.config_path.clone(),
+        askpass,
+        bw_session: app.bw_session.clone(),
+        has_tunnel,
+    };
+    let tx = events_tx.clone();
+    crate::containers::spawn_container_logs_fetch(
+        ctx,
+        runtime,
+        container_id,
+        container_name,
+        crate::app::LOGS_TAIL,
+        move |alias, container_id, _name, result| {
+            let _ = tx.send(AppEvent::ContainerLogsTailComplete {
+                alias,
+                container_id,
+                result: Box::new(result),
+            });
+        },
+    );
+}
+
+/// Maximum number of containers to fire `docker inspect` for when the
+/// cursor lands on a host-header row. Sized to cover the FLEET roll-up
+/// and surface restart-loop / OOM signals in the host detail panel
+/// without fanning out one SSH thread per container on hosts with
+/// hundreds of services. Running containers are preferred; the rest is
+/// best-effort.
+const HOST_HEADER_INSPECT_FANOUT: usize = 10;
+
+/// Pre-fetch up to `HOST_HEADER_INSPECT_FANOUT` `docker inspect` calls
+/// when the cursor lands on a host-header row, so the ATTENTION card can
+/// surface restart loops and OOM kills. Dedups via inspect_cache.fresh
+/// + in_flight; no-op in demo mode or before the runtime is known.
+pub(super) fn ensure_inspect_for_host_header(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
+    if app.demo_mode || !app.running {
+        return;
+    }
+    let Some(alias) = selected_header_alias(app) else {
+        return;
+    };
+    let Some(cache_entry) = app.container_cache.get(&alias) else {
+        return;
+    };
+    let runtime = cache_entry.runtime;
+    // Running containers first so the inspect aggregate prioritises
+    // signals tied to live workloads (restart loops on services that are
+    // back up, recent OOMs on services that came back). Both buckets are
+    // sorted by id so the spawn order is identical across repeated
+    // renders, regardless of how `docker ps` interleaved its NDJSON.
+    let mut ordered: Vec<String> = cache_entry
+        .containers
+        .iter()
+        .filter(|c| c.state == "running")
+        .map(|c| c.id.clone())
+        .collect();
+    ordered.sort();
+    let mut rest: Vec<String> = cache_entry
+        .containers
+        .iter()
+        .filter(|c| c.state != "running")
+        .map(|c| c.id.clone())
+        .collect();
+    rest.sort();
+    ordered.extend(rest);
+    ordered.truncate(HOST_HEADER_INSPECT_FANOUT);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let askpass = app
+        .hosts_state
+        .list
+        .iter()
+        .find(|h| h.alias == alias)
+        .and_then(|h| h.askpass.clone());
+    let has_tunnel = app.tunnels.active.contains_key(&alias);
+    let config_path = app.reload.config_path.clone();
+    let bw_session = app.bw_session.clone();
+
+    let mut fired: usize = 0;
+    for container_id in ordered {
+        if app
+            .containers_overview
+            .inspect_cache
+            .fresh(&container_id, now)
+            .is_some()
+        {
+            continue;
+        }
+        if app
+            .containers_overview
+            .inspect_cache
+            .in_flight
+            .contains(&container_id)
+        {
+            continue;
+        }
+        app.containers_overview
+            .inspect_cache
+            .in_flight
+            .insert(container_id.clone());
+        let ctx = crate::ssh_context::OwnedSshContext {
+            alias: alias.clone(),
+            config_path: config_path.clone(),
+            askpass: askpass.clone(),
+            bw_session: bw_session.clone(),
+            has_tunnel,
+        };
+        let tx = events_tx.clone();
+        crate::containers::spawn_container_inspect_listing(
+            ctx,
+            runtime,
+            container_id.clone(),
+            move |alias, container_id, result| {
+                let _ = tx.send(AppEvent::ContainerInspectComplete {
+                    alias,
+                    container_id,
+                    result: Box::new(result),
+                });
+            },
+        );
+        fired += 1;
+    }
+    if fired > 0 {
+        log::debug!(
+            "[purple] host_header inspect prefetch: alias={} fired={}",
+            alias,
+            fired
+        );
+    }
+}
+
+/// Refresh the selected row's host listing if cache is stale or
+/// missing and no fetch is already in flight for that alias.
+/// Skips if the alias is owned by a running `R` batch so the
+/// batch driver retains exclusive completion semantics. No-op in
+/// demo mode and during shutdown.
+pub(super) fn ensure_list_for_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
+    if app.demo_mode || !app.running {
+        return;
+    }
+    // Header rows are selectable too; resolve the alias from either a
+    // container row (its `alias` field) or a divider row (the alias is
+    // the header itself) so the auto-refresh keeps the row under the
+    // cursor fresh in both cases.
+    let Some(alias) = selected_container_alias(app).or_else(|| selected_header_alias(app)) else {
+        return;
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let cached_runtime = if let Some(entry) = app.container_cache.get(&alias) {
+        if now.saturating_sub(entry.timestamp) < crate::app::LIST_CACHE_TTL_SECS {
+            return;
+        }
+        Some(entry.runtime)
+    } else {
+        // Should not happen. selected_container_row only returns rows
+        // backed by a cache entry. but treat as "no cached runtime".
+        None
+    };
+    if app.containers_overview.auto_list_in_flight.contains(&alias) {
+        return;
+    }
+    if let Some(batch) = app.containers_overview.refresh_batch.as_ref() {
+        if batch.in_flight_aliases.contains(&alias) {
+            return;
+        }
+    }
+    app.containers_overview
+        .auto_list_in_flight
+        .insert(alias.clone());
+
+    let askpass = app
+        .hosts_state
+        .list
+        .iter()
+        .find(|h| h.alias == alias)
+        .and_then(|h| h.askpass.clone());
+    let has_tunnel = app.tunnels.active.contains_key(&alias);
+    log::debug!("[purple] auto-list refresh: alias={}", alias);
+    spawn_refresh(
+        app.reload.config_path.clone(),
+        app.bw_session.clone(),
+        crate::app::RefreshQueueItem {
+            alias,
+            askpass,
+            cached_runtime,
+            has_tunnel,
+        },
+        events_tx,
+    );
+}
+
+fn handle_search_keys(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => {
+            app.search.query = None;
+            app.ui
+                .containers_overview_state
+                .select(first_visible_idx(app));
+        }
+        KeyCode::Enter => {
+            app.search.query = None;
+            exec_into_selected_container(app);
+        }
+        KeyCode::Down | KeyCode::Tab => select_next(app),
+        KeyCode::Up | KeyCode::BackTab => select_prev(app),
+        KeyCode::PageDown => {
+            for _ in 0..10 {
+                select_next(app);
+            }
+        }
+        KeyCode::PageUp => {
+            for _ in 0..10 {
+                select_prev(app);
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(q) = app.search.query.as_mut() {
+                q.pop();
+            }
+            app.ui
+                .containers_overview_state
+                .select(first_visible_idx(app));
+        }
+        KeyCode::Char(c) => {
+            if let Some(q) = app.search.query.as_mut() {
+                q.push(c);
+            }
+            app.ui
+                .containers_overview_state
+                .select(first_visible_idx(app));
+        }
+        _ => {}
+    }
+}

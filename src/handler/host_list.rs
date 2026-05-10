@@ -500,6 +500,9 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                 } else {
                     app.update_last_modified();
                     app.reload_hosts();
+                    // Restored host has no container_cache entry —
+                    // queue an initial fetch for THIS alias only.
+                    app.pending_container_fetch_aliases.push(alias.clone());
                     app.notify(crate::messages::host_restored(&alias));
                 }
             } else {

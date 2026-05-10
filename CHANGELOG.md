@@ -1,3 +1,13 @@
+## 3.9.0 - 2026-05-10
+
+- feat: Manage every container in your fleet from one tab.
+- feat: Press Tab past Hosts and Tunnels to land in Containers. Every Docker and Podman container groups under each host. Park the cursor on a host divider and the detail panel summarises engine version, runtime, sync age and running/exited counts.
+- feat: Enter shells in. `l` streams the last 200 log lines. `K` restarts. `S` stops. `e` runs a one-off command. Confirms always show before anything destructive.
+- feat: `Ctrl-K` cycles a whole compose stack member by member. `K` or `S` on a host divider sweeps every running container on that host in order.
+- feat: `r` refreshes one host. `R` refreshes all in parallel, four at a time. `a` adds a host to the cache from a picker.
+- feat: The detail panel reads `docker inspect` once and remembers, so image digest, restart policy, user, privileged flag, mounts, network and recent logs render instantly as you arrow through.
+- feat: Sync brings freshly added hosts into the cache automatically. Jump finds containers by name, image or host and lands you on the right row.
+
 ## 3.8.0 - 2026-05-08
 
 - feat: Esc cancels, never quits. Press q to quit.

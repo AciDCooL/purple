@@ -280,7 +280,10 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
 }
 
 /// `C` — open the container overlay for the selected host. Spawns a
-/// background listing thread unless the app is in demo mode.
+/// background listing thread unless the app is in demo mode. State setup
+/// lives in `crate::handler::containers::open_overlay_for_host` so the
+/// containers overview tab and the host-list `C` shortcut share one
+/// implementation.
 pub(super) fn open_container_overlay(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     if app.is_pattern_selected() {
         return;
@@ -298,41 +301,5 @@ pub(super) fn open_container_overlay(app: &mut App, events_tx: &mpsc::Sender<App
     if let Some(hint) = stale_hint {
         app.notify_warning(crate::messages::stale_host(&hint));
     }
-    let (cached_runtime, cached_containers) = if let Some(entry) = app.container_cache.get(&alias) {
-        (Some(entry.runtime), entry.containers.clone())
-    } else {
-        (None, Vec::new())
-    };
-    let mut list_state = ratatui::widgets::ListState::default();
-    if !cached_containers.is_empty() {
-        list_state.select(Some(0));
-    }
-    app.container_state = Some(crate::app::ContainerState {
-        alias: alias.clone(),
-        askpass: askpass.clone(),
-        runtime: cached_runtime,
-        containers: cached_containers,
-        list_state,
-        loading: !app.demo_mode,
-        error: None,
-        action_in_progress: None,
-        confirm_action: None,
-    });
-    app.set_screen(Screen::Containers {
-        alias: alias.clone(),
-    });
-    if !app.demo_mode {
-        let has_tunnel = app.tunnels.active.contains_key(&alias);
-        let ctx = crate::ssh_context::OwnedSshContext {
-            alias,
-            config_path: app.reload.config_path.clone(),
-            askpass,
-            bw_session: app.bw_session.clone(),
-            has_tunnel,
-        };
-        let tx = events_tx.clone();
-        crate::containers::spawn_container_listing(ctx, cached_runtime, move |a, result| {
-            let _ = tx.send(AppEvent::ContainerListing { alias: a, result });
-        });
-    }
+    crate::handler::containers::open_overlay_for_host(app, alias, askpass, events_tx);
 }

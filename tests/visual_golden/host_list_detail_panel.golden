@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels                                                                 │
+│  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 24 ── ●16 ✖2 ○6 ─────────────────────────────────────────╮╭─ bastion-ams ────────────────────────╮
 │     NAME                             TAGS          LAST▾ ││ ops@140.82.121.3:22                  │
@@ -150,6 +150,16 @@
 (31,1) fg=Reset bg=Reset mod=DIM
 (32,1) fg=Reset bg=Reset mod=DIM
 (33,1) fg=Reset bg=Reset mod=DIM
+(40,1) fg=Reset bg=Reset mod=DIM
+(41,1) fg=Reset bg=Reset mod=DIM
+(42,1) fg=Reset bg=Reset mod=DIM
+(43,1) fg=Reset bg=Reset mod=DIM
+(44,1) fg=Reset bg=Reset mod=DIM
+(45,1) fg=Reset bg=Reset mod=DIM
+(46,1) fg=Reset bg=Reset mod=DIM
+(47,1) fg=Reset bg=Reset mod=DIM
+(48,1) fg=Reset bg=Reset mod=DIM
+(49,1) fg=Reset bg=Reset mod=DIM
 (99,1) fg=Reset bg=Reset mod=DIM
 (0,2) fg=Reset bg=Reset mod=DIM
 (1,2) fg=Reset bg=Reset mod=DIM

@@ -6617,10 +6617,12 @@ fn jump_commands_have_unique_keys_per_target() {
     let commands = PaletteCommand::all();
     let mut seen_hosts = std::collections::HashSet::new();
     let mut seen_tunnels = std::collections::HashSet::new();
+    let mut seen_containers = std::collections::HashSet::new();
     for cmd in commands {
         let bucket = match cmd.target {
             crate::app::JumpActionTarget::Hosts => &mut seen_hosts,
             crate::app::JumpActionTarget::Tunnels => &mut seen_tunnels,
+            crate::app::JumpActionTarget::Containers => &mut seen_containers,
         };
         assert!(
             bucket.insert(cmd.key),
@@ -6629,7 +6631,34 @@ fn jump_commands_have_unique_keys_per_target() {
             cmd.target
         );
     }
-    assert!(commands.len() >= 25, "expected at least 25 jump actions");
+    assert!(commands.len() >= 28, "expected at least 28 jump actions");
+}
+
+#[test]
+fn jump_action_set_includes_container_actions() {
+    let commands = PaletteCommand::for_mode(JumpMode::Containers);
+    assert!(
+        commands
+            .iter()
+            .any(|c| c.label.contains("Containers: Refresh all hosts")),
+        "Containers: Refresh all hosts must be present"
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|c| c.label.contains("Containers: Cycle sort")),
+        "Containers: Cycle sort must be present"
+    );
+    assert!(
+        commands
+            .iter()
+            .any(|c| c.label.contains("Containers: Toggle detail panel")),
+        "Containers: Toggle detail panel must be present"
+    );
+    assert!(
+        commands.iter().any(|c| c.label.contains("Hosts: Add host")),
+        "cross-tab Hosts: Add host stays reachable from the containers tab"
+    );
 }
 
 #[test]

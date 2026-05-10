@@ -834,8 +834,9 @@ fn tool_list_containers(args: &Value, config_path: &Path) -> Value {
     }
 
     match crate::containers::parse_container_output(&stdout, None) {
-        Ok((runtime, containers)) => {
-            let containers_json: Vec<Value> = containers
+        Ok(listing) => {
+            let containers_json: Vec<Value> = listing
+                .containers
                 .iter()
                 .map(|c| {
                     serde_json::json!({
@@ -848,10 +849,13 @@ fn tool_list_containers(args: &Value, config_path: &Path) -> Value {
                     })
                 })
                 .collect();
-            let result = serde_json::json!({
-                "runtime": runtime.as_str(),
+            let mut result = serde_json::json!({
+                "runtime": listing.runtime.as_str(),
                 "containers": containers_json,
             });
+            if let Some(v) = listing.engine_version {
+                result["engine_version"] = serde_json::Value::String(v);
+            }
             let json_str = serde_json::to_string_pretty(&result)
                 .expect("serde_json::json! values are always serialisable");
             mcp_tool_result(&json_str)
@@ -911,7 +915,7 @@ fn tool_container_action(args: &Value, config_path: &Path) -> Value {
     }
 
     let runtime = match crate::containers::parse_container_output(&detect_stdout, None) {
-        Ok((rt, _)) => rt,
+        Ok(listing) => listing.runtime,
         Err(e) => return mcp_tool_error(&format!("Failed to detect container runtime: {e}")),
     };
 

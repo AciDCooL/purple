@@ -96,7 +96,16 @@ pub(crate) fn run_tui(mut app: App) -> Result<()> {
         lazy_cert_check(&mut app, &events_tx);
 
         handle_pending_connect(&mut app, &mut terminal, &events, &mut last_config_check)?;
-
+        handle_pending_container_exec(&mut app, &mut terminal, &events, &mut last_config_check)?;
+        handle_pending_container_logs(&mut app, &events_tx);
+        handle_pending_container_action(&mut app, &events_tx);
+        // Drain any aliases queued for an initial container-cache
+        // fetch (form save, sync, external edit, restore). The
+        // helper drains the queue itself and routes the items into
+        // the existing `RefreshBatch` driver.
+        if !app.pending_container_fetch_aliases.is_empty() {
+            handler::containers_overview::auto_fetch_new_hosts(&mut app, &events_tx);
+        }
         handle_pending_snippet(&mut app, &mut terminal, &events, &mut last_config_check)?;
     }
 
@@ -242,7 +251,7 @@ fn dispatch_event(
             handler::event_loop::handle_snippet_all_done(app, run_id);
         }
         Some(AppEvent::ContainerListing { alias, result }) => {
-            handler::event_loop::handle_container_listing(app, alias, result);
+            handler::event_loop::handle_container_listing(app, alias, result, events_tx);
         }
         Some(AppEvent::ContainerActionComplete {
             alias,
@@ -251,6 +260,44 @@ fn dispatch_event(
         }) => {
             handler::event_loop::handle_container_action_complete(
                 app, alias, action, result, events_tx,
+            );
+        }
+        Some(AppEvent::ContainerLogsComplete {
+            alias,
+            container_id,
+            container_name,
+            result,
+        }) => {
+            handler::event_loop::handle_container_logs_complete(
+                app,
+                alias,
+                container_id,
+                container_name,
+                result,
+            );
+        }
+        Some(AppEvent::ContainerInspectComplete {
+            alias,
+            container_id,
+            result,
+        }) => {
+            handler::event_loop::handle_container_inspect_complete(
+                app,
+                alias,
+                container_id,
+                *result,
+            );
+        }
+        Some(AppEvent::ContainerLogsTailComplete {
+            alias,
+            container_id,
+            result,
+        }) => {
+            handler::event_loop::handle_container_logs_tail_complete(
+                app,
+                alias,
+                container_id,
+                *result,
             );
         }
         Some(AppEvent::VaultSignResult {
@@ -397,7 +444,7 @@ fn handle_pending_connect(
     if use_tmux {
         // Tmux mode: open SSH in a new tmux window. TUI stays alive.
         // Vault SSH cert signing runs first (eprintln warnings are harmless
-        // on the alternate screen — ratatui repaints over them on the next
+        // on the alternate screen. ratatui repaints over them on the next
         // draw cycle). Sign the entire ProxyJump chain so the proxy hop's
         // cert is in place before ssh tries to use it.
         let vault_msg = if vault_host.is_some() {
@@ -529,6 +576,217 @@ fn handle_pending_connect(
     app.reload_hosts();
     app.update_last_modified();
     Ok(())
+}
+
+/// Drain any queued container-exec request. Same lifecycle as
+/// `handle_pending_connect` but the spawned command is
+/// `ssh -t <alias> <runtime> exec -it <id> sh -c 'bash || sh'` instead
+/// of a plain shell login.
+fn handle_pending_container_exec(
+    app: &mut App,
+    terminal: &mut tui::Tui,
+    events: &EventHandler,
+    last_config_check: &mut std::time::Instant,
+) -> Result<()> {
+    let Some(req) = app.pending_container_exec.take() else {
+        return Ok(());
+    };
+
+    let askpass = req.askpass.or_else(preferences::load_askpass_default);
+    let has_active_tunnel = app.tunnels.active.contains_key(&req.alias);
+    let use_tmux = connection::is_in_tmux() && askpass.is_none();
+
+    let remote_cmd = if let Some(ref user_cmd) = req.command {
+        // User-typed exec command from the `e` prompt. The remote runs
+        // `sh -c '<cmd>'`; embedded single-quotes are escaped as the
+        // standard POSIX `'\''` so the wrapping quotes survive a token
+        // like `it's-fine`. The prompt handler already rejects newlines.
+        let escaped = user_cmd.replace('\'', "'\\''");
+        format!(
+            "{} exec -it {} sh -c '{}'",
+            req.runtime.as_str(),
+            req.container_id,
+            escaped
+        )
+    } else {
+        format!(
+            "{} exec -it {} sh -c 'bash || sh'",
+            req.runtime.as_str(),
+            req.container_id
+        )
+    };
+
+    if use_tmux {
+        let label = format!("{}/{}", req.alias, req.container_name);
+        match connection::connect_tmux_window_with_remote_command(
+            &req.alias,
+            &app.reload.config_path,
+            has_active_tunnel,
+            &remote_cmd,
+            &label,
+        ) {
+            Ok(()) => {
+                app.notify(crate::messages::container_exec_opened_in_tmux(
+                    &req.container_name,
+                    &req.alias,
+                ));
+            }
+            Err(e) => {
+                app.notify_error(crate::messages::tmux_error(&e));
+            }
+        }
+        return Ok(());
+    }
+
+    events.pause();
+    terminal.exit()?;
+
+    let result = connection::connect_with_remote_command(
+        &req.alias,
+        &app.reload.config_path,
+        askpass.as_deref(),
+        app.bw_session.as_deref(),
+        has_active_tunnel,
+        &remote_cmd,
+    );
+
+    match result {
+        Ok(cr) => {
+            let code = cr.status.code().unwrap_or(1);
+            // SSH exit 255 = ssh itself failed (auth, network, host-key
+            // mismatch); anything else means ssh connected and the
+            // remote command exited with that code. Recording history
+            // for non-255 mirrors the host-list connect flow so a
+            // mid-shell crash still counts as a successful login.
+            if code != 255 {
+                app.history.record(&req.alias);
+                app.hosts_state.render_cache.invalidate();
+            }
+            if code == 0 {
+                app.notify(crate::messages::container_exec_ended(&req.container_name));
+            } else if let Some((hostname, known_hosts_path)) =
+                connection::parse_host_key_error(&cr.stderr_output)
+            {
+                // Same recovery surface as the host-list `i` path:
+                // park the user on ConfirmHostKeyReset so they can
+                // delete the stale known_hosts entry and retry.
+                app.screen = app::Screen::ConfirmHostKeyReset {
+                    alias: req.alias.clone(),
+                    hostname,
+                    known_hosts_path,
+                    askpass: askpass.clone(),
+                };
+            } else {
+                let reason = connection::stderr_summary(&cr.stderr_output);
+                let msg = match reason {
+                    Some(r) => {
+                        crate::messages::container_exec_failed_with_reason(&req.container_name, &r)
+                    }
+                    None => {
+                        crate::messages::container_exec_exited_with_code(&req.container_name, code)
+                    }
+                };
+                app.notify_error(msg);
+            }
+        }
+        Err(e) => {
+            eprintln!("{}", crate::messages::connection_spawn_failed(&e));
+            app.notify_error(crate::messages::container_exec_spawn_failed(
+                &req.container_name,
+            ));
+        }
+    }
+    askpass::cleanup_marker(&req.alias);
+    terminal.enter()?;
+    events.resume();
+    *last_config_check = std::time::Instant::now();
+    Ok(())
+}
+
+/// Drain `pending_container_logs`. Spawns a background SSH
+/// thread that runs `<runtime> logs --tail N <id>` and emits an
+/// `AppEvent::ContainerLogsComplete` with the captured output. The
+/// receiving handler in `event_loop.rs` fills the open
+/// `Screen::ContainerLogs` overlay's body.
+fn handle_pending_container_logs(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>) {
+    let Some(req) = app.pending_container_logs.take() else {
+        return;
+    };
+    let askpass = req.askpass.or_else(preferences::load_askpass_default);
+    let has_tunnel = app.tunnels.active.contains_key(&req.alias);
+    let ctx = crate::ssh_context::OwnedSshContext {
+        alias: req.alias,
+        config_path: app.reload.config_path.clone(),
+        askpass,
+        bw_session: app.bw_session.clone(),
+        has_tunnel,
+    };
+    let tx = events_tx.clone();
+    log::debug!(
+        "[purple] container_logs_fetch: spawning alias={} id={}",
+        ctx.alias,
+        req.container_id
+    );
+    crate::containers::spawn_container_logs_fetch(
+        ctx,
+        req.runtime,
+        req.container_id,
+        req.container_name,
+        crate::handler::container_logs::DEFAULT_TAIL,
+        move |alias, container_id, container_name, result| {
+            let _ = tx.send(AppEvent::ContainerLogsComplete {
+                alias,
+                container_id,
+                container_name,
+                result,
+            });
+        },
+    );
+}
+
+/// Drain `pending_container_action`. Reuses the existing
+/// `spawn_container_action` helper and `AppEvent::ContainerActionComplete`
+/// event so the result handler can stay one path. The action's
+/// container_id+name are logged here; the toast on completion uses
+/// the alias because the existing event payload does not carry the
+/// per-container labels.
+fn handle_pending_container_action(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>) {
+    // Drain at most one action per tick. Stack-restart pushes N
+    // requests but the SSH workers should not all sprint off the
+    // same tick. staggering keeps load on the remote sshd lower.
+    let Some(req) = app.pending_container_actions.pop_front() else {
+        return;
+    };
+    let askpass = req.askpass.or_else(preferences::load_askpass_default);
+    let has_tunnel = app.tunnels.active.contains_key(&req.alias);
+    let ctx = crate::ssh_context::OwnedSshContext {
+        alias: req.alias.clone(),
+        config_path: app.reload.config_path.clone(),
+        askpass,
+        bw_session: app.bw_session.clone(),
+        has_tunnel,
+    };
+    let tx = events_tx.clone();
+    log::info!(
+        "[purple] container_action_drain: spawning alias={} id={} action={:?} name={}",
+        req.alias,
+        req.container_id,
+        req.action,
+        req.container_name
+    );
+    crate::containers::spawn_container_action(
+        ctx,
+        req.runtime,
+        req.action,
+        req.container_id,
+        move |alias, action, result| {
+            let _ = tx.send(AppEvent::ContainerActionComplete {
+                alias,
+                action,
+                result,
+            });
+        },
+    );
 }
 
 /// Drain any queued snippet-run request: suspend the TUI, run the command

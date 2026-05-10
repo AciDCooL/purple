@@ -152,6 +152,7 @@ pub struct JumpAction {
 pub enum JumpActionTarget {
     Hosts,
     Tunnels,
+    Containers,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

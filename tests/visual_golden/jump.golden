@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels                                                                 │
+│  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 24 ── ●16 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   ADDRESS                         TAGS                            LAST▾ │
@@ -11,7 +11,7 @@
 │   ● aws-ap│  │ █ Find anything                                                   │  │        4h  │
 │   ● aws-ap│  ╰───────────────────────────────────────────────────────────────────╯  │        5h  │
 │   ● aws-wo│                                                                         │        6h  │
-│   ● aws-ba│   Actions   6 of 29                                                     │        7h  │
+│   ● aws-ba│   Actions   6 of 32                                                     │        7h  │
 │   ● aws-ml│   Hosts: Add host                                                   a   │        8h  │
 │   ● pve-we│   Tunnels: Manage tunnels                                           T   │       14h  │
 │   ● pve-we│   Containers: List containers                                       C   │       15h  │

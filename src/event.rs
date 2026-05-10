@@ -64,18 +64,43 @@ pub enum AppEvent {
     },
     ContainerListing {
         alias: String,
-        result: Result<
-            (
-                crate::containers::ContainerRuntime,
-                Vec<crate::containers::ContainerInfo>,
-            ),
-            crate::containers::ContainerError,
-        >,
+        result: Result<crate::containers::ContainerListing, crate::containers::ContainerError>,
     },
     ContainerActionComplete {
         alias: String,
         action: crate::containers::ContainerAction,
         result: Result<(), String>,
+    },
+    /// Result of a `docker inspect` (or `podman inspect`) call fired by
+    /// the containers overview detail panel. Cached per (alias,
+    /// container_id) once received so repeat fetches inside the TTL
+    /// window are skipped.
+    ContainerInspectComplete {
+        alias: String,
+        container_id: String,
+        // Boxed because `ContainerInspect` carries the full audit
+        // payload (caps, mounts, compose labels). Inlining it grows the
+        // `AppEvent` enum past clippy's `large_enum_variant` budget,
+        // bloating every queue slot for events that do not carry it.
+        result: Box<Result<crate::containers::ContainerInspect, String>>,
+    },
+    /// Result of `<runtime> logs --tail 200` over SSH for a container
+    /// the user opened with `l`. Populates `Screen::ContainerLogs.body`
+    /// (or `.error`) when received.
+    ContainerLogsComplete {
+        alias: String,
+        container_id: String,
+        container_name: String,
+        result: Result<Vec<String>, String>,
+    },
+    /// Result of a short `<runtime> logs --tail N` fetch fired by the
+    /// containers-overview detail panel to populate the LOGS card.
+    /// Distinct from `ContainerLogsComplete` so the dedicated logs
+    /// viewer (`l`) and the detail-panel card stay on separate caches.
+    ContainerLogsTailComplete {
+        alias: String,
+        container_id: String,
+        result: Box<Result<Vec<String>, String>>,
     },
     VaultSignResult {
         alias: String,
@@ -234,6 +259,9 @@ impl EventHandler {
                 | AppEvent::SnippetProgress { .. }
                 | AppEvent::ContainerListing { .. }
                 | AppEvent::ContainerActionComplete { .. }
+                | AppEvent::ContainerInspectComplete { .. }
+                | AppEvent::ContainerLogsComplete { .. }
+                | AppEvent::ContainerLogsTailComplete { .. }
                 | AppEvent::VaultSignResult { .. }
                 | AppEvent::VaultSignProgress { .. }
                 | AppEvent::VaultSignAllDone { .. }

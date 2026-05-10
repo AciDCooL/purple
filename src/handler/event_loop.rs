@@ -1,7 +1,7 @@
 use std::sync::mpsc;
 use std::time::Instant;
 
-use crate::app::{self, App};
+use crate::app::{self, App, Screen};
 use crate::containers;
 use crate::event::AppEvent;
 use crate::file_browser;
@@ -24,7 +24,7 @@ pub(crate) fn handle_tick(
     // Tick the spinner whenever something needs animation. Reachable hosts
     // drive the breathing online-dot pulse via `online_dot_pulsing(tick)`,
     // so they share the same monotonically-incrementing tick counter as
-    // the spinner — saves a parallel tick driver. Active tunnels also
+    // the spinner. saves a parallel tick driver. Active tunnels also
     // tick the spinner so the live chart wave has a continuous phase.
     let tunnels_animating =
         matches!(app.top_page, crate::app::TopPage::Tunnels) && !app.tunnels.active.is_empty();
@@ -168,6 +168,7 @@ pub(crate) fn handle_sync_complete(
         .unwrap_or_default()
         .as_secs();
     let display_name = providers::provider_display_name(&provider);
+    let before_aliases = app.snapshot_alias_set();
     let (_msg, is_err, total, added, updated, stale) =
         app.apply_sync_result(&provider, hosts, false);
     if is_err {
@@ -206,6 +207,7 @@ pub(crate) fn handle_sync_complete(
     // Reset config check timer so auto-reload doesn't immediately
     // detect our own write as an "external" change
     *last_config_check = Instant::now();
+    app.queue_new_aliases_since(&before_aliases);
 }
 
 /// Handle `AppEvent::SyncPartial`.
@@ -222,6 +224,7 @@ pub(crate) fn handle_sync_partial(
         .unwrap_or_default()
         .as_secs();
     let display_name = providers::provider_display_name(provider.as_str());
+    let before_aliases = app.snapshot_alias_set();
     let (msg, is_err, synced, added, updated, stale) =
         app.apply_sync_result(&provider, hosts, true);
     if is_err {
@@ -261,6 +264,7 @@ pub(crate) fn handle_sync_partial(
     app.providers.sync_done.push(display_name.to_string());
     crate::set_sync_summary(app);
     *last_config_check = Instant::now();
+    app.queue_new_aliases_since(&before_aliases);
 }
 
 /// Handle `AppEvent::SyncError`.
@@ -477,14 +481,28 @@ pub(crate) fn handle_snippet_all_done(app: &mut App, run_id: u64) {
 pub(crate) fn handle_container_listing(
     app: &mut App,
     alias: String,
-    result: Result<
-        (containers::ContainerRuntime, Vec<containers::ContainerInfo>),
-        containers::ContainerError,
-    >,
+    result: Result<containers::ContainerListing, containers::ContainerError>,
+    events_tx: &mpsc::Sender<AppEvent>,
 ) {
+    // Race guard: a `docker ps` thread may return after the user
+    // deleted the host (or `reload_hosts` pruned the cache via an
+    // external config edit). Without this guard the cache would be
+    // re-populated with an orphan and the next save would write it
+    // back to disk. Drop the result silently in that case but still
+    // tick the batch driver so an `R`-batch can complete cleanly.
+    if !app.hosts_state.list.iter().any(|h| h.alias == alias) {
+        log::debug!(
+            "[purple] container_listing dropped: alias={} no longer in config",
+            alias
+        );
+        crate::askpass::cleanup_marker(&alias);
+        app.containers_overview.auto_list_in_flight.remove(&alias);
+        drive_refresh_batch(app, &alias, events_tx);
+        return;
+    }
     // Always update cache, even if overlay is closed
     match &result {
-        Ok((runtime, containers)) => {
+        Ok(listing) => {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -493,11 +511,23 @@ pub(crate) fn handle_container_listing(
                 alias.clone(),
                 containers::ContainerCacheEntry {
                     timestamp: now,
-                    runtime: *runtime,
-                    containers: containers.clone(),
+                    runtime: listing.runtime,
+                    engine_version: listing.engine_version.clone(),
+                    containers: listing.containers.clone(),
                 },
             );
             containers::save_container_cache(&app.container_cache);
+            // Prefetch `docker inspect` for every container in this
+            // listing so HEALTH and the inspect-sourced detail cards
+            // populate without waiting for the user to scroll over
+            // each row. Dedup via in_flight set + TTL.
+            crate::handler::containers_overview::prefetch_inspect_for_listing(
+                app,
+                &alias,
+                listing.runtime,
+                &listing.containers,
+                events_tx,
+            );
         }
         Err(e) => {
             // Preserve runtime even on error
@@ -512,9 +542,9 @@ pub(crate) fn handle_container_listing(
     if let Some(ref mut state) = app.container_state {
         if state.alias == alias {
             match result {
-                Ok((runtime, containers)) => {
-                    state.runtime = Some(runtime);
-                    state.containers = containers;
+                Ok(listing) => {
+                    state.runtime = Some(listing.runtime);
+                    state.containers = listing.containers;
                     state.loading = false;
                     state.error = None;
                     if let Some(sel) = state.list_state.selected() {
@@ -536,6 +566,251 @@ pub(crate) fn handle_container_listing(
         }
     }
     crate::askpass::cleanup_marker(&alias);
+    app.containers_overview.auto_list_in_flight.remove(&alias);
+
+    // Drive the `R` batch refresh: a listing whose alias is in the
+    // batch's in_flight set decrements the counter and pops the next
+    // queued host. Non-batch listings (parallel `C`, `a`-add,
+    // action-complete refresh) drop through unchanged.
+    drive_refresh_batch(app, &alias, events_tx);
+}
+
+/// Drive the `R` batch refresh on each `ContainerListing` arrival.
+///
+/// Only listings whose alias is in `batch.in_flight_aliases` mutate
+/// the batch counters. Listings from concurrent non-batch triggers
+/// (host-list `C`, action-complete refresh, `a`-add) drop through .
+/// without that guard the counter would corrupt and the batch could
+/// either complete prematurely or hang.
+pub(crate) fn drive_refresh_batch(app: &mut App, alias: &str, events_tx: &mpsc::Sender<AppEvent>) {
+    let Some(batch) = app.containers_overview.refresh_batch.as_mut() else {
+        return;
+    };
+    if !batch.in_flight_aliases.remove(alias) {
+        // Listing for an alias that is not part of this batch.
+        return;
+    }
+    batch.in_flight = batch.in_flight.saturating_sub(1);
+    batch.completed += 1;
+
+    let next = batch.queue.pop_front();
+    let total = batch.total;
+    let completed = batch.completed;
+    let queue_remaining = batch.queue.len();
+
+    let spawned = next.is_some();
+    if let Some(item) = next {
+        batch.in_flight += 1;
+        batch.in_flight_aliases.insert(item.alias.clone());
+        let config_path = app.reload.config_path.clone();
+        let bw_session = app.bw_session.clone();
+        let ctx = crate::ssh_context::OwnedSshContext {
+            alias: item.alias,
+            config_path,
+            askpass: item.askpass,
+            bw_session,
+            has_tunnel: item.has_tunnel,
+        };
+        let tx = events_tx.clone();
+        containers::spawn_container_listing(ctx, item.cached_runtime, move |a, r| {
+            let _ = tx.send(AppEvent::ContainerListing {
+                alias: a,
+                result: r,
+            });
+        });
+    }
+
+    // Re-borrow after the mutable spawn block above so the final
+    // counters are post-pop-and-respawn.
+    let still_in_flight = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .map(|b| b.in_flight)
+        .unwrap_or(0);
+
+    log::debug!(
+        "[purple] refresh_batch: alias={} done={}/{} in_flight={} queue={} spawned_next={}",
+        alias,
+        completed,
+        total,
+        still_in_flight,
+        queue_remaining,
+        spawned
+    );
+
+    // Update progress / completion notification.
+    if queue_remaining == 0 && still_in_flight == 0 {
+        app.containers_overview.refresh_batch = None;
+        app.notify(crate::messages::container_refresh_complete(total));
+    } else {
+        app.notify_background(crate::messages::container_refresh_progress(
+            completed, total,
+        ));
+    }
+}
+
+/// Handle `AppEvent::ContainerInspectComplete`. Stores the result (Ok or
+/// Err) in the per-overview cache keyed by container ID and clears the
+/// in-flight marker. The result itself is held even on error so the
+/// detail panel can render the message instead of spinning forever.
+pub(crate) fn handle_container_inspect_complete(
+    app: &mut App,
+    alias: String,
+    container_id: String,
+    result: Result<containers::ContainerInspect, String>,
+) {
+    // Race guard mirrors handle_container_listing: drop the result
+    // when the host (and therefore its containers) is gone.
+    if !app.hosts_state.list.iter().any(|h| h.alias == alias) {
+        log::debug!(
+            "[purple] container_inspect_complete dropped: alias={} no longer in config",
+            alias
+        );
+        app.containers_overview
+            .inspect_cache
+            .in_flight
+            .remove(&container_id);
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    log::debug!(
+        "[purple] container_inspect_complete: alias={} id={} ok={}",
+        alias,
+        container_id,
+        result.is_ok()
+    );
+    app.containers_overview.inspect_cache.entries.insert(
+        container_id.clone(),
+        crate::app::InspectCacheEntry {
+            timestamp: now,
+            result,
+        },
+    );
+    app.containers_overview
+        .inspect_cache
+        .in_flight
+        .remove(&container_id);
+}
+
+/// Handle `AppEvent::ContainerLogsTailComplete`. Stores the result in
+/// the per-overview logs cache keyed by container ID and clears the
+/// in-flight marker. The result is held even on error so the LOGS card
+/// can render the message in place of spinning.
+pub(crate) fn handle_container_logs_tail_complete(
+    app: &mut App,
+    alias: String,
+    container_id: String,
+    result: Result<Vec<String>, String>,
+) {
+    if !app.hosts_state.list.iter().any(|h| h.alias == alias) {
+        log::debug!(
+            "[purple] container_logs_tail_complete dropped: alias={} no longer in config",
+            alias
+        );
+        app.containers_overview
+            .logs_cache
+            .in_flight
+            .remove(&container_id);
+        return;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    log::debug!(
+        "[purple] container_logs_tail_complete: alias={} id={} ok={}",
+        alias,
+        container_id,
+        result.is_ok()
+    );
+    app.containers_overview.logs_cache.entries.insert(
+        container_id.clone(),
+        crate::app::LogsCacheEntry {
+            timestamp: now,
+            result,
+        },
+    );
+    app.containers_overview
+        .logs_cache
+        .in_flight
+        .remove(&container_id);
+}
+
+/// Handle `AppEvent::ContainerLogsComplete`. When the user is still
+/// on the matching `Screen::ContainerLogs` overlay, populate the body
+/// (or error). When the screen has changed (Esc, Tab away), drop the
+/// payload silently. The user opted out before the SSH call returned.
+pub(crate) fn handle_container_logs_complete(
+    app: &mut App,
+    alias: String,
+    container_id: String,
+    container_name: String,
+    result: Result<Vec<String>, String>,
+) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    if let Screen::ContainerLogs {
+        alias: scr_alias,
+        container_id: scr_id,
+        body,
+        error,
+        fetched_at,
+        scroll,
+        last_render_height,
+        ..
+    } = &mut app.screen
+    {
+        if scr_alias == &alias && scr_id == &container_id {
+            match result {
+                Ok(lines) => {
+                    log::debug!(
+                        "[purple] container_logs_complete: {} lines for alias={} id={}",
+                        lines.len(),
+                        alias,
+                        container_id
+                    );
+                    *body = lines;
+                    *error = None;
+                    *fetched_at = now;
+                    // Tail-anchor: align the bottom of the body with
+                    // the bottom of the viewport so the latest line
+                    // sits at the last visible row, with N preceding
+                    // lines filling the gap. The renderer wrote
+                    // `last_render_height` while painting the loading
+                    // placeholder one frame earlier.
+                    *scroll = crate::handler::container_logs::tail_scroll(
+                        body.len(),
+                        *last_render_height,
+                    );
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[external] container_logs_complete: alias={} id={} error={}",
+                        alias,
+                        container_id,
+                        e
+                    );
+                    body.clear();
+                    *error = Some(e);
+                    *fetched_at = now;
+                    *scroll = 0;
+                }
+            }
+            return;
+        }
+    }
+    log::debug!(
+        "[purple] container_logs_complete dropped (overlay closed): alias={} id={} name={}",
+        alias,
+        container_id,
+        container_name
+    );
 }
 
 /// Handle `AppEvent::ContainerActionComplete`.
@@ -569,6 +844,12 @@ pub(crate) fn handle_container_action_complete(
     if let Some((refresh_alias, askpass, cached_runtime)) = should_refresh {
         app.notify_background(crate::messages::container_action_complete(action.as_str()));
         let has_tunnel = app.tunnels.active.contains_key(&refresh_alias);
+        // Mark in-flight so the scroll-driven auto-refresh does not
+        // double-spawn for the same alias while this post-action
+        // listing is still pending.
+        app.containers_overview
+            .auto_list_in_flight
+            .insert(refresh_alias.clone());
         let ctx = crate::ssh_context::OwnedSshContext {
             alias: refresh_alias,
             config_path: app.reload.config_path.clone(),

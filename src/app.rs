@@ -40,6 +40,7 @@ pub(super) fn eq_ci(a: &str, b: &str) -> bool {
 
 mod baselines;
 mod container_state;
+mod containers_overview;
 mod display_list;
 mod form_state;
 mod forms;
@@ -63,6 +64,11 @@ mod vault;
 
 pub use baselines::{FormBaseline, ProviderFormBaseline, SnippetFormBaseline, TunnelFormBaseline};
 pub use container_state::ContainerState;
+pub use containers_overview::{
+    ContainerActionRequest, ContainerExecRequest, ContainerLogsRequest, ContainersOverviewState,
+    ContainersSortMode, InspectCacheEntry, LIST_CACHE_TTL_SECS, LOGS_TAIL, LogsCacheEntry,
+    REFRESH_MAX_PARALLEL, RefreshBatch, RefreshQueueItem,
+};
 pub use form_state::FormState;
 pub(crate) use forms::char_to_byte_pos;
 pub use forms::{
@@ -80,7 +86,7 @@ pub use provider_state::{
     LabelMigrationField, PendingLabelMigration, ProviderRow, ProviderState, SyncRecord,
 };
 pub use reload_state::{ConflictState, ReloadState};
-pub use screen::{Screen, TopPage, WhatsNewState};
+pub use screen::{Screen, StackMember, TopPage, WhatsNewState};
 pub use search::SearchState;
 pub use snippet_state::SnippetState;
 pub use status_state::{MessageClass, StatusCenter, StatusMessage};
@@ -118,12 +124,31 @@ impl Drop for App {
 pub struct App {
     // Core
     pub screen: Screen,
-    /// Top-level page (Hosts vs Tunnels). Selected by Tab/Shift+Tab in
-    /// the navigation bar. Independent of `screen`, which tracks overlays.
+    /// Top-level page (Hosts, Tunnels, Containers). Selected by Tab/Shift+Tab
+    /// in the navigation bar. Independent of `screen`, which tracks overlays.
     pub top_page: TopPage,
     pub running: bool,
     pub hosts_state: HostState,
     pub pending_connect: Option<(String, Option<String>)>,
+    /// Drained by the main loop just like `pending_connect`. Spawns
+    /// `ssh -t <alias> <runtime> exec -it <id> sh -c 'bash || sh'`
+    /// inline, restoring the TUI when the shell exits.
+    pub pending_container_exec: Option<ContainerExecRequest>,
+    /// Drained by the main loop. Spawns a background SSH thread that
+    /// runs `<runtime> logs --tail 200 <id>` and emits an
+    /// `AppEvent::ContainerLogsComplete` with the captured output. The
+    /// receiving handler lands the result on `Screen::ContainerLogs`.
+    pub pending_container_logs: Option<ContainerLogsRequest>,
+    /// Drained by the main loop. Each request fires `<runtime>
+    /// {restart,stop} <id>` over SSH on a worker thread; on completion
+    /// an `AppEvent::ContainerActionComplete` triggers a host-cache
+    /// refresh and a toast. Stored as a queue so a stack-restart can
+    /// stack N members and the drain takes them one at a time.
+    pub pending_container_actions: std::collections::VecDeque<ContainerActionRequest>,
+    /// Aliases queued for an initial container-cache fetch. Each
+    /// entry is the SPECIFIC alias that the trigger introduced; the
+    /// helper must not sweep in unrelated cache-missing hosts.
+    pub pending_container_fetch_aliases: Vec<String>,
 
     // Sub-structs
     pub status_center: StatusCenter,
@@ -176,6 +201,7 @@ pub struct App {
     // Containers
     pub container_state: Option<ContainerState>,
     pub container_cache: HashMap<String, crate::containers::ContainerCacheEntry>,
+    pub containers_overview: ContainersOverviewState,
 
     // First-run hints
     pub known_hosts_count: usize,
@@ -218,6 +244,10 @@ impl App {
             running: true,
             hosts_state,
             pending_connect: None,
+            pending_container_exec: None,
+            pending_container_logs: None,
+            pending_container_actions: std::collections::VecDeque::new(),
+            pending_container_fetch_aliases: Vec::new(),
             status_center: StatusCenter::default(),
             ui: UiSelection::new_with_initial_selection(initial_selection),
             search: SearchState::default(),
@@ -239,12 +269,37 @@ impl App {
             file_browser_paths: HashMap::new(),
             container_state: None,
             container_cache: crate::containers::load_container_cache(),
+            containers_overview: ContainersOverviewState::default(),
             known_hosts_count: 0,
             welcome_opened: None,
             demo_mode: false,
             pending_vault_config_write: false,
             jump: None,
             esc_quit_hint_shown: false,
+        }
+    }
+
+    /// Snapshot the alias of every host currently loaded. Used as
+    /// the "before" set for `queue_new_aliases_since` after a
+    /// reload that may have added or removed hosts.
+    pub fn snapshot_alias_set(&self) -> std::collections::HashSet<String> {
+        self.hosts_state
+            .list
+            .iter()
+            .map(|h| h.alias.clone())
+            .collect()
+    }
+
+    /// Push aliases that are in the current host list but were NOT
+    /// in `before_aliases` to the auto-fetch queue. Sync handlers
+    /// and external-config-edit detection use this so only freshly
+    /// introduced hosts trigger an initial `docker ps`. pre-existing
+    /// cache-missing hosts are explicitly left alone.
+    pub fn queue_new_aliases_since(&mut self, before_aliases: &std::collections::HashSet<String>) {
+        for h in &self.hosts_state.list {
+            if !before_aliases.contains(&h.alias) {
+                self.pending_container_fetch_aliases.push(h.alias.clone());
+            }
         }
     }
 
@@ -304,7 +359,7 @@ impl App {
             self.apply_sort();
         }
 
-        // Close tag pickers if open — tags.list is stale after reload
+        // Close tag pickers if open. tags.list is stale after reload
         if matches!(self.screen, Screen::TagPicker | Screen::BulkTagEditor) {
             self.screen = Screen::HostList;
             self.forms.bulk_tag_editor = BulkTagEditorState::default();
@@ -320,6 +375,71 @@ impl App {
             .iter()
             .map(|h| h.alias.as_str())
             .collect();
+
+        // Drop container-cache entries for hosts that disappeared
+        // since the last reload (manual delete, stale purge, or an
+        // external `~/.ssh/config` edit). Persist the trimmed cache
+        // so `~/.purple/container_cache.jsonl` does not keep
+        // serving orphan entries on the next purple start. Demo
+        // mode skips disk writes via `save_container_cache` itself.
+        let pre_container_cache = self.container_cache.len();
+        self.container_cache
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        let dropped_container_hosts =
+            pre_container_cache.saturating_sub(self.container_cache.len());
+        if dropped_container_hosts > 0 {
+            log::debug!(
+                "[purple] reload_hosts: dropped {} orphan container_cache host(s)",
+                dropped_container_hosts
+            );
+            crate::containers::save_container_cache(&self.container_cache);
+        }
+
+        // Inspect cache is keyed on full container ID. Any ID whose
+        // host just got dropped is by definition orphan; build the
+        // valid-id set from the (just-pruned) container_cache.
+        let valid_container_ids: std::collections::HashSet<String> = self
+            .container_cache
+            .values()
+            .flat_map(|e| e.containers.iter().map(|c| c.id.clone()))
+            .collect();
+        let pre_inspect = self.containers_overview.inspect_cache.entries.len();
+        self.containers_overview
+            .inspect_cache
+            .entries
+            .retain(|id, _| valid_container_ids.contains(id));
+        self.containers_overview
+            .inspect_cache
+            .in_flight
+            .retain(|id| valid_container_ids.contains(id));
+        // Logs cache shares the inspect-cache lifetime: orphan entries
+        // (containers whose host was just removed) are dropped together.
+        self.containers_overview
+            .logs_cache
+            .entries
+            .retain(|id, _| valid_container_ids.contains(id));
+        self.containers_overview
+            .logs_cache
+            .in_flight
+            .retain(|id| valid_container_ids.contains(id));
+        // Prune auto-list in-flight markers for deleted hosts. The
+        // listing thread still posts a result that hits the race
+        // guard in `handle_container_listing` and removes it there,
+        // but pruning here keeps debug state clean and avoids a
+        // false-positive dedup hit if the same alias is re-added
+        // before the stray listing returns.
+        self.containers_overview
+            .auto_list_in_flight
+            .retain(|alias| valid_aliases.contains(alias.as_str()));
+        let dropped_inspect =
+            pre_inspect.saturating_sub(self.containers_overview.inspect_cache.entries.len());
+        if dropped_inspect > 0 {
+            log::debug!(
+                "[purple] reload_hosts: dropped {} orphan inspect_cache entrie(s)",
+                dropped_inspect
+            );
+        }
+
         let pre_status = self.ping.status.len();
         let pre_checked = self.ping.last_checked.len();
         self.ping
@@ -618,6 +738,7 @@ impl App {
                         (state.mode, a.target),
                         (JumpMode::Hosts, JumpActionTarget::Hosts)
                             | (JumpMode::Tunnels, JumpActionTarget::Tunnels)
+                            | (JumpMode::Containers, JumpActionTarget::Containers)
                     );
                     let bump = if mode_match { 20_000 } else { 10_000 };
                     best = best.saturating_add(bump);
@@ -936,10 +1057,11 @@ impl App {
                 .any(|(path, old_mtime)| reload_state::get_mtime(path) != *old_mtime);
         if changed {
             if let Ok(new_config) = SshConfigFile::parse(&self.reload.config_path) {
+                let before_aliases = self.snapshot_alias_set();
                 self.hosts_state.ssh_config = new_config;
-                // Invalidate undo state — config structure may have changed externally
+                // Invalidate undo state. config structure may have changed externally
                 self.hosts_state.undo_stack.clear();
-                // Clear stale ping status — hosts may have changed
+                // Clear stale ping status. hosts may have changed
                 log::debug!(
                     "[config] external config change: clearing {} ping result(s) + timestamps",
                     self.ping.status.len()
@@ -956,6 +1078,7 @@ impl App {
                     reload_state::snapshot_include_dir_mtimes(&self.hosts_state.ssh_config);
                 let count = self.hosts_state.list.len();
                 self.notify_background(crate::messages::config_reloaded(count));
+                self.queue_new_aliases_since(&before_aliases);
             }
         }
     }
@@ -964,7 +1087,7 @@ impl App {
     /// been modified since `self.reload.last_modified` was captured? Used by
     /// async write paths (e.g. the Vault SSH bulk-sign completion handler)
     /// to refuse writing when an external editor changed the file underneath
-    /// us — overwriting those edits would silently discard user work. The
+    /// us. overwriting those edits would silently discard user work. The
     /// backup-on-write mechanism in `SshConfigFile::write()` would still
     /// recover them, but detecting the conflict BEFORE writing is strictly
     /// better than after.
@@ -1077,7 +1200,7 @@ pub use jump::{
 };
 
 /// Backwards-compatible alias for the old `PaletteCommand` (now `JumpAction`) name. The
-/// renamed type is `JumpAction`. Test-only — there is no production
+/// renamed type is `JumpAction`. Test-only. there is no production
 /// caller.
 #[cfg(test)]
 pub type PaletteCommand = JumpAction;
@@ -1085,7 +1208,7 @@ pub type PaletteCommand = JumpAction;
 /// Unified action set. Every action declares its `target` so dispatch
 /// switches `top_page` first, then synthesises the hotkey for the right
 /// handler. The jump bar shows this same list regardless of which
-/// top-page was active when it opened — so the overlay size is
+/// top-page was active when it opened. so the overlay size is
 /// consistent and `Tunnels: Add tunnel` is reachable from the Hosts
 /// tab and vice versa.
 static ALL_JUMP_ACTIONS: &[JumpAction] = &[
@@ -1303,6 +1426,27 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         aliases: &["order tunnels"],
         target: JumpActionTarget::Tunnels,
     },
+    JumpAction {
+        key: 'R',
+        key_str: "R",
+        label: "Containers: Refresh all hosts",
+        aliases: &["reload containers", "fetch", "rescan"],
+        target: JumpActionTarget::Containers,
+    },
+    JumpAction {
+        key: 's',
+        key_str: "s",
+        label: "Containers: Cycle sort",
+        aliases: &["order containers", "sort by host", "sort by name"],
+        target: JumpActionTarget::Containers,
+    },
+    JumpAction {
+        key: 'v',
+        key_str: "v",
+        label: "Containers: Toggle detail panel",
+        aliases: &["show details", "hide details", "compact view"],
+        target: JumpActionTarget::Containers,
+    },
 ];
 
 /// Which command set the jump bar displays. Determined by the screen that
@@ -1313,6 +1457,7 @@ pub enum JumpMode {
     #[default]
     Hosts,
     Tunnels,
+    Containers,
 }
 
 /// Cap on hits rendered per section. Broad queries (e.g. one character)
@@ -1326,6 +1471,13 @@ pub const PALETTE_PER_SECTION_CAP: usize = 32;
 /// one keystroke away. Lives in the data layer so `visible_hits()`,
 /// `empty_state_groups()` and the Down handler all agree on the bound.
 pub const JUMP_EMPTY_STATE_ACTIONS_CAP: usize = 6;
+
+/// On context-specific tabs (Tunnels, Containers) the empty-state bumps
+/// up to this many actions of the active tab's category to the front,
+/// before round-robining the remaining slots across other categories.
+/// Sized so half the cap surfaces tab actions and the other half stays
+/// reachable as a hub menu (cross-tab discovery).
+const EMPTY_STATE_TAB_BIAS: usize = 3;
 
 /// Display order for action categories on the empty state. The
 /// round-robin walks these buckets in this order, NOT in static-table
@@ -1347,7 +1499,7 @@ const CATEGORY_PRIORITY: &[&str] = &[
 ];
 
 /// Minimum nucleo score for actions. Below this the action is dropped from
-/// results — kills "Containers: List containers" matching `eric` because
+/// results. kills "Containers: List containers" matching `eric` because
 /// `e/r/i/c` happen to scatter across the label without semantic intent.
 const PALETTE_ACTION_FLOOR: u32 = 30;
 
@@ -1395,7 +1547,7 @@ fn preview(s: &str, max: usize) -> String {
 /// Restrict scoring to a single field when the user prefixes the query
 /// with `user:` / `host:` / `proxy:` / `vault:` / `tag:`. Returns `None`
 /// when no scope is set OR when the scope does not apply to the hit
-/// (e.g. `vault:` on a snippet) — caller falls back to the full set.
+/// (e.g. `vault:` on a snippet). caller falls back to the full set.
 fn scoped_haystacks_for(hit: &JumpHit, scope: Option<QueryScope>) -> Option<Vec<&str>> {
     let scope = scope?;
     match (hit, scope) {
@@ -1455,8 +1607,8 @@ pub enum MatchSource {
 /// Reorder actions so the first N show one per category, the next N
 /// show the second action of each category, etc. Preserves within-bucket
 /// order so muscle memory survives. Buckets are visited in
-/// `CATEGORY_PRIORITY` order — declarative, decoupled from static-table
-/// row order — so the empty-state top-N always leads with the most
+/// `CATEGORY_PRIORITY` order. declarative, decoupled from static-table
+/// row order. so the empty-state top-N always leads with the most
 /// important categories. Categories not in the priority list fall to
 /// the end in stable encounter order.
 fn round_robin_actions_by_category(actions: impl Iterator<Item = JumpAction>) -> Vec<JumpHit> {
@@ -1491,6 +1643,38 @@ fn round_robin_actions_by_category(actions: impl Iterator<Item = JumpAction>) ->
         }
         depth += 1;
     }
+    out
+}
+
+/// Like `round_robin_actions_by_category` but pulls up to `bump` actions
+/// whose dispatch `target` matches `preferred` to the front before
+/// round-robining the rest. Used by the empty-state on context-specific
+/// tabs (Tunnels, Containers) so the user sees actions that operate on
+/// the active tab, not just actions whose label happens to start with
+/// the same prefix. Filtering by `target` (dispatch destination) instead
+/// of label category keeps `Containers: List containers` (target=Hosts,
+/// opens the legacy per-host overlay) out of the bias on the Containers
+/// tab, where it would otherwise crowd out the genuinely tab-relevant
+/// `Refresh / Cycle sort / Toggle detail panel` actions.
+fn round_robin_actions_with_bias(
+    actions: impl Iterator<Item = JumpAction>,
+    preferred: JumpActionTarget,
+    bump: usize,
+) -> Vec<JumpHit> {
+    let collected: Vec<JumpAction> = actions.collect();
+    let biased: Vec<JumpAction> = collected
+        .iter()
+        .filter(|a| a.target == preferred)
+        .take(bump)
+        .copied()
+        .collect();
+    let biased_keys: std::collections::HashSet<char> = biased.iter().map(|a| a.key).collect();
+    let rest: Vec<JumpAction> = collected
+        .into_iter()
+        .filter(|a| !(biased_keys.contains(&a.key) && a.target == preferred))
+        .collect();
+    let mut out: Vec<JumpHit> = biased.into_iter().map(JumpHit::Action).collect();
+    out.extend(round_robin_actions_by_category(rest.into_iter()));
     out
 }
 
@@ -1555,7 +1739,7 @@ pub struct JumpState {
 
 // Manual `Clone` because `nucleo_matcher::Matcher` is not `Clone`. State
 // clones (e.g. in tests) drop the cached matcher and let the next
-// recompute build a fresh one — correct behavior, just slightly slower
+// recompute build a fresh one. correct behavior, just slightly slower
 // for the next keystroke after a clone.
 impl Clone for JumpState {
     fn clone(&self) -> Self {
@@ -1598,36 +1782,26 @@ impl JumpState {
     /// actions); otherwise it is the live computed `hits`. The cap on
     /// the empty state is applied HERE (data layer) so the Down/Up
     /// handlers, `visible_hits().len()`, and the renderer all agree on
-    /// the same bound — without this, scrolling past the rendered cap
+    /// the same bound. without this, scrolling past the rendered cap
     /// would silently advance `selected` into invisible rows and the
     /// highlight would appear to jump back to row 0.
     pub fn visible_hits(&self) -> Vec<JumpHit> {
         if self.query.is_empty() {
             let mut out: Vec<JumpHit> = self.recents.clone();
-            let recent_keys: std::collections::HashSet<RecentRef> =
-                self.recents.iter().map(|h| h.identity()).collect();
-            let actions = round_robin_actions_by_category(
-                JumpAction::for_mode(self.mode)
-                    .iter()
-                    .filter(|a| {
-                        let id = RecentRef::new(SourceKind::Action, a.key.to_string());
-                        !recent_keys.contains(&id)
-                    })
-                    .copied(),
-            );
-            for hit in actions.into_iter().take(JUMP_EMPTY_STATE_ACTIONS_CAP) {
-                out.push(hit);
-            }
+            out.extend(self.empty_state_actions());
             out
         } else {
             self.hits.clone()
         }
     }
 
-    /// Number of actions available for the empty-state ACTIONS section
-    /// BEFORE the cap. Used by the renderer to render `Actions  6 of 29`
-    /// when the cap is applied.
-    pub fn empty_state_actions_total(&self) -> usize {
+    /// Action set for the empty-state, after the `recent_keys` filter
+    /// is applied. Shared by `empty_state_actions` (which adds bias and
+    /// caps) and `empty_state_actions_total` (which just counts).
+    /// Centralising the filter predicate guarantees the rendered
+    /// "Actions  N of M" header stays in sync with the rendered list
+    /// across future edits.
+    fn filtered_actions_for_empty_state(&self) -> Vec<JumpAction> {
         let recent_keys: std::collections::HashSet<RecentRef> =
             self.recents.iter().map(|h| h.identity()).collect();
         JumpAction::for_mode(self.mode)
@@ -1636,7 +1810,37 @@ impl JumpState {
                 let id = RecentRef::new(SourceKind::Action, a.key.to_string());
                 !recent_keys.contains(&id)
             })
-            .count()
+            .copied()
+            .collect()
+    }
+
+    /// Top-N actions for the empty-state, after `recent_keys` filtering
+    /// and the optional tab-bias. Single source of truth for both the
+    /// renderer (`empty_state_groups`) and the navigation handler
+    /// (`visible_hits`); without it the two would drift on the bias and
+    /// the cursor would land on different rows than the user sees.
+    fn empty_state_actions(&self) -> Vec<JumpHit> {
+        let filtered = self.filtered_actions_for_empty_state();
+        let preferred_target = match self.mode {
+            JumpMode::Hosts => None,
+            JumpMode::Tunnels => Some(JumpActionTarget::Tunnels),
+            JumpMode::Containers => Some(JumpActionTarget::Containers),
+        };
+        let actions = match preferred_target {
+            Some(t) => round_robin_actions_with_bias(filtered.into_iter(), t, EMPTY_STATE_TAB_BIAS),
+            None => round_robin_actions_by_category(filtered.into_iter()),
+        };
+        actions
+            .into_iter()
+            .take(JUMP_EMPTY_STATE_ACTIONS_CAP)
+            .collect()
+    }
+
+    /// Number of actions available for the empty-state ACTIONS section
+    /// BEFORE the cap. Used by the renderer to render `Actions  6 of 29`
+    /// when the cap is applied.
+    pub fn empty_state_actions_total(&self) -> usize {
+        self.filtered_actions_for_empty_state().len()
     }
 
     /// Group `visible_hits()` for the query view: by `SourceKind` in render
@@ -1667,25 +1871,9 @@ impl JumpState {
         if !self.recents.is_empty() {
             out.push(("RECENT", self.recents.clone()));
         }
-        let recent_keys: std::collections::HashSet<RecentRef> =
-            self.recents.iter().map(|h| h.identity()).collect();
-        // Round-robin by `Category:` prefix so the empty-state top-N
-        // shows one action per category before showing a second from the
-        // same category. Without this, the first six all start with
-        // `Hosts:` (because that's the static-list order) and the user
-        // believes the bar is a host CRUD menu.
-        let actions: Vec<JumpHit> = round_robin_actions_by_category(
-            JumpAction::for_mode(self.mode)
-                .iter()
-                .filter(|a| {
-                    let id = RecentRef::new(SourceKind::Action, a.key.to_string());
-                    !recent_keys.contains(&id)
-                })
-                .copied(),
-        )
-        .into_iter()
-        .take(JUMP_EMPTY_STATE_ACTIONS_CAP)
-        .collect();
+        // Single source of truth shared with `visible_hits` so the
+        // navigation cursor and the rendered list cannot drift.
+        let actions = self.empty_state_actions();
         if !actions.is_empty() {
             out.push(("ACTIONS", actions));
         }

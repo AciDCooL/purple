@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use log::debug;
 
-use crate::app::{SortMode, ViewMode};
+use crate::app::{ContainersSortMode, SortMode, ViewMode};
 use crate::fs_util;
 
 // In test mode the override is thread-local: cargo runs each test on its own
@@ -50,13 +50,19 @@ pub fn clear_path_override_for_tests() {
 }
 
 fn path() -> Option<PathBuf> {
+    // Tests MUST opt in via `set_path_override`. Falling through to
+    // the real `~/.purple/preferences` would let a forgotten
+    // override read the user's saved settings and, worse, write
+    // back into them on `save_value`. Mirrors the same guard in
+    // `containers::cache_path`.
     #[cfg(test)]
     {
-        if let Some(p) = PATH_OVERRIDE.with(|p| p.borrow().clone()) {
-            return Some(p);
-        }
+        PATH_OVERRIDE.with(|p| p.borrow().clone())
     }
-    dirs::home_dir().map(|h| h.join(".purple/preferences"))
+    #[cfg(not(test))]
+    {
+        dirs::home_dir().map(|h| h.join(".purple/preferences"))
+    }
 }
 
 /// Load a value for a given key from ~/.purple/preferences.
@@ -87,13 +93,20 @@ fn load_value(key: &str) -> Option<String> {
 
 /// Save a key=value pair to ~/.purple/preferences. Preserves unknown keys and comments.
 fn save_value(key: &str, value: &str) -> io::Result<()> {
-    if crate::demo_flag::is_demo() {
-        return Ok(());
-    }
     let path = match path() {
         Some(p) => p,
         None => return Ok(()),
     };
+    // In production demo mode disk writes are suppressed so the user's
+    // real preferences file stays untouched. Inside tests the path
+    // resolves to a tempfile via the thread-local override, so we let
+    // writes through regardless of the global demo flag (handler
+    // fixtures flip that flag and would otherwise mute every prefs
+    // assertion that runs in parallel with them).
+    #[cfg(not(test))]
+    if crate::demo_flag::is_demo() {
+        return Ok(());
+    }
 
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
     let mut lines: Vec<String> = Vec::new();
@@ -155,13 +168,17 @@ pub fn load_group_by() -> crate::app::GroupBy {
 
 /// Remove a key from ~/.purple/preferences. No-op if the key or file does not exist.
 fn remove_value(key: &str) -> io::Result<()> {
-    if crate::demo_flag::is_demo() {
-        return Ok(());
-    }
     let path = match path() {
         Some(p) => p,
         None => return Ok(()),
     };
+    // Same demo-vs-test gate as `save_value`: production demo mode
+    // suppresses disk writes; test mode lets a tempfile override
+    // through irrespective of the global flag.
+    #[cfg(not(test))]
+    if crate::demo_flag::is_demo() {
+        return Ok(());
+    }
     let existing = std::fs::read_to_string(&path).unwrap_or_default();
 
     // Early return if key not present — avoids unnecessary rewrite
@@ -220,6 +237,69 @@ pub fn save_view_mode(mode: ViewMode) -> io::Result<()> {
             ViewMode::Detailed => "detailed",
         },
     )
+}
+
+/// Containers-tab sort order. Separate key from the host-list `sort_mode`
+/// so the two screens persist independently. Default `AlphaHost` matches
+/// `ContainersSortMode::default()`.
+pub fn load_containers_sort_mode() -> ContainersSortMode {
+    load_value("containers_sort_mode")
+        .map(|v| ContainersSortMode::from_key(&v))
+        .unwrap_or_default()
+}
+
+pub fn save_containers_sort_mode(mode: ContainersSortMode) -> io::Result<()> {
+    save_value("containers_sort_mode", mode.to_key())
+}
+
+/// Containers-tab detail panel toggle. Separate key so the host-list
+/// preference does not bleed into the containers screen and vice versa.
+/// Default Detailed: when nothing is saved yet the detail panel renders
+/// alongside the list whenever the terminal is wide enough.
+pub fn load_containers_view_mode() -> ViewMode {
+    load_value("containers_view_mode")
+        .map(|v| match v.as_str() {
+            "compact" => ViewMode::Compact,
+            _ => ViewMode::Detailed,
+        })
+        .unwrap_or(ViewMode::Detailed)
+}
+
+pub fn save_containers_view_mode(mode: ViewMode) -> io::Result<()> {
+    save_value(
+        "containers_view_mode",
+        match mode {
+            ViewMode::Compact => "compact",
+            ViewMode::Detailed => "detailed",
+        },
+    )
+}
+
+/// Aliases whose containers group is currently folded in the
+/// containers-tab AlphaHost view. Persists as a comma-separated list so
+/// a fresh start restores the user's last fold state. Empty list means
+/// every group is expanded.
+pub fn load_containers_collapsed_hosts() -> std::collections::HashSet<String> {
+    load_value("containers_collapsed_hosts")
+        .map(|raw| {
+            raw.split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn save_containers_collapsed_hosts(
+    aliases: &std::collections::HashSet<String>,
+) -> io::Result<()> {
+    if aliases.is_empty() {
+        let _ = remove_value("containers_collapsed_hosts");
+        return Ok(());
+    }
+    let mut sorted: Vec<&str> = aliases.iter().map(|s| s.as_str()).collect();
+    sorted.sort_unstable();
+    save_value("containers_collapsed_hosts", &sorted.join(","))
 }
 
 /// Load global askpass default from ~/.purple/preferences.
@@ -781,6 +861,110 @@ mod tests {
             std::fs::write(path, "view_mode=compact\n").unwrap();
             let mode = load_view_mode();
             assert_eq!(mode, ViewMode::Compact);
+        });
+    }
+
+    // --- Containers sort mode (separate key from host-list sort_mode) ---
+
+    #[test]
+    fn load_containers_sort_mode_defaults_to_alpha_host() {
+        with_temp_prefs("containers_sort_mode_default", |_path| {
+            assert_eq!(load_containers_sort_mode(), ContainersSortMode::AlphaHost);
+        });
+    }
+
+    #[test]
+    fn save_load_containers_sort_mode_round_trip() {
+        with_temp_prefs("containers_sort_mode_round_trip", |_path| {
+            save_containers_sort_mode(ContainersSortMode::AlphaContainer).unwrap();
+            assert_eq!(
+                load_containers_sort_mode(),
+                ContainersSortMode::AlphaContainer
+            );
+            save_containers_sort_mode(ContainersSortMode::AlphaHost).unwrap();
+            assert_eq!(load_containers_sort_mode(), ContainersSortMode::AlphaHost);
+        });
+    }
+
+    #[test]
+    fn load_containers_sort_mode_unknown_value_falls_back_to_default() {
+        with_temp_prefs("containers_sort_mode_unknown", |path| {
+            std::fs::write(path, "containers_sort_mode=garbage\n").unwrap();
+            assert_eq!(load_containers_sort_mode(), ContainersSortMode::AlphaHost);
+        });
+    }
+
+    #[test]
+    fn containers_sort_mode_does_not_clobber_host_sort_mode() {
+        with_temp_prefs("containers_sort_mode_isolation", |path| {
+            save_sort_mode(SortMode::AlphaAlias).unwrap();
+            save_containers_sort_mode(ContainersSortMode::AlphaContainer).unwrap();
+            let content = std::fs::read_to_string(path).unwrap();
+            assert!(content.contains("sort_mode=alpha_alias"));
+            assert!(content.contains("containers_sort_mode=alpha_container"));
+            assert_eq!(load_sort_mode(), SortMode::AlphaAlias);
+            assert_eq!(
+                load_containers_sort_mode(),
+                ContainersSortMode::AlphaContainer
+            );
+        });
+    }
+
+    // --- Containers view mode (separate key from host-list view_mode) ---
+
+    #[test]
+    fn load_containers_view_mode_defaults_to_detailed() {
+        with_temp_prefs("containers_view_mode_default", |_path| {
+            assert_eq!(load_containers_view_mode(), ViewMode::Detailed);
+        });
+    }
+
+    #[test]
+    fn save_load_containers_view_mode_round_trip() {
+        with_temp_prefs("containers_view_mode_round_trip", |_path| {
+            save_containers_view_mode(ViewMode::Compact).unwrap();
+            assert_eq!(load_containers_view_mode(), ViewMode::Compact);
+            save_containers_view_mode(ViewMode::Detailed).unwrap();
+            assert_eq!(load_containers_view_mode(), ViewMode::Detailed);
+        });
+    }
+
+    #[test]
+    fn save_containers_collapsed_hosts_writes_sorted_csv() {
+        with_temp_prefs("containers_collapsed_save", |path| {
+            let mut set = std::collections::HashSet::new();
+            set.insert("zeus".to_string());
+            set.insert("apollo".to_string());
+            set.insert("hera".to_string());
+            save_containers_collapsed_hosts(&set).unwrap();
+            let content = std::fs::read_to_string(path).unwrap();
+            // Sorted output keeps the prefs file diff-friendly across runs.
+            assert!(content.contains("containers_collapsed_hosts=apollo,hera,zeus"));
+        });
+    }
+
+    #[test]
+    fn save_containers_collapsed_hosts_empty_clears_key() {
+        with_temp_prefs("containers_collapsed_clear", |path| {
+            std::fs::write(path, "containers_collapsed_hosts=alpha\n").unwrap();
+            save_containers_collapsed_hosts(&std::collections::HashSet::new()).unwrap();
+            let content = std::fs::read_to_string(path).unwrap();
+            assert!(
+                !content.contains("containers_collapsed_hosts"),
+                "empty set must remove the key entirely"
+            );
+        });
+    }
+
+    #[test]
+    fn load_containers_collapsed_hosts_round_trip() {
+        with_temp_prefs("containers_collapsed_round_trip", |_path| {
+            let mut set = std::collections::HashSet::new();
+            set.insert("alpha".to_string());
+            set.insert("bravo".to_string());
+            save_containers_collapsed_hosts(&set).unwrap();
+            let loaded = load_containers_collapsed_hosts();
+            assert_eq!(loaded, set);
         });
     }
 

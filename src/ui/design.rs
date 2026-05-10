@@ -612,6 +612,163 @@ pub fn render_discard_prompt(frame: &mut Frame, footer_area: Rect, app: &App) {
 }
 
 // ---------------------------------------------------------------------------
+// Section card primitives
+// ---------------------------------------------------------------------------
+//
+// Bordered "section cards" with title in the top border. Shared by host
+// detail and container detail so both panels read as siblings.
+
+/// Box-drawing characters for section cards. Match the rounded-border look
+/// used everywhere else in the TUI.
+pub const BOX_TL: &str = "\u{256D}";
+pub const BOX_TR: &str = "\u{256E}";
+pub const BOX_BL: &str = "\u{2570}";
+pub const BOX_BR: &str = "\u{256F}";
+pub const BOX_H: &str = "\u{2500}";
+pub const BOX_V: &str = "\u{2502}";
+
+/// Push the opening line of a section card: ╭─ TITLE ───╮
+pub fn section_open(lines: &mut Vec<Line<'static>>, title: &str, width: usize) {
+    use unicode_width::UnicodeWidthStr;
+    let border_prefix = format!("{}{} ", BOX_TL, BOX_H);
+    let title_suffix = " ";
+    let prefix_width = border_prefix.width() + title.width() + title_suffix.width();
+    let fill = width.saturating_sub(prefix_width).saturating_sub(1);
+    lines.push(Line::from(vec![
+        Span::styled(border_prefix, theme::border()),
+        Span::styled(title.to_string(), theme::bold()),
+        Span::styled(title_suffix, theme::border()),
+        Span::styled(BOX_H.repeat(fill), theme::border()),
+        Span::styled(BOX_TR, theme::border()),
+    ]));
+}
+
+/// Push the opening line of a section card without a title: ╭───────╮
+pub fn section_open_notitle(lines: &mut Vec<Line<'static>>, width: usize) {
+    let fill = width.saturating_sub(2);
+    lines.push(Line::from(vec![
+        Span::styled(BOX_TL, theme::border()),
+        Span::styled(BOX_H.repeat(fill), theme::border()),
+        Span::styled(BOX_TR, theme::border()),
+    ]));
+}
+
+/// Push a content row wrapped in box side characters: │ <spans...> │
+pub fn section_line(lines: &mut Vec<Line<'static>>, spans: Vec<Span<'static>>, width: usize) {
+    use unicode_width::UnicodeWidthStr;
+    let mut full_spans: Vec<Span<'static>> =
+        vec![Span::styled(format!("{} ", BOX_V), theme::border())];
+    let content_width: usize = full_spans.iter().map(|s| s.content.width()).sum::<usize>()
+        + spans.iter().map(|s| s.content.width()).sum::<usize>();
+    full_spans.extend(spans);
+    let closing_offset = 1;
+    let padding = width
+        .saturating_sub(content_width)
+        .saturating_sub(closing_offset);
+    if padding > 0 {
+        full_spans.push(Span::raw(" ".repeat(padding)));
+    }
+    full_spans.push(Span::styled(BOX_V, theme::border()));
+    lines.push(Line::from(full_spans));
+}
+
+/// Push the closing line of a section card: ╰───────╯
+pub fn section_close(lines: &mut Vec<Line<'static>>, width: usize) {
+    let fill = width.saturating_sub(2);
+    lines.push(Line::from(vec![
+        Span::styled(BOX_BL, theme::border()),
+        Span::styled(BOX_H.repeat(fill), theme::border()),
+        Span::styled(BOX_BR, theme::border()),
+    ]));
+}
+
+/// Empty bordered line used to stretch the last card on a panel. Renders
+/// as `│              │` so the close-border stays anchored to the panel
+/// bottom regardless of how much content the cards above produced.
+pub fn section_empty_line(width: usize) -> Line<'static> {
+    let fill = width.saturating_sub(2);
+    Line::from(vec![
+        Span::styled(BOX_V, theme::border()),
+        Span::raw(" ".repeat(fill)),
+        Span::styled(BOX_V, theme::border()),
+    ])
+}
+
+/// Pad the line list so the LAST `section_close` row sits at row index
+/// `available_rows - 1`. Inserts empty bordered lines just before that
+/// close so the trailing card stretches without breaking its frame.
+/// No-op when the lines already fill or exceed `available_rows`.
+pub fn stretch_last_card(lines: &mut Vec<Line<'static>>, available_rows: usize, box_width: usize) {
+    if lines.len() >= available_rows {
+        return;
+    }
+    let extra = available_rows - lines.len();
+    let last_close = lines.iter().rposition(|line| {
+        line.spans
+            .first()
+            .map(|s| s.content.starts_with(BOX_BL))
+            .unwrap_or(false)
+    });
+    let Some(idx) = last_close else {
+        return;
+    };
+    for _ in 0..extra {
+        lines.insert(idx, section_empty_line(box_width));
+    }
+}
+
+/// Push a label+value field row inside a section card. Truncates the value
+/// when it exceeds `max_value_width`. Pass `0` to disable truncation.
+pub fn section_field(
+    lines: &mut Vec<Line<'static>>,
+    label: &str,
+    value: &str,
+    max_value_width: usize,
+    box_width: usize,
+) {
+    use unicode_width::UnicodeWidthStr;
+    let display = if max_value_width > 0 && value.width() > max_value_width {
+        super::truncate(value, max_value_width)
+    } else {
+        value.to_string()
+    };
+    let spans = vec![
+        Span::styled(
+            format!("{:<width$}", label, width = SECTION_LABEL_W as usize),
+            theme::muted(),
+        ),
+        Span::styled(display, theme::bold()),
+    ];
+    section_line(lines, spans, box_width);
+}
+
+/// Push a label+value field row with a custom value style (e.g. warning,
+/// error, online dot). Otherwise identical to `section_field`.
+pub fn section_field_styled(
+    lines: &mut Vec<Line<'static>>,
+    label: &str,
+    value: &str,
+    value_style: ratatui::style::Style,
+    max_value_width: usize,
+    box_width: usize,
+) {
+    use unicode_width::UnicodeWidthStr;
+    let display = if max_value_width > 0 && value.width() > max_value_width {
+        super::truncate(value, max_value_width)
+    } else {
+        value.to_string()
+    };
+    let spans = vec![
+        Span::styled(
+            format!("{:<width$}", label, width = SECTION_LABEL_W as usize),
+            theme::muted(),
+        ),
+        Span::styled(display, value_style),
+    ];
+    section_line(lines, spans, box_width);
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

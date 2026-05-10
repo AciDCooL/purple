@@ -387,6 +387,273 @@ fn visual_tunnel_host_picker_filtered() {
 }
 
 #[test]
+fn visual_containers_overview() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.ui.containers_overview_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("containers_overview", &actual);
+}
+
+/// AlphaContainer sort mode: flat list, no host headers, HOST
+/// column visible per-row. Specifically pins the regression where
+/// `host_count` was being read from header items (zero in this mode)
+/// and the stats title rendered "0 hosts".
+#[test]
+fn visual_containers_overview_alpha_container_mode() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.containers_overview.sort_mode = crate::app::ContainersSortMode::AlphaContainer;
+    app.ui.containers_overview_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("containers_overview_alpha_container", &actual);
+}
+
+/// At 200 cols the detail panel renders alongside the list. The panel
+/// is 96 cols wide (twice the host-detail width) and the list takes the
+/// remainder. Cursor placed on the first Container row of the first
+/// non-folded host so the panel exercises the container branch rather
+/// than the host-summary branch (covered separately by
+/// `visual_containers_overview_host_detail`). Height set to 40 so the
+/// LOGS card has visible inner rows beyond just open/close borders.
+#[test]
+fn visual_containers_overview_with_detail() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    let items = crate::ui::containers_overview::visible_items(&app);
+    let first_container = items
+        .iter()
+        .position(|i| i.as_container().is_some())
+        .expect("demo cache has at least one container");
+    app.ui
+        .containers_overview_state
+        .select(Some(first_container));
+    let backend = TestBackend::new(200, 60);
+    let mut terminal = Terminal::new(backend).expect("create terminal");
+    let mut anim = AnimationState::default();
+    terminal
+        .draw(|frame| ui::render(frame, &mut app, &mut anim))
+        .expect("render frame");
+    let buf = terminal.backend().buffer().clone();
+    let actual = serialize_buffer(&buf);
+    assert_golden("containers_overview_with_detail", &actual);
+}
+
+/// Sibling of `visual_containers_overview_with_detail`: cursor parked
+/// on the first host-divider row so the detail panel renders the
+/// per-host summary (running/exited/total, runtime, last sync, fold
+/// state, key reminder). Pins the header-detail render path against
+/// drift now that dividers are first-class selection targets.
+#[test]
+fn visual_containers_overview_host_detail() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    let items = crate::ui::containers_overview::visible_items(&app);
+    let first_header = items
+        .iter()
+        .position(|i| i.is_header())
+        .expect("AlphaHost mode emits a header before the first container");
+    app.ui.containers_overview_state.select(Some(first_header));
+    let backend = TestBackend::new(200, 60);
+    let mut terminal = Terminal::new(backend).expect("create terminal");
+    let mut anim = AnimationState::default();
+    terminal
+        .draw(|frame| ui::render(frame, &mut app, &mut anim))
+        .expect("render frame");
+    let buf = terminal.backend().buffer().clone();
+    let actual = serialize_buffer(&buf);
+    assert_golden("containers_overview_host_detail", &actual);
+}
+
+#[test]
+fn visual_container_logs() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::ContainerLogs {
+        alias: "aws-api-staging".to_string(),
+        container_id: "f9a0b1c2d3e4".to_string(),
+        container_name: "api".to_string(),
+        body: vec![
+            "2026-05-09 19:41:58  10.0.0.42  GET /api/v1/health 200 17ms".to_string(),
+            "2026-05-09 19:42:01  198.51.100.7  POST /webhooks/github 202 41ms".to_string(),
+            "2026-05-09 19:42:05  upstream timed out (110: Operation timed out)".to_string(),
+            "2026-05-09 19:42:11  10.0.0.42  GET /api/v1/health 200 16ms".to_string(),
+        ],
+        fetched_at: crate::demo_flag::now_secs() - 3,
+        error: None,
+        scroll: 0,
+        last_render_height: 0,
+    };
+    let actual = render_screen(&mut app);
+    assert_golden("container_logs", &actual);
+}
+
+#[test]
+fn visual_confirm_container_restart() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::ConfirmContainerRestart {
+        alias: "aws-api-staging".to_string(),
+        container_id: "f9a0b1c2d3e4".to_string(),
+        container_name: "api".to_string(),
+        project: Some("aws-api-staging".to_string()),
+        uptime: Some("2d".to_string()),
+    };
+    let actual = render_screen(&mut app);
+    assert_golden("confirm_container_restart", &actual);
+}
+
+#[test]
+fn visual_confirm_container_stop() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::ConfirmContainerStop {
+        alias: "aws-api-staging".to_string(),
+        container_id: "f9a0b1c2d3e4".to_string(),
+        container_name: "api".to_string(),
+        project: Some("aws-api-staging".to_string()),
+        uptime: Some("2d".to_string()),
+    };
+    let actual = render_screen(&mut app);
+    assert_golden("confirm_container_stop", &actual);
+}
+
+#[test]
+fn visual_confirm_stack_restart() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::ConfirmStackRestart {
+        alias: "aws-api-staging".to_string(),
+        project: "aws-api-staging".to_string(),
+        members: vec![
+            crate::app::StackMember {
+                container_id: "f9a0b1c2d3e4".to_string(),
+                container_name: "api".to_string(),
+                uptime: Some("2d".to_string()),
+            },
+            crate::app::StackMember {
+                container_id: "a1b2c3d4e5f6".to_string(),
+                container_name: "datadog-agent".to_string(),
+                uptime: Some("2d".to_string()),
+            },
+            crate::app::StackMember {
+                container_id: "11223344aabb".to_string(),
+                container_name: "nginx".to_string(),
+                uptime: Some("2d".to_string()),
+            },
+        ],
+    };
+    let actual = render_screen(&mut app);
+    assert_golden("confirm_stack_restart", &actual);
+}
+
+#[test]
+fn visual_confirm_host_restart_all() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::ConfirmHostRestartAll {
+        alias: "aws-api-staging".to_string(),
+        members: vec![
+            crate::app::StackMember {
+                container_id: "f9a0b1c2d3e4".to_string(),
+                container_name: "api".to_string(),
+                uptime: Some("2d".to_string()),
+            },
+            crate::app::StackMember {
+                container_id: "a1b2c3d4e5f6".to_string(),
+                container_name: "datadog-agent".to_string(),
+                uptime: Some("2d".to_string()),
+            },
+            crate::app::StackMember {
+                container_id: "11223344aabb".to_string(),
+                container_name: "nginx".to_string(),
+                uptime: Some("2d".to_string()),
+            },
+        ],
+    };
+    let actual = render_screen(&mut app);
+    assert_golden("confirm_host_restart_all", &actual);
+}
+
+#[test]
+fn visual_confirm_host_stop_all() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::ConfirmHostStopAll {
+        alias: "aws-api-staging".to_string(),
+        members: vec![
+            crate::app::StackMember {
+                container_id: "f9a0b1c2d3e4".to_string(),
+                container_name: "api".to_string(),
+                uptime: Some("2d".to_string()),
+            },
+            crate::app::StackMember {
+                container_id: "a1b2c3d4e5f6".to_string(),
+                container_name: "datadog-agent".to_string(),
+                uptime: Some("2d".to_string()),
+            },
+        ],
+    };
+    let actual = render_screen(&mut app);
+    assert_golden("confirm_host_stop_all", &actual);
+}
+
+/// Containers overview after the user pressed `v` to fold the detail
+/// panel. Verifies the list takes the full body width and the footer
+/// flips to `v detail`.
+#[test]
+fn visual_containers_overview_compact() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.containers_overview.view_mode = crate::app::ViewMode::Compact;
+    app.ui.containers_overview_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("containers_overview_compact", &actual);
+}
+
+/// Containers overview with one host group folded via Space. The
+/// folded host's containers vanish from the list and the divider's
+/// suffix flips to `(N hidden)`.
+#[test]
+fn visual_containers_overview_collapsed_group() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.containers_overview
+        .collapsed_hosts
+        .insert("aws-api-staging".to_string());
+    app.ui.containers_overview_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("containers_overview_collapsed_group", &actual);
+}
+
+#[test]
+fn visual_container_exec_prompt() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::ContainerExecPrompt {
+        alias: "aws-api-staging".to_string(),
+        container_id: "f9a0b1c2d3e4".to_string(),
+        container_name: "api".to_string(),
+        query: "tail -n 50 /var/log/app.log".to_string(),
+    };
+    let actual = render_screen(&mut app);
+    assert_golden("container_exec_prompt", &actual);
+}
+
+#[test]
 fn visual_tunnels_overview_delete_confirm() {
     // Pending-delete confirmation footer rendered over the overview.
     let _g = setup();
@@ -673,6 +940,19 @@ fn visual_jump_over_tunnels() {
     app.recompute_jump_hits();
     let actual = render_screen(&mut app);
     assert_golden("jump_over_tunnels", &actual);
+}
+
+#[test]
+fn visual_jump_over_containers() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.jump = Some(crate::app::JumpState::for_mode(
+        crate::app::JumpMode::Containers,
+    ));
+    app.recompute_jump_hits();
+    let actual = render_screen(&mut app);
+    assert_golden("jump_over_containers", &actual);
 }
 
 #[test]

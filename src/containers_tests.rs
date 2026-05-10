@@ -242,19 +242,19 @@ fn id_colon_rejected() {
 // -- container_list_command ----------------------------------------------
 
 #[test]
-fn list_cmd_docker() {
-    assert_eq!(
-        container_list_command(Some(ContainerRuntime::Docker)),
-        "docker ps -a --format '{{json .}}'"
-    );
+fn list_cmd_docker_includes_engine_sentinel() {
+    let cmd = container_list_command(Some(ContainerRuntime::Docker));
+    assert!(cmd.contains("docker ps -a --format '{{json .}}'"));
+    assert!(cmd.contains("##purple:engine##"));
+    assert!(cmd.contains("docker version --format '{{.Server.Version}}'"));
 }
 
 #[test]
-fn list_cmd_podman() {
-    assert_eq!(
-        container_list_command(Some(ContainerRuntime::Podman)),
-        "podman ps -a --format '{{json .}}'"
-    );
+fn list_cmd_podman_includes_engine_sentinel() {
+    let cmd = container_list_command(Some(ContainerRuntime::Podman));
+    assert!(cmd.contains("podman ps -a --format '{{json .}}'"));
+    assert!(cmd.contains("##purple:engine##"));
+    assert!(cmd.contains("podman version --format '{{.Server.Version}}'"));
 }
 
 #[test]
@@ -263,6 +263,7 @@ fn list_cmd_none_has_sentinels() {
     assert!(cmd.contains("##purple:docker##"));
     assert!(cmd.contains("##purple:podman##"));
     assert!(cmd.contains("##purple:none##"));
+    assert!(cmd.contains("##purple:engine##"));
 }
 
 #[test]
@@ -279,17 +280,17 @@ fn list_cmd_none_docker_first() {
 fn output_docker_sentinel() {
     let c = make_json("abc", "web", "nginx", "running", "Up", "80/tcp");
     let out = format!("##purple:docker##\n{c}");
-    let (rt, cs) = parse_container_output(&out, None).unwrap();
-    assert_eq!(rt, ContainerRuntime::Docker);
-    assert_eq!(cs.len(), 1);
+    let listing = parse_container_output(&out, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+    assert_eq!(listing.containers.len(), 1);
 }
 
 #[test]
 fn output_podman_sentinel() {
     let c = make_json("xyz", "db", "pg", "exited", "Exited", "");
     let out = format!("##purple:podman##\n{c}");
-    let (rt, _) = parse_container_output(&out, None).unwrap();
-    assert_eq!(rt, ContainerRuntime::Podman);
+    let listing = parse_container_output(&out, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Podman);
 }
 
 #[test]
@@ -302,9 +303,9 @@ fn output_none_sentinel() {
 #[test]
 fn output_no_sentinel_with_caller() {
     let c = make_json("a", "app", "img", "running", "Up", "");
-    let (rt, cs) = parse_container_output(&c, Some(ContainerRuntime::Docker)).unwrap();
-    assert_eq!(rt, ContainerRuntime::Docker);
-    assert_eq!(cs.len(), 1);
+    let listing = parse_container_output(&c, Some(ContainerRuntime::Docker)).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+    assert_eq!(listing.containers.len(), 1);
 }
 
 #[test]
@@ -317,16 +318,16 @@ fn output_no_sentinel_no_caller() {
 fn output_motd_before_sentinel() {
     let c = make_json("a", "app", "img", "running", "Up", "");
     let out = format!("Welcome to server\nInfo line\n##purple:docker##\n{c}");
-    let (rt, cs) = parse_container_output(&out, None).unwrap();
-    assert_eq!(rt, ContainerRuntime::Docker);
-    assert_eq!(cs.len(), 1);
+    let listing = parse_container_output(&out, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+    assert_eq!(listing.containers.len(), 1);
 }
 
 #[test]
 fn output_empty_container_list() {
-    let (rt, cs) = parse_container_output("##purple:docker##\n", None).unwrap();
-    assert_eq!(rt, ContainerRuntime::Docker);
-    assert!(cs.is_empty());
+    let listing = parse_container_output("##purple:docker##\n", None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+    assert!(listing.containers.is_empty());
 }
 
 #[test]
@@ -335,8 +336,8 @@ fn output_multiple_containers() {
     let c2 = make_json("b", "db", "pg", "exited", "Exited", "");
     let c3 = make_json("c", "cache", "redis", "running", "Up", "6379/tcp");
     let out = format!("##purple:podman##\n{c1}\n{c2}\n{c3}");
-    let (_, cs) = parse_container_output(&out, None).unwrap();
-    assert_eq!(cs.len(), 3);
+    let listing = parse_container_output(&out, None).unwrap();
+    assert_eq!(listing.containers.len(), 3);
 }
 
 // -- friendly_container_error --------------------------------------------
@@ -391,6 +392,7 @@ fn cache_round_trip() {
         alias: "web1".to_string(),
         timestamp: 1_700_000_000,
         runtime: ContainerRuntime::Docker,
+        engine_version: Some("25.0.3".to_string()),
         containers: vec![ContainerInfo {
             id: "abc".to_string(),
             names: "nginx".to_string(),
@@ -404,6 +406,7 @@ fn cache_round_trip() {
     let d: CacheLine = serde_json::from_str(&s).unwrap();
     assert_eq!(d.alias, "web1");
     assert_eq!(d.runtime, ContainerRuntime::Docker);
+    assert_eq!(d.engine_version.as_deref(), Some("25.0.3"));
     assert_eq!(d.containers.len(), 1);
     assert_eq!(d.containers[0].id, "abc");
 }
@@ -414,11 +417,26 @@ fn cache_round_trip_podman() {
         alias: "host2".to_string(),
         timestamp: 200,
         runtime: ContainerRuntime::Podman,
+        engine_version: None,
         containers: vec![],
     };
     let s = serde_json::to_string(&line).unwrap();
     let d: CacheLine = serde_json::from_str(&s).unwrap();
     assert_eq!(d.runtime, ContainerRuntime::Podman);
+    assert!(d.engine_version.is_none());
+    // None must omit the field on serialise so disk format stays compact.
+    assert!(!s.contains("engine_version"));
+}
+
+#[test]
+fn cache_legacy_line_without_engine_version_loads() {
+    // Cache files written by older purple builds omit engine_version.
+    // Backward compat: Option<String> + serde(default) makes them load
+    // cleanly with engine_version = None.
+    let legacy = r#"{"alias":"old","timestamp":100,"runtime":"Docker","containers":[]}"#;
+    let d: CacheLine = serde_json::from_str(legacy).unwrap();
+    assert_eq!(d.alias, "old");
+    assert!(d.engine_version.is_none());
 }
 
 #[test]
@@ -434,6 +452,7 @@ fn cache_parse_malformed_ignored() {
         alias: "good".to_string(),
         timestamp: 1,
         runtime: ContainerRuntime::Docker,
+        engine_version: None,
         containers: vec![],
     })
     .unwrap();
@@ -454,6 +473,7 @@ fn cache_parse_multiple_hosts() {
                 alias: alias.to_string(),
                 timestamp: i as u64,
                 runtime: ContainerRuntime::Docker,
+                engine_version: None,
                 containers: vec![],
             })
             .unwrap()
@@ -477,6 +497,7 @@ fn parse_cache_line(line: &str) -> Option<(String, ContainerCacheEntry)> {
         ContainerCacheEntry {
             timestamp: entry.timestamp,
             runtime: entry.runtime,
+            engine_version: entry.engine_version,
             containers: entry.containers,
         },
     ))
@@ -599,9 +620,9 @@ fn list_cmd_none_valid_shell_syntax() {
 #[test]
 fn output_sentinel_on_last_line() {
     let r = parse_container_output("some MOTD\n##purple:docker##", None);
-    let (rt, cs) = r.unwrap();
-    assert_eq!(rt, ContainerRuntime::Docker);
-    assert!(cs.is_empty());
+    let listing = r.unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+    assert!(listing.containers.is_empty());
 }
 
 #[test]
@@ -652,6 +673,7 @@ fn cache_duplicate_alias_last_wins() {
         alias: "dup".to_string(),
         timestamp: 1,
         runtime: ContainerRuntime::Docker,
+        engine_version: None,
         containers: vec![],
     })
     .unwrap();
@@ -659,6 +681,7 @@ fn cache_duplicate_alias_last_wins() {
         alias: "dup".to_string(),
         timestamp: 99,
         runtime: ContainerRuntime::Podman,
+        engine_version: None,
         containers: vec![],
     })
     .unwrap();
@@ -773,26 +796,109 @@ fn output_unknown_sentinel() {
 fn output_sentinel_with_crlf() {
     let c = make_json("a", "web", "nginx", "running", "Up", "");
     let input = format!("##purple:docker##\r\n{c}\r\n");
-    let (rt, cs) = parse_container_output(&input, None).unwrap();
-    assert_eq!(rt, ContainerRuntime::Docker);
-    assert_eq!(cs.len(), 1);
+    let listing = parse_container_output(&input, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+    assert_eq!(listing.containers.len(), 1);
 }
 
 #[test]
 fn output_sentinel_indented() {
     let c = make_json("a", "web", "nginx", "running", "Up", "");
     let input = format!("  ##purple:docker##\n{c}");
-    let (rt, cs) = parse_container_output(&input, None).unwrap();
-    assert_eq!(rt, ContainerRuntime::Docker);
-    assert_eq!(cs.len(), 1);
+    let listing = parse_container_output(&input, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+    assert_eq!(listing.containers.len(), 1);
 }
 
 #[test]
 fn output_caller_runtime_podman() {
     let c = make_json("a", "app", "img", "running", "Up", "");
-    let (rt, cs) = parse_container_output(&c, Some(ContainerRuntime::Podman)).unwrap();
-    assert_eq!(rt, ContainerRuntime::Podman);
-    assert_eq!(cs.len(), 1);
+    let listing = parse_container_output(&c, Some(ContainerRuntime::Podman)).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Podman);
+    assert_eq!(listing.containers.len(), 1);
+}
+
+#[test]
+fn output_engine_sentinel_extracts_version() {
+    let c = make_json("a", "web", "nginx", "running", "Up", "");
+    let out = format!("##purple:docker##\n{c}\n##purple:engine##\n25.0.3");
+    let listing = parse_container_output(&out, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+    assert_eq!(listing.containers.len(), 1);
+    assert_eq!(listing.engine_version.as_deref(), Some("25.0.3"));
+}
+
+#[test]
+fn output_engine_sentinel_with_empty_version() {
+    // Daemon down: docker version produced no stdout. Sentinel still
+    // emitted but the line after it is empty. Parser must yield None.
+    let c = make_json("a", "web", "nginx", "running", "Up", "");
+    let out = format!("##purple:docker##\n{c}\n##purple:engine##\n");
+    let listing = parse_container_output(&out, None).unwrap();
+    assert_eq!(listing.containers.len(), 1);
+    assert!(listing.engine_version.is_none());
+}
+
+#[test]
+fn output_legacy_no_engine_sentinel_yields_none() {
+    // Older purple SSH command shape (before engine sentinel) must
+    // still parse cleanly with engine_version == None.
+    let c = make_json("a", "web", "nginx", "running", "Up", "");
+    let out = format!("##purple:docker##\n{c}");
+    let listing = parse_container_output(&out, None).unwrap();
+    assert_eq!(listing.containers.len(), 1);
+    assert!(listing.engine_version.is_none());
+}
+
+#[test]
+fn output_caller_runtime_with_engine_sentinel() {
+    let c = make_json("a", "app", "img", "running", "Up", "");
+    let out = format!("{c}\n##purple:engine##\n4.9.0");
+    let listing = parse_container_output(&out, Some(ContainerRuntime::Podman)).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Podman);
+    assert_eq!(listing.containers.len(), 1);
+    assert_eq!(listing.engine_version.as_deref(), Some("4.9.0"));
+}
+
+#[test]
+fn output_engine_sentinel_only_no_runtime_sentinel_no_caller() {
+    // engine sentinel alone is not a runtime sentinel; without a caller
+    // hint there is nothing to identify the runtime, so parsing must err.
+    let r = parse_container_output("##purple:engine##\n25.0.3", None);
+    assert!(r.is_err());
+}
+
+#[test]
+fn output_engine_version_caps_to_first_line_when_motd_follows() {
+    // Some shells emit a logout banner or trailing MOTD after the
+    // version subcall. The parser must capture only the first non-empty
+    // post-sentinel line, otherwise the cached engine_version would
+    // surface as "25.0.3\n-- session closed --" in the Runtime field.
+    let c = make_json("a", "web", "nginx", "running", "Up", "");
+    let out =
+        format!("##purple:docker##\n{c}\n##purple:engine##\n25.0.3\nlogout\n-- session closed --");
+    let listing = parse_container_output(&out, None).unwrap();
+    assert_eq!(listing.engine_version.as_deref(), Some("25.0.3"));
+}
+
+#[test]
+fn list_cmd_known_runtime_chains_with_and_so_ps_failure_propagates() {
+    // Docker known-runtime command must short-circuit at `&&` so a `ps`
+    // failure cannot be masked by a successful `version` subcall on the
+    // remote shell. The trailing version step is wrapped in `|| true`
+    // so its own failure stays best-effort.
+    let docker = container_list_command(Some(ContainerRuntime::Docker));
+    assert!(
+        docker.contains(" && echo '##purple:engine##' && "),
+        "docker command must use `&&` between ps and engine sentinel: {docker}"
+    );
+    assert!(
+        docker.contains("|| true"),
+        "version subcall must be wrapped so its failure does not surface: {docker}"
+    );
+    let podman = container_list_command(Some(ContainerRuntime::Podman));
+    assert!(podman.contains(" && echo '##purple:engine##' && "));
+    assert!(podman.contains("|| true"));
 }
 
 // -- Additional tests: container_action_command ---------------------------
@@ -966,4 +1072,580 @@ fn friendly_error_changed_wins_over_unknown() {
     let stderr = "Host key for x has changed.\nHost key verification failed.";
     let msg = friendly_container_error(stderr, Some(255));
     assert_eq!(msg, crate::messages::HOST_KEY_CHANGED);
+}
+
+// -- parse_container_inspect ---------------------------------------------
+
+fn sample_inspect_running() -> String {
+    serde_json::json!([{
+        "RestartCount": 0,
+        "State": {
+            "Status": "running",
+            "Running": true,
+            "ExitCode": 0,
+            "OOMKilled": false,
+            "StartedAt": "2026-05-09T08:00:00Z",
+            "FinishedAt": "0001-01-01T00:00:00Z",
+            "Health": {"Status": "healthy"}
+        },
+        "Config": {
+            "Cmd": ["nginx", "-g", "daemon off;"],
+            "Entrypoint": null,
+            "Env": ["PATH=/usr/bin", "TZ=UTC", "FOO=bar"]
+        },
+        "Mounts": [{"Source": "/var/data", "Destination": "/data"}, {"Source": "/etc/cfg", "Destination": "/etc/cfg"}],
+        "NetworkSettings": {
+            "Networks": {
+                "bridge": {"IPAddress": "172.17.0.5"}
+            }
+        }
+    }])
+    .to_string()
+}
+
+#[test]
+fn parse_inspect_extracts_running_fields() {
+    let r = parse_container_inspect(&sample_inspect_running()).expect("parse");
+    assert_eq!(r.exit_code, 0);
+    assert!(!r.oom_killed);
+    assert_eq!(r.started_at, "2026-05-09T08:00:00Z");
+    assert_eq!(r.health.as_deref(), Some("healthy"));
+    assert_eq!(r.restart_count, 0);
+    assert_eq!(r.command.as_ref().map(|c| c.len()), Some(3));
+    assert_eq!(r.env_count, 3);
+    assert_eq!(r.mount_count, 2);
+    assert_eq!(r.networks.len(), 1);
+    assert_eq!(r.networks[0].name, "bridge");
+    assert_eq!(r.networks[0].ip_address, "172.17.0.5");
+}
+
+#[test]
+fn parse_inspect_extracts_exited_fields() {
+    let json = serde_json::json!([{
+        "RestartCount": 3,
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "ExitCode": 137,
+            "OOMKilled": true,
+            "StartedAt": "2026-05-08T12:00:00Z",
+            "FinishedAt": "2026-05-08T18:00:00Z"
+        },
+        "Config": {"Cmd": null, "Entrypoint": null, "Env": []},
+        "Mounts": [],
+        "NetworkSettings": {"Networks": {}}
+    }])
+    .to_string();
+    let r = parse_container_inspect(&json).expect("parse");
+    assert_eq!(r.exit_code, 137);
+    assert!(r.oom_killed);
+    assert_eq!(r.restart_count, 3);
+    assert_eq!(r.health, None);
+    assert!(r.command.is_none());
+    assert_eq!(r.env_count, 0);
+    assert_eq!(r.mount_count, 0);
+}
+
+#[test]
+fn parse_inspect_empty_array_errors() {
+    assert!(parse_container_inspect("[]").is_err());
+}
+
+#[test]
+fn parse_inspect_empty_string_errors() {
+    assert!(parse_container_inspect("").is_err());
+    assert!(parse_container_inspect("   ").is_err());
+}
+
+#[test]
+fn parse_inspect_invalid_json_errors() {
+    assert!(parse_container_inspect("not json").is_err());
+}
+
+#[test]
+fn parse_inspect_missing_fields_uses_defaults() {
+    // Minimal valid object — every nested field absent. Parser must not
+    // panic and must produce a usable but empty ContainerInspect.
+    let r = parse_container_inspect("[{}]").expect("parse");
+    assert_eq!(r.exit_code, 0);
+    assert!(!r.oom_killed);
+    assert_eq!(r.restart_count, 0);
+    assert!(r.command.is_none());
+    assert_eq!(r.env_count, 0);
+    assert!(r.networks.is_empty());
+}
+
+// -- exit_code_meaning ---------------------------------------------------
+
+#[test]
+fn exit_code_meaning_known_codes() {
+    assert!(exit_code_meaning(1).is_some());
+    assert!(exit_code_meaning(137).unwrap().contains("OOM"));
+    assert!(exit_code_meaning(143).unwrap().contains("SIGTERM"));
+    assert!(exit_code_meaning(127).unwrap().contains("not found"));
+}
+
+#[test]
+fn exit_code_meaning_unknown_returns_none() {
+    // 0 has no entry: detail panel only annotates failed exits.
+    assert!(exit_code_meaning(0).is_none());
+    assert!(exit_code_meaning(42).is_none());
+    assert!(exit_code_meaning(255).is_none());
+}
+
+// -- container_inspect_command -------------------------------------------
+
+#[test]
+fn inspect_command_uses_runtime_binary() {
+    assert_eq!(
+        container_inspect_command(ContainerRuntime::Docker, "abc"),
+        "docker inspect abc"
+    );
+    assert_eq!(
+        container_inspect_command(ContainerRuntime::Podman, "xyz"),
+        "podman inspect xyz"
+    );
+}
+
+// -- parse_container_inspect: audit fields (Phase A) ---------------------
+
+const FIXTURE_FULL_RUNNING: &str = r#"[{
+  "Id":"86d03287fdf9aaaa",
+  "Image":"sha256:a4f1e7c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7c91d",
+  "Config":{
+    "Image":"nginx:stable-alpine",
+    "User":"root",
+    "Cmd":["/bin/sh","-c","while :; do sleep 6h & wait; done"],
+    "Env":["PATH=/usr/local/sbin:/usr/local/bin","NGINX_VERSION=1.27.0","PKG_RELEASE=1"],
+    "Labels":{
+      "com.docker.compose.project":"signalproxy-nl",
+      "com.docker.compose.service":"nginx-terminate"
+    }
+  },
+  "HostConfig":{
+    "RestartPolicy":{"Name":"unless-stopped","MaximumRetryCount":0},
+    "Privileged":false,
+    "ReadonlyRootfs":false,
+    "CapAdd":null,
+    "CapDrop":["NET_RAW"],
+    "AppArmorProfile":"docker-default",
+    "SecurityOpt":["seccomp=default"]
+  },
+  "AppArmorProfile":"docker-default",
+  "State":{"Status":"running","ExitCode":0,"StartedAt":"2026-04-02T19:46:58Z","Health":{"Status":"healthy"}},
+  "RestartCount":0,
+  "Mounts":[
+    {"Type":"bind","Source":"/etc/letsencrypt","Destination":"/etc/letsencrypt","Mode":"rw","RW":true},
+    {"Type":"volume","Name":"certs","Destination":"/etc/nginx/certs","Mode":"ro","RW":false},
+    {"Type":"bind","Source":"/srv/nginx.conf","Destination":"/etc/nginx/nginx.conf","Mode":"ro","RW":false}
+  ],
+  "NetworkSettings":{"Networks":{"signal-tls-proxy_default":{"IPAddress":"172.18.0.3"}}}
+}]"#;
+
+#[test]
+fn inspect_parses_image_digest_from_full_image_id() {
+    let inspect = parse_container_inspect(FIXTURE_FULL_RUNNING).unwrap();
+    assert_eq!(
+        inspect.image_digest.as_deref(),
+        Some("sha256:a4f1e7c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7c91d")
+    );
+}
+
+#[test]
+fn inspect_parses_restart_policy_unless_stopped() {
+    let inspect = parse_container_inspect(FIXTURE_FULL_RUNNING).unwrap();
+    assert_eq!(inspect.restart_policy.as_deref(), Some("unless-stopped"));
+}
+
+#[test]
+fn inspect_parses_user_root() {
+    let inspect = parse_container_inspect(FIXTURE_FULL_RUNNING).unwrap();
+    assert_eq!(inspect.user.as_deref(), Some("root"));
+}
+
+#[test]
+fn inspect_parses_privs_block() {
+    let inspect = parse_container_inspect(FIXTURE_FULL_RUNNING).unwrap();
+    assert!(!inspect.privileged);
+    assert!(!inspect.readonly_rootfs);
+    assert_eq!(inspect.apparmor_profile.as_deref(), Some("docker-default"));
+    assert_eq!(inspect.seccomp_profile.as_deref(), Some("default"));
+    assert!(inspect.cap_add.is_empty());
+    assert_eq!(inspect.cap_drop, vec!["NET_RAW".to_string()]);
+}
+
+#[test]
+fn inspect_parses_three_mounts_with_rw_ro() {
+    let inspect = parse_container_inspect(FIXTURE_FULL_RUNNING).unwrap();
+    assert_eq!(inspect.mounts.len(), 3);
+    assert_eq!(inspect.mounts[0].source, "/etc/letsencrypt");
+    assert_eq!(inspect.mounts[0].destination, "/etc/letsencrypt");
+    assert!(!inspect.mounts[0].read_only);
+    assert!(inspect.mounts[1].read_only);
+    assert!(inspect.mounts[2].read_only);
+}
+
+#[test]
+fn inspect_parses_compose_labels() {
+    let inspect = parse_container_inspect(FIXTURE_FULL_RUNNING).unwrap();
+    assert_eq!(inspect.compose_project.as_deref(), Some("signalproxy-nl"));
+    assert_eq!(inspect.compose_service.as_deref(), Some("nginx-terminate"));
+}
+
+#[test]
+fn inspect_handles_missing_audit_fields_gracefully() {
+    let minimal = r#"[{
+      "Id":"abc",
+      "State":{"Status":"running","ExitCode":0,"StartedAt":"2026-01-01T00:00:00Z"},
+      "Config":{"Image":"alpine"},
+      "HostConfig":{}
+    }]"#;
+    let inspect = parse_container_inspect(minimal).unwrap();
+    assert_eq!(inspect.image_digest.as_deref(), None);
+    assert_eq!(inspect.restart_policy.as_deref(), None);
+    assert_eq!(inspect.user.as_deref(), None);
+    assert!(!inspect.privileged);
+    assert!(!inspect.readonly_rootfs);
+    assert_eq!(inspect.apparmor_profile.as_deref(), None);
+    assert_eq!(inspect.seccomp_profile.as_deref(), None);
+    assert!(inspect.cap_add.is_empty());
+    assert!(inspect.cap_drop.is_empty());
+    assert!(inspect.mounts.is_empty());
+    assert_eq!(inspect.compose_project.as_deref(), None);
+    assert_eq!(inspect.compose_service.as_deref(), None);
+    // Mockup 2 fields all default to None / empty when absent.
+    assert!(inspect.created_at.is_empty());
+    assert_eq!(inspect.pid, None);
+    assert_eq!(inspect.hostname, None);
+    assert_eq!(inspect.working_dir, None);
+    assert_eq!(inspect.network_mode, None);
+    assert_eq!(inspect.memory_limit, None);
+    assert_eq!(inspect.cpu_limit_nanos, None);
+    assert_eq!(inspect.pids_limit, None);
+    assert_eq!(inspect.image_version, None);
+    assert_eq!(inspect.health_test, None);
+}
+
+// -- parse_container_inspect: Mockup 2 fields ----------------------------
+
+const FIXTURE_MOCKUP2: &str = r#"[{
+  "Id":"86d03287fdf9aaaa",
+  "Created":"2026-04-02T19:46:55Z",
+  "Image":"sha256:c9095e",
+  "Config":{
+    "Image":"nginx:stable-alpine",
+    "Hostname":"86d03287fdf9",
+    "WorkingDir":"/usr/share/nginx",
+    "StopSignal":"SIGQUIT",
+    "StopTimeout":30,
+    "Labels":{
+      "org.opencontainers.image.version":"1.27.3",
+      "org.opencontainers.image.revision":"a4f9b22",
+      "org.opencontainers.image.source":"github.com/nginxinc/docker-nginx",
+      "com.docker.compose.project":"edge"
+    },
+    "Healthcheck":{
+      "Test":["CMD","curl","-fs","http://localhost"],
+      "Interval":30000000000,
+      "Timeout":5000000000
+    }
+  },
+  "HostConfig":{
+    "NetworkMode":"bridge",
+    "Memory":536870912,
+    "NanoCpus":1500000000,
+    "PidsLimit":200,
+    "LogConfig":{"Type":"json-file","Config":{"max-size":"10m"}}
+  },
+  "State":{
+    "Status":"running",
+    "Pid":12345,
+    "ExitCode":0,
+    "StartedAt":"2026-04-02T19:46:58Z",
+    "Health":{"Status":"unhealthy","FailingStreak":3}
+  },
+  "Mounts":[],
+  "NetworkSettings":{"Networks":{}}
+}]"#;
+
+#[test]
+fn inspect_parses_created_at() {
+    let i = parse_container_inspect(FIXTURE_MOCKUP2).unwrap();
+    assert_eq!(i.created_at, "2026-04-02T19:46:55Z");
+}
+
+#[test]
+fn inspect_parses_pid_when_running() {
+    let i = parse_container_inspect(FIXTURE_MOCKUP2).unwrap();
+    assert_eq!(i.pid, Some(12345));
+}
+
+#[test]
+fn inspect_drops_pid_zero() {
+    let json = r#"[{"State":{"Pid":0,"Status":"exited","ExitCode":0,"StartedAt":""}}]"#;
+    let i = parse_container_inspect(json).unwrap();
+    assert_eq!(i.pid, None);
+}
+
+#[test]
+fn inspect_parses_hostname_and_workdir() {
+    let i = parse_container_inspect(FIXTURE_MOCKUP2).unwrap();
+    assert_eq!(i.hostname.as_deref(), Some("86d03287fdf9"));
+    assert_eq!(i.working_dir.as_deref(), Some("/usr/share/nginx"));
+}
+
+#[test]
+fn inspect_parses_stop_signal_and_timeout() {
+    let i = parse_container_inspect(FIXTURE_MOCKUP2).unwrap();
+    assert_eq!(i.stop_signal.as_deref(), Some("SIGQUIT"));
+    assert_eq!(i.stop_timeout, Some(30));
+}
+
+#[test]
+fn inspect_parses_oci_image_labels() {
+    let i = parse_container_inspect(FIXTURE_MOCKUP2).unwrap();
+    assert_eq!(i.image_version.as_deref(), Some("1.27.3"));
+    assert_eq!(i.image_revision.as_deref(), Some("a4f9b22"));
+    assert_eq!(
+        i.image_source.as_deref(),
+        Some("github.com/nginxinc/docker-nginx")
+    );
+}
+
+#[test]
+fn inspect_parses_resource_limits() {
+    let i = parse_container_inspect(FIXTURE_MOCKUP2).unwrap();
+    assert_eq!(i.memory_limit, Some(536870912));
+    assert_eq!(i.cpu_limit_nanos, Some(1500000000));
+    assert_eq!(i.pids_limit, Some(200));
+}
+
+#[test]
+fn inspect_drops_memory_zero_unlimited() {
+    let json = r#"[{"HostConfig":{"Memory":0,"NanoCpus":0,"PidsLimit":0}}]"#;
+    let i = parse_container_inspect(json).unwrap();
+    assert_eq!(i.memory_limit, None);
+    assert_eq!(i.cpu_limit_nanos, None);
+    assert_eq!(i.pids_limit, None);
+}
+
+#[test]
+fn inspect_drops_pids_limit_negative_one() {
+    // docker emits -1 for "no limit" on some daemons; treat same as 0.
+    let json = r#"[{"HostConfig":{"PidsLimit":-1}}]"#;
+    let i = parse_container_inspect(json).unwrap();
+    assert_eq!(i.pids_limit, None);
+}
+
+#[test]
+fn inspect_parses_network_mode_and_log_driver() {
+    let i = parse_container_inspect(FIXTURE_MOCKUP2).unwrap();
+    assert_eq!(i.network_mode.as_deref(), Some("bridge"));
+    assert_eq!(i.log_driver.as_deref(), Some("json-file"));
+}
+
+#[test]
+fn inspect_drops_network_mode_default() {
+    // "default" is a non-distinguishing value the renderer should not
+    // bother to surface.
+    let json = r#"[{"HostConfig":{"NetworkMode":"default"}}]"#;
+    let i = parse_container_inspect(json).unwrap();
+    assert_eq!(i.network_mode, None);
+}
+
+#[test]
+fn inspect_parses_healthcheck_definition() {
+    let i = parse_container_inspect(FIXTURE_MOCKUP2).unwrap();
+    assert_eq!(
+        i.health_test.as_deref(),
+        Some(&["CMD", "curl", "-fs", "http://localhost"][..])
+            .map(|a| a.iter().map(|s| s.to_string()).collect::<Vec<_>>())
+            .as_deref()
+    );
+    assert_eq!(i.health_interval_ns, Some(30_000_000_000));
+}
+
+#[test]
+fn inspect_parses_health_failing_streak() {
+    let i = parse_container_inspect(FIXTURE_MOCKUP2).unwrap();
+    assert_eq!(i.health_failing_streak, Some(3));
+}
+
+// -- parse_uptime_from_status (Phase A) ----------------------------------
+
+#[test]
+fn uptime_weeks() {
+    assert_eq!(
+        parse_uptime_from_status("Up 5 weeks (healthy)"),
+        Some("5w".to_string())
+    );
+    assert_eq!(
+        parse_uptime_from_status("Up 1 week"),
+        Some("1w".to_string())
+    );
+}
+
+#[test]
+fn uptime_days() {
+    assert_eq!(
+        parse_uptime_from_status("Up 12 days"),
+        Some("12d".to_string())
+    );
+}
+
+#[test]
+fn uptime_hours() {
+    assert_eq!(
+        parse_uptime_from_status("Up About an hour"),
+        Some("1h".to_string())
+    );
+    assert_eq!(
+        parse_uptime_from_status("Up 3 hours"),
+        Some("3h".to_string())
+    );
+}
+
+#[test]
+fn uptime_minutes() {
+    assert_eq!(
+        parse_uptime_from_status("Up 16 minutes"),
+        Some("16m".to_string())
+    );
+    assert_eq!(
+        parse_uptime_from_status("Up About a minute"),
+        Some("1m".to_string())
+    );
+}
+
+#[test]
+fn uptime_seconds() {
+    assert_eq!(
+        parse_uptime_from_status("Up 30 seconds"),
+        Some("<1m".to_string())
+    );
+    assert_eq!(
+        parse_uptime_from_status("Up Less than a second"),
+        Some("<1m".to_string())
+    );
+}
+
+#[test]
+fn uptime_paused_still_running() {
+    assert_eq!(
+        parse_uptime_from_status("Up 5 minutes (Paused)"),
+        Some("5m".to_string())
+    );
+}
+
+#[test]
+fn uptime_months() {
+    assert_eq!(
+        parse_uptime_from_status("Up 3 months"),
+        Some("3mo".to_string())
+    );
+    assert_eq!(
+        parse_uptime_from_status("Up 1 month"),
+        Some("1mo".to_string())
+    );
+}
+
+#[test]
+fn uptime_years() {
+    assert_eq!(
+        parse_uptime_from_status("Up 2 years"),
+        Some("2y".to_string())
+    );
+    assert_eq!(
+        parse_uptime_from_status("Up 1 year"),
+        Some("1y".to_string())
+    );
+}
+
+#[test]
+fn uptime_non_running_returns_none() {
+    assert_eq!(parse_uptime_from_status("Exited (0) 2 days ago"), None);
+    assert_eq!(parse_uptime_from_status("Created"), None);
+    assert_eq!(
+        parse_uptime_from_status("Restarting (1) 3 seconds ago"),
+        None
+    );
+    assert_eq!(parse_uptime_from_status(""), None);
+    assert_eq!(parse_uptime_from_status("not a docker status"), None);
+}
+
+// -- container_logs_command + parse_log_output (Phase B) -----------------
+
+#[test]
+fn logs_command_uses_runtime_and_tail() {
+    assert_eq!(
+        container_logs_command(ContainerRuntime::Docker, "abc", 200),
+        "docker logs --tail 200 abc"
+    );
+    assert_eq!(
+        container_logs_command(ContainerRuntime::Podman, "xyz", 50),
+        "podman logs --tail 50 xyz"
+    );
+}
+
+#[test]
+fn logs_command_tail_zero_yields_zero_not_all() {
+    // `--tail 0` returns no lines on docker/podman. Surface this
+    // exactly so a caller passing 0 cannot accidentally trigger an
+    // unbounded `--tail all` walk through every line in the
+    // container's log file.
+    assert_eq!(
+        container_logs_command(ContainerRuntime::Docker, "abc", 0),
+        "docker logs --tail 0 abc"
+    );
+}
+
+#[test]
+fn parse_log_output_combines_stdout_and_stderr_in_order() {
+    let stdout = "stdout-line-1\nstdout-line-2\n";
+    let stderr = "stderr-line-1\nstderr-line-2\n";
+    let lines = parse_log_output(stdout, stderr);
+    assert_eq!(lines.len(), 4);
+    assert_eq!(lines[0], "stdout-line-1");
+    assert_eq!(lines[1], "stdout-line-2");
+    assert_eq!(lines[2], "stderr-line-1");
+    assert_eq!(lines[3], "stderr-line-2");
+}
+
+#[test]
+fn parse_log_output_stderr_only_appended() {
+    // Containers (Go/Rust binaries, k8s) often emit exclusively to
+    // stderr. The renderer must show those lines, not silently drop
+    // them when stdout is empty.
+    let lines = parse_log_output("", "only-on-stderr\nanother\n");
+    assert_eq!(lines, vec!["only-on-stderr", "another"]);
+}
+
+#[test]
+fn parse_log_output_strips_all_trailing_blank_lines() {
+    // Both streams ending in newline plus a flushed empty line each
+    // would produce two trailing empties. The renderer should not
+    // leave a blank tail.
+    let stdout = "real-line\n\n";
+    let stderr = "stderr-line\n\n";
+    let lines = parse_log_output(stdout, stderr);
+    assert_eq!(lines, vec!["real-line", "stderr-line"]);
+}
+
+#[test]
+fn parse_log_output_empty_inputs_returns_empty() {
+    assert!(parse_log_output("", "").is_empty());
+}
+
+// -- format_uptime_short (Phase A) ---------------------------------------
+
+#[test]
+fn format_uptime_short_buckets() {
+    assert_eq!(format_uptime_short(0), "0s");
+    assert_eq!(format_uptime_short(45), "45s");
+    assert_eq!(format_uptime_short(60), "1m");
+    assert_eq!(format_uptime_short(3599), "59m");
+    assert_eq!(format_uptime_short(3600), "1h");
+    assert_eq!(format_uptime_short(86_399), "23h");
+    assert_eq!(format_uptime_short(86_400), "1d");
+    assert_eq!(format_uptime_short(7 * 86_400), "7d");
 }

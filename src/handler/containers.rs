@@ -6,6 +6,64 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::{App, Screen};
 use crate::event::AppEvent;
 
+/// Build `ContainerState` from cache, switch to `Screen::Containers`, and
+/// (unless in demo mode) spawn the background SSH listing thread. Shared
+/// by every entry point that opens the per-host containers overlay
+/// (`C` on the host list, `Enter` on the containers overview tab) so the
+/// state setup cannot drift between callers. Stale-host warnings stay at
+/// the call site since they depend on cursor-resolved metadata the
+/// caller already has in scope.
+pub(super) fn open_overlay_for_host(
+    app: &mut App,
+    alias: String,
+    askpass: Option<String>,
+    events_tx: &mpsc::Sender<AppEvent>,
+) {
+    let (cached_runtime, cached_containers) = if let Some(entry) = app.container_cache.get(&alias) {
+        (Some(entry.runtime), entry.containers.clone())
+    } else {
+        (None, Vec::new())
+    };
+    let mut list_state = ratatui::widgets::ListState::default();
+    if !cached_containers.is_empty() {
+        list_state.select(Some(0));
+    }
+    app.container_state = Some(crate::app::ContainerState {
+        alias: alias.clone(),
+        askpass: askpass.clone(),
+        runtime: cached_runtime,
+        containers: cached_containers,
+        list_state,
+        loading: !app.demo_mode,
+        error: None,
+        action_in_progress: None,
+        confirm_action: None,
+    });
+    app.set_screen(Screen::Containers {
+        alias: alias.clone(),
+    });
+    if !app.demo_mode {
+        let has_tunnel = app.tunnels.active.contains_key(&alias);
+        // Mark in-flight so `ensure_list_for_selected_host` will not
+        // double-spawn if the user Tabs to the Containers tab before
+        // this listing returns.
+        app.containers_overview
+            .auto_list_in_flight
+            .insert(alias.clone());
+        let ctx = crate::ssh_context::OwnedSshContext {
+            alias,
+            config_path: app.reload.config_path.clone(),
+            askpass,
+            bw_session: app.bw_session.clone(),
+            has_tunnel,
+        };
+        let tx = events_tx.clone();
+        crate::containers::spawn_container_listing(ctx, cached_runtime, move |a, result| {
+            let _ = tx.send(AppEvent::ContainerListing { alias: a, result });
+        });
+    }
+}
+
 pub(super) fn handle_containers(
     app: &mut App,
     key: KeyEvent,

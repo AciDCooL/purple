@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels                                                                 │
+│  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 24 ── ●16 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   ADDRESS                         TAGS                            LAST▾ │
@@ -13,7 +13,7 @@
 │   ● aws-wo│   bastion-ams                                     bastion.ams.example   │        6h  │
 │   ● aws-ba│   Help: What's new                                                  n   │        7h  │
 │   ● aws-ml│                                                                         │        8h  │
-│   ● pve-we│   Actions   6 of 28                                                     │       14h  │
+│   ● pve-we│   Actions   6 of 31                                                     │       14h  │
 │   ● pve-we│   Hosts: Add host                                                   a   │       15h  │
 │   ● pve-db│   Tunnels: Manage tunnels                                           T   │       16h  │
 │   ● pve-db│   Containers: List containers                                       C   │       17h  │

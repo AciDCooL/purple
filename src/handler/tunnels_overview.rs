@@ -7,7 +7,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use log::{debug, info};
 
-use crate::app::{App, Screen, TopPage};
+use crate::app::{App, Screen};
 use crate::tunnel::TunnelRule;
 
 /// Resolve the tunnel row currently under the cursor. Walks the SAME
@@ -265,8 +265,12 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
             log::debug!("jump: opened from tunnels overview");
             app.open_jump(crate::app::JumpMode::Tunnels);
         }
-        KeyCode::Tab | KeyCode::BackTab => {
-            app.top_page = TopPage::Hosts;
+        KeyCode::Tab => {
+            app.top_page = app.top_page.next();
+            app.search.query = None;
+        }
+        KeyCode::BackTab => {
+            app.top_page = app.top_page.prev();
             app.search.query = None;
         }
         KeyCode::Char('a') => {

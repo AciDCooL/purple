@@ -127,6 +127,95 @@ impl Drop for SignalMaskGuard {
     }
 }
 
+/// Spawn `cmd`, mask interactive signals in the parent, tee SSH's
+/// stderr to the real stderr while capturing it for error detection,
+/// then wait for the child to exit. Both `connect` and
+/// `connect_with_remote_command` build their `Command` independently
+/// (different argv) and delegate the spawn/wait/tee plumbing here so
+/// the long stderr-buffer + signal-guard sequence lives in one place.
+///
+/// `log_label` is interpolated into the started/ended/failed log lines
+/// so a reader can tell host-login from container-exec at a glance.
+fn spawn_ssh_and_wait(mut cmd: Command, alias: &str, log_label: &str) -> Result<ConnectResult> {
+    cmd.stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::piped());
+
+    // Reset signal mask in the child process so SSH receives Ctrl+C
+    // normally. We mask signals in the parent AFTER spawn so the
+    // child doesn't inherit the blocked mask.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            let mut mask: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut mask);
+            libc::sigprocmask(libc::SIG_SETMASK, &mask, std::ptr::null_mut());
+            Ok(())
+        });
+    }
+
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("Failed to launch ssh {} for '{}'", log_label, alias))?;
+
+    // Mask SIGINT/SIGTSTP in purple AFTER spawn so SSH doesn't inherit
+    // the blocked mask. The guard restores the mask on drop (even on
+    // early return).
+    #[cfg(unix)]
+    let _signal_guard = SignalMaskGuard::block_interactive();
+
+    let stderr_pipe = child.stderr.take().expect("stderr was piped");
+    let stderr_thread = std::thread::spawn(move || {
+        use std::io::{Read, Write};
+        let mut captured = Vec::new();
+        let mut buf = [0u8; 4096];
+        let mut reader = stderr_pipe;
+        let mut stderr_out = std::io::stderr();
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let _ = stderr_out.write_all(&buf[..n]);
+                    let _ = stderr_out.flush();
+                    captured.extend_from_slice(&buf[..n]);
+                }
+                Err(_) => break,
+            }
+        }
+        String::from_utf8_lossy(&captured).to_string()
+    });
+
+    let status = child
+        .wait()
+        .with_context(|| format!("Failed to wait for ssh {} for '{}'", log_label, alias))?;
+    let stderr_output = stderr_thread.join().unwrap_or_else(|_| {
+        warn!("[purple] Stderr capture thread panicked for {alias}");
+        String::new()
+    });
+
+    let code = status.code().unwrap_or(-1);
+    if code == 0 {
+        info!("SSH {} ended: {alias} (exit 0)", log_label);
+    } else {
+        error!("[external] SSH {} failed: {alias} (exit {code})", log_label);
+        if !stderr_output.is_empty() {
+            let stderr = stderr_output.trim();
+            let lower = stderr.to_lowercase();
+            if lower.contains("are too open") || lower.contains("bad permissions") {
+                warn!("[config] SSH key permission issue: {stderr}");
+            } else {
+                debug!("[external] SSH stderr: {stderr}");
+            }
+        }
+    }
+
+    Ok(ConnectResult {
+        status,
+        stderr_output,
+    })
+}
+
 /// Launch an SSH connection to the given host alias.
 /// Uses the system `ssh` binary with inherited stdin/stdout. Stderr is piped and
 /// forwarded to real stderr in real time so the output is captured for error detection.
@@ -152,11 +241,7 @@ pub fn connect(
         cmd.arg("-o").arg("ClearAllForwardings=yes");
     }
 
-    cmd.arg("--")
-        .arg(alias)
-        .stdin(std::process::Stdio::inherit())
-        .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::piped());
+    cmd.arg("--").arg(alias);
 
     if askpass.is_some() {
         crate::askpass_env::configure_ssh_command(&mut cmd, alias, config_path);
@@ -166,88 +251,105 @@ pub fn connect(
         cmd.env("BW_SESSION", token);
     }
 
-    // Reset signal mask in the child process so SSH receives Ctrl+C normally.
-    // We mask signals in the parent AFTER spawn so the child doesn't inherit
-    // the blocked mask.
-    #[cfg(unix)]
-    unsafe {
-        use std::os::unix::process::CommandExt;
-        cmd.pre_exec(|| {
-            // Ensure SSH starts with default signal handling even if parent
-            // has signals blocked. This runs after fork, before exec.
-            let mut mask: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&mut mask);
-            libc::sigprocmask(libc::SIG_SETMASK, &mask, std::ptr::null_mut());
-            Ok(())
-        });
+    spawn_ssh_and_wait(cmd, alias, "connection")
+}
+
+/// Launch an SSH connection that runs a single remote command in
+/// interactive mode. Mirrors `connect()` exactly except for two
+/// additions: `-t` to allocate a TTY (required for the remote shell
+/// `docker exec` opens) and the trailing `remote_command` string passed
+/// to ssh as one argv slot. The remote shell receives the string as a
+/// single command line, so multi-token commands and shell operators
+/// like `||` work naturally.
+///
+/// Used by the containers overview Enter handler: the `remote_command`
+/// is built as `<runtime> exec -it <container_id> sh -c 'bash || sh'`
+/// where `container_id` has already been validated to alphanumeric +
+/// `-_.` so it cannot inject shell metacharacters.
+pub fn connect_with_remote_command(
+    alias: &str,
+    config_path: &Path,
+    askpass: Option<&str>,
+    bw_session: Option<&str>,
+    has_active_tunnel: bool,
+    remote_command: &str,
+) -> Result<ConnectResult> {
+    info!("SSH exec started: {alias}");
+    debug!(
+        "SSH command: ssh -F {} -t -- {alias} {}",
+        config_path.display(),
+        remote_command
+    );
+
+    let mut cmd = Command::new("ssh");
+    cmd.arg("-F").arg(config_path).arg("-t");
+
+    if has_active_tunnel {
+        cmd.arg("-o").arg("ClearAllForwardings=yes");
     }
 
-    let mut child = cmd
-        .spawn()
-        .with_context(|| format!("Failed to launch ssh for '{}'", alias))?;
+    cmd.arg("--").arg(alias).arg(remote_command);
 
-    // Mask SIGINT/SIGTSTP in purple AFTER spawn so SSH doesn't inherit
-    // the blocked mask. SSH receives Ctrl+C normally via the terminal driver.
-    // The guard restores the mask on drop (even on early return).
-    #[cfg(unix)]
-    let _signal_guard = SignalMaskGuard::block_interactive();
+    if askpass.is_some() {
+        crate::askpass_env::configure_ssh_command(&mut cmd, alias, config_path);
+    }
 
-    // Tee stderr: forward to real stderr while capturing for error detection
-    let stderr_pipe = child.stderr.take().expect("stderr was piped");
-    let stderr_thread = std::thread::spawn(move || {
-        use std::io::{Read, Write};
-        let mut captured = Vec::new();
-        let mut buf = [0u8; 4096];
-        let mut reader = stderr_pipe;
-        let mut stderr_out = std::io::stderr();
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    let _ = stderr_out.write_all(&buf[..n]);
-                    let _ = stderr_out.flush();
-                    captured.extend_from_slice(&buf[..n]);
-                }
-                Err(_) => break,
-            }
-        }
-        String::from_utf8_lossy(&captured).to_string()
-    });
+    if let Some(token) = bw_session {
+        cmd.env("BW_SESSION", token);
+    }
 
-    let status = child
-        .wait()
-        .with_context(|| format!("Failed to wait for ssh for '{}'", alias))?;
-    let stderr_output = stderr_thread.join().unwrap_or_else(|_| {
-        warn!("[purple] Stderr capture thread panicked for {alias}");
-        String::new()
-    });
+    spawn_ssh_and_wait(cmd, alias, "exec")
+}
 
-    // _signal_guard drops here, restoring the original signal mask.
-    // Any pending SIGINT from Ctrl+C during SSH is safely consumed.
+/// tmux variant of `connect_with_remote_command`. Opens a new tmux
+/// window running `ssh -t <alias> <remote_command>` so the TUI stays
+/// alive in the original window. Same askpass-incompatible caveat as
+/// `connect_tmux_window`.
+pub fn connect_tmux_window_with_remote_command(
+    alias: &str,
+    config_path: &Path,
+    has_active_tunnel: bool,
+    remote_command: &str,
+    window_label: &str,
+) -> Result<()> {
+    info!("SSH exec via tmux: {alias}");
 
-    let code = status.code().unwrap_or(-1);
-    if code == 0 {
-        info!("SSH connection ended: {alias} (exit 0)");
+    let config_str = config_path
+        .to_str()
+        .context("SSH config path is not valid UTF-8")?;
+
+    let mut args = vec![
+        "new-window",
+        "-n",
+        window_label,
+        "--",
+        "ssh",
+        "-F",
+        config_str,
+        "-t",
+    ];
+
+    if has_active_tunnel {
+        args.extend(["-o", "ClearAllForwardings=yes"]);
+    }
+
+    args.extend(["--", alias, remote_command]);
+
+    debug!("tmux exec args: {:?}", args);
+
+    let status = Command::new("tmux")
+        .args(&args)
+        .status()
+        .with_context(|| format!("Failed to launch tmux exec window for '{alias}'"))?;
+
+    if status.success() {
+        info!("tmux exec window created: {alias}");
+        Ok(())
     } else {
-        error!("[external] SSH connection failed: {alias} (exit {code})");
-        if !stderr_output.is_empty() {
-            let stderr = stderr_output.trim();
-            let lower = stderr.to_lowercase();
-            // Match local key permission errors like "Permissions 0644 for '~/.ssh/id_rsa'
-            // are too open" but not remote auth rejections ("Permission denied") or
-            // generic "no permission" errors from the remote host.
-            if lower.contains("are too open") || lower.contains("bad permissions") {
-                warn!("[config] SSH key permission issue: {stderr}");
-            } else {
-                debug!("[external] SSH stderr: {stderr}");
-            }
-        }
+        let code = status.code().unwrap_or(-1);
+        error!("[external] tmux exec window failed for {alias} (exit {code})");
+        anyhow::bail!("tmux new-window exited with code {code}")
     }
-
-    Ok(ConnectResult {
-        status,
-        stderr_output,
-    })
 }
 
 /// Extract a concise reason from SSH stderr for display in the toast.

@@ -361,15 +361,726 @@ fn build_demo_container_cache() -> String {
     let ts6 = now - 800;
     let ts7 = now - 1100;
     format!(
-        r#"{{"alias":"bastion-ams","timestamp":{},"runtime":"Docker","containers":[{{"ID":"f1a2b3c4d5e6","Names":"nginx-proxy","Image":"nginx:1.25-alpine","State":"running","Status":"Up 12 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"a2b3c4d5e6f7","Names":"app-backend","Image":"myapp:v2.14.1","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:8080->8080/tcp"}},{{"ID":"b3c4d5e6f7a8","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:6379->6379/tcp"}},{{"ID":"c4d5e6f7a8b9","Names":"postgres","Image":"postgres:16-alpine","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:5432->5432/tcp"}},{{"ID":"d5e6f7a8b9c0","Names":"prometheus","Image":"prom/prometheus:v2.48","State":"running","Status":"Up 5 days","Ports":"127.0.0.1:9090->9090/tcp"}},{{"ID":"e6f7a8b9c0d1","Names":"grafana","Image":"grafana/grafana:10.2","State":"running","Status":"Up 5 days","Ports":"127.0.0.1:3000->3000/tcp"}},{{"ID":"f7a8b9c0d1e2","Names":"certbot","Image":"certbot/certbot:v2.7","State":"exited","Status":"Exited (0) 2 days ago","Ports":""}}]}}
-{{"alias":"db-primary","timestamp":{},"runtime":"Docker","containers":[{{"ID":"a8b9c0d1e2f3","Names":"postgres-primary","Image":"postgres:16-alpine","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:5432->5432/tcp"}},{{"ID":"b9c0d1e2f3a4","Names":"pgbouncer","Image":"pgbouncer:1.21","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:6432->6432/tcp"}},{{"ID":"c0d1e2f3a4b5","Names":"pg-exporter","Image":"prometheuscommunity/postgres-exporter:0.15","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:9187->9187/tcp"}}]}}
-{{"alias":"do-web-ams","timestamp":{},"runtime":"Docker","containers":[{{"ID":"d1e2f3a4b5c6","Names":"nginx","Image":"nginx:1.25","State":"running","Status":"Up 8 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"e2f3a4b5c6d7","Names":"app","Image":"myapp:3.2.1","State":"running","Status":"Up 8 days","Ports":"8080/tcp"}},{{"ID":"f3a4b5c6d7e8","Names":"worker","Image":"myapp:3.2.1","State":"running","Status":"Up 8 days","Ports":""}},{{"ID":"a4b5c6d7e8f9","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 8 days","Ports":"6379/tcp"}},{{"ID":"b5c6d7e8f9a0","Names":"sidekiq","Image":"myapp:3.2.1","State":"exited","Status":"Exited (1) 3 hours ago","Ports":""}}]}}
-{{"alias":"pve-web-01","timestamp":{},"runtime":"Docker","containers":[{{"ID":"c6d7e8f9a0b1","Names":"nginx","Image":"nginx:1.25","State":"running","Status":"Up 20 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"d7e8f9a0b1c2","Names":"webapp","Image":"internal/webapp:1.8.3","State":"running","Status":"Up 20 days","Ports":"127.0.0.1:3000->3000/tcp"}},{{"ID":"e8f9a0b1c2d3","Names":"celery","Image":"internal/webapp:1.8.3","State":"running","Status":"Up 20 days","Ports":""}}]}}
-{{"alias":"aws-api-staging","timestamp":{},"runtime":"Docker","containers":[{{"ID":"f9a0b1c2d3e4","Names":"api","Image":"myteam/api:v4.1.0-rc2","State":"running","Status":"Up 2 days","Ports":"0.0.0.0:8080->8080/tcp"}},{{"ID":"a0b1c2d3e4f5","Names":"nginx","Image":"nginx:1.25-alpine","State":"running","Status":"Up 2 days","Ports":"0.0.0.0:443->443/tcp"}},{{"ID":"b1c2d3e4f5a6","Names":"datadog-agent","Image":"datadog/agent:7","State":"running","Status":"Up 2 days","Ports":""}},{{"ID":"c2d3e4f5a6b7","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 2 days","Ports":"127.0.0.1:6379->6379/tcp"}}]}}
-{{"alias":"aws-batch-us","timestamp":{},"runtime":"Docker","containers":[{{"ID":"d3e4f5a6b7c8","Names":"scheduler","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:8080->8080/tcp"}},{{"ID":"e4f5a6b7c8d9","Names":"worker-1","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":""}},{{"ID":"f5a6b7c8d9e0","Names":"worker-2","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":""}},{{"ID":"a6b7c8d9e0f1","Names":"rabbitmq","Image":"rabbitmq:3.13-management","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:5672->5672/tcp, 127.0.0.1:15672->15672/tcp"}},{{"ID":"b7c8d9e0f1a2","Names":"flower","Image":"mher/flower:2.0","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:5555->5555/tcp"}}]}}
+        r#"{{"alias":"bastion-ams","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"f1a2b3c4d5e6","Names":"nginx-proxy","Image":"nginx:1.25-alpine","State":"running","Status":"Up 12 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"a2b3c4d5e6f7","Names":"app-backend","Image":"myapp:v2.14.1","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:8080->8080/tcp"}},{{"ID":"b3c4d5e6f7a8","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:6379->6379/tcp"}},{{"ID":"c4d5e6f7a8b9","Names":"postgres","Image":"postgres:16-alpine","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:5432->5432/tcp"}},{{"ID":"d5e6f7a8b9c0","Names":"prometheus","Image":"prom/prometheus:v2.48","State":"running","Status":"Up 5 days","Ports":"127.0.0.1:9090->9090/tcp"}},{{"ID":"e6f7a8b9c0d1","Names":"grafana","Image":"grafana/grafana:10.2","State":"running","Status":"Up 5 days","Ports":"127.0.0.1:3000->3000/tcp"}},{{"ID":"f7a8b9c0d1e2","Names":"certbot","Image":"certbot/certbot:v2.7","State":"exited","Status":"Exited (0) 2 days ago","Ports":""}}]}}
+{{"alias":"db-primary","timestamp":{},"runtime":"Docker","engine_version":"24.0.7","containers":[{{"ID":"a8b9c0d1e2f3","Names":"postgres-primary","Image":"postgres:16-alpine","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:5432->5432/tcp"}},{{"ID":"b9c0d1e2f3a4","Names":"pgbouncer","Image":"pgbouncer:1.21","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:6432->6432/tcp"}},{{"ID":"c0d1e2f3a4b5","Names":"pg-exporter","Image":"prometheuscommunity/postgres-exporter:0.15","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:9187->9187/tcp"}}]}}
+{{"alias":"do-web-ams","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"d1e2f3a4b5c6","Names":"nginx","Image":"nginx:1.25","State":"running","Status":"Up 8 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"e2f3a4b5c6d7","Names":"app","Image":"myapp:3.2.1","State":"running","Status":"Up 8 days","Ports":"8080/tcp"}},{{"ID":"f3a4b5c6d7e8","Names":"worker","Image":"myapp:3.2.1","State":"running","Status":"Up 8 days","Ports":""}},{{"ID":"a4b5c6d7e8f9","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 8 days","Ports":"6379/tcp"}},{{"ID":"b5c6d7e8f9a0","Names":"sidekiq","Image":"myapp:3.2.1","State":"exited","Status":"Exited (1) 3 hours ago","Ports":""}}]}}
+{{"alias":"pve-web-01","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"c6d7e8f9a0b1","Names":"nginx","Image":"nginx:1.25","State":"running","Status":"Up 20 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"d7e8f9a0b1c2","Names":"webapp","Image":"internal/webapp:1.8.3","State":"running","Status":"Up 20 days","Ports":"127.0.0.1:3000->3000/tcp"}},{{"ID":"e8f9a0b1c2d3","Names":"celery","Image":"internal/webapp:1.8.3","State":"running","Status":"Up 20 days","Ports":""}}]}}
+{{"alias":"aws-api-staging","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"f9a0b1c2d3e4","Names":"api","Image":"myteam/api:v4.1.0-rc2","State":"running","Status":"Up 2 days","Ports":"0.0.0.0:8080->8080/tcp"}},{{"ID":"a0b1c2d3e4f5","Names":"nginx","Image":"nginx:1.25-alpine","State":"running","Status":"Up 2 days","Ports":"0.0.0.0:443->443/tcp"}},{{"ID":"b1c2d3e4f5a6","Names":"datadog-agent","Image":"datadog/agent:7","State":"running","Status":"Up 2 days","Ports":""}},{{"ID":"c2d3e4f5a6b7","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 2 days","Ports":"127.0.0.1:6379->6379/tcp"}}]}}
+{{"alias":"aws-batch-us","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"d3e4f5a6b7c8","Names":"scheduler","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:8080->8080/tcp"}},{{"ID":"e4f5a6b7c8d9","Names":"worker-1","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":""}},{{"ID":"f5a6b7c8d9e0","Names":"worker-2","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":""}},{{"ID":"a6b7c8d9e0f1","Names":"rabbitmq","Image":"rabbitmq:3.13-management","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:5672->5672/tcp, 127.0.0.1:15672->15672/tcp"}},{{"ID":"b7c8d9e0f1a2","Names":"flower","Image":"mher/flower:2.0","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:5555->5555/tcp"}}]}}
 {{"alias":"gateway-vpn","timestamp":{},"runtime":"Docker","containers":[{{"ID":"c8d9e0f1a2b3","Names":"wireguard","Image":"linuxserver/wireguard:1.0","State":"running","Status":"Up 45 days","Ports":"0.0.0.0:51820->51820/udp"}},{{"ID":"d9e0f1a2b3c4","Names":"pihole","Image":"pihole/pihole:2024.07","State":"running","Status":"Up 45 days","Ports":"0.0.0.0:53->53/tcp, 0.0.0.0:53->53/udp, 127.0.0.1:8080->80/tcp"}},{{"ID":"e0f1a2b3c4d5","Names":"unbound","Image":"mvance/unbound:1.20","State":"running","Status":"Up 45 days","Ports":"127.0.0.1:5335->5335/tcp"}}]}}"#,
         ts1, ts2, ts3, ts4, ts5, ts6, ts7,
     )
+}
+
+/// Pre-populate the inspect-detail cache with deterministic synthetic
+/// data for every container in the demo cache. Real builds fire SSH
+/// `docker inspect` calls; the demo skips that path so the panel
+/// renders fully without any network activity.
+///
+/// The seed varies digest, mounts, compose-project, user and privs by
+/// container name so the demo renders a plausibly heterogeneous fleet
+/// (db containers get `/var/lib/postgresql/data`, nginx gets
+/// `/etc/letsencrypt`, datadog-agent gets `/var/run/docker.sock`).
+/// Earlier versions seeded a single uniform record per container which
+/// made the stack-restart demo group every container on a host into
+/// one fictional project.
+fn seed_demo_inspect_cache(app: &mut App) {
+    use crate::app::{InspectCacheEntry, LogsCacheEntry};
+    use crate::containers::{ContainerInspect, NetworkInfo};
+
+    let now = crate::demo_flag::now_secs();
+    let aliases: Vec<(String, Vec<crate::containers::ContainerInfo>)> = app
+        .container_cache
+        .iter()
+        .map(|(a, e)| (a.clone(), e.containers.clone()))
+        .collect();
+    for (alias, containers) in aliases {
+        for c in containers {
+            let running = c.state.eq_ignore_ascii_case("running");
+            let profile = container_demo_profile(&c.names);
+            let optional_str = |s: &'static str| {
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
+            };
+            // Synthetic deterministic PID derived from the container id so
+            // the panel shows different numbers per row.
+            let synthetic_pid =
+                c.id.bytes()
+                    .fold(2000u32, |acc, b| acc.wrapping_add(b as u32 * 7));
+            // The demo deliberately surfaces a restart loop on
+            // `app-backend` (bastion-ams) and an OOM kill on `sidekiq`
+            // (do-web-ams) so the host detail panel's ATTENTION card
+            // demonstrates inspect-aggregate signals.
+            let demo_oom_killed = c.names == "sidekiq";
+            let demo_restart_count = match c.names.as_str() {
+                "app-backend" => 14u32,
+                _ if running => 0,
+                _ => 2,
+            };
+            let inspect = ContainerInspect {
+                exit_code: if running { 0 } else { 1 },
+                oom_killed: demo_oom_killed,
+                // Deterministic timestamps so the visual regression
+                // golden does not drift with wall-clock. Running
+                // containers carry a Started; exited carry both.
+                started_at: "2026-04-27T08:00:00Z".to_string(),
+                finished_at: if running {
+                    String::new()
+                } else {
+                    "2026-05-07T16:42:00Z".to_string()
+                },
+                created_at: "2026-04-27T07:59:55Z".to_string(),
+                health: if running && profile.has_healthcheck {
+                    Some("healthy".to_string())
+                } else {
+                    None
+                },
+                restart_count: demo_restart_count,
+                command: Some(vec!["/usr/local/bin/entrypoint".to_string()]),
+                entrypoint: None,
+                env_count: profile.env_count,
+                mount_count: profile.mounts.len(),
+                // Synthetic network name. The compose-network convention
+                // follows `<project>_default`, so reuse the per-container
+                // project name to keep the panel coherent.
+                networks: vec![NetworkInfo {
+                    name: format!(
+                        "{}_default",
+                        profile
+                            .compose_project
+                            .as_deref()
+                            .unwrap_or(&alias)
+                            .replace(['-', '.'], "_")
+                    ),
+                    ip_address: "172.18.0.5".to_string(),
+                }],
+                image_digest: Some(synthetic_digest(&c.id)),
+                restart_policy: if running {
+                    Some("unless-stopped".to_string())
+                } else {
+                    Some("on-failure".to_string())
+                },
+                user: Some(profile.user.to_string()),
+                privileged: profile.privileged,
+                readonly_rootfs: false,
+                apparmor_profile: Some("docker-default".to_string()),
+                seccomp_profile: Some("default".to_string()),
+                cap_add: profile.cap_add.iter().map(|s| s.to_string()).collect(),
+                cap_drop: profile.cap_drop.iter().map(|s| s.to_string()).collect(),
+                mounts: profile.mounts,
+                compose_project: profile.compose_project.clone(),
+                compose_service: Some(c.names.clone()),
+                pid: if running { Some(synthetic_pid) } else { None },
+                stop_signal: None,
+                stop_timeout: None,
+                image_version: optional_str(profile.image_version),
+                image_revision: optional_str(profile.image_revision),
+                image_source: optional_str(profile.image_source),
+                working_dir: optional_str(profile.working_dir),
+                hostname: Some(c.id[..12.min(c.id.len())].to_string()),
+                memory_limit: profile.memory_mb.map(|mb| mb * 1024 * 1024),
+                cpu_limit_nanos: profile.cpu_cores.map(|c| (c * 1e9) as u64),
+                pids_limit: profile.pids_limit,
+                log_driver: Some("json-file".to_string()),
+                network_mode: Some("bridge".to_string()),
+                health_test: if profile.has_healthcheck {
+                    Some(vec![
+                        "CMD-SHELL".to_string(),
+                        "curl -fs http://localhost/healthz || exit 1".to_string(),
+                    ])
+                } else {
+                    None
+                },
+                health_interval_ns: if profile.has_healthcheck {
+                    Some(30_000_000_000)
+                } else {
+                    None
+                },
+                health_failing_streak: if profile.has_healthcheck {
+                    Some(0)
+                } else {
+                    None
+                },
+            };
+            app.containers_overview.inspect_cache.entries.insert(
+                c.id.clone(),
+                InspectCacheEntry {
+                    timestamp: now,
+                    result: Ok(inspect),
+                },
+            );
+            let log_lines = container_demo_logs(&c.names, running);
+            app.containers_overview.logs_cache.entries.insert(
+                c.id.clone(),
+                LogsCacheEntry {
+                    timestamp: now,
+                    result: Ok(log_lines),
+                },
+            );
+        }
+    }
+}
+
+/// Synthetic recent log lines per container profile. Returned in
+/// chronological order (oldest first) so the LOGS card's tail-render
+/// shows the most recent line at the bottom. Lines are deterministic
+/// per service name so visual goldens stay stable.
+///
+/// Long enough (~15 lines) that a tall LOGS card has content to fill
+/// instead of empty padding when the panel grows.
+fn container_demo_logs(name: &str, running: bool) -> Vec<String> {
+    let stem = name
+        .rsplit_once('-')
+        .filter(|(_, n)| n.chars().all(|c| c.is_ascii_digit()))
+        .map(|(s, _)| s)
+        .unwrap_or(name);
+    if !running {
+        return vec![
+            "[2026-05-07 16:41:50] INFO shutdown signal received".to_string(),
+            "[2026-05-07 16:41:51] INFO draining 4 active connections".to_string(),
+            "[2026-05-07 16:41:55] INFO connection 7f3a closed".to_string(),
+            "[2026-05-07 16:41:55] INFO connection 8b1c closed".to_string(),
+            "[2026-05-07 16:41:56] INFO connection a4d2 closed".to_string(),
+            "[2026-05-07 16:41:56] INFO connection b2e8 closed".to_string(),
+            "[2026-05-07 16:41:58] INFO shutting down workers".to_string(),
+            "[2026-05-07 16:41:59] INFO worker 1 stopped".to_string(),
+            "[2026-05-07 16:41:59] INFO worker 2 stopped".to_string(),
+            "[2026-05-07 16:42:00] INFO graceful shutdown complete".to_string(),
+            "[2026-05-07 16:42:00] INFO process exited code=1".to_string(),
+        ];
+    }
+    match stem {
+        "nginx" | "nginx-proxy" => vec![
+            r#"172.18.0.5 - - [27/Apr/2026:07:58:12 +0000] "GET /healthz HTTP/1.1" 200 2"#
+                .to_string(),
+            r#"172.18.0.5 - - [27/Apr/2026:07:58:42 +0000] "GET /healthz HTTP/1.1" 200 2"#
+                .to_string(),
+            r#"203.0.113.42 - - [27/Apr/2026:07:59:01 +0000] "GET / HTTP/1.1" 200 4218"#
+                .to_string(),
+            r#"203.0.113.42 - - [27/Apr/2026:07:59:01 +0000] "GET /assets/main.css HTTP/1.1" 200 8421"#
+                .to_string(),
+            r#"203.0.113.42 - - [27/Apr/2026:07:59:01 +0000] "GET /assets/main.js HTTP/1.1" 200 124816"#
+                .to_string(),
+            r#"172.18.0.5 - - [27/Apr/2026:07:59:12 +0000] "GET /healthz HTTP/1.1" 200 2"#
+                .to_string(),
+            r#"198.51.100.7 - - [27/Apr/2026:07:59:43 +0000] "POST /api/v1/login HTTP/1.1" 200 187"#
+                .to_string(),
+            r#"198.51.100.7 - - [27/Apr/2026:07:59:44 +0000] "GET /api/v1/users HTTP/1.1" 200 2147"#
+                .to_string(),
+            r#"172.18.0.5 - - [27/Apr/2026:07:59:42 +0000] "GET /healthz HTTP/1.1" 200 2"#
+                .to_string(),
+            r#"198.51.100.7 - - [27/Apr/2026:08:00:14 +0000] "GET /api/v1/orders HTTP/1.1" 200 8124"#
+                .to_string(),
+            r#"172.18.0.5 - - [27/Apr/2026:08:01:12 +0000] "GET /healthz HTTP/1.1" 200 2"#
+                .to_string(),
+            r#"172.18.0.5 - - [27/Apr/2026:08:01:43 +0000] "GET /api/v1/users HTTP/1.1" 200 2147"#
+                .to_string(),
+            r#"172.18.0.5 - - [27/Apr/2026:08:02:02 +0000] "POST /api/v1/login HTTP/1.1" 200 187"#
+                .to_string(),
+            r#"172.18.0.5 - - [27/Apr/2026:08:02:14 +0000] "GET /assets/main.js HTTP/1.1" 304 0"#
+                .to_string(),
+            r#"172.18.0.5 - - [27/Apr/2026:08:02:31 +0000] "GET /healthz HTTP/1.1" 200 2"#
+                .to_string(),
+        ],
+        "certbot" => vec![
+            "Cert not yet due for renewal".to_string(),
+            "The following certificates are not due for renewal yet:".to_string(),
+            "  /etc/letsencrypt/live/example.com/fullchain.pem expires on 2026-07-19".to_string(),
+            "No renewals were attempted.".to_string(),
+            "Sleeping until next scheduled run".to_string(),
+        ],
+        "app-backend" | "app" | "webapp" | "api" => vec![
+            "[INFO] worker booted, listening on 0.0.0.0:8080".to_string(),
+            "[INFO] connected to postgres at db-primary:5432".to_string(),
+            "[INFO] connected to redis at cache:6379".to_string(),
+            "[INFO] migrations complete (schema v42)".to_string(),
+            r#"[INFO] request_id=4f30 method=GET path=/healthz status=200 duration=1ms"#
+                .to_string(),
+            r#"[INFO] request_id=4f31 method=GET path=/api/users/42 status=200 duration=12ms"#
+                .to_string(),
+            r#"[INFO] request_id=4f32 method=GET path=/api/orders status=200 duration=38ms"#
+                .to_string(),
+            r#"[WARN] request_id=4f33 method=GET path=/api/orders/9999 status=404 duration=4ms"#
+                .to_string(),
+            r#"[INFO] request_id=4f34 method=POST path=/api/login status=200 duration=22ms"#
+                .to_string(),
+            r#"[INFO] request_id=4f35 method=GET path=/api/dashboard status=200 duration=64ms"#
+                .to_string(),
+            r#"[INFO] request_id=4f36 method=GET path=/api/healthz status=200 duration=1ms"#
+                .to_string(),
+            r#"[INFO] request_id=4f3a method=GET path=/healthz status=200 duration=2ms"#
+                .to_string(),
+            r#"[INFO] request_id=4f3b method=POST path=/api/users status=201 duration=18ms"#
+                .to_string(),
+            r#"[INFO] request_id=4f3c method=GET path=/api/orders status=200 duration=42ms"#
+                .to_string(),
+            r#"[INFO] request_id=4f3d method=GET path=/api/healthz status=200 duration=1ms"#
+                .to_string(),
+        ],
+        "worker" | "celery" | "sidekiq" | "scheduler" | "flower" => vec![
+            r#"task=email.send id=8b2c queue=default state=running"#.to_string(),
+            r#"task=email.send id=8b2c queue=default state=success duration=312ms"#.to_string(),
+            r#"task=billing.charge id=4a91 queue=default state=running"#.to_string(),
+            r#"task=billing.charge id=4a91 queue=default state=success duration=518ms"#.to_string(),
+            r#"task=metrics.flush id=ff10 queue=metrics state=success duration=4ms"#.to_string(),
+        ],
+        "redis" => vec![
+            "1:M 27 Apr 2026 08:00:01.123 * Ready to accept connections".to_string(),
+            "1:M 27 Apr 2026 08:01:14.881 * 1 changes in 3600 seconds. Saving...".to_string(),
+            "1:M 27 Apr 2026 08:01:14.882 * Background saving started by pid 39".to_string(),
+            "39:C 27 Apr 2026 08:01:14.911 * DB saved on disk".to_string(),
+            "1:M 27 Apr 2026 08:01:14.982 * Background saving terminated with success".to_string(),
+        ],
+        "postgres" | "postgres-primary" => vec![
+            "2026-04-27 08:00:14.121 UTC [1] LOG:  starting PostgreSQL 16.4".to_string(),
+            "2026-04-27 08:00:14.245 UTC [1] LOG:  listening on IPv4 address \"0.0.0.0\""
+                .to_string(),
+            "2026-04-27 08:00:14.512 UTC [42] LOG:  database system is ready to accept connections"
+                .to_string(),
+            "2026-04-27 08:01:00.114 UTC [89] LOG:  checkpoint starting: time".to_string(),
+            "2026-04-27 08:01:01.882 UTC [89] LOG:  checkpoint complete: wrote 12 buffers".to_string(),
+        ],
+        "pgbouncer" => vec![
+            "2026-04-27 08:00:00.001 UTC [1] LOG kernel file descriptor limit: 1048576".to_string(),
+            "2026-04-27 08:00:00.018 UTC [1] LOG listening on 0.0.0.0:6432".to_string(),
+            "2026-04-27 08:01:14.219 UTC [1] LOG C-0xc12: db=app login attempt: user=app db=app"
+                .to_string(),
+            "2026-04-27 08:01:14.221 UTC [1] LOG C-0xc12: db=app closing because: client close request"
+                .to_string(),
+            "2026-04-27 08:02:00.001 UTC [1] LOG stats: 12 xacts/s, 24 queries/s, in 14kB out 38kB"
+                .to_string(),
+        ],
+        "prometheus" => vec![
+            r#"ts=2026-04-27T08:00:14Z level=info caller=main.go:451 msg="Starting Prometheus""#
+                .to_string(),
+            r#"ts=2026-04-27T08:00:14Z level=info caller=web.go:526 msg="Start listening for connections" address=0.0.0.0:9090"#
+                .to_string(),
+            r#"ts=2026-04-27T08:01:00Z level=info caller=head.go:651 msg="Replaying on-disk memory mappable chunks if any""#
+                .to_string(),
+            r#"ts=2026-04-27T08:01:00Z level=info caller=main.go:1136 msg="Server is ready to receive web requests""#
+                .to_string(),
+            r#"ts=2026-04-27T08:02:00Z level=info caller=compact.go:518 msg="write block" duration=42ms"#
+                .to_string(),
+        ],
+        "grafana" => vec![
+            r#"logger=server t=2026-04-27T08:00:14Z level=info msg="Starting Grafana" version=11.3.0"#
+                .to_string(),
+            r#"logger=migrator t=2026-04-27T08:00:14Z level=info msg="migrations completed""#
+                .to_string(),
+            r#"logger=http.server t=2026-04-27T08:00:15Z level=info msg="HTTP Server Listen" address=0.0.0.0:3000"#
+                .to_string(),
+            r#"logger=context t=2026-04-27T08:01:14Z level=info msg="Request completed" method=GET path=/api/health status=200"#
+                .to_string(),
+            r#"logger=context t=2026-04-27T08:02:14Z level=info msg="Request completed" method=GET path=/api/health status=200"#
+                .to_string(),
+        ],
+        "rabbitmq" => vec![
+            "2026-04-27 08:00:00.001 [info] <0.42.0> Server startup complete".to_string(),
+            "2026-04-27 08:00:00.018 [info] <0.42.0> Listening on 0.0.0.0:5672 amqp".to_string(),
+            "2026-04-27 08:01:14.882 [info] <0.91.0> connection accepted from 172.18.0.5:54321"
+                .to_string(),
+            "2026-04-27 08:01:14.901 [info] <0.91.0> connection accepted: user=app vhost=/"
+                .to_string(),
+            "2026-04-27 08:02:00.001 [info] <0.91.0> consumer handed off to channel 1".to_string(),
+        ],
+        "datadog-agent" => vec![
+            r#"2026-04-27 08:00:00 UTC | CORE | INFO | running on platform: linux"#.to_string(),
+            r#"2026-04-27 08:00:01 UTC | CORE | INFO | hostname configured to ip-10-30-0-6"#
+                .to_string(),
+            r#"2026-04-27 08:01:00 UTC | CORE | INFO | Sent series. payload_size=12834 bytes"#
+                .to_string(),
+            r#"2026-04-27 08:01:30 UTC | CORE | INFO | Sent metadata payload"#.to_string(),
+            r#"2026-04-27 08:02:00 UTC | CORE | INFO | Sent series. payload_size=11240 bytes"#
+                .to_string(),
+        ],
+        "wireguard" => vec![
+            "[#] iptables-restore -n".to_string(),
+            "[#] wg setconf wg0 /dev/fd/63".to_string(),
+            "[#] ip -4 address add 10.13.13.1/24 dev wg0".to_string(),
+            "[#] ip link set mtu 1420 up dev wg0".to_string(),
+            "Successfully connected to WireGuard interface wg0".to_string(),
+        ],
+        "pihole" | "unbound" => vec![
+            "Apr 27 08:00:01 dnsmasq[1]: started, version 2.90".to_string(),
+            "Apr 27 08:00:01 dnsmasq[1]: read /etc/hosts - 6 addresses".to_string(),
+            "Apr 27 08:01:14 dnsmasq[1]: query[A] api.example.com from 192.168.1.42".to_string(),
+            "Apr 27 08:01:14 dnsmasq[1]: forwarded api.example.com to 1.1.1.1".to_string(),
+            "Apr 27 08:01:14 dnsmasq[1]: reply api.example.com is 203.0.113.42".to_string(),
+        ],
+        "pg-exporter" => vec![
+            r#"ts=2026-04-27T08:00:00Z caller=main.go:155 level=info msg="Starting postgres_exporter""#
+                .to_string(),
+            r#"ts=2026-04-27T08:00:01Z caller=server.go:33 level=info msg="Listening on" address=0.0.0.0:9187"#
+                .to_string(),
+            r#"ts=2026-04-27T08:01:00Z caller=postgres_exporter.go:1672 level=info msg="Established new database connection""#
+                .to_string(),
+            r#"ts=2026-04-27T08:01:30Z caller=postgres_exporter.go:1789 level=info msg="Scrape complete" duration=42ms"#
+                .to_string(),
+            r#"ts=2026-04-27T08:02:00Z caller=postgres_exporter.go:1789 level=info msg="Scrape complete" duration=38ms"#
+                .to_string(),
+        ],
+        _ => vec![
+            "service started".to_string(),
+            "ready to accept work".to_string(),
+            "tick: heartbeat ok".to_string(),
+            "tick: heartbeat ok".to_string(),
+            "tick: heartbeat ok".to_string(),
+        ],
+    }
+}
+
+/// Per-container demo profile. Bound to the container's name so a
+/// nginx instance always renders with `/etc/letsencrypt`, postgres
+/// with `/var/lib/postgresql/data` and so on. Stack-grouping uses
+/// `compose_project`; containers that share a project on the same
+/// host get cycled together by the stack-restart confirm.
+struct ContainerDemoProfile {
+    compose_project: Option<String>,
+    user: &'static str,
+    privileged: bool,
+    cap_add: &'static [&'static str],
+    cap_drop: &'static [&'static str],
+    mounts: Vec<crate::containers::MountInfo>,
+    env_count: usize,
+    image_version: &'static str,
+    image_revision: &'static str,
+    image_source: &'static str,
+    working_dir: &'static str,
+    memory_mb: Option<u64>,
+    cpu_cores: Option<f64>,
+    pids_limit: Option<i64>,
+    has_healthcheck: bool,
+}
+
+fn container_demo_profile(name: &str) -> ContainerDemoProfile {
+    use crate::containers::MountInfo;
+    let bind = |source: &str, dest: &str, read_only: bool| MountInfo {
+        source: source.to_string(),
+        destination: dest.to_string(),
+        read_only,
+    };
+    let volume = |volume_name: &str, dest: &str, read_only: bool| MountInfo {
+        source: volume_name.to_string(),
+        destination: dest.to_string(),
+        read_only,
+    };
+
+    // Match on the container's compose-service name (the `Names` field
+    // on `docker ps` JSON), trimming any compose-style numeric suffix
+    // so `worker-1` and `worker-2` share a profile.
+    let stem = name
+        .rsplit_once('-')
+        .filter(|(_, n)| n.chars().all(|c| c.is_ascii_digit()))
+        .map(|(s, _)| s)
+        .unwrap_or(name);
+
+    match stem {
+        "nginx" | "nginx-proxy" => ContainerDemoProfile {
+            compose_project: Some("edge".into()),
+            user: "root",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![
+                bind("/etc/letsencrypt", "/etc/letsencrypt", false),
+                volume("certs", "/etc/nginx/certs", true),
+            ],
+            env_count: 8,
+            image_version: "1.27.3",
+            image_revision: "a4f9b22",
+            image_source: "github.com/nginxinc/docker-nginx",
+            working_dir: "/",
+            memory_mb: Some(256),
+            cpu_cores: Some(1.0),
+            pids_limit: Some(100),
+            has_healthcheck: true,
+        },
+        "certbot" => ContainerDemoProfile {
+            compose_project: Some("edge".into()),
+            user: "root",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &[],
+            mounts: vec![bind("/etc/letsencrypt", "/etc/letsencrypt", false)],
+            env_count: 4,
+            image_version: "2.11.0",
+            image_revision: "5b3f9e1",
+            image_source: "github.com/certbot/certbot",
+            working_dir: "/etc/letsencrypt",
+            memory_mb: None,
+            cpu_cores: None,
+            pids_limit: None,
+            has_healthcheck: false,
+        },
+        "app-backend" | "app" | "webapp" | "api" => ContainerDemoProfile {
+            compose_project: Some("app".into()),
+            user: "app",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![
+                bind("/srv/app/data", "/app/data", false),
+                bind("/srv/app/config", "/app/config", true),
+            ],
+            env_count: 16,
+            image_version: "3.2.1",
+            image_revision: "8c2a15d",
+            image_source: "github.com/acme/app",
+            working_dir: "/app",
+            memory_mb: Some(512),
+            cpu_cores: Some(2.0),
+            pids_limit: Some(200),
+            has_healthcheck: true,
+        },
+        "worker" | "celery" | "sidekiq" => ContainerDemoProfile {
+            compose_project: Some("app".into()),
+            user: "app",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![bind("/srv/app/data", "/app/data", false)],
+            env_count: 14,
+            image_version: "3.2.1",
+            image_revision: "8c2a15d",
+            image_source: "github.com/acme/app",
+            working_dir: "/app",
+            memory_mb: Some(256),
+            cpu_cores: Some(1.0),
+            pids_limit: Some(100),
+            has_healthcheck: false,
+        },
+        "redis" => ContainerDemoProfile {
+            compose_project: Some("cache".into()),
+            user: "redis",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![volume("redis_data", "/data", false)],
+            env_count: 4,
+            image_version: "7.4.1",
+            image_revision: "f9e2b07",
+            image_source: "github.com/redis/docker",
+            working_dir: "/data",
+            memory_mb: Some(256),
+            cpu_cores: Some(0.5),
+            pids_limit: Some(100),
+            has_healthcheck: true,
+        },
+        "postgres" | "postgres-primary" => ContainerDemoProfile {
+            compose_project: Some("db".into()),
+            user: "postgres",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![volume("postgres_data", "/var/lib/postgresql/data", false)],
+            env_count: 9,
+            image_version: "16.4",
+            image_revision: "2d8e7a3",
+            image_source: "github.com/docker-library/postgres",
+            working_dir: "/var/lib/postgresql",
+            memory_mb: Some(1024),
+            cpu_cores: Some(2.0),
+            pids_limit: Some(200),
+            has_healthcheck: true,
+        },
+        "pgbouncer" => ContainerDemoProfile {
+            compose_project: Some("db".into()),
+            user: "postgres",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![bind("/etc/pgbouncer", "/etc/pgbouncer", true)],
+            env_count: 6,
+            image_version: "1.23.1",
+            image_revision: "",
+            image_source: "github.com/edoburu/docker-pgbouncer",
+            working_dir: "/",
+            memory_mb: Some(128),
+            cpu_cores: Some(0.5),
+            pids_limit: Some(50),
+            has_healthcheck: false,
+        },
+        "pg-exporter" => ContainerDemoProfile {
+            compose_project: Some("monitoring".into()),
+            user: "nobody",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW", "SETUID", "SETGID"],
+            mounts: vec![],
+            env_count: 3,
+            image_version: "0.15.0",
+            image_revision: "4a3b8c1",
+            image_source: "github.com/prometheus-community/postgres_exporter",
+            working_dir: "/",
+            memory_mb: None,
+            cpu_cores: None,
+            pids_limit: None,
+            has_healthcheck: false,
+        },
+        "prometheus" => ContainerDemoProfile {
+            compose_project: Some("monitoring".into()),
+            user: "nobody",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW", "SETUID", "SETGID"],
+            mounts: vec![
+                volume("prometheus_data", "/prometheus", false),
+                bind("/srv/prometheus", "/etc/prometheus", true),
+            ],
+            env_count: 5,
+            image_version: "2.55.0",
+            image_revision: "7e9d3a2",
+            image_source: "github.com/prometheus/prometheus",
+            working_dir: "/prometheus",
+            memory_mb: Some(512),
+            cpu_cores: Some(1.0),
+            pids_limit: Some(100),
+            has_healthcheck: true,
+        },
+        "grafana" => ContainerDemoProfile {
+            compose_project: Some("monitoring".into()),
+            user: "grafana",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![
+                volume("grafana_data", "/var/lib/grafana", false),
+                bind("/srv/grafana", "/etc/grafana", true),
+            ],
+            env_count: 11,
+            image_version: "11.3.0",
+            image_revision: "9c1f8e4",
+            image_source: "github.com/grafana/grafana",
+            working_dir: "/usr/share/grafana",
+            memory_mb: Some(512),
+            cpu_cores: Some(1.0),
+            pids_limit: Some(100),
+            has_healthcheck: true,
+        },
+        "rabbitmq" => ContainerDemoProfile {
+            compose_project: Some("batch".into()),
+            user: "rabbitmq",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![volume("rabbitmq_data", "/var/lib/rabbitmq", false)],
+            env_count: 7,
+            image_version: "4.0.4",
+            image_revision: "3b6a9d2",
+            image_source: "github.com/docker-library/rabbitmq",
+            working_dir: "/",
+            memory_mb: Some(1024),
+            cpu_cores: Some(1.5),
+            pids_limit: Some(200),
+            has_healthcheck: true,
+        },
+        "scheduler" | "flower" | "worker-1" | "worker-2" => ContainerDemoProfile {
+            compose_project: Some("batch".into()),
+            user: "celery",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![bind("/srv/batch", "/app", true)],
+            env_count: 12,
+            image_version: "5.4.0",
+            image_revision: "8c2a15d",
+            image_source: "github.com/celery/celery",
+            working_dir: "/app",
+            memory_mb: Some(256),
+            cpu_cores: Some(1.0),
+            pids_limit: Some(100),
+            has_healthcheck: false,
+        },
+        "datadog-agent" => ContainerDemoProfile {
+            // Agents run as host-network siblings, not as a compose
+            // service. Surfacing no project suppresses the stack
+            // restart confirm for the agent (Ctrl-K is refused with
+            // a toast), which matches real fleet behaviour.
+            compose_project: None,
+            user: "root",
+            privileged: false,
+            cap_add: &["SYS_PTRACE"],
+            cap_drop: &[],
+            mounts: vec![bind("/var/run/docker.sock", "/var/run/docker.sock", true)],
+            env_count: 18,
+            image_version: "7.58.0",
+            image_revision: "b4f1e3c",
+            image_source: "github.com/DataDog/datadog-agent",
+            working_dir: "/",
+            memory_mb: Some(512),
+            cpu_cores: Some(0.5),
+            pids_limit: Some(100),
+            has_healthcheck: true,
+        },
+        "wireguard" => ContainerDemoProfile {
+            compose_project: Some("vpn".into()),
+            user: "root",
+            privileged: false,
+            cap_add: &["NET_ADMIN", "SYS_MODULE"],
+            cap_drop: &[],
+            mounts: vec![bind("/srv/wireguard", "/config", false)],
+            env_count: 5,
+            image_version: "1.0.20210914",
+            image_revision: "",
+            image_source: "github.com/linuxserver/docker-wireguard",
+            working_dir: "/",
+            memory_mb: None,
+            cpu_cores: None,
+            pids_limit: None,
+            has_healthcheck: false,
+        },
+        "pihole" | "unbound" => ContainerDemoProfile {
+            compose_project: Some("vpn".into()),
+            user: "root",
+            privileged: false,
+            cap_add: &["NET_ADMIN"],
+            cap_drop: &[],
+            mounts: vec![bind("/srv/dns", "/etc/pihole", false)],
+            env_count: 7,
+            image_version: "2024.07.0",
+            image_revision: "",
+            image_source: "github.com/pi-hole/docker-pi-hole",
+            working_dir: "/",
+            memory_mb: Some(256),
+            cpu_cores: Some(0.5),
+            pids_limit: None,
+            has_healthcheck: true,
+        },
+        _ => ContainerDemoProfile {
+            compose_project: None,
+            user: "root",
+            privileged: false,
+            cap_add: &[],
+            cap_drop: &["NET_RAW"],
+            mounts: vec![bind("/srv/data", "/data", false)],
+            env_count: 6,
+            image_version: "",
+            image_revision: "",
+            image_source: "",
+            working_dir: "/",
+            memory_mb: None,
+            cpu_cores: None,
+            pids_limit: None,
+            has_healthcheck: false,
+        },
+    }
+}
+
+/// Deterministic synthetic sha256 digest for a container id. Real
+/// `docker inspect` returns the actual content-addressable hash; the
+/// demo fakes one so the panel renders a digest line that varies per
+/// container instead of repeating a single hardcoded constant.
+fn synthetic_digest(container_id: &str) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in container_id.bytes() {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100_0000_01b3);
+    }
+    let half = format!("{:016x}", hash);
+    format!("sha256:{}{}", half, half.chars().rev().collect::<String>())
 }
 
 pub fn build_demo_app() -> App {
@@ -393,6 +1104,15 @@ pub fn build_demo_app() -> App {
 
     // Container cache (timestamps relative to now)
     app.container_cache = containers::parse_container_cache_content(&build_demo_container_cache());
+    seed_demo_inspect_cache(&mut app);
+    // One pre-folded host group so a fresh `--demo` boot already
+    // showcases the divider's `(N hidden)` summary without the user
+    // hunting for the Space binding. Picked `aws-batch-us` because it
+    // is mid-list (not the first group) and homogeneous (all running),
+    // so the folded summary reads cleanly.
+    app.containers_overview
+        .collapsed_hosts
+        .insert("aws-batch-us".to_string());
 
     // Ping status (deterministic)
     let reachable = |ms| PingStatus::Reachable { rtt_ms: ms };
