@@ -704,6 +704,10 @@ pub fn container_unknown_sentinel(s: &str) -> String {
     format!("Unknown sentinel: {s}")
 }
 
+pub fn container_invalid_id(reason: &str) -> String {
+    format!("Container exec blocked: {reason}")
+}
+
 /// Transient label shown on the file browser overlay while an scp transfer
 /// is running. Singular form for a single source.
 pub fn scp_copying_one(source: &str) -> String {

@@ -1,31 +1,31 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ 24 ── ●16 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
+╭ 25 ── ●17 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   ADDRESS                         TAGS                            LAST▾ │
 │──────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌  ● bastion-ams            140.82.121.3 ⇄                  production vpn                   <1m  │
 │   ● db-pri╭ Jump ───────────────────────────────────────────────────────────────────╮        1h  │
 │   ● monito│                                                                         │        2h  │
 │   ● gatewa│  ╭───────────────────────────────────────────────────────────────────╮  │        3h  │
-│   ● aws-ap│  │ █ Find anything                                                   │  │        4h  │
+│   ● podman│  │ █ Find anything                                                   │  │        4h  │
 │   ● aws-ap│  ╰───────────────────────────────────────────────────────────────────╯  │        5h  │
-│   ● aws-wo│                                                                         │        6h  │
-│   ● aws-ba│   Actions   6 of 32                                                     │        7h  │
-│   ● aws-ml│   Hosts: Add host                                                   a   │        8h  │
-│   ● pve-we│   Tunnels: Manage tunnels                                           T   │       14h  │
+│   ● aws-ap│                                                                         │        6h  │
+│   ● aws-wo│   Actions   6 of 32                                                     │        7h  │
+│   ● aws-ba│   Hosts: Add host                                                   a   │        8h  │
+│   ● aws-ml│   Tunnels: Manage tunnels                                           T   │        9h  │
 │   ● pve-we│   Containers: List containers                                       C   │       15h  │
-│   ● pve-db│   Files: Browse remote files                                        F   │       16h  │
+│   ● pve-we│   Files: Browse remote files                                        F   │       16h  │
 │   ● pve-db│   Vault: Sign certificate                                           V   │       17h  │
-│   ● pve-re│   Keys: Manage SSH keys                                             K   │       18h  │
-│   ● pve-ma│                                                                         │       19h  │
-│   ● pve-mo╰─────────────────────────────────────────────────────────────────────────╯x      20h  │
-│   ○ do-wor Enter  select    ↑↓  select    Tab  next    Esc  close                    n        -  │
+│   ● pve-db│   Keys: Manage SSH keys                                             K   │       18h  │
+│   ● pve-re│                                                                         │       19h  │
+│   ● pve-ma╰─────────────────────────────────────────────────────────────────────────╯       20h  │
+│   ● pve-mo Enter  select    ↑↓  select    Tab  next    Esc  close                    x      21h  │
+│   ○ do-work-web-ams        104.248.38.91                   production web digitalocean        -  │
 │   ○ do-work-staging-ams    104.248.38.92 ⇄                 staging web digitalocean           -  │
 │   ○ do-work-worker-ams     104.248.38.93                   worker digitalocean                -  │
 │   ○ do-work-ci-runner      104.248.38.94 ↗                 ci digitalocean                    -  │
 │   ○ do-personal-blog       167.99.42.10                    personal web digitalocean          -  │
-│   ○ do-personal-mail       167.99.42.11                    personal mail digitalocean         -  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---

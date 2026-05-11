@@ -1,15 +1,15 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ search: 6/24 ────────────────────────────────────────────────────────────────────────────────────╮
+╭ search: 6/25 ────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME               ADDRESS                                   TAGS                      LAST▾ │
 │──────────────────────────────────────────────────────────────────────────────────────────────────│
-│▌  ● aws-api-prod       52.47.100.23 ↗                            production api aws          4h  │
-│   ● aws-api-staging    52.47.100.24                              staging api aws             5h  │
-│   ● aws-worker-eu      3.120.55.17                               production worker aws       6h  │
-│   ● aws-batch-us       52.47.100.25                              production batch aws        7h  │
-│   ● aws-ml-eu          3.120.55.18                               ml aws                      8h  │
-│   ✖ aws-cache-eu       3.120.55.19                               cache aws                   9h  │
+│▌  ● aws-api-prod       52.47.100.23 ↗                            production api aws          5h  │
+│   ● aws-api-staging    52.47.100.24                              staging api aws             6h  │
+│   ● aws-worker-eu      3.120.55.17                               production worker aws       7h  │
+│   ● aws-batch-us       52.47.100.25                              production batch aws        8h  │
+│   ● aws-ml-eu          3.120.55.18                               ml aws                      9h  │
+│   ✖ aws-cache-eu       3.120.55.19                               cache aws                  10h  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
@@ -26,7 +26,7 @@
 │                                                                                                  │
 │                                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
- /  aws_ (6 of 24)                                                                                  
+ /  aws_ (6 of 25)                                                                                  
  Enter  connect    Ctrl+E  edit    Esc  cancel   tag: fuzzy  tag= exact                             
 ---STYLES---
 (0,0) fg=Reset bg=Reset mod=DIM

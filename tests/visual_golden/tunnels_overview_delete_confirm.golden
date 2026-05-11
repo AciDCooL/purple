@@ -9,10 +9,10 @@
 │   ○ db-primary             5432 → localhost:5432                           —                 1h  │
 │   ○ db-primary             9090 → localhost:9090                           —                 1h  │
 │   ○ monitoring             3000 → localhost:3000                           —                 2h  │
-│   ○ pve-db-01              5432 → localhost:5432                           —                16h  │
-│   ○ pve-redis              6379 → localhost:6379                           —                18h  │
-│   ○ pve-monitor            3000 → localhost:3000                           —                20h  │
-│   ○ pve-monitor            9090 → localhost:9090                           —                20h  │
+│   ○ pve-db-01              5432 → localhost:5432                           —                17h  │
+│   ○ pve-redis              6379 → localhost:6379                           —                19h  │
+│   ○ pve-monitor            3000 → localhost:3000                           —                21h  │
+│   ○ pve-monitor            9090 → localhost:9090                           —                21h  │
 │   ○ do-work-staging-ams    5432 → localhost:5432                           —                  —  │
 │                                                                                                  │
 │                                                                                                  │

@@ -219,6 +219,18 @@ pub struct ContainersOverviewState {
     /// AlphaHost rendering. Persisted across sessions via preferences
     /// so a folded group stays folded after restart.
     pub collapsed_hosts: HashSet<String>,
+    /// Memoized render list. The render and handler paths call
+    /// `visible_items` repeatedly (24 call sites, several per key
+    /// event) and each call cloned 6 String fields per container. The
+    /// cache stores the built `Vec<ContainerListItem>` keyed on a
+    /// content fingerprint over the inputs (sort_mode, search query,
+    /// collapsed_hosts, per-host (timestamp, container_count)). On a
+    /// hit we skip the collect/sort/intersperse step entirely and
+    /// return a clone of the cached vec. The fingerprint walks all
+    /// hosts but only reads a few fields each, so it is dramatically
+    /// cheaper than rebuilding the row set.
+    pub view_cache:
+        std::cell::RefCell<Option<(u64, Vec<crate::ui::containers_overview::ContainerListItem>)>>,
 }
 
 impl Default for ContainersOverviewState {
@@ -231,6 +243,7 @@ impl Default for ContainersOverviewState {
             auto_list_in_flight: HashSet::new(),
             view_mode: ViewMode::Detailed,
             collapsed_hosts: HashSet::new(),
+            view_cache: std::cell::RefCell::new(None),
         }
     }
 }

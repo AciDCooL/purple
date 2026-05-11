@@ -43,6 +43,12 @@ Host gateway-vpn
   # purple:tags infra,vpn
   # purple:vault-ssh ssh-client-signer/sign/infra
 
+Host podman-edge
+  HostName 10.20.30.40
+  User core
+  # purple:tags edge,podman
+  # purple:meta os=Fedora CoreOS 41,runtime=podman 5.8
+
 # AWS EC2
 
 Host aws-api-prod
@@ -262,6 +268,7 @@ const DEMO_HISTORY_SPEC: &[(&str, u32, u64)] = &[
     ("db-primary", 142, 250),
     ("monitoring", 121, 280),
     ("gateway-vpn", 31, 300),
+    ("podman-edge", 18, 60),
     ("aws-api-prod", 180, 300),
     ("aws-api-staging", 90, 200),
     ("aws-worker-eu", 65, 180),
@@ -360,6 +367,15 @@ fn build_demo_container_cache() -> String {
     let ts5 = now - 1000;
     let ts6 = now - 800;
     let ts7 = now - 1100;
+    let ts8 = now - 700;
+    // The `podman-edge` row is the only podman host in the demo. Key
+    // shape differences vs the docker fleet above:
+    //   - runtime: "Podman", engine_version 5.x
+    //   - Status is empty (podman emits no "Up Xd" / "Exited (N)" text)
+    //   - Image uses the docker.io/library/ registry-prefixed form
+    //   - One stopped container with non-zero exit driven by the
+    //     inspect cache (not the Status string) so the state glyph
+    //     warning path exercises the podman fallback in render_row.
     format!(
         r#"{{"alias":"bastion-ams","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"f1a2b3c4d5e6","Names":"nginx-proxy","Image":"nginx:1.25-alpine","State":"running","Status":"Up 12 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"a2b3c4d5e6f7","Names":"app-backend","Image":"myapp:v2.14.1","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:8080->8080/tcp"}},{{"ID":"b3c4d5e6f7a8","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:6379->6379/tcp"}},{{"ID":"c4d5e6f7a8b9","Names":"postgres","Image":"postgres:16-alpine","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:5432->5432/tcp"}},{{"ID":"d5e6f7a8b9c0","Names":"prometheus","Image":"prom/prometheus:v2.48","State":"running","Status":"Up 5 days","Ports":"127.0.0.1:9090->9090/tcp"}},{{"ID":"e6f7a8b9c0d1","Names":"grafana","Image":"grafana/grafana:10.2","State":"running","Status":"Up 5 days","Ports":"127.0.0.1:3000->3000/tcp"}},{{"ID":"f7a8b9c0d1e2","Names":"certbot","Image":"certbot/certbot:v2.7","State":"exited","Status":"Exited (0) 2 days ago","Ports":""}}]}}
 {{"alias":"db-primary","timestamp":{},"runtime":"Docker","engine_version":"24.0.7","containers":[{{"ID":"a8b9c0d1e2f3","Names":"postgres-primary","Image":"postgres:16-alpine","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:5432->5432/tcp"}},{{"ID":"b9c0d1e2f3a4","Names":"pgbouncer","Image":"pgbouncer:1.21","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:6432->6432/tcp"}},{{"ID":"c0d1e2f3a4b5","Names":"pg-exporter","Image":"prometheuscommunity/postgres-exporter:0.15","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:9187->9187/tcp"}}]}}
@@ -367,8 +383,9 @@ fn build_demo_container_cache() -> String {
 {{"alias":"pve-web-01","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"c6d7e8f9a0b1","Names":"nginx","Image":"nginx:1.25","State":"running","Status":"Up 20 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"d7e8f9a0b1c2","Names":"webapp","Image":"internal/webapp:1.8.3","State":"running","Status":"Up 20 days","Ports":"127.0.0.1:3000->3000/tcp"}},{{"ID":"e8f9a0b1c2d3","Names":"celery","Image":"internal/webapp:1.8.3","State":"running","Status":"Up 20 days","Ports":""}}]}}
 {{"alias":"aws-api-staging","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"f9a0b1c2d3e4","Names":"api","Image":"myteam/api:v4.1.0-rc2","State":"running","Status":"Up 2 days","Ports":"0.0.0.0:8080->8080/tcp"}},{{"ID":"a0b1c2d3e4f5","Names":"nginx","Image":"nginx:1.25-alpine","State":"running","Status":"Up 2 days","Ports":"0.0.0.0:443->443/tcp"}},{{"ID":"b1c2d3e4f5a6","Names":"datadog-agent","Image":"datadog/agent:7","State":"running","Status":"Up 2 days","Ports":""}},{{"ID":"c2d3e4f5a6b7","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 2 days","Ports":"127.0.0.1:6379->6379/tcp"}}]}}
 {{"alias":"aws-batch-us","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"d3e4f5a6b7c8","Names":"scheduler","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:8080->8080/tcp"}},{{"ID":"e4f5a6b7c8d9","Names":"worker-1","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":""}},{{"ID":"f5a6b7c8d9e0","Names":"worker-2","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":""}},{{"ID":"a6b7c8d9e0f1","Names":"rabbitmq","Image":"rabbitmq:3.13-management","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:5672->5672/tcp, 127.0.0.1:15672->15672/tcp"}},{{"ID":"b7c8d9e0f1a2","Names":"flower","Image":"mher/flower:2.0","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:5555->5555/tcp"}}]}}
-{{"alias":"gateway-vpn","timestamp":{},"runtime":"Docker","containers":[{{"ID":"c8d9e0f1a2b3","Names":"wireguard","Image":"linuxserver/wireguard:1.0","State":"running","Status":"Up 45 days","Ports":"0.0.0.0:51820->51820/udp"}},{{"ID":"d9e0f1a2b3c4","Names":"pihole","Image":"pihole/pihole:2024.07","State":"running","Status":"Up 45 days","Ports":"0.0.0.0:53->53/tcp, 0.0.0.0:53->53/udp, 127.0.0.1:8080->80/tcp"}},{{"ID":"e0f1a2b3c4d5","Names":"unbound","Image":"mvance/unbound:1.20","State":"running","Status":"Up 45 days","Ports":"127.0.0.1:5335->5335/tcp"}}]}}"#,
-        ts1, ts2, ts3, ts4, ts5, ts6, ts7,
+{{"alias":"gateway-vpn","timestamp":{},"runtime":"Docker","containers":[{{"ID":"c8d9e0f1a2b3","Names":"wireguard","Image":"linuxserver/wireguard:1.0","State":"running","Status":"Up 45 days","Ports":"0.0.0.0:51820->51820/udp"}},{{"ID":"d9e0f1a2b3c4","Names":"pihole","Image":"pihole/pihole:2024.07","State":"running","Status":"Up 45 days","Ports":"0.0.0.0:53->53/tcp, 0.0.0.0:53->53/udp, 127.0.0.1:8080->80/tcp"}},{{"ID":"e0f1a2b3c4d5","Names":"unbound","Image":"mvance/unbound:1.20","State":"running","Status":"Up 45 days","Ports":"127.0.0.1:5335->5335/tcp"}}]}}
+{{"alias":"podman-edge","timestamp":{},"runtime":"Podman","engine_version":"5.8.2","containers":[{{"ID":"a1b2c3d4e5f6","Names":"caddy","Image":"docker.io/library/caddy:2.8-alpine","State":"running","Status":"","Ports":"443->443/tcp"}},{{"ID":"b2c3d4e5f6a7","Names":"podman-api","Image":"docker.io/library/python:3.13-slim","State":"running","Status":"","Ports":"127.0.0.1:8000->8000/tcp"}},{{"ID":"c3d4e5f6a7b8","Names":"valkey","Image":"docker.io/valkey/valkey:8-alpine","State":"running","Status":"","Ports":"127.0.0.1:6379->6379/tcp"}},{{"ID":"d4e5f6a7b8c9","Names":"loki","Image":"docker.io/grafana/loki:3.2","State":"exited","Status":"","Ports":""}}]}}"#,
+        ts1, ts2, ts3, ts4, ts5, ts6, ts7, ts8,
     )
 }
 
@@ -420,8 +437,16 @@ fn seed_demo_inspect_cache(app: &mut App) {
                 _ if running => 0,
                 _ => 2,
             };
+            // The `loki` container on the podman-edge host is exited
+            // with code 137 (SIGKILL / OOM) so the state-glyph fallback
+            // path warns even though podman emits an empty Status.
+            let demo_exit_code = match c.names.as_str() {
+                _ if running => 0,
+                "loki" => 137,
+                _ => 1,
+            };
             let inspect = ContainerInspect {
-                exit_code: if running { 0 } else { 1 },
+                exit_code: demo_exit_code,
                 oom_killed: demo_oom_killed,
                 // Deterministic timestamps so the visual regression
                 // golden does not drift with wall-clock. Running
@@ -1119,6 +1144,7 @@ pub fn build_demo_app() -> App {
     // Ungrouped hosts
     app.ping.status.insert("bastion-ams".into(), reachable(7));
     app.ping.status.insert("gateway-vpn".into(), reachable(11));
+    app.ping.status.insert("podman-edge".into(), reachable(28));
     // ProxyJump hosts (normally skipped by pinger, forced reachable for demo)
     app.ping.status.insert("db-primary".into(), reachable(5));
     app.ping.status.insert("monitoring".into(), reachable(8));
@@ -2007,8 +2033,8 @@ mod tests {
     #[test]
     fn demo_app_has_expected_hosts() {
         let (app, _guard) = demo_app();
-        // 22 original + 2 do-personal hosts = 24
-        assert_eq!(app.hosts_state.list.len(), 24);
+        // 22 original + 2 do-personal + 1 podman-edge = 25
+        assert_eq!(app.hosts_state.list.len(), 25);
     }
 
     #[test]
@@ -2021,7 +2047,7 @@ mod tests {
     #[test]
     fn demo_app_has_history() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.history.entries.len(), 22);
+        assert_eq!(app.history.entries.len(), 23);
     }
 
     #[test]
@@ -2033,7 +2059,7 @@ mod tests {
     #[test]
     fn demo_app_has_containers() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.container_cache.len(), 7);
+        assert_eq!(app.container_cache.len(), 8);
         assert!(app.container_cache.contains_key("bastion-ams"));
         assert!(app.container_cache.contains_key("db-primary"));
         assert!(app.container_cache.contains_key("do-web-ams"));
@@ -2041,6 +2067,11 @@ mod tests {
         assert!(app.container_cache.contains_key("aws-api-staging"));
         assert!(app.container_cache.contains_key("aws-batch-us"));
         assert!(app.container_cache.contains_key("gateway-vpn"));
+        assert!(app.container_cache.contains_key("podman-edge"));
+        assert_eq!(
+            app.container_cache["podman-edge"].runtime,
+            crate::containers::ContainerRuntime::Podman
+        );
     }
 
     #[test]

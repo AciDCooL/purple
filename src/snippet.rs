@@ -819,14 +819,11 @@ pub fn run_snippet(
     }
 
     if capture {
-        let output = cmd
-            .output()
-            .map_err(|e| anyhow::anyhow!("Failed to run ssh for '{}': {}", alias, e))?;
-
+        let (status, stdout, stderr) = run_with_bounded_output(&mut cmd, alias)?;
         Ok(SnippetResult {
-            status: output.status,
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+            status,
+            stdout,
+            stderr,
         })
     } else {
         let status = cmd
@@ -839,6 +836,101 @@ pub fn run_snippet(
             stderr: String::new(),
         })
     }
+}
+
+/// Hard cap on stdout/stderr captured from an SSH child process.
+/// A hostile or malfunctioning remote can stream unbounded output and
+/// blow up purple's memory. 16 MB is far above any legitimate
+/// `docker inspect` / `docker logs --tail 200` / `ps -a` output (which
+/// peak at hundreds of KB) and below what would meaningfully stress
+/// the parse pipelines or terminal buffer.
+pub const SSH_OUTPUT_MAX_BYTES: usize = 16 * 1024 * 1024;
+
+/// Spawn a child with piped stdout/stderr and read each pipe with a
+/// hard byte cap. Once the cap is hit the remaining bytes are drained
+/// to a sink (so the child can exit cleanly) and a debug log records
+/// the truncation. Returns the captured payload as lossy-UTF8 Strings
+/// alongside the child's exit status.
+fn run_with_bounded_output(
+    cmd: &mut Command,
+    alias: &str,
+) -> anyhow::Result<(ExitStatus, String, String)> {
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to spawn ssh for '{}': {}", alias, e))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+
+    let alias_for_stdout = alias.to_string();
+    let stdout_handle = std::thread::spawn(move || match stdout {
+        Some(mut pipe) => {
+            read_bounded(&mut pipe, SSH_OUTPUT_MAX_BYTES, &alias_for_stdout, "stdout")
+        }
+        None => Vec::new(),
+    });
+    let alias_for_stderr = alias.to_string();
+    let stderr_handle = std::thread::spawn(move || match stderr {
+        Some(mut pipe) => {
+            read_bounded(&mut pipe, SSH_OUTPUT_MAX_BYTES, &alias_for_stderr, "stderr")
+        }
+        None => Vec::new(),
+    });
+
+    // Join the drain threads BEFORE waiting on the child. The threads
+    // own the pipe read-ends; when they finish (cap hit or EOF) the
+    // reader handle drops and closes its side of the pipe, which
+    // unblocks any pending write on the remote child. Waiting on the
+    // child first would deadlock the moment stdout exceeded the kernel
+    // pipe buffer (typically 64 KB on Linux): the child blocks on
+    // write, the parent blocks on wait, neither thread runs.
+    let stdout_bytes = stdout_handle.join().unwrap_or_default();
+    let stderr_bytes = stderr_handle.join().unwrap_or_default();
+    let status = child
+        .wait()
+        .map_err(|e| anyhow::anyhow!("ssh wait failed for '{}': {}", alias, e))?;
+
+    Ok((
+        status,
+        String::from_utf8_lossy(&stdout_bytes).to_string(),
+        String::from_utf8_lossy(&stderr_bytes).to_string(),
+    ))
+}
+
+fn read_bounded<R: std::io::Read>(
+    reader: &mut R,
+    max: usize,
+    alias: &str,
+    stream: &str,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 * 1024);
+    let mut chunk = [0u8; 8 * 1024];
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                if out.len() + n > max {
+                    let allowed = max.saturating_sub(out.len());
+                    out.extend_from_slice(&chunk[..allowed]);
+                    log::warn!(
+                        "[external] ssh {} for '{}' exceeded {} bytes; truncating remainder",
+                        stream,
+                        alias,
+                        max
+                    );
+                    // Drain remaining bytes so the child can exit cleanly
+                    // instead of blocking on a backpressured pipe.
+                    let _ = std::io::copy(reader, &mut std::io::sink());
+                    break;
+                }
+                out.extend_from_slice(&chunk[..n]);
+            }
+            Err(e) => {
+                log::debug!("[external] ssh {stream} read error for '{alias}': {e}");
+                break;
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]

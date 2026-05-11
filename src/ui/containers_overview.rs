@@ -40,7 +40,7 @@ const UPTIME_W: usize = 8;
 /// One renderable row in the containers overview. Public so the
 /// handler can resolve cursor-relative actions against the same
 /// sequence the UI renders.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ContainerRow {
     /// Full docker/podman container ID. Used by the handler to key the
     /// inspect cache and as the `<id>` argument to `docker inspect`.
@@ -95,7 +95,7 @@ fn current_unix_secs() -> u64 {
 /// only. `AlphaContainer` mode renders a flat container list with
 /// no headers. Mirrors `HostListItem::GroupHeader` from the hosts
 /// tab so the design conventions stay aligned across surfaces.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum ContainerListItem {
     HostHeader {
         alias: String,
@@ -129,7 +129,38 @@ impl ContainerListItem {
 /// `AlphaContainer` mode the list is flat with no headers (the
 /// container-name ordering would otherwise interleave hosts and the
 /// headers would be meaningless).
+///
+/// Memoized: the result is cached in `ContainersOverviewState.view_cache`
+/// keyed on a fingerprint of the inputs (sort_mode, search query,
+/// collapsed_hosts, per-host listing signature). The 24 call sites
+/// across handlers, jump and render hit this function multiple times
+/// per key event; on cache hit we skip the collect/sort/intersperse
+/// rebuild entirely. The cache stays correct without manual
+/// invalidates because every input that influences the output is part
+/// of the fingerprint.
 pub(crate) fn visible_items(app: &App) -> Vec<ContainerListItem> {
+    let fp = view_fingerprint(app);
+    // Take the shared borrow, extract a clone if the fingerprint matches,
+    // then DROP the borrow before any potential `borrow_mut()` path.
+    // Holding a `Ref<_>` across the mutable refill would panic at runtime
+    // because RefCell borrows are dynamically checked. Structuring as
+    // extract-then-drop guarantees the panic class is unreachable.
+    let cached = app
+        .containers_overview
+        .view_cache
+        .borrow()
+        .as_ref()
+        .filter(|(cached_fp, _)| *cached_fp == fp)
+        .map(|(_, items)| items.clone());
+    if let Some(items) = cached {
+        return items;
+    }
+    let items = build_visible_items(app);
+    *app.containers_overview.view_cache.borrow_mut() = Some((fp, items.clone()));
+    items
+}
+
+fn build_visible_items(app: &App) -> Vec<ContainerListItem> {
     let mut rows = collect_rows(app);
     sort_rows(&mut rows, app.containers_overview.sort_mode);
 
@@ -141,6 +172,38 @@ pub(crate) fn visible_items(app: &App) -> Vec<ContainerListItem> {
             rows.into_iter().map(ContainerListItem::Container).collect()
         }
     }
+}
+
+/// Cheap content fingerprint over every input that influences
+/// `visible_items`. Walks `container_cache` sorted by alias for a
+/// stable hash regardless of HashMap iteration order. Reads only
+/// (alias, timestamp, container_count) per host so cost is O(hosts)
+/// rather than O(containers).
+fn view_fingerprint(app: &App) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+
+    (app.containers_overview.sort_mode as u8).hash(&mut hasher);
+    app.search.query.as_deref().hash(&mut hasher);
+
+    let mut collapsed: Vec<&String> = app.containers_overview.collapsed_hosts.iter().collect();
+    collapsed.sort();
+    collapsed.len().hash(&mut hasher);
+    for c in collapsed {
+        c.hash(&mut hasher);
+    }
+
+    let mut aliases: Vec<&String> = app.container_cache.keys().collect();
+    aliases.sort();
+    aliases.len().hash(&mut hasher);
+    for alias in aliases {
+        let entry = &app.container_cache[alias];
+        alias.hash(&mut hasher);
+        entry.timestamp.hash(&mut hasher);
+        entry.containers.len().hash(&mut hasher);
+    }
+
+    hasher.finish()
 }
 
 /// Convenience: just the container rows, in render order, with
@@ -461,9 +524,16 @@ fn render_row<'a>(
     row: &'a ContainerRow,
     cols: &Columns,
     health: Option<&str>,
+    inspect_exit_code: Option<i32>,
     spinner_tick: u64,
 ) -> ListItem<'a> {
-    let (state_glyph, state_style) = state_glyph(&row.state, health, &row.status, spinner_tick);
+    let (state_glyph, state_style) = state_glyph(
+        &row.state,
+        health,
+        &row.status,
+        inspect_exit_code,
+        spinner_tick,
+    );
     let image = super::truncate(&row.image, cols.image);
 
     let mut spans: Vec<Span<'static>> = vec![
@@ -509,10 +579,19 @@ fn render_row<'a>(
 /// non-zero code uses the error glyph in warning tier; `dead` uses the
 /// error glyph in error tier; paused/restarting use the half-circle in
 /// warning tier; everything else falls back to the muted hollow circle.
+///
+/// `inspect_exit_code` is the optional ExitCode from a prior
+/// `container inspect` cache. Podman emits an empty `Status` so the
+/// docker-format `"Exited (N)"` parse fails; this fallback lets the
+/// glyph turn warning as soon as inspect data lands rather than waiting
+/// for the user to open the detail panel. Podman 3.x uses `"stopped"`
+/// where podman 5.x and docker use `"exited"`; both are treated the
+/// same here.
 fn state_glyph(
     state: &str,
     health: Option<&str>,
     status: &str,
+    inspect_exit_code: Option<i32>,
     spinner_tick: u64,
 ) -> (&'static str, ratatui::style::Style) {
     if is_running(state) {
@@ -524,10 +603,13 @@ fn state_glyph(
     }
     match state {
         "dead" => (design::ICON_ERROR, theme::error()),
-        "exited" => match parse_exit_code_from_status(status) {
-            Some(code) if code != 0 => (design::ICON_ERROR, theme::warning()),
-            _ => (design::ICON_STOPPED, theme::muted()),
-        },
+        "exited" | "stopped" => {
+            let exit_code = parse_exit_code_from_status(status).or(inspect_exit_code);
+            match exit_code {
+                Some(code) if code != 0 => (design::ICON_ERROR, theme::warning()),
+                _ => (design::ICON_STOPPED, theme::muted()),
+            }
+        }
         "paused" | "restarting" => (design::ICON_PAUSED, theme::warning()),
         _ => (design::ICON_STOPPED, theme::muted()),
     }
@@ -713,14 +795,18 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
                 // for this row. `None` when no inspect has landed yet
                 // (HEALTH cell will show `-`); the auto-fetch trigger
                 // populates it within a frame or two of selection.
-                let health = app
+                let inspect = app
                     .containers_overview
                     .inspect_cache
                     .entries
                     .get(&row.id)
-                    .and_then(|e| e.result.as_ref().ok())
-                    .and_then(|i| i.health.as_deref());
-                render_row(row, &cols, health, spinner_tick)
+                    .and_then(|e| e.result.as_ref().ok());
+                let health = inspect.and_then(|i| i.health.as_deref());
+                // Pass the inspected ExitCode through so the state glyph
+                // can warn on non-zero exits even when `Status` is empty
+                // (podman emits no status string).
+                let inspect_exit_code = inspect.map(|i| i.exit_code);
+                render_row(row, &cols, health, inspect_exit_code, spinner_tick)
             }
             ContainerListItem::HostHeader { alias, .. } => render_host_header_row(alias, content_w),
         })
@@ -1069,11 +1155,7 @@ fn build_host_detail_lines(
         let exit_nonzero = e
             .containers
             .iter()
-            .filter(|c| {
-                parse_exit_code_from_status(&c.status)
-                    .map(|code| code != 0)
-                    .unwrap_or(false)
-            })
+            .filter(|c| container_has_nonzero_exit(app, c))
             .count();
         if exit_nonzero > 0 {
             design::section_field_styled(
@@ -1133,11 +1215,9 @@ fn build_host_detail_lines(
         || inspect_signals.oom_count > 0
         || entry
             .map(|e| {
-                e.containers.iter().any(|c| {
-                    parse_exit_code_from_status(&c.status)
-                        .map(|code| code != 0)
-                        .unwrap_or(false)
-                })
+                e.containers
+                    .iter()
+                    .any(|c| container_has_nonzero_exit(app, c))
             })
             .unwrap_or(false);
     if attention_needed {
@@ -1166,11 +1246,7 @@ fn build_host_detail_lines(
             let bad_exit = e
                 .containers
                 .iter()
-                .filter(|c| {
-                    parse_exit_code_from_status(&c.status)
-                        .map(|code| code != 0)
-                        .unwrap_or(false)
-                })
+                .filter(|c| container_has_nonzero_exit(app, c))
                 .count();
             if bad_exit > 0 {
                 design::section_field_styled(
@@ -1488,6 +1564,28 @@ fn parse_exit_code_from_status(status: &str) -> Option<i32> {
     let after = &status[start + prefix.len()..];
     let end = after.find(')')?;
     after[..end].parse().ok()
+}
+
+/// True when the container exited with a non-zero code. First tries the
+/// docker `Status` string (`Exited (N)`); on podman where Status is empty,
+/// falls back to the inspect cache for the same container ID. Returns
+/// `false` when no exit signal is yet available (no Status pattern AND
+/// no cached inspect) so the user sees a clean state rather than a false
+/// warning until data lands.
+fn container_has_nonzero_exit(app: &App, c: &crate::containers::ContainerInfo) -> bool {
+    if let Some(code) = parse_exit_code_from_status(&c.status) {
+        return code != 0;
+    }
+    if c.state != "exited" && c.state != "stopped" {
+        return false;
+    }
+    app.containers_overview
+        .inspect_cache
+        .entries
+        .get(&c.id)
+        .and_then(|e| e.result.as_ref().ok())
+        .map(|i| i.exit_code != 0)
+        .unwrap_or(false)
 }
 
 #[derive(Default, Debug)]
@@ -2644,38 +2742,239 @@ mod tests {
 
     #[test]
     fn state_glyph_running_with_unhealthy_health_uses_error_tier() {
-        let (glyph, _) = state_glyph("running", Some("unhealthy"), "Up 1m", 0);
+        let (glyph, _) = state_glyph("running", Some("unhealthy"), "Up 1m", None, 0);
         assert_eq!(glyph, design::ICON_ONLINE);
     }
 
     #[test]
     fn state_glyph_dead_state_uses_error_glyph() {
-        let (glyph, _) = state_glyph("dead", None, "Dead", 0);
+        let (glyph, _) = state_glyph("dead", None, "Dead", None, 0);
         assert_eq!(glyph, design::ICON_ERROR);
     }
 
     #[test]
     fn state_glyph_exited_with_nonzero_code_uses_error_glyph() {
-        let (glyph, _) = state_glyph("exited", None, "Exited (137) 2h ago", 0);
+        let (glyph, _) = state_glyph("exited", None, "Exited (137) 2h ago", None, 0);
         assert_eq!(glyph, design::ICON_ERROR);
     }
 
     #[test]
     fn state_glyph_exited_with_zero_code_uses_hollow_circle() {
-        let (glyph, _) = state_glyph("exited", None, "Exited (0) 1m ago", 0);
+        let (glyph, _) = state_glyph("exited", None, "Exited (0) 1m ago", None, 0);
         assert_eq!(glyph, design::ICON_STOPPED);
     }
 
     #[test]
     fn state_glyph_paused_uses_half_circle() {
-        let (glyph, _) = state_glyph("paused", None, "Paused", 0);
+        let (glyph, _) = state_glyph("paused", None, "Paused", None, 0);
         assert_eq!(glyph, design::ICON_PAUSED);
     }
 
     #[test]
     fn state_glyph_running_no_health_pulses_default_dot() {
-        let (glyph, _) = state_glyph("running", None, "Up 5d", 0);
+        let (glyph, _) = state_glyph("running", None, "Up 5d", None, 0);
         assert_eq!(glyph, design::ICON_ONLINE);
+    }
+
+    #[test]
+    fn state_glyph_podman_stopped_treated_as_exited() {
+        // Podman 3.x uses State="stopped" where docker uses "exited".
+        // Both must take the exit-code branch.
+        let (glyph, _) = state_glyph("stopped", None, "", Some(137), 0);
+        assert_eq!(glyph, design::ICON_ERROR);
+        let (glyph, _) = state_glyph("stopped", None, "", Some(0), 0);
+        assert_eq!(glyph, design::ICON_STOPPED);
+    }
+
+    #[test]
+    fn state_glyph_podman_exited_empty_status_uses_inspect_exit_code() {
+        // Podman emits empty Status; parse_exit_code_from_status returns
+        // None. The cached inspect ExitCode is the fallback signal.
+        let (glyph, _) = state_glyph("exited", None, "", Some(137), 0);
+        assert_eq!(glyph, design::ICON_ERROR);
+        let (glyph, _) = state_glyph("exited", None, "", Some(0), 0);
+        assert_eq!(glyph, design::ICON_STOPPED);
+        let (glyph, _) = state_glyph("exited", None, "", None, 0);
+        assert_eq!(glyph, design::ICON_STOPPED);
+    }
+
+    // -- container_has_nonzero_exit ----------------------------------
+    // Gates the ATTENTION card non-zero exit highlight. Only reachable
+    // via render in production; tests document all five branches so a
+    // refactor cannot silently drop a podman host from the warning set.
+
+    fn make_container_info(
+        id: &str,
+        state: &str,
+        status: &str,
+    ) -> crate::containers::ContainerInfo {
+        crate::containers::ContainerInfo {
+            id: id.to_string(),
+            names: "svc".to_string(),
+            image: "img".to_string(),
+            state: state.to_string(),
+            status: status.to_string(),
+            ports: String::new(),
+        }
+    }
+
+    fn seed_inspect_exit_code(app: &mut App, id: &str, exit_code: i32) {
+        use crate::app::InspectCacheEntry;
+        app.containers_overview.inspect_cache.entries.insert(
+            id.to_string(),
+            InspectCacheEntry {
+                timestamp: 0,
+                result: Ok(crate::containers::ContainerInspect {
+                    exit_code,
+                    ..Default::default()
+                }),
+            },
+        );
+    }
+
+    #[test]
+    fn container_has_nonzero_exit_docker_status_nonzero() {
+        let app = app_with_cache(HashMap::new());
+        let c = make_container_info("c1", "exited", "Exited (137) 2h ago");
+        assert!(container_has_nonzero_exit(&app, &c));
+    }
+
+    #[test]
+    fn container_has_nonzero_exit_docker_status_zero() {
+        let app = app_with_cache(HashMap::new());
+        let c = make_container_info("c2", "exited", "Exited (0) 1m ago");
+        assert!(!container_has_nonzero_exit(&app, &c));
+    }
+
+    #[test]
+    fn container_has_nonzero_exit_podman_empty_status_with_inspect_nonzero() {
+        let mut app = app_with_cache(HashMap::new());
+        app.containers_overview.inspect_cache.entries.clear();
+        seed_inspect_exit_code(&mut app, "c3", 137);
+        let c = make_container_info("c3", "exited", "");
+        assert!(container_has_nonzero_exit(&app, &c));
+    }
+
+    #[test]
+    fn container_has_nonzero_exit_podman_empty_status_no_inspect_is_false() {
+        // No false alarm when we have no exit signal yet.
+        let mut app = app_with_cache(HashMap::new());
+        app.containers_overview.inspect_cache.entries.clear();
+        let c = make_container_info("c4", "exited", "");
+        assert!(!container_has_nonzero_exit(&app, &c));
+    }
+
+    #[test]
+    fn container_has_nonzero_exit_running_state_blocks_inspect_fallback() {
+        // A stale inspect saying exit=137 must not flag a currently
+        // running container as failed.
+        let mut app = app_with_cache(HashMap::new());
+        app.containers_overview.inspect_cache.entries.clear();
+        seed_inspect_exit_code(&mut app, "c5", 137);
+        let c = make_container_info("c5", "running", "");
+        assert!(!container_has_nonzero_exit(&app, &c));
+    }
+
+    #[test]
+    fn container_has_nonzero_exit_podman3_stopped_state_uses_fallback() {
+        // Podman 3.x uses state="stopped" where podman 5.x / docker use
+        // "exited". Both must accept the inspect fallback.
+        let mut app = app_with_cache(HashMap::new());
+        app.containers_overview.inspect_cache.entries.clear();
+        seed_inspect_exit_code(&mut app, "c6", 1);
+        let c = make_container_info("c6", "stopped", "");
+        assert!(container_has_nonzero_exit(&app, &c));
+    }
+
+    // -- view_cache + view_fingerprint --------------------------------
+    // Verifies the memoization layer in visible_items: first call
+    // populates, identical state hits cache, every fingerprint input
+    // mutation busts the cache.
+
+    fn cached_fp(app: &App) -> Option<u64> {
+        app.containers_overview
+            .view_cache
+            .borrow()
+            .as_ref()
+            .map(|(fp, _)| *fp)
+    }
+
+    #[test]
+    fn view_cache_starts_empty_and_populates_on_first_call() {
+        let cache = cache_with(&[("host1", &[("id1", "web", "nginx", "running")])]);
+        let app = app_with_cache(cache);
+        // Demo build_demo_app pre-populates and the assignment of a new
+        // cache map does NOT clear view_cache. Reset it for the test so
+        // we can assert the populate-from-empty transition.
+        *app.containers_overview.view_cache.borrow_mut() = None;
+
+        assert!(cached_fp(&app).is_none());
+        let _ = visible_rows(&app);
+        assert!(cached_fp(&app).is_some());
+    }
+
+    #[test]
+    fn view_cache_hits_on_identical_state() {
+        let cache = cache_with(&[("h", &[("i", "a", "img", "running")])]);
+        let app = app_with_cache(cache);
+        *app.containers_overview.view_cache.borrow_mut() = None;
+        let rows1 = visible_rows(&app);
+        let fp1 = cached_fp(&app).unwrap();
+        let rows2 = visible_rows(&app);
+        let fp2 = cached_fp(&app).unwrap();
+        assert_eq!(fp1, fp2);
+        assert_eq!(rows1, rows2);
+    }
+
+    #[test]
+    fn view_cache_invalidates_on_sort_mode_change() {
+        let cache = cache_with(&[("h", &[("i", "a", "img", "running")])]);
+        let mut app = app_with_cache(cache);
+        *app.containers_overview.view_cache.borrow_mut() = None;
+        let _ = visible_rows(&app);
+        let fp_before = cached_fp(&app).unwrap();
+        app.containers_overview.sort_mode = ContainersSortMode::AlphaContainer;
+        let _ = visible_rows(&app);
+        assert_ne!(fp_before, cached_fp(&app).unwrap());
+    }
+
+    #[test]
+    fn view_cache_invalidates_on_search_query_change() {
+        let cache = cache_with(&[("h", &[("i", "web", "img", "running")])]);
+        let mut app = app_with_cache(cache);
+        *app.containers_overview.view_cache.borrow_mut() = None;
+        let _ = visible_rows(&app);
+        let fp_before = cached_fp(&app).unwrap();
+        app.search.query = Some("web".to_string());
+        let _ = visible_rows(&app);
+        assert_ne!(fp_before, cached_fp(&app).unwrap());
+    }
+
+    #[test]
+    fn view_cache_invalidates_on_container_cache_timestamp_bump() {
+        let mut app = app_with_cache(cache_with(&[("h", &[("i", "web", "img", "running")])]));
+        *app.containers_overview.view_cache.borrow_mut() = None;
+        let _ = visible_rows(&app);
+        let fp_before = cached_fp(&app).unwrap();
+        if let Some(entry) = app.container_cache.get_mut("h") {
+            entry.timestamp += 1;
+        }
+        let _ = visible_rows(&app);
+        assert_ne!(fp_before, cached_fp(&app).unwrap());
+    }
+
+    #[test]
+    fn view_cache_invalidates_on_collapsed_hosts_toggle() {
+        let cache = cache_with(&[("h", &[("i", "web", "img", "running")])]);
+        let mut app = app_with_cache(cache);
+        *app.containers_overview.view_cache.borrow_mut() = None;
+        let _ = visible_rows(&app);
+        let fp_before = cached_fp(&app).unwrap();
+        app.containers_overview
+            .collapsed_hosts
+            .insert("h".to_string());
+        let _ = visible_rows(&app);
+        assert_ne!(fp_before, cached_fp(&app).unwrap());
     }
 
     #[test]

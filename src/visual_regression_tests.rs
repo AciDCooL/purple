@@ -442,6 +442,67 @@ fn visual_containers_overview_with_detail() {
     assert_golden("containers_overview_with_detail", &actual);
 }
 
+/// Podman snapshot. Cursor parked on the podman-edge group so the
+/// detail panel shows the host summary for the only podman host in
+/// the demo. Pins the empty-Status rendering and the inspect-driven
+/// state-glyph fallback (loki exited with code 137 via inspect cache
+/// only, since podman emits no Status string).
+#[test]
+fn visual_containers_overview_podman_host_detail() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    let items = crate::ui::containers_overview::visible_items(&app);
+    let podman_header = items
+        .iter()
+        .position(|i| match i {
+            crate::ui::containers_overview::ContainerListItem::HostHeader { alias, .. } => {
+                alias == "podman-edge"
+            }
+            _ => false,
+        })
+        .expect("podman-edge header in demo");
+    app.ui.containers_overview_state.select(Some(podman_header));
+    let backend = TestBackend::new(200, 60);
+    let mut terminal = Terminal::new(backend).expect("create terminal");
+    let mut anim = AnimationState::default();
+    terminal
+        .draw(|frame| ui::render(frame, &mut app, &mut anim))
+        .expect("render frame");
+    let buf = terminal.backend().buffer().clone();
+    let actual = serialize_buffer(&buf);
+    assert_golden("containers_overview_podman_host_detail", &actual);
+}
+
+/// Sibling of the host-header variant: cursor parked on a running
+/// podman container row so the detail panel shows the per-container
+/// card with the docker.io/library/ image and empty docker-style
+/// Status synthesized into the lower-case state label.
+#[test]
+fn visual_containers_overview_podman_container_detail() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    let items = crate::ui::containers_overview::visible_items(&app);
+    let caddy_row = items
+        .iter()
+        .position(|i| match i.as_container() {
+            Some(row) => row.alias == "podman-edge" && row.name == "caddy",
+            None => false,
+        })
+        .expect("podman-edge/caddy in demo");
+    app.ui.containers_overview_state.select(Some(caddy_row));
+    let backend = TestBackend::new(200, 60);
+    let mut terminal = Terminal::new(backend).expect("create terminal");
+    let mut anim = AnimationState::default();
+    terminal
+        .draw(|frame| ui::render(frame, &mut app, &mut anim))
+        .expect("render frame");
+    let buf = terminal.backend().buffer().clone();
+    let actual = serialize_buffer(&buf);
+    assert_golden("containers_overview_podman_container_detail", &actual);
+}
+
 /// Sibling of `visual_containers_overview_with_detail`: cursor parked
 /// on the first host-divider row so the detail panel renders the
 /// per-host summary (running/exited/total, runtime, last sync, fold

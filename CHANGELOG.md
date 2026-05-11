@@ -1,3 +1,13 @@
+## 3.10.1 - 2026-05-11
+
+- feat: Cleaner Podman fleets, snappier containers, safer exec.
+- fix: Podman 3.x and 5.x JSON parses across the board. Array `Names`, array `Ports`, the docker-shim runtime relabel and Podman 3.x's `OomKilled` field all land in the same columns Docker already uses.
+- fix: A non-zero exit lights up the row and the ATTENTION card on Podman too. The state glyph turns warning when inspect reports the code, even with an empty Status string.
+- feat: SSH command output caps at 16 MB. A runaway remote can no longer balloon purple's memory or freeze a refresh while a snippet streams.
+- feat: The containers tab paints sooner on big fleets. The row build is memoized, so sort, search and collapse stay smooth past a hundred hosts.
+- change: Container exec validates every container ID before it spawns ssh. Future entry points (MCP, jump-bar paste) cannot smuggle a shell-meta character through.
+- fix: A warning toast no longer waits behind a held success message. The warning takes the slot the moment it lands.
+
 ## 3.10.0 - 2026-05-10
 
 - feat: Smoother prompts, sharper logs, easier troubleshooting.

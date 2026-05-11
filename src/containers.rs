@@ -12,34 +12,186 @@ use crate::ssh_context::{OwnedSshContext, SshContext};
 // ---------------------------------------------------------------------------
 
 /// Metadata for a single container (from `docker ps -a` / `podman ps -a`).
+///
+/// Deserialization is tolerant of both docker and podman JSON shapes.
+/// Docker uses `ID` plus scalar `Names`/`Ports`; podman uses `Id` plus
+/// `Names` as an array and `Ports` as an array of objects. The custom
+/// helpers below coerce both into the docker-shaped scalar fields the
+/// rest of purple (UI, cache, MCP) already understands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContainerInfo {
-    #[serde(rename = "ID")]
+    #[serde(rename = "ID", alias = "Id")]
     pub id: String,
-    #[serde(rename = "Names")]
+    #[serde(rename = "Names", deserialize_with = "deserialize_names_field")]
     pub names: String,
     #[serde(rename = "Image")]
     pub image: String,
     #[serde(rename = "State")]
     pub state: String,
-    #[serde(rename = "Status")]
+    #[serde(rename = "Status", default)]
     pub status: String,
-    #[serde(rename = "Ports")]
+    // `default` covers the missing-key case directly via Default::default()
+    // and bypasses `deserialize_with`. The custom deserializer therefore
+    // only runs when `Ports` is present (scalar, array or explicit null).
+    #[serde(
+        rename = "Ports",
+        deserialize_with = "deserialize_ports_field",
+        default
+    )]
     pub ports: String,
 }
 
-/// Parse NDJSON output from `docker ps --format '{{json .}}'`.
-/// Invalid lines are silently ignored (MOTD lines, blank lines, etc.).
+/// Accept `Names` as either a scalar string (docker) or an array of
+/// strings (podman). Multiple names join with `,` to match docker's
+/// own comma-joined rendering. Unexpected shapes (number, object,
+/// null) propagate as serde errors; `parse_container_ps` drops the
+/// offending row via `.ok()`, which is the right behaviour for a row
+/// that has lost its identity.
+fn deserialize_names_field<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum NamesField {
+        Scalar(String),
+        Array(Vec<String>),
+    }
+    match NamesField::deserialize(deserializer)? {
+        NamesField::Scalar(s) => Ok(s),
+        NamesField::Array(arr) => Ok(arr.join(",")),
+    }
+}
+
+/// Accept `Ports` as either a scalar string (docker) or an array of
+/// port objects (podman). Podman entries are rendered into the same
+/// `host_ip:host_port->container_port/proto` form docker emits, so
+/// downstream UI rendering stays uniform. An explicit JSON null is
+/// tolerated and produces an empty string: podman uses `null` to mean
+/// "no ports published", which is semantically valid and the row must
+/// remain visible.
+fn deserialize_ports_field<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum PortsField {
+        Scalar(String),
+        Array(Vec<PodmanPort>),
+    }
+    match Option::<PortsField>::deserialize(deserializer)? {
+        Some(PortsField::Scalar(s)) => Ok(s),
+        Some(PortsField::Array(arr)) => Ok(format_podman_ports(&arr)),
+        None => Ok(String::new()),
+    }
+}
+
+#[derive(Deserialize)]
+struct PodmanPort {
+    #[serde(default)]
+    host_ip: String,
+    #[serde(default)]
+    container_port: u32,
+    #[serde(default)]
+    host_port: u32,
+    #[serde(default = "podman_port_default_range")]
+    range: u32,
+    #[serde(default)]
+    protocol: String,
+}
+
+fn podman_port_default_range() -> u32 {
+    1
+}
+
+fn format_podman_ports(ports: &[PodmanPort]) -> String {
+    // ~24 chars per typical port entry. Pre-allocating avoids the
+    // intermediate Vec<String> + repeated re-allocations that the prior
+    // map/collect/join chain produced for compose stacks with many
+    // published ports.
+    let mut out = String::with_capacity(ports.len().saturating_mul(24));
+    for (i, p) in ports.iter().enumerate() {
+        if i > 0 {
+            out.push_str(", ");
+        }
+        write_podman_port(p, &mut out);
+    }
+    out
+}
+
+fn write_podman_port(p: &PodmanPort, out: &mut String) {
+    use std::fmt::Write as _;
+    let protocol = if p.protocol.is_empty() {
+        "tcp"
+    } else {
+        p.protocol.as_str()
+    };
+    if p.host_port != 0 {
+        // Podman emits an empty `host_ip` for both IPv4 wildcard and IPv6
+        // wildcard binds. Omit the prefix when unknown rather than
+        // mis-claim IPv4. Concrete addresses (e.g. 127.0.0.1, ::1) render
+        // verbatim with the docker `addr:port->...` form.
+        if !p.host_ip.is_empty() {
+            let _ = write!(out, "{}:", p.host_ip);
+        }
+        if p.range > 1 {
+            let _ = write!(
+                out,
+                "{}-{}->",
+                p.host_port,
+                p.host_port.saturating_add(p.range.saturating_sub(1))
+            );
+        } else {
+            let _ = write!(out, "{}->", p.host_port);
+        }
+    }
+    if p.range > 1 {
+        let _ = write!(
+            out,
+            "{}-{}",
+            p.container_port,
+            p.container_port.saturating_add(p.range.saturating_sub(1))
+        );
+    } else {
+        let _ = write!(out, "{}", p.container_port);
+    }
+    let _ = write!(out, "/{protocol}");
+}
+
+/// Try to parse one NDJSON line into `ContainerInfo`. Returns `None`
+/// for blank/non-JSON lines (MOTD/banner) without logging. JSON-shaped
+/// lines that fail to match the schema log at debug level so missing
+/// containers can be correlated to a concrete parse error rather than
+/// guessed from a shrunken list.
+fn try_parse_container_line(trimmed: &str) -> Option<ContainerInfo> {
+    if trimmed.is_empty() {
+        return None;
+    }
+    match serde_json::from_str(trimmed) {
+        Ok(c) => Some(c),
+        Err(e) if trimmed.starts_with('{') => {
+            log::debug!(
+                "[external] container parse: dropped JSON line: {} (err: {})",
+                &trimmed[..trimmed.len().min(120)],
+                e
+            );
+            None
+        }
+        Err(_) => None,
+    }
+}
+
+/// Parse NDJSON output from `docker ps --format '{{json .}}'` or
+/// `podman ps --format '{{json .}}'`. Used by tests and the public
+/// crate API exposed via `lib.rs`; the live SSH path streams through
+/// `parse_container_output` directly, so the binary build sees this
+/// helper as unused and the lint must be silenced.
+#[allow(dead_code)]
 pub fn parse_container_ps(output: &str) -> Vec<ContainerInfo> {
     output
         .lines()
-        .filter_map(|line| {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-            serde_json::from_str(trimmed).ok()
-        })
+        .filter_map(|line| try_parse_container_line(line.trim()))
         .collect()
 }
 
@@ -213,13 +365,17 @@ pub fn parse_container_output(
         },
     };
 
-    let mut listing_buf = String::new();
     // Bound the version capture to the first non-empty post-sentinel line.
     // A trailing logout banner or MOTD after `docker version` would
     // otherwise concat into the cached engine_version and surface as
     // "25.0.3\n-- session closed --" in the Runtime field.
     let mut engine_version: Option<String> = None;
     let mut after_engine = false;
+    let mut containers: Vec<ContainerInfo> = Vec::new();
+    // Stream-parse each NDJSON line during the sentinel sweep so we never
+    // build an intermediate copy of the listing block. At 1000 containers
+    // that intermediate buffer would cost ~300 KB and an extra `.lines()`
+    // walk; this loop is O(lines) with zero auxiliary allocation.
     for line in output.lines() {
         let trimmed = line.trim();
         if trimmed == "##purple:engine##" {
@@ -233,16 +389,57 @@ pub fn parse_container_output(
             if !trimmed.is_empty() && engine_version.is_none() {
                 engine_version = Some(trimmed.to_string());
             }
-        } else {
-            listing_buf.push_str(line);
-            listing_buf.push('\n');
+            continue;
+        }
+        if let Some(c) = try_parse_container_line(trimmed) {
+            containers.push(c);
         }
     }
+
+    // Fedora CoreOS, podman-machine and other distros symlink `docker` to
+    // `podman`. Detection picks the docker branch but the JSON shape is
+    // pure podman (array `Names`, lowercase `Id`). When that happens we
+    // relabel the runtime so downstream consumers (MCP runtime field, host
+    // detail label, sort/filter by runtime) match reality.
+    let runtime = if matches!(runtime, ContainerRuntime::Docker) && looks_like_podman(output) {
+        log::debug!(
+            "[external] container detection: docker sentinel emitted podman-shaped JSON, relabeling runtime to Podman"
+        );
+        ContainerRuntime::Podman
+    } else {
+        runtime
+    };
+
+    log::debug!(
+        "[external] container listing parsed: runtime={:?} version={:?} containers={}",
+        runtime,
+        engine_version,
+        containers.len()
+    );
     Ok(ContainerListing {
         runtime,
         engine_version,
-        containers: parse_container_ps(&listing_buf),
+        containers,
     })
+}
+
+/// Heuristic: does the raw `ps` output look like podman JSON?
+/// Podman emits `"Names":[` (array) and `"Id":` (lowercase d) for every row.
+/// Docker emits `"Names":"` (string) and `"ID":` (uppercase D). We sample the
+/// first JSON-shaped non-sentinel line. The check is fast (substring scan)
+/// and only matters when the docker sentinel was emitted by a podman shim.
+/// Accepts both `"Names":[` and `"Names": [` (pretty-printed) so handwritten
+/// test fixtures and any intermediate JSON formatter cannot defeat the
+/// detector silently.
+fn looks_like_podman(output: &str) -> bool {
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("##purple:") || !trimmed.starts_with('{') {
+            continue;
+        }
+        return trimmed.contains("\"Names\":[") || trimmed.contains("\"Names\": [");
+    }
+    false
 }
 
 // ---------------------------------------------------------------------------
@@ -534,7 +731,14 @@ pub fn parse_container_inspect(output: &str) -> Result<ContainerInspect, String>
     let network_settings = &entry["NetworkSettings"];
 
     let exit_code = state["ExitCode"].as_i64().unwrap_or(0) as i32;
-    let oom_killed = state["OOMKilled"].as_bool().unwrap_or(false);
+    // Podman 5.x and docker both emit `OOMKilled`. Podman 3.x (still the
+    // packaged default on Ubuntu 22.04 LTS) emits `OomKilled`. Try both so
+    // OOM-killed containers surface in the ATTENTION card regardless of
+    // remote runtime version.
+    let oom_killed = state["OOMKilled"]
+        .as_bool()
+        .or_else(|| state["OomKilled"].as_bool())
+        .unwrap_or(false);
     let started_at = state["StartedAt"].as_str().unwrap_or("").to_string();
     let finished_at = state["FinishedAt"].as_str().unwrap_or("").to_string();
     let health = state

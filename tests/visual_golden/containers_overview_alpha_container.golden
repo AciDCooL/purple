@@ -1,17 +1,19 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ 30 ──────────────────────────────────────────────────────────────────────────────────────────────╮
+╭ 34 ──────────────────────────────────────────────────────────────────────────────────────────────╮
 │     HOST               NAME ▾              IMAGE                                         UPTIME  │
 │ ──────────────────────────────────────────────────────────────────────────────────────────────── │
 │ ▌ ● aws-api-staging    api                 myteam/api:v4.1.0-rc2                             2d  │
 │   ● do-web-ams         app                 myapp:3.2.1                                       8d  │
 │   ● bastion-ams        app-backend         myapp:v2.14.1                                    12d  │
+│   ● podman-edge        caddy               docker.io/library/caddy:2.8-alpine                 -  │
 │   ● pve-web-01         celery              internal/webapp:1.8.3                            20d  │
 │   ○ bastion-ams        certbot             certbot/certbot:v2.7                               -  │
 │   ● aws-api-staging    datadog-agent       datadog/agent:7                                   2d  │
 │   ● aws-batch-us       flower              mher/flower:2.0                                  14d  │
 │   ● bastion-ams        grafana             grafana/grafana:10.2                              5d  │
+│   ✖ podman-edge        loki                docker.io/grafana/loki:3.2                         -  │
 │   ● aws-api-staging    nginx               nginx:1.25-alpine                                 2d  │
 │   ● do-web-ams         nginx               nginx:1.25                                        8d  │
 │   ● pve-web-01         nginx               nginx:1.25                                       20d  │
@@ -19,13 +21,11 @@
 │   ● db-primary         pg-exporter         prometheuscommunity/postgres-exporter:0…         30d  │
 │   ● db-primary         pgbouncer           pgbouncer:1.21                                   30d  │
 │   ● gateway-vpn        pihole              pihole/pihole:2024.07                            45d  │
+│   ● podman-edge        podman-api          docker.io/library/python:3.13-slim                 -  │
 │   ● bastion-ams        postgres            postgres:16-alpine                               12d  │
 │   ● db-primary         postgres-primary    postgres:16-alpine                               30d  │
 │   ● bastion-ams        prometheus          prom/prometheus:v2.48                             5d  │
 │   ● aws-batch-us       rabbitmq            rabbitmq:3.13-management                         14d  │
-│   ● aws-api-staging    redis               redis:7-alpine                                    2d  │
-│   ● bastion-ams        redis               redis:7-alpine                                   12d  │
-│   ● do-web-ams         redis               redis:7-alpine                                    8d  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  shell    /  search    l  logs    v  compact    :  jump                               ?  more
 ---STYLES---
@@ -892,8 +892,8 @@
 (96,9) fg=Reset bg=Reset mod=DIM
 (99,9) fg=Reset bg=Reset mod=DIM
 (0,10) fg=Reset bg=Reset mod=DIM
-(4,10) fg=Reset bg=Reset mod=DIM
-(5,10) fg=Reset bg=Reset mod=DIM
+(4,10) fg=Green bg=Reset mod=-
+(5,10) fg=Green bg=Reset mod=-
 (6,10) fg=Reset bg=Reset mod=BOLD
 (7,10) fg=Reset bg=Reset mod=BOLD
 (8,10) fg=Reset bg=Reset mod=BOLD
@@ -975,8 +975,8 @@
 (96,10) fg=Reset bg=Reset mod=DIM
 (99,10) fg=Reset bg=Reset mod=DIM
 (0,11) fg=Reset bg=Reset mod=DIM
-(4,11) fg=Green bg=Reset mod=-
-(5,11) fg=Green bg=Reset mod=-
+(4,11) fg=Reset bg=Reset mod=DIM
+(5,11) fg=Reset bg=Reset mod=DIM
 (6,11) fg=Reset bg=Reset mod=BOLD
 (7,11) fg=Reset bg=Reset mod=BOLD
 (8,11) fg=Reset bg=Reset mod=BOLD
@@ -1307,8 +1307,8 @@
 (96,14) fg=Reset bg=Reset mod=DIM
 (99,14) fg=Reset bg=Reset mod=DIM
 (0,15) fg=Reset bg=Reset mod=DIM
-(4,15) fg=Green bg=Reset mod=-
-(5,15) fg=Green bg=Reset mod=-
+(4,15) fg=Yellow bg=Reset mod=BOLD
+(5,15) fg=Yellow bg=Reset mod=BOLD
 (6,15) fg=Reset bg=Reset mod=BOLD
 (7,15) fg=Reset bg=Reset mod=BOLD
 (8,15) fg=Reset bg=Reset mod=BOLD

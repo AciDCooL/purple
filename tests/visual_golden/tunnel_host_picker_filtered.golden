@@ -9,10 +9,10 @@
 │   ○ db-primary             5432 → localhost:5432                           —                 1h  │
 │   ○ db-primary             9090 → localhost:9090                           —                 1h  │
 │   ○ monitoring             3000 → localhost:3000                           —                 2h  │
-│   ○ pve-db-01     ╭ Add Tunnel › Select Host (3 of 24) ──────────────────────╮              16h  │
-│   ○ pve-redis     │  /db█                                                    │              18h  │
-│   ○ pve-monitor   │ ─────────────────────────────────────────────────────────│              20h  │
-│   ○ pve-monitor   │  db-primary  10.30.1.5                                   │              20h  │
+│   ○ pve-db-01     ╭ Add Tunnel › Select Host (3 of 25) ──────────────────────╮              17h  │
+│   ○ pve-redis     │  /db█                                                    │              19h  │
+│   ○ pve-monitor   │ ─────────────────────────────────────────────────────────│              21h  │
+│   ○ pve-monitor   │  db-primary  10.30.1.5                                   │              21h  │
 │   ○ do-work-stagin│  pve-db-01  192.168.1.30                                 │                —  │
 │                   │  pve-db-02  192.168.1.31                                 │                   │
 │                   ╰──────────────────────────────────────────────────────────╯                   │

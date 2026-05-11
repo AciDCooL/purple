@@ -1,31 +1,31 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ 24 ── ●16 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
+╭ 25 ── ●17 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   ADDRESS                         TAGS                            LAST▾ │
 │──────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌  ● bastion-ams            140.82.121.3 ⇄                  production vpn                   <1m  │
 │   ● db-primary             10.30.1.5:5433 ↗ ⇄              production database               1h  │
 │   ● moni╭ id_ed25519 ──────────────────────────────────────────────────────────────────╮     2h  │
 │   ● gate│                                                                              │     3h  │
-│   ● aws-│  Type                  ED25519 256                                           │     4h  │
+│   ● podm│  Type                  ED25519 256                                           │     4h  │
 │   ● aws-│  Fingerprint           SHA256:dGVzdGRlbW9rZXlmb3JwdXJwbGVzc2g                │     5h  │
 │   ● aws-│  Comment               ops@bastion                                           │     6h  │
 │   ● aws-│  Path                  ~/.ssh/id_ed25519                                     │     7h  │
 │   ● aws-│                                                                              │     8h  │
-│   ● pve-│  Linked Hosts                                                                │    14h  │
+│   ● aws-│  Linked Hosts                                                                │     9h  │
 │   ● pve-│  ────────────────────────                                                    │    15h  │
 │   ● pve-│  bastion-ams    -> 140.82.121.3                                              │    16h  │
 │   ● pve-│  aws-api-prod   -> 52.47.100.23                                              │    17h  │
 │   ● pve-│  aws-api-staging -> 52.47.100.24                                             │    18h  │
 │   ● pve-│                                                                              │    19h  │
 │   ● pve-╰──────────────────────────────────────────────────────────────────────────────╯    20h  │
-│   ○ do-w Esc  close                                                                           -  │
+│   ● pve- Esc  close                                                                         21h  │
+│   ○ do-work-web-ams        104.248.38.91                   production web digitalocean        -  │
 │   ○ do-work-staging-ams    104.248.38.92 ⇄                 staging web digitalocean           -  │
 │   ○ do-work-worker-ams     104.248.38.93                   worker digitalocean                -  │
 │   ○ do-work-ci-runner      104.248.38.94 ↗                 ci digitalocean                    -  │
 │   ○ do-personal-blog       167.99.42.10                    personal web digitalocean          -  │
-│   ○ do-personal-mail       167.99.42.11                    personal mail digitalocean         -  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---

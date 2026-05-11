@@ -1,31 +1,31 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ 24 ── ●16 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
+╭ 25 ── ●17 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   ADDRESS                         TAGS                            LAST▾ │
 │──────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌  ● bastion-ams            140.82.121.3 ⇄                  production vpn                   <1m  │
 │   ● db-primary             10.30.1.5:5433 ↗ ⇄              production database               1h  │
 │   ● monitoring             10.30.2.10 ↗ ⇄                  production monitoring             2h  │
 │   ● gateway-vpn            185.199.108.5                   infra vpn                         3h  │
-│   ● aws-api-prod           52.47.100.23 ↗                  production api aws                4h  │
-│   ● aws-api-s╭ Add a 2nd Hetzner config ──────────────────────────────────────────╮          5h  │
-│   ● aws-worke│                                                                    │          6h  │
-│   ● aws-batch├─ Name for your current config ─────────────────────────────────────┤          7h  │
-│   ● aws-ml-eu│ default                                                            │          8h  │
-│   ● pve-web-0├─ Name for the new config ──────────────────────────────────────────┤         14h  │
+│   ● podman-edge            10.20.30.40                     edge podman                       4h  │
+│   ● aws-api-p╭ Add a 2nd Hetzner config ──────────────────────────────────────────╮          5h  │
+│   ● aws-api-s│                                                                    │          6h  │
+│   ● aws-worke├─ Name for your current config ─────────────────────────────────────┤          7h  │
+│   ● aws-batch│ default                                                            │          8h  │
+│   ● aws-ml-eu├─ Name for the new config ──────────────────────────────────────────┤          9h  │
 │   ● pve-web-0│                                                                    │         15h  │
-│   ● pve-db-01│                                                                    │x        16h  │
-│   ● pve-db-02╰────────────────────────────────────────────────────────────────────╯x        17h  │
-│   ● pve-redis Enter  save    Tab  next    Esc  cancel                                       18h  │
-│   ● pve-mail               192.168.1.50                    mail internal proxmox            19h  │
-│   ● pve-monitor            192.168.1.60 ⇄                  monitoring internal proxmox      20h  │
+│   ● pve-web-0│                                                                    │         16h  │
+│   ● pve-db-01╰────────────────────────────────────────────────────────────────────╯x        17h  │
+│   ● pve-db-02 Enter  save    Tab  next    Esc  cancel                              x        18h  │
+│   ● pve-redis              192.168.1.40 ⇄                  cache internal proxmox           19h  │
+│   ● pve-mail               192.168.1.50                    mail internal proxmox            20h  │
+│   ● pve-monitor            192.168.1.60 ⇄                  monitoring internal proxmox      21h  │
 │   ○ do-work-web-ams        104.248.38.91                   production web digitalocean        -  │
 │   ○ do-work-staging-ams    104.248.38.92 ⇄                 staging web digitalocean           -  │
 │   ○ do-work-worker-ams     104.248.38.93                   worker digitalocean                -  │
 │   ○ do-work-ci-runner      104.248.38.94 ↗                 ci digitalocean                    -  │
 │   ○ do-personal-blog       167.99.42.10                    personal web digitalocean          -  │
-│   ○ do-personal-mail       167.99.42.11                    personal mail digitalocean         -  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---

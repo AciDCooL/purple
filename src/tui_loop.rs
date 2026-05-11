@@ -592,6 +592,21 @@ fn handle_pending_container_exec(
         return Ok(());
     };
 
+    // Defense-in-depth: container_id is currently gated by
+    // `selected_running_row_with_runtime` (which calls validate_container_id)
+    // before pending_container_exec is populated. This second validation
+    // covers any future entry point (MCP tool call, paste-via-jump, etc.)
+    // that might populate the request without going through that gate.
+    if let Err(e) = crate::containers::validate_container_id(&req.container_id) {
+        log::warn!(
+            "[purple] container exec blocked on '{}': invalid container_id: {}",
+            req.alias,
+            e
+        );
+        app.notify(crate::messages::container_invalid_id(&e));
+        return Ok(());
+    }
+
     let askpass = req.askpass.or_else(preferences::load_askpass_default);
     let has_active_tunnel = app.tunnels.active.contains_key(&req.alias);
     let use_tmux = connection::is_in_tmux() && askpass.is_none();

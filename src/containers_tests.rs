@@ -84,6 +84,379 @@ fn parse_ps_long_ports() {
     assert_eq!(parse_container_ps(&line)[0].ports, ports);
 }
 
+// -- parse_container_ps: podman format ----------------------------------
+// Podman's `ps --format '{{json .}}'` differs from docker on three keys:
+// `Id` (lowercase d), `Names` is an array, `Ports` is an array of port
+// objects (or null). These tests pin the tolerant deserialization.
+
+#[test]
+fn parse_ps_podman_single_running() {
+    let line = r#"{"Id":"826abc60f2e5","Names":["purple-test-nginx"],"Image":"docker.io/library/nginx:alpine","State":"running","Status":"","Ports":[{"host_ip":"","container_port":80,"host_port":8081,"range":1,"protocol":"tcp"}]}"#;
+    let r = parse_container_ps(line);
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].id, "826abc60f2e5");
+    assert_eq!(r[0].names, "purple-test-nginx");
+    assert_eq!(r[0].image, "docker.io/library/nginx:alpine");
+    assert_eq!(r[0].state, "running");
+    assert_eq!(r[0].status, "");
+    // Empty host_ip on podman covers both IPv4 and IPv6 wildcard binds;
+    // we omit the prefix rather than mis-claim IPv4.
+    assert_eq!(r[0].ports, "8081->80/tcp");
+}
+
+#[test]
+fn parse_ps_podman_names_array_multiple_joined() {
+    let line = r#"{"Id":"x","Names":["primary","secondary","tertiary"],"Image":"img","State":"running","Status":""}"#;
+    assert_eq!(
+        parse_container_ps(line)[0].names,
+        "primary,secondary,tertiary"
+    );
+}
+
+#[test]
+fn parse_ps_podman_names_empty_array() {
+    let line = r#"{"Id":"x","Names":[],"Image":"img","State":"running","Status":""}"#;
+    assert_eq!(parse_container_ps(line)[0].names, "");
+}
+
+#[test]
+fn parse_ps_podman_ports_null() {
+    let line =
+        r#"{"Id":"x","Names":["n"],"Image":"img","State":"running","Status":"","Ports":null}"#;
+    assert_eq!(parse_container_ps(line)[0].ports, "");
+}
+
+#[test]
+fn parse_ps_podman_ports_field_absent() {
+    let line = r#"{"Id":"x","Names":["n"],"Image":"img","State":"running","Status":""}"#;
+    assert_eq!(parse_container_ps(line)[0].ports, "");
+}
+
+#[test]
+fn parse_ps_podman_ports_empty_array() {
+    let line = r#"{"Id":"x","Names":["n"],"Image":"img","State":"running","Status":"","Ports":[]}"#;
+    assert_eq!(parse_container_ps(line)[0].ports, "");
+}
+
+#[test]
+fn parse_ps_podman_ports_exposed_not_published() {
+    // host_port == 0 => container-only exposure
+    let line = r#"{"Id":"x","Names":["n"],"Image":"img","State":"running","Status":"","Ports":[{"host_ip":"","container_port":6379,"host_port":0,"range":1,"protocol":"tcp"}]}"#;
+    assert_eq!(parse_container_ps(line)[0].ports, "6379/tcp");
+}
+
+#[test]
+fn parse_ps_podman_ports_published_with_host_ip() {
+    let line = r#"{"Id":"x","Names":["n"],"Image":"img","State":"running","Status":"","Ports":[{"host_ip":"127.0.0.1","container_port":5432,"host_port":5432,"range":1,"protocol":"tcp"}]}"#;
+    assert_eq!(
+        parse_container_ps(line)[0].ports,
+        "127.0.0.1:5432->5432/tcp"
+    );
+}
+
+#[test]
+fn parse_ps_podman_ports_range_published() {
+    let line = r#"{"Id":"x","Names":["n"],"Image":"img","State":"running","Status":"","Ports":[{"host_ip":"","container_port":8000,"host_port":8000,"range":3,"protocol":"udp"}]}"#;
+    assert_eq!(
+        parse_container_ps(line)[0].ports,
+        "8000-8002->8000-8002/udp"
+    );
+}
+
+#[test]
+fn parse_ps_podman_ports_multiple_objects_joined() {
+    let line = r#"{"Id":"x","Names":["n"],"Image":"img","State":"running","Status":"","Ports":[{"host_ip":"","container_port":80,"host_port":8080,"range":1,"protocol":"tcp"},{"host_ip":"","container_port":443,"host_port":8443,"range":1,"protocol":"tcp"}]}"#;
+    assert_eq!(
+        parse_container_ps(line)[0].ports,
+        "8080->80/tcp, 8443->443/tcp"
+    );
+}
+
+#[test]
+fn parse_ps_podman_ports_default_protocol_tcp() {
+    // protocol missing/empty => default tcp (matches docker convention)
+    let line = r#"{"Id":"x","Names":["n"],"Image":"img","State":"running","Status":"","Ports":[{"host_ip":"","container_port":80,"host_port":8080,"range":1,"protocol":""}]}"#;
+    assert_eq!(parse_container_ps(line)[0].ports, "8080->80/tcp");
+}
+
+#[test]
+fn parse_ps_podman_stopped_container() {
+    // Created/stopped containers have State="created" or "exited" with no
+    // published ports. Status is often empty on podman.
+    let line = r#"{"Id":"a092e6927446","Names":["purple-test-stopped"],"Image":"docker.io/library/alpine:latest","State":"created","Status":"","Ports":null}"#;
+    let r = parse_container_ps(line);
+    assert_eq!(r[0].id, "a092e6927446");
+    assert_eq!(r[0].names, "purple-test-stopped");
+    assert_eq!(r[0].state, "created");
+    assert_eq!(r[0].ports, "");
+}
+
+#[test]
+fn parse_ps_podman_three_containers_ndjson() {
+    // Mirrors the live `podman ps -a --format '{{json .}}'` shape across
+    // running/running/created, with and without published ports.
+    let lines = [
+        r#"{"Id":"826abc60f2e5","Names":["purple-test-nginx"],"Image":"docker.io/library/nginx:alpine","State":"running","Status":"","Ports":[{"host_ip":"","container_port":80,"host_port":8081,"range":1,"protocol":"tcp"}]}"#,
+        r#"{"Id":"04bfa4272e1e","Names":["purple-test-redis"],"Image":"docker.io/library/redis:alpine","State":"running","Status":"","Ports":null}"#,
+        r#"{"Id":"a092e6927446","Names":["purple-test-stopped"],"Image":"docker.io/library/alpine:latest","State":"created","Status":"","Ports":null}"#,
+    ];
+    let r = parse_container_ps(&lines.join("\n"));
+    assert_eq!(r.len(), 3);
+    assert_eq!(r[0].names, "purple-test-nginx");
+    assert_eq!(r[0].ports, "8081->80/tcp");
+    assert_eq!(r[1].names, "purple-test-redis");
+    assert_eq!(r[1].ports, "");
+    assert_eq!(r[2].state, "created");
+    assert_eq!(r[2].ports, "");
+}
+
+#[test]
+fn parse_ps_podman_names_null_drops_row() {
+    // `Names: null` is a corruption signal: a container has lost its
+    // identity. The strict NamesField deserializer rejects null,
+    // parse_container_ps' .ok() filter then drops the row entirely
+    // rather than render a nameless entry in the UI.
+    let line =
+        r#"{"Id":"x","Names":null,"Image":"img","State":"running","Status":"","Ports":null}"#;
+    assert_eq!(parse_container_ps(line).len(), 0);
+}
+
+#[test]
+fn parse_ps_mixed_docker_and_podman_lines_in_same_output() {
+    // Edge case where one host emits both shapes: e.g. a podman-docker
+    // shim that wraps some calls but not others or a future podman that
+    // changes shape between versions during a rolling upgrade.
+    let docker_line = r#"{"ID":"deadbeef","Names":"web","Image":"nginx","State":"running","Status":"Up 1m","Ports":"0.0.0.0:80->80/tcp"}"#;
+    let podman_line = r#"{"Id":"cafebabe","Names":["app"],"Image":"docker.io/library/redis","State":"running","Status":"","Ports":null}"#;
+    let r = parse_container_ps(&format!("{docker_line}\n{podman_line}"));
+    assert_eq!(r.len(), 2);
+    assert_eq!(r[0].id, "deadbeef");
+    assert_eq!(r[0].names, "web");
+    assert_eq!(r[0].ports, "0.0.0.0:80->80/tcp");
+    assert_eq!(r[1].id, "cafebabe");
+    assert_eq!(r[1].names, "app");
+    assert_eq!(r[1].ports, "");
+}
+
+#[test]
+fn parse_ps_both_id_fields_present_drops_row() {
+    // When both `ID` and `Id` are present, serde treats them as duplicate
+    // field assignments (rename + alias target the same struct field) and
+    // raises a deserialization error. parse_container_ps' .ok() filter
+    // then drops the row. No real-world runtime emits both keys; this
+    // pins the defensive behaviour for the corrupted-input edge case so
+    // a serde version that silently picks one value (and a different one
+    // per release) cannot creep in unnoticed.
+    let line =
+        r#"{"ID":"upper","Id":"lower","Names":["n"],"Image":"img","State":"running","Status":""}"#;
+    assert_eq!(parse_container_ps(line).len(), 0);
+}
+
+#[test]
+fn parse_ps_podman_ports_range_zero_renders_as_single_port() {
+    // `range: 0` is technically corrupt input (podman always emits >=1)
+    // but the format helper must degrade gracefully to single-port form
+    // rather than emit nonsensical `8080-8079->80-79` from saturating
+    // arithmetic. Pinned to catch a future refactor that drops the
+    // `range > 1` guard.
+    let line = r#"{"Id":"x","Names":["n"],"Image":"img","State":"running","Status":"","Ports":[{"host_ip":"","container_port":80,"host_port":8080,"range":0,"protocol":"tcp"}]}"#;
+    assert_eq!(parse_container_ps(line)[0].ports, "8080->80/tcp");
+}
+
+#[test]
+fn parse_ps_docker_format_still_works() {
+    // Regression guard: docker's scalar `Names`/`Ports` and uppercase `ID`
+    // must continue to deserialize unchanged after the tolerant coercion.
+    let line = r#"{"ID":"deadbeef","Names":"web,web-alt","Image":"nginx","State":"running","Status":"Up 5 minutes","Ports":"0.0.0.0:80->80/tcp"}"#;
+    let r = parse_container_ps(line);
+    assert_eq!(r[0].id, "deadbeef");
+    assert_eq!(r[0].names, "web,web-alt");
+    assert_eq!(r[0].ports, "0.0.0.0:80->80/tcp");
+    assert_eq!(r[0].status, "Up 5 minutes");
+}
+
+#[test]
+fn parse_output_podman_three_containers_with_sentinels() {
+    // End-to-end: combined detection sentinel + podman NDJSON + engine
+    // version. Reproduces the live SSH pipeline output shape.
+    let out = "\
+##purple:podman##\n\
+{\"Id\":\"a\",\"Names\":[\"one\"],\"Image\":\"i\",\"State\":\"running\",\"Status\":\"\",\"Ports\":null}\n\
+{\"Id\":\"b\",\"Names\":[\"two\"],\"Image\":\"i\",\"State\":\"exited\",\"Status\":\"\",\"Ports\":null}\n\
+{\"Id\":\"c\",\"Names\":[\"three\"],\"Image\":\"i\",\"State\":\"created\",\"Status\":\"\",\"Ports\":null}\n\
+##purple:engine##\n\
+5.8.2";
+    let listing = parse_container_output(out, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Podman);
+    assert_eq!(listing.engine_version.as_deref(), Some("5.8.2"));
+    assert_eq!(listing.containers.len(), 3);
+    assert_eq!(listing.containers[0].names, "one");
+    assert_eq!(listing.containers[2].state, "created");
+}
+
+#[test]
+fn parse_output_fedora_coreos_docker_alias_relabels_to_podman() {
+    // Fedora CoreOS / podman-machine ships `docker` as a symlink to
+    // podman. Detection sees `docker` and emits the docker sentinel,
+    // but the JSON shape is unmistakably podman (array `Names`). The
+    // shape detector relabels the runtime so downstream consumers
+    // (host detail label, MCP `runtime` field, group/filter by
+    // runtime) reflect what's actually running on the remote.
+    let out = "\
+##purple:docker##\n\
+{\"Id\":\"a\",\"Names\":[\"one\"],\"Image\":\"i\",\"State\":\"running\",\"Status\":\"\",\"Ports\":null}\n\
+##purple:engine##\n\
+5.8.2";
+    let listing = parse_container_output(out, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Podman);
+    assert_eq!(listing.containers.len(), 1);
+    assert_eq!(listing.containers[0].names, "one");
+}
+
+#[test]
+fn parse_output_docker_branch_with_docker_shape_stays_docker() {
+    // Counterpart to the Fedora CoreOS relabel: a real docker host
+    // emits docker sentinel AND docker-shaped JSON. No relabel.
+    let out = "\
+##purple:docker##\n\
+{\"ID\":\"a\",\"Names\":\"one\",\"Image\":\"i\",\"State\":\"running\",\"Status\":\"Up 5m\",\"Ports\":\"0.0.0.0:80->80/tcp\"}\n\
+##purple:engine##\n\
+29.4.2";
+    let listing = parse_container_output(out, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+}
+
+#[test]
+fn parse_output_docker_sentinel_empty_body_stays_docker() {
+    // Edge case: docker sentinel with NO container lines. The shape
+    // detector has nothing to inspect, must NOT relabel to Podman.
+    // A future `looks_like_podman` that defaulted to `true` on empty
+    // input would silently mislabel every fresh-cached docker host.
+    let out = "##purple:docker##\n##purple:engine##\n29.4.2";
+    let listing = parse_container_output(out, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Docker);
+    assert_eq!(listing.containers.len(), 0);
+}
+
+#[test]
+fn parse_output_pretty_printed_podman_json_relabels_to_podman() {
+    // Pretty-printer in the middle (e.g. an SSH wrapper that pipes
+    // through `jq`) would emit `"Names": [` with a space. The shape
+    // detector must accept both compact and pretty forms.
+    let out = "\
+##purple:docker##\n\
+{\"Id\": \"a\", \"Names\": [\"one\"], \"Image\": \"i\", \"State\": \"running\", \"Status\": \"\"}\n\
+##purple:engine##\n\
+5.8.2";
+    let listing = parse_container_output(out, None).unwrap();
+    assert_eq!(listing.runtime, ContainerRuntime::Podman);
+}
+
+// -- looks_like_podman: direct unit tests -------------------------------
+// Internal heuristic that drives the Fedora CoreOS relabel. Integration
+// tests above exercise it via parse_container_output, but pinning each
+// branch directly makes a regression in the detector trivially diagnosable.
+
+#[test]
+fn looks_like_podman_compact_array_names_returns_true() {
+    let out =
+        "{\"Id\":\"a\",\"Names\":[\"web\"],\"Image\":\"i\",\"State\":\"running\",\"Status\":\"\"}";
+    assert!(super::looks_like_podman(out));
+}
+
+#[test]
+fn looks_like_podman_pretty_printed_array_names_returns_true() {
+    let out = "{\"Id\": \"a\", \"Names\": [\"web\"], \"State\": \"running\"}";
+    assert!(super::looks_like_podman(out));
+}
+
+#[test]
+fn looks_like_podman_docker_scalar_names_returns_false() {
+    let out = "{\"ID\":\"a\",\"Names\":\"web\",\"Image\":\"i\",\"State\":\"running\"}";
+    assert!(!super::looks_like_podman(out));
+}
+
+#[test]
+fn looks_like_podman_empty_input_returns_false() {
+    assert!(!super::looks_like_podman(""));
+}
+
+#[test]
+fn looks_like_podman_only_sentinels_no_json_returns_false() {
+    // Empty body with only sentinels (Fedora-like host with zero
+    // containers). Must NOT relabel to Podman by default.
+    let out = "##purple:docker##\n##purple:engine##\n29.4.2";
+    assert!(!super::looks_like_podman(out));
+}
+
+#[test]
+fn looks_like_podman_skips_motd_lines() {
+    // MOTD or banner lines that do not start with `{` are skipped;
+    // detector still finds the real JSON line below.
+    let out = "Last login: Mon\nFedora CoreOS 41\n{\"Id\":\"a\",\"Names\":[\"web\"]}";
+    assert!(super::looks_like_podman(out));
+}
+
+// -- parse_container_inspect: podman version compat ---------------------
+
+#[test]
+fn parse_container_inspect_oom_killed_both_casings() {
+    // Podman 5.x + docker emit `OOMKilled`. Podman 3.x (Ubuntu 22.04
+    // LTS default) emits `OomKilled`. Both must surface oom_killed=true
+    // so the ATTENTION card flags OOM-killed containers regardless of
+    // remote runtime version. Pins the alias chain so a refactor that
+    // drops the fallback fails loudly here rather than silently in
+    // production telemetry.
+    let docker_shape = r#"[{"State":{"ExitCode":137,"OOMKilled":true,"StartedAt":"","FinishedAt":""},"Config":{},"NetworkSettings":{},"RestartCount":0,"Mounts":[]}]"#;
+    let podman3_shape = r#"[{"State":{"ExitCode":137,"OomKilled":true,"StartedAt":"","FinishedAt":""},"Config":{},"NetworkSettings":{},"RestartCount":0,"Mounts":[]}]"#;
+    let neither_key = r#"[{"State":{"ExitCode":0,"StartedAt":"","FinishedAt":""},"Config":{},"NetworkSettings":{},"RestartCount":0,"Mounts":[]}]"#;
+
+    assert!(parse_container_inspect(docker_shape).unwrap().oom_killed);
+    assert!(parse_container_inspect(podman3_shape).unwrap().oom_killed);
+    assert!(!parse_container_inspect(neither_key).unwrap().oom_killed);
+}
+
+// -- validate_container_id: injection-vector rejection ------------------
+
+#[test]
+fn validate_container_id_accepts_typical_ids() {
+    assert!(validate_container_id("abc123").is_ok());
+    assert!(validate_container_id("826abc60f2e5").is_ok());
+    assert!(validate_container_id("my-container_1.0").is_ok());
+}
+
+#[test]
+fn validate_container_id_rejects_empty() {
+    assert!(validate_container_id("").is_err());
+}
+
+#[test]
+fn validate_container_id_rejects_shell_metacharacters() {
+    // The defense-in-depth check in handle_pending_container_exec relies
+    // on this rejection to keep crafted container names off the SSH
+    // command line. Every char that has shell meaning must fail.
+    for bad in [
+        ";", "|", "&", "`", "$", "(", ")", "<", ">", "\\", "\"", "'", "\n", " ",
+    ] {
+        let id = format!("abc{bad}def");
+        assert!(
+            validate_container_id(&id).is_err(),
+            "metachar '{bad}' must be rejected"
+        );
+    }
+}
+
+#[test]
+fn validate_container_id_rejects_colon() {
+    // Colon would split addressable forms like `pod:container`.
+    assert!(validate_container_id("qemu:300").is_err());
+}
+
+#[test]
+fn validate_container_id_rejects_non_ascii() {
+    assert!(validate_container_id("café").is_err());
+}
+
 // -- parse_runtime -------------------------------------------------------
 
 #[test]

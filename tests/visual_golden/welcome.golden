@@ -1,31 +1,31 @@
 ╭─────────────────────╭──────────────────────────────────────────────────────╮─────────────────────╮
 │  purple       hosts │                                                      │                     │
 ╰─────────────────────│                                                      │─────────────────────╯
-╭ 24 ── ●16 ✖2 ○6 ────│                                                      │─────────────────────╮
+╭ 25 ── ●17 ✖2 ○6 ────│                                                      │─────────────────────╮
 │     NAME            │                              ╮                       │               LAST▾ │
 │─────────────────────│                 ╭─╮╷ ╷╭─ ╭─╮ │ ╭─╮                   │─────────────────────│
 │▌  ● bastion-ams     │                 │ ││ ││  │ │ │ ├─╯                   │                <1m  │
 │   ● db-primary      │                 ├─╯╰─╯╵  ├─╯╶┴╴╰─╴ ▪                 │se               1h  │
 │   ● monitoring      │                 ╵        ╵                           │ring             2h  │
 │   ● gateway-vpn     │                                                      │                 3h  │
-│   ● aws-api-prod    │                                                      │s                4h  │
-│   ● aws-api-staging │                                                      │                 5h  │
-│   ● aws-worker-eu   │            Your SSH config, supercharged.            │ aws             6h  │
-│   ● aws-batch-us    │                                                      │aws              7h  │
-│   ● aws-ml-eu       │                                                      │                 8h  │
-│   ● pve-web-01      │              Press  ?  anytime for help.             │mox             14h  │
-│   ● pve-web-02      │                                                      │mox             15h  │
-│   ● pve-db-01       │                                                      │ proxmox        16h  │
-│   ● pve-db-02       │          22 hosts loaded from ~/.ssh/config.         │ proxmox        17h  │
-│   ● pve-redis       │                                                      │oxmox           18h  │
-│   ● pve-mail        │        Your original config has been backed up       │xmox            19h  │
-│   ● pve-monitor     │             to ~/.purple/config.original             │al proxmox      20h  │
-│   ○ do-work-web-ams │                                                      │gitalocean        -  │
-│   ○ do-work-staging-│                    Enter  continue                   │alocean           -  │
+│   ● podman-edge     │                                                      │                 4h  │
+│   ● aws-api-prod    │                                                      │s                5h  │
+│   ● aws-api-staging │            Your SSH config, supercharged.            │                 6h  │
+│   ● aws-worker-eu   │                                                      │ aws             7h  │
+│   ● aws-batch-us    │                                                      │aws              8h  │
+│   ● aws-ml-eu       │              Press  ?  anytime for help.             │                 9h  │
+│   ● pve-web-01      │                                                      │mox             15h  │
+│   ● pve-web-02      │                                                      │mox             16h  │
+│   ● pve-db-01       │          22 hosts loaded from ~/.ssh/config.         │ proxmox        17h  │
+│   ● pve-db-02       │                                                      │ proxmox        18h  │
+│   ● pve-redis       │        Your original config has been backed up       │oxmox           19h  │
+│   ● pve-mail        │             to ~/.purple/config.original             │xmox            20h  │
+│   ● pve-monitor     │                                                      │al proxmox      21h  │
+│   ○ do-work-web-ams │                    Enter  continue                   │gitalocean        -  │
+│   ○ do-work-staging-│                                                      │alocean           -  │
 │   ○ do-work-worker-a│                                                      │an                -  │
 │   ○ do-work-ci-runne│                                                      │                  -  │
 │   ○ do-personal-blog│                                                      │talocean          -  │
-│   ○ do-personal-mail│                                                      │italocean         -  │
 ╰─────────────────────│                                                      │─────── getpurple.sh ╯
  Enter  connect    /  ╰──────────────────────────────────────────────────────╯               ?  more
 ---STYLES---

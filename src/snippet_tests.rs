@@ -915,3 +915,50 @@ fn base_ssh_interactive_omits_strict_host_key_checking() {
         "interactive ssh must NOT set StrictHostKeyChecking (let user confirm TOFU), got: {args:?}"
     );
 }
+
+// =========================================================================
+// read_bounded: cap enforcement on captured SSH stdout/stderr.
+// The 16 MB cap is the only memory protection against a hostile or
+// malfunctioning SSH remote that streams unbounded output. These tests
+// pin the boundary behaviour so a refactor cannot silently regress it.
+// =========================================================================
+
+#[test]
+fn read_bounded_under_cap_returns_all_bytes() {
+    let data = b"hello world";
+    let mut cursor = std::io::Cursor::new(data.to_vec());
+    let out = super::read_bounded(&mut cursor, 100, "test-alias", "stdout");
+    assert_eq!(out, b"hello world");
+}
+
+#[test]
+fn read_bounded_exactly_at_cap_returns_all_bytes() {
+    // Boundary: cap == data length must not truncate.
+    let data = vec![0xAAu8; 32];
+    let mut cursor = std::io::Cursor::new(data.clone());
+    let out = super::read_bounded(&mut cursor, 32, "alias", "stdout");
+    assert_eq!(out.len(), 32);
+    assert_eq!(out, data);
+}
+
+#[test]
+fn read_bounded_one_over_cap_truncates_to_cap() {
+    let max = 16usize;
+    let data = vec![0xBBu8; max + 1];
+    let mut cursor = std::io::Cursor::new(data);
+    let out = super::read_bounded(&mut cursor, max, "alias", "stdout");
+    assert_eq!(out.len(), max);
+    assert!(out.iter().all(|&b| b == 0xBBu8));
+}
+
+#[test]
+fn read_bounded_massive_overflow_stays_at_cap() {
+    // Defends against a hostile remote streaming 64 KB when the cap
+    // is 1 KB: total captured memory must equal the cap, never the
+    // payload size.
+    let max = 1024usize;
+    let data = vec![0xCCu8; 64 * 1024];
+    let mut cursor = std::io::Cursor::new(data);
+    let out = super::read_bounded(&mut cursor, max, "alias", "stdout");
+    assert_eq!(out.len(), max);
+}
