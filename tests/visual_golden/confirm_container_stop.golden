@@ -2,30 +2,30 @@
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 29 ──────────────────────────────────────────────────────────────────────────────────────────────╮
-│     NAME                IMAGE                                           UPTIME                   │
+│     NAME                IMAGE                                                            UPTIME  │
 │ ──────────────────────────────────────────────────────────────────────────────────────────────── │
 │ ▌── aws-api-staging ───────────────────────────────────────────────────────────────────────────  │
-│   ● api                 myteam/api:v4.1.0-rc2                               2d                   │
-│   ● datadog-agent       datadog/agent:7                                     2d                   │
-│   ● nginx               nginx:1.25-alpine                                   2d                   │
-│   ● redis         ╭  Stop container?  ───────────────────────────────────────╮                   │
+│   ● api                 myteam/api:v4.1.0-rc2                                                2d  │
+│   ● datadog-agent       datadog/agent:7                                                      2d  │
+│   ● nginx               nginx:1.25-alpine                                                    2d  │
+│   ● redis         ╭  Stop container?  ───────────────────────────────────────╮               2d  │
 │  ── aws-batch-us ─│                                                          │─────────────────  │
 │  ── bastion-ams ──│api  on  aws-api-staging                                  │─────────────────  │
-│   ● app-backend   │aws-api-staging  ·  Up 2d                                 │                   │
-│   ○ certbot       │                                                          │                   │
-│   ● grafana       │Sends SIGTERM, waits 10s, then SIGKILL. Container will not│                   │
-│   ● nginx-proxy   │restart unless its policy reschedules it.                 │                   │
-│   ● postgres      │                                                          │                   │
-│   ● prometheus    │                                                          │                   │
-│   ● redis         ╰──────────────────────────────────────────────────────────╯                   │
+│   ● app-backend   │aws-api-staging  ·  Up 2d                                 │              12d  │
+│   ○ certbot       │                                                          │                -  │
+│   ● grafana       │Sends SIGTERM, waits 10s, then SIGKILL. Container will not│               5d  │
+│   ● nginx-proxy   │restart unless its policy reschedules it.                 │              12d  │
+│   ● postgres      │                                                          │              12d  │
+│   ● prometheus    │                                                          │               5d  │
+│   ● redis         ╰──────────────────────────────────────────────────────────╯              12d  │
 │  ── db-primary ─── y  stop    n/Esc  keep                                     ─────────────────  │
-│   ● pg-exporter         prometheuscommunity/postgres-exporter:0.15         30d                   │
-│   ● pgbouncer           pgbouncer:1.21                                     30d                   │
-│   ● postgres-primary    postgres:16-alpine                                 30d                   │
+│   ● pg-exporter         prometheuscommunity/postgres-exporter:0.15                          30d  │
+│   ● pgbouncer           pgbouncer:1.21                                                      30d  │
+│   ● postgres-primary    postgres:16-alpine                                                  30d  │
 │  ── do-web-ams ────────────────────────────────────────────────────────────────────────────────  │
-│   ● app                 myapp:3.2.1                                         8d                   │
-│   ● nginx               nginx:1.25                                          8d                   │
-│   ● redis               redis:7-alpine                                      8d                   │
+│   ● app                 myapp:3.2.1                                                          8d  │
+│   ● nginx               nginx:1.25                                                           8d  │
+│   ● redis               redis:7-alpine                                                       8d  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  shell    /  search    l  logs    v  compact    :  jump                               ?  more
 ---STYLES---
@@ -497,10 +497,10 @@
 (65,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (66,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (67,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(68,4) fg=DarkGray bg=Reset mod=DIM
-(69,4) fg=DarkGray bg=Reset mod=DIM
-(70,4) fg=DarkGray bg=Reset mod=DIM
-(71,4) fg=DarkGray bg=Reset mod=DIM
+(68,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(69,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(70,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(71,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (72,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (73,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (74,4) fg=DarkGray bg=Reset mod=BOLD|DIM
@@ -509,23 +509,23 @@
 (77,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (78,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (79,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(80,4) fg=DarkGray bg=Reset mod=DIM
-(81,4) fg=DarkGray bg=Reset mod=DIM
-(82,4) fg=DarkGray bg=Reset mod=DIM
-(83,4) fg=DarkGray bg=Reset mod=DIM
-(84,4) fg=DarkGray bg=Reset mod=DIM
+(80,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(81,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(82,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(83,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(84,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (85,4) fg=DarkGray bg=Reset mod=DIM
 (86,4) fg=DarkGray bg=Reset mod=DIM
 (87,4) fg=DarkGray bg=Reset mod=DIM
 (88,4) fg=DarkGray bg=Reset mod=DIM
-(89,4) fg=DarkGray bg=Reset mod=DIM
-(90,4) fg=DarkGray bg=Reset mod=DIM
-(91,4) fg=DarkGray bg=Reset mod=DIM
-(92,4) fg=DarkGray bg=Reset mod=DIM
-(93,4) fg=DarkGray bg=Reset mod=DIM
-(94,4) fg=DarkGray bg=Reset mod=DIM
-(95,4) fg=DarkGray bg=Reset mod=DIM
-(96,4) fg=DarkGray bg=Reset mod=DIM
+(89,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(90,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(91,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(92,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(93,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(94,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(95,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(96,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (97,4) fg=DarkGray bg=Reset mod=DIM
 (98,4) fg=DarkGray bg=Reset mod=DIM
 (99,4) fg=DarkGray bg=Reset mod=DIM

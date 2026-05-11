@@ -86,7 +86,7 @@ pub use provider_state::{
     LabelMigrationField, PendingLabelMigration, ProviderRow, ProviderState, SyncRecord,
 };
 pub use reload_state::{ConflictState, ReloadState};
-pub use screen::{Screen, StackMember, TopPage, WhatsNewState};
+pub use screen::{ContainerLogsSearch, Screen, StackMember, TopPage, WhatsNewState};
 pub use search::SearchState;
 pub use snippet_state::SnippetState;
 pub use status_state::{MessageClass, StatusCenter, StatusMessage};

@@ -549,9 +549,54 @@ fn visual_container_logs() {
         error: None,
         scroll: 0,
         last_render_height: 0,
+        search: None,
     };
     let actual = render_screen(&mut app);
     assert_golden("container_logs", &actual);
+}
+
+#[test]
+fn visual_container_logs_search_active() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    let body = vec![
+        "2026-05-09 19:41:58  10.0.0.42  GET /api/v1/health 200 17ms".to_string(),
+        "2026-05-09 19:42:01  198.51.100.7  POST /webhooks/github 202 41ms".to_string(),
+        "2026-05-09 19:42:05  upstream timed out (110: Operation timed out)".to_string(),
+        "2026-05-09 19:42:11  10.0.0.42  GET /api/v1/health 200 16ms".to_string(),
+    ];
+    // Hand-built post-Enter state: query confirmed, three hits across
+    // /api/v1/health and the GET lines, cursor parked on the first.
+    let matches: Vec<usize> = body
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            if crate::handler::container_logs::matches_line(line, "api") {
+                Some(idx)
+            } else {
+                None
+            }
+        })
+        .collect();
+    app.screen = Screen::ContainerLogs {
+        alias: "aws-api-staging".to_string(),
+        container_id: "f9a0b1c2d3e4".to_string(),
+        container_name: "api".to_string(),
+        body,
+        fetched_at: crate::demo_flag::now_secs() - 3,
+        error: None,
+        scroll: 0,
+        last_render_height: 0,
+        search: Some(crate::app::ContainerLogsSearch {
+            query: "api".to_string(),
+            matches,
+            current: 0,
+            cursor_pos: 3,
+        }),
+    };
+    let actual = render_screen(&mut app);
+    assert_golden("container_logs_search_active", &actual);
 }
 
 #[test]

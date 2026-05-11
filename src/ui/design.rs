@@ -188,6 +188,18 @@ pub fn overlay_block_line(title: Line<'static>) -> Block<'static> {
         .title(title)
 }
 
+/// Overlay block with the search-active purple border. Mirrors
+/// `search_block_line` for overlays — use on overlays whose body
+/// hosts a `/` search so the border switches to purple while the
+/// search is open (same affordance as the host list border switch).
+pub fn search_overlay_block_line(title: Line<'static>) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(theme::border_search())
+        .title(title)
+}
+
 /// Plain overlay block: rounded border, accent border, NO title. Use for
 /// unique dialogs (e.g. welcome screen) where the block carries no title
 /// and the content itself supplies visual hierarchy.

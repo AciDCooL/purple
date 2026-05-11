@@ -42,6 +42,79 @@ pub struct WhatsNewState {
     pub scroll: u16,
 }
 
+/// Search state for the container logs viewer. `None` on
+/// `Screen::ContainerLogs.search` means no search is active.
+///
+/// Modeless: while the struct is `Some`, every keystroke either edits
+/// the query (chars / cursor / delete) or navigates matches
+/// (Tab / Shift+Tab). There is no "confirm" step — matches are
+/// recomputed live and `Esc` exits search outright.
+///
+/// `matches` are line indices into the rendered body; `current`
+/// indexes into `matches`. Smart case is decided by the query at
+/// match time: any uppercase rune flips to case-sensitive (vim's
+/// `'smartcase'`).
+///
+/// `cursor_pos` is a char index into `query` (0..=chars().count()).
+/// Mirrors the host_form pattern so Left/Right/Home/End/Delete edit
+/// mid-string instead of forcing append-only behaviour.
+#[derive(Debug, Default, Clone, PartialEq)]
+pub struct ContainerLogsSearch {
+    pub query: String,
+    pub matches: Vec<usize>,
+    pub current: usize,
+    pub cursor_pos: usize,
+}
+
+impl ContainerLogsSearch {
+    pub fn insert_char(&mut self, c: char) {
+        let byte_pos = super::forms::char_to_byte_pos(&self.query, self.cursor_pos);
+        self.query.insert(byte_pos, c);
+        self.cursor_pos += 1;
+    }
+
+    pub fn delete_char_before_cursor(&mut self) {
+        if self.cursor_pos == 0 {
+            return;
+        }
+        let byte_pos = super::forms::char_to_byte_pos(&self.query, self.cursor_pos);
+        let prev = super::forms::char_to_byte_pos(&self.query, self.cursor_pos - 1);
+        self.query.drain(prev..byte_pos);
+        self.cursor_pos -= 1;
+    }
+
+    pub fn delete_char_at_cursor(&mut self) {
+        let len = self.query.chars().count();
+        if self.cursor_pos >= len {
+            return;
+        }
+        let byte_pos = super::forms::char_to_byte_pos(&self.query, self.cursor_pos);
+        let next = super::forms::char_to_byte_pos(&self.query, self.cursor_pos + 1);
+        self.query.drain(byte_pos..next);
+    }
+
+    pub fn move_left(&mut self) {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+        }
+    }
+
+    pub fn move_right(&mut self) {
+        let len = self.query.chars().count();
+        if self.cursor_pos < len {
+            self.cursor_pos += 1;
+        }
+    }
+
+    pub fn move_home(&mut self) {
+        self.cursor_pos = 0;
+    }
+
+    pub fn move_end(&mut self) {
+        self.cursor_pos = self.query.chars().count();
+    }
+}
+
 /// One running compose-stack member surfaced in the stack-restart
 /// confirm dialog. Carried so the confirm body can list every
 /// container that will be cycled, identity-and-state-clear.
@@ -145,6 +218,8 @@ pub enum Screen {
         error: Option<String>,
         scroll: u16,
         last_render_height: u16,
+        /// `/` search state. `None` when no search is active.
+        search: Option<ContainerLogsSearch>,
     },
     /// Confirm dialog for `K` (kick). restart a single running
     /// container. Reuses `route_confirm_key` so y/n/Esc are the only

@@ -1093,7 +1093,9 @@ pub(crate) fn parse_log_output(stdout: &str, stderr: &str) -> Vec<String> {
 }
 
 /// Spawn a background thread to run `container logs`. Same shape as
-/// `spawn_container_inspect_listing`.
+/// `spawn_container_inspect_listing`. In demo mode the SSH call is
+/// short-circuited with a deterministic synthetic log stream so the
+/// logs viewer (and its `/` search) is exercisable without a remote.
 pub fn spawn_container_logs_fetch<F>(
     ctx: OwnedSshContext,
     runtime: ContainerRuntime,
@@ -1104,6 +1106,17 @@ pub fn spawn_container_logs_fetch<F>(
 ) where
     F: FnOnce(String, String, String, Result<Vec<String>, String>) + Send + 'static,
 {
+    if crate::demo_flag::is_demo() {
+        let lines = demo_log_lines(&container_name, tail);
+        log::debug!(
+            "[purple] container_logs_fetch: demo short-circuit alias={} id={} lines={}",
+            ctx.alias,
+            container_id,
+            lines.len()
+        );
+        send(ctx.alias, container_id, container_name, Ok(lines));
+        return;
+    }
     std::thread::spawn(move || {
         let borrowed = SshContext {
             alias: &ctx.alias,
@@ -1115,6 +1128,100 @@ pub fn spawn_container_logs_fetch<F>(
         let result = fetch_container_logs(&borrowed, runtime, &container_id, tail);
         send(ctx.alias, container_id, container_name, result);
     });
+}
+
+/// Generate a deterministic stream of fake log lines for demo mode.
+/// Mixes INFO / WARN / ERROR / DEBUG with realistic-looking content
+/// (HTTP requests, DB pings, retries, timeouts) so the user can
+/// usefully press `/` and find matches under `--demo`. Anchored to
+/// `demo_flag::now_secs()` so timestamps stay stable across renders.
+pub(crate) fn demo_log_lines(container_name: &str, tail: usize) -> Vec<String> {
+    use std::time::{Duration, UNIX_EPOCH};
+    // Cheap hash to fan out per-container variation without bringing
+    // `rand` into the binary.
+    let seed: u32 = container_name
+        .bytes()
+        .fold(0u32, |acc, b| acc.wrapping_mul(31).wrapping_add(b as u32));
+
+    // Templates rotate every line. Index 0 is the freshest log line.
+    let templates: &[&str] = &[
+        "INFO  [{}] handled GET /api/v1/health 200 in 14ms",
+        "INFO  [{}] handled POST /api/v1/orders 201 in 38ms (user_id={user})",
+        "DEBUG [{}] cache hit key=session:{user} ttl=3600",
+        "INFO  [{}] handled GET /api/v1/users/{user} 200 in 11ms",
+        "WARN  [{}] slow query detected duration=812ms statement=SELECT FROM orders",
+        "INFO  [{}] connection pool size=12 idle=8 in_use=4",
+        "DEBUG [{}] flushing metrics batch size=64",
+        "INFO  [{}] handled GET /api/v1/inventory 200 in 22ms",
+        "ERROR [{}] upstream timeout after 5000ms target=payments retry=1",
+        "WARN  [{}] retrying request attempt=2 backoff=250ms",
+        "INFO  [{}] handled POST /api/v1/login 200 in 31ms",
+        "DEBUG [{}] gc cycle reclaimed=42MB took=18ms",
+        "INFO  [{}] heartbeat ok rss=128MB cpu=4%",
+        "ERROR [{}] failed to acquire lock resource=cache_warmer waiter=3",
+        "INFO  [{}] handled DELETE /api/v1/sessions/{user} 204 in 9ms",
+        "WARN  [{}] disk usage at 78% mount=/data threshold=80%",
+        "INFO  [{}] handled GET /api/v1/search?q=widget 200 in 47ms",
+        "DEBUG [{}] websocket ping rtt=12ms",
+    ];
+
+    // Always use `demo_flag::now_secs()` even outside demo mode: the
+    // helper's OnceLock caches the first wallclock value, so repeated
+    // calls within a process return the same instant. Branching on
+    // `is_demo()` would let tests cross a second boundary and flake.
+    let now = crate::demo_flag::now_secs();
+
+    // Map each line to a timestamp working backwards from now. One log
+    // every 3 seconds keeps the time range realistic for a 200-line tail.
+    let mut lines = Vec::with_capacity(tail);
+    for i in 0..tail {
+        let template = templates[(i + seed as usize) % templates.len()];
+        let user = 1000 + ((seed as usize + i * 7) % 50);
+        let secs_back = (i as u64) * 3;
+        let line_time = UNIX_EPOCH + Duration::from_secs(now.saturating_sub(secs_back));
+        let ts = format_demo_timestamp(line_time);
+        let body = template
+            .replace("{}", container_name)
+            .replace("{user}", &user.to_string());
+        lines.push(format!("{} {}", ts, body));
+    }
+    // Render flush-top with the newest line at the bottom of the
+    // viewport, matching real `docker logs --tail` output.
+    lines.reverse();
+    lines
+}
+
+fn format_demo_timestamp(t: std::time::SystemTime) -> String {
+    use std::time::UNIX_EPOCH;
+    let secs = t
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // Fast UTC breakdown without dragging in chrono. Good enough for a
+    // demo timestamp where leap seconds / DST are irrelevant.
+    let days_since_epoch = (secs / 86_400) as i64;
+    let seconds_in_day = (secs % 86_400) as u32;
+    let h = seconds_in_day / 3600;
+    let m = (seconds_in_day % 3600) / 60;
+    let s = seconds_in_day % 60;
+    let (y, mo, d) = civil_from_days(days_since_epoch);
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, mo, d, h, m, s)
+}
+
+/// Convert days-since-1970-01-01 to (year, month, day). Howard Hinnant's
+/// civil_from_days algorithm — proleptic Gregorian, 1970 = day 0.
+fn civil_from_days(z: i64) -> (i32, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = if m <= 2 { y + 1 } else { y };
+    (y as i32, m, d)
 }
 
 // ---------------------------------------------------------------------------

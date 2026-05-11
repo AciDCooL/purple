@@ -857,6 +857,15 @@ pub fn container_logs_failed(reason: &str) -> String {
     format!("logs fetch failed: {}", reason)
 }
 
+/// Search position badge for the logs overlay: `3 of 12` while the
+/// user navigates `/foo` matches with n/N.
+pub fn container_logs_search_position(current: usize, total: usize) -> String {
+    format!("{} of {}", current, total)
+}
+
+/// Search badge when the query has no hits in the current body.
+pub const CONTAINER_LOGS_SEARCH_NO_MATCHES: &str = "no matches";
+
 // ── Container restart/stop (K / S) ─────────────────────────────────
 
 /// Confirm body line that summarises a destructive action's mechanics.

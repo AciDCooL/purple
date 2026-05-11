@@ -10672,6 +10672,7 @@ fn logs_overlay_esc_closes_to_host_list() {
         error: None,
         scroll: 0,
         last_render_height: 0,
+        search: None,
     };
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
@@ -10690,6 +10691,7 @@ fn logs_overlay_q_closes_to_host_list() {
         error: None,
         scroll: 0,
         last_render_height: 0,
+        search: None,
     };
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
@@ -10712,6 +10714,7 @@ fn logs_overlay_g_resets_scroll_and_capital_g_jumps_to_tail() {
         error: None,
         scroll: 50,
         last_render_height: 24,
+        search: None,
     };
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
@@ -10742,6 +10745,7 @@ fn logs_overlay_capital_g_clamps_when_body_fits_in_viewport() {
         error: None,
         scroll: 1,
         last_render_height: 24,
+        search: None,
     };
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('G')), &tx);
@@ -10769,6 +10773,7 @@ fn logs_complete_ok_populates_body_and_anchors_to_tail() {
         error: None,
         scroll: 0,
         last_render_height: 24,
+        search: None,
     };
     let lines: Vec<String> = (0..100).map(|i| format!("line {}", i)).collect();
     crate::handler::event_loop::handle_container_logs_complete(
@@ -10808,6 +10813,7 @@ fn logs_complete_ok_keeps_scroll_zero_when_body_fits_viewport() {
         error: None,
         scroll: 0,
         last_render_height: 24,
+        search: None,
     };
     crate::handler::event_loop::handle_container_logs_complete(
         &mut app,
@@ -10835,6 +10841,7 @@ fn logs_complete_err_clears_body_and_records_error() {
         error: None,
         scroll: 5,
         last_render_height: 24,
+        search: None,
     };
     crate::handler::event_loop::handle_container_logs_complete(
         &mut app,
@@ -10889,6 +10896,7 @@ fn logs_complete_dropped_when_container_id_differs() {
         error: None,
         scroll: 0,
         last_render_height: 0,
+        search: None,
     };
     crate::handler::event_loop::handle_container_logs_complete(
         &mut app,
@@ -10902,4 +10910,310 @@ fn logs_complete_dropped_when_container_id_differs() {
     } else {
         panic!("expected ContainerLogs to remain");
     }
+}
+
+// --- Logs handler search keys ---------------------------------------
+
+fn make_logs_app_with_body(body: Vec<String>) -> App {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerLogs {
+        alias: "db".to_string(),
+        container_id: "c3".to_string(),
+        container_name: "postgres".to_string(),
+        body,
+        fetched_at: 100,
+        error: None,
+        scroll: 0,
+        last_render_height: 24,
+        search: None,
+    };
+    app
+}
+
+fn search_state(app: &App) -> Option<crate::app::ContainerLogsSearch> {
+    if let Screen::ContainerLogs { search, .. } = &app.screen {
+        search.clone()
+    } else {
+        None
+    }
+}
+
+#[test]
+fn logs_overlay_slash_opens_search_with_empty_query() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string(), "bar".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let s = search_state(&app).expect("search must be Some after /");
+    assert!(s.query.is_empty(), "query starts empty");
+    assert_eq!(s.cursor_pos, 0, "cursor starts at 0");
+}
+
+#[test]
+fn logs_overlay_typing_extends_query_and_recomputes_matches() {
+    let mut app = make_logs_app_with_body(vec![
+        "error 1".to_string(),
+        "ok".to_string(),
+        "Error 2".to_string(),
+    ]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
+    let s = search_state(&app).expect("search active");
+    assert_eq!(s.query, "err");
+    // Smart-case: lowercase query matches both "error 1" and "Error 2".
+    assert_eq!(s.matches, vec![0, 2]);
+}
+
+#[test]
+fn logs_overlay_backspace_shrinks_query_and_clamps_current() {
+    let mut app = make_logs_app_with_body(vec!["one".to_string(), "two".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('o')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
+    let s = search_state(&app).expect("search active");
+    assert!(s.query.is_empty(), "backspace removes the only char");
+    assert!(s.matches.is_empty(), "empty query yields no matches");
+}
+
+#[test]
+fn logs_overlay_esc_during_search_closes_search_only() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('f')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(search_state(&app).is_none(), "Esc closes search");
+    assert!(
+        matches!(app.screen, Screen::ContainerLogs { .. }),
+        "viewer stays open"
+    );
+}
+
+#[test]
+fn logs_overlay_esc_without_search_closes_viewer() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(
+        matches!(app.screen, Screen::HostList),
+        "Esc without search closes viewer"
+    );
+}
+
+#[test]
+fn logs_overlay_tab_cycles_forward_through_matches() {
+    let mut app = make_logs_app_with_body(vec![
+        "foo a".to_string(),
+        "bar".to_string(),
+        "foo b".to_string(),
+        "foo c".to_string(),
+    ]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('f')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('o')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('o')), &tx);
+    // Three matches at lines 0, 2, 3. Initial current=0.
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    assert_eq!(search_state(&app).unwrap().current, 1);
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    assert_eq!(search_state(&app).unwrap().current, 2);
+    // Wrap-around.
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    assert_eq!(search_state(&app).unwrap().current, 0);
+}
+
+#[test]
+fn logs_overlay_shift_tab_cycles_backward_through_matches() {
+    let mut app = make_logs_app_with_body(vec![
+        "foo a".to_string(),
+        "foo b".to_string(),
+        "foo c".to_string(),
+    ]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('f')), &tx);
+    // Initial current=0. Shift+Tab wraps to last.
+    let _ = handle_key_event(&mut app, key(KeyCode::BackTab), &tx);
+    assert_eq!(search_state(&app).unwrap().current, 2);
+    let _ = handle_key_event(&mut app, key(KeyCode::BackTab), &tx);
+    assert_eq!(search_state(&app).unwrap().current, 1);
+}
+
+#[test]
+fn logs_overlay_n_during_search_is_just_a_letter() {
+    let mut app = make_logs_app_with_body(vec!["no entry".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
+    // Modeless: n is part of the query, not a match-nav command.
+    assert_eq!(search_state(&app).unwrap().query, "n");
+    assert_eq!(
+        search_state(&app).unwrap().matches,
+        vec![0],
+        "query 'n' matches 'no entry'"
+    );
+}
+
+#[test]
+fn logs_overlay_q_during_search_extends_query_not_quits() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+    assert!(
+        matches!(app.screen, Screen::ContainerLogs { .. }),
+        "q during search must not close the viewer"
+    );
+    assert_eq!(search_state(&app).unwrap().query, "q");
+}
+
+#[test]
+fn logs_overlay_typing_resets_current_to_first_match() {
+    // After Tab moves to match #2, refining the query must reset
+    // current back to 0 — mirrors app::search::apply_filter.
+    let mut app = make_logs_app_with_body(vec![
+        "foo a".to_string(),
+        "foo b".to_string(),
+        "foo c".to_string(),
+    ]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('f')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    assert_eq!(search_state(&app).unwrap().current, 2);
+    // Typing another char refines the query and must reset current.
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('o')), &tx);
+    assert_eq!(
+        search_state(&app).unwrap().current,
+        0,
+        "refining query must reset cursor to first match"
+    );
+}
+
+#[test]
+fn logs_overlay_scroll_keys_swallowed_during_search() {
+    // Modeless contract: while search is active, j/k/g/G are treated
+    // as character input so the user can search for those letters.
+    let mut app = make_logs_app_with_body(vec!["jump line".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
+    assert_eq!(search_state(&app).unwrap().query, "j");
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
+    assert_eq!(search_state(&app).unwrap().query, "jg");
+}
+
+#[test]
+fn logs_overlay_typing_uppercase_flips_to_case_sensitive() {
+    let mut app = make_logs_app_with_body(vec!["Error: x".to_string(), "error: y".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    // Capital E flips to case-sensitive.
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('E')), &tx);
+    let s = search_state(&app).unwrap();
+    assert_eq!(
+        s.matches,
+        vec![0],
+        "uppercase query must match only the capitalised line"
+    );
+}
+
+#[test]
+fn logs_overlay_cursor_tracks_inserts_at_end() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('c')), &tx);
+    let s = search_state(&app).unwrap();
+    assert_eq!(s.query, "abc");
+    assert_eq!(s.cursor_pos, 3, "cursor follows the tail after appends");
+}
+
+#[test]
+fn logs_overlay_left_arrow_moves_cursor_back_then_insert_lands_mid_query() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('c')), &tx);
+    // cursor at end (pos 2). Left once, insert 'b' between a and c.
+    let _ = handle_key_event(&mut app, key(KeyCode::Left), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
+    let s = search_state(&app).unwrap();
+    assert_eq!(s.query, "abc", "char inserted at cursor, not at end");
+    assert_eq!(s.cursor_pos, 2);
+}
+
+#[test]
+fn logs_overlay_home_end_jump_cursor_to_extremes() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('c')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Home), &tx);
+    assert_eq!(search_state(&app).unwrap().cursor_pos, 0);
+    let _ = handle_key_event(&mut app, key(KeyCode::End), &tx);
+    assert_eq!(search_state(&app).unwrap().cursor_pos, 3);
+}
+
+#[test]
+fn logs_overlay_delete_removes_char_at_cursor() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('c')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Home), &tx);
+    // Cursor at 0, Delete eats 'a'.
+    let _ = handle_key_event(&mut app, key(KeyCode::Delete), &tx);
+    let s = search_state(&app).unwrap();
+    assert_eq!(s.query, "bc");
+    assert_eq!(s.cursor_pos, 0, "delete does not move cursor");
+}
+
+#[test]
+fn logs_overlay_backspace_at_position_zero_is_noop() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Home), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
+    let s = search_state(&app).unwrap();
+    assert_eq!(s.query, "a", "backspace at start does not corrupt query");
+    assert_eq!(s.cursor_pos, 0);
+}
+
+#[test]
+fn logs_overlay_left_at_position_zero_is_noop() {
+    let mut app = make_logs_app_with_body(vec!["foo".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Left), &tx);
+    assert_eq!(search_state(&app).unwrap().cursor_pos, 0);
+}
+
+#[test]
+fn logs_overlay_cursor_handles_unicode_grapheme() {
+    let mut app = make_logs_app_with_body(vec!["über".to_string()]);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
+    // Type "ü" (2-byte UTF-8). Cursor advances by one CHAR, not 2 bytes.
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('ü')), &tx);
+    let s = search_state(&app).unwrap();
+    assert_eq!(s.query, "ü");
+    assert_eq!(s.cursor_pos, 1, "cursor counts chars, not bytes");
+    // Backspace must remove the whole rune, not a single byte.
+    let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
+    assert!(search_state(&app).unwrap().query.is_empty());
 }

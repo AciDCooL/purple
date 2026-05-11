@@ -103,6 +103,9 @@ pub const ACTION_BOTTOM: &str = " bottom ";
 pub const ACTION_SCROLL: &str = " scroll ";
 pub const ACTION_PAGE: &str = " page ";
 pub const ACTION_ALL: &str = " all ";
+pub const ACTION_CLOSE: &str = " close ";
+pub const ACTION_MATCH: &str = " match ";
+pub const ACTION_MOVE: &str = " move ";
 
 // --- Tab / arrow / Space ---
 

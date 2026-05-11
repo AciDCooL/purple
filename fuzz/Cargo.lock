@@ -1673,7 +1673,7 @@ dependencies = [
 
 [[package]]
 name = "purple-ssh"
-version = "3.10.1"
+version = "3.11.0"
 dependencies = [
  "anyhow",
  "base64",

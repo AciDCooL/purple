@@ -1,3 +1,13 @@
+## 3.11.0 - 2026-05-11
+
+- feat: Live-search container logs without leaving purple.
+- feat: Press `/` in the logs viewer to filter as you type. Tab and Shift+Tab step through matches, `←`/`→`/`Home`/`End`/`Backspace`/`Delete` edit the query, `Esc` returns to the logs.
+- feat: Smart-case search matches like you would expect. Lowercase finds anything, an uppercase character locks the search to exact case.
+- feat: Demo mode now ships realistic container logs, so `--demo` exercises the new search without a remote shell.
+- change: Container detail cards line up consistently. ACTIONS verbs share the same value column as FLEET state, HOST address and STATUS rows, so the cards read as one grid.
+- change: UPTIME stays anchored to the right edge of the container list, even when the detail panel is folded. IMAGE flexes to fill the space.
+- change: Mounts table in the container detail card has breathing room. The `rw`/`ro` tag no longer presses against the right border.
+
 ## 3.10.1 - 2026-05-11
 
 - feat: Cleaner Podman fleets, snappier containers, safer exec.

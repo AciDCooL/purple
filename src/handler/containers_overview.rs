@@ -520,6 +520,7 @@ fn queue_logs_fetch_for_selected(app: &mut App) {
         error: None,
         scroll: 0,
         last_render_height: 0,
+        search: None,
     });
 }
 

@@ -766,6 +766,7 @@ pub(crate) fn handle_container_logs_complete(
         fetched_at,
         scroll,
         last_render_height,
+        search,
         ..
     } = &mut app.screen
     {
@@ -791,6 +792,24 @@ pub(crate) fn handle_container_logs_complete(
                         body.len(),
                         *last_render_height,
                     );
+                    // Recompute search matches against the refreshed
+                    // body so an active `/foo` survives the `r` cycle.
+                    // Re-centre the viewport on the current match so
+                    // the user lands back on a visible hit.
+                    if let Some(s) = search.as_mut() {
+                        crate::handler::container_logs::refresh_search(body, s);
+                        log::debug!(
+                            "[purple] container_logs: search refreshed query={:?} matches={}",
+                            s.query,
+                            s.matches.len()
+                        );
+                        crate::handler::container_logs::recenter_on_match(
+                            body.len(),
+                            *last_render_height,
+                            s,
+                            scroll,
+                        );
+                    }
                 }
                 Err(e) => {
                     log::warn!(

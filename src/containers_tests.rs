@@ -2022,3 +2022,97 @@ fn format_uptime_short_buckets() {
     assert_eq!(format_uptime_short(86_400), "1d");
     assert_eq!(format_uptime_short(7 * 86_400), "7d");
 }
+
+// -- demo_log_lines (Phase B: demo short-circuit) ------------------------
+
+#[test]
+fn demo_log_lines_returns_requested_tail_count() {
+    let lines = demo_log_lines("api", 200);
+    assert_eq!(lines.len(), 200);
+}
+
+#[test]
+fn demo_log_lines_are_deterministic_for_same_container() {
+    let a = demo_log_lines("api", 50);
+    let b = demo_log_lines("api", 50);
+    assert_eq!(a, b, "same container name yields identical output");
+}
+
+#[test]
+fn demo_log_lines_vary_between_containers() {
+    let a = demo_log_lines("api", 30);
+    let b = demo_log_lines("worker", 30);
+    assert_ne!(a, b, "different containers must produce different streams");
+}
+
+#[test]
+fn demo_log_lines_include_search_targets() {
+    let lines = demo_log_lines("api", 200);
+    let joined = lines.join("\n");
+    // The user must be able to find these via `/` to demo search.
+    assert!(
+        joined.contains("ERROR"),
+        "demo logs must include error rows"
+    );
+    assert!(joined.contains("WARN"), "demo logs must include warn rows");
+    assert!(joined.contains("INFO"), "demo logs must include info rows");
+}
+
+#[test]
+fn demo_log_lines_start_with_iso_timestamp() {
+    let lines = demo_log_lines("api", 5);
+    // Format: YYYY-MM-DD HH:MM:SS
+    let first = &lines[0];
+    assert_eq!(first.as_bytes()[4], b'-', "year-month separator at index 4");
+    assert_eq!(first.as_bytes()[7], b'-', "month-day separator at index 7");
+    assert_eq!(first.as_bytes()[10], b' ', "date-time gap at index 10");
+    assert_eq!(
+        first.as_bytes()[13],
+        b':',
+        "hour-minute separator at index 13"
+    );
+}
+
+#[test]
+fn civil_from_days_round_trip_known_dates() {
+    // 1970-01-01 is day 0.
+    assert_eq!(civil_from_days(0), (1970, 1, 1));
+    // 2026-05-11 is day 20585 (matches `date -d "2026-05-11" +%s` math).
+    let secs: u64 = 1_778_457_600; // 2026-05-11 00:00:00 UTC
+    let days = (secs / 86_400) as i64;
+    assert_eq!(civil_from_days(days), (2026, 5, 11));
+}
+
+#[test]
+fn civil_from_days_handles_leap_years() {
+    // 2000-02-29 exists (divisible by 400). 2000-01-01 is day 10957.
+    assert_eq!(civil_from_days(10_957 + 31 + 28), (2000, 2, 29));
+    // 2024-02-29 exists (divisible by 4 not by 100). 2024-01-01 = day 19723.
+    assert_eq!(civil_from_days(19_723 + 31 + 28), (2024, 2, 29));
+}
+
+#[test]
+fn civil_from_days_handles_non_leap_centennial() {
+    // 1900 is NOT a leap year (divisible by 100, not by 400).
+    // 1900-01-01 = day -25_567. 1900-03-01 = +59 days (Jan 31 + Feb 28).
+    assert_eq!(civil_from_days(-25_567 + 31 + 28), (1900, 3, 1));
+}
+
+#[test]
+fn format_demo_timestamp_emits_iso_8601_seconds() {
+    use std::time::{Duration, UNIX_EPOCH};
+    // 2026-05-11 00:00:00 UTC = 1_778_457_600 (cross-checked via
+    // `date -u -d "2026-05-11" +%s`). Add 19h53m47s = 71_627s.
+    let t = UNIX_EPOCH + Duration::from_secs(1_778_457_600 + 71_627);
+    assert_eq!(format_demo_timestamp(t), "2026-05-11 19:53:47");
+}
+
+#[test]
+fn format_demo_timestamp_pads_single_digit_fields() {
+    use std::time::{Duration, UNIX_EPOCH};
+    // 2026-01-05 03:07:09 UTC.
+    // 2026-01-01 base then +4 days. Seconds-in-day = 3*3600 + 7*60 + 9.
+    let secs_2026_jan_1: u64 = 1_767_225_600; // verified: 2026-01-01 00:00:00 UTC
+    let t = UNIX_EPOCH + Duration::from_secs(secs_2026_jan_1 + 4 * 86_400 + 3 * 3600 + 7 * 60 + 9);
+    assert_eq!(format_demo_timestamp(t), "2026-01-05 03:07:09");
+}

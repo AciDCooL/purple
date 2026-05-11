@@ -381,14 +381,20 @@ where
     let with_uptime_min = always_on_with_image(IMAGE_MIN) + GAP_W + UPTIME_W;
     let show_uptime = content_w >= with_uptime_min;
 
-    // Image shrink: if the row at image_max doesn't fit, eat into IMAGE
-    // until it does (or hits IMAGE_MIN). UPTIME is already demoted
-    // above so this is the last resort.
+    // IMAGE is the flex column. When the row needs more width than
+    // available, shrink IMAGE toward IMAGE_MIN. When there is surplus
+    // and UPTIME is on, expand IMAGE to absorb it so UPTIME anchors
+    // to the right edge (mirrors host_list's flex_gap pattern; without
+    // this, collapsing the detail panel leaves an empty column to the
+    // right of IMAGE while UPTIME drifts left of its natural anchor).
     let total_max =
         always_on_with_image(image_max) + if show_uptime { GAP_W + UPTIME_W } else { 0 };
     let image = if total_max > content_w {
         let excess = total_max - content_w;
         image_max.saturating_sub(excess).max(IMAGE_MIN)
+    } else if show_uptime {
+        let consumed = always_on_with_image(0) + GAP_W + UPTIME_W;
+        content_w.saturating_sub(consumed).max(image_max)
     } else {
         image_max
     };
@@ -1515,10 +1521,12 @@ fn push_action_text_row(
     } else {
         theme::muted()
     };
-    // Key column is sized to fit the longest binding ("Space" = 5 chars
-    // plus one trailing space). Keeping the verb column flush across
-    // rows lets the eye scan the action verbs as a single column.
-    let key_field = format!("{:<6}", key);
+    // Key column width matches `design::SECTION_LABEL_W` so action
+    // verbs line up vertically with the values in sibling cards
+    // (STATUS/FLEET/HOST). The longest binding ("Space" = 5 cols)
+    // still fits comfortably; the extra width is breathing room that
+    // keeps the inner-card grid visually consistent.
+    let key_field = format!("{:<width$}", key, width = design::SECTION_LABEL_W as usize);
     let mut spans: Vec<Span<'static>> = Vec::new();
     spans.push(Span::styled(key_field, key_style));
     spans.push(Span::styled(verb.to_string(), verb_style));
@@ -2277,7 +2285,11 @@ fn build_detail_lines(
         if !insp.mounts.is_empty() {
             design::section_open(&mut lines, "MOUNTS", box_width);
             // section_line strips 3 cols for the left/right borders.
-            let inner = box_width.saturating_sub(3);
+            // Subtract one more so the mode tag does not press against
+            // the right `│`; other section helpers get this gap for free
+            // via their right-padding, but the mounts row fills `inner`
+            // exactly with its own spacer.
+            let inner = box_width.saturating_sub(4);
             const ARROW: &str = " \u{2192} ";
             const ARROW_W: usize = 3;
             const MODE_W: usize = 2;
@@ -2728,6 +2740,48 @@ mod tests {
         )];
         let cols = compute_columns(rows.iter(), 75, false);
         assert!(cols.show_uptime, "UPTIME survives modest widths");
+    }
+
+    #[test]
+    fn compute_columns_flexes_image_to_anchor_uptime_right() {
+        // With surplus width and UPTIME on, IMAGE absorbs the surplus so
+        // UPTIME sits at the right edge instead of floating after a short
+        // image string. Mirrors host_list's flex_gap behaviour.
+        let rows = [col_row("svc", "img:1")];
+        let cols = compute_columns(rows.iter(), 200, false);
+        let consumed = HIGHLIGHT_W
+            + MARKER_W
+            + STATUS_DOT_W
+            + cols.name
+            + GAP_W
+            + cols.image
+            + GAP_W
+            + UPTIME_W;
+        assert_eq!(consumed, 200, "rendered row spans full content width");
+        assert!(cols.image > IMAGE_MIN, "image flexed beyond minimum");
+    }
+
+    #[test]
+    fn compute_columns_flexes_image_with_host_column_visible() {
+        // AlphaContainer mode renders the HOST column. The flex
+        // accounting must subtract the host segment too, otherwise
+        // UPTIME would overshoot and the row would overflow.
+        let rows = [col_row("svc", "img:1")];
+        let cols = compute_columns(rows.iter(), 200, true);
+        let consumed = HIGHLIGHT_W
+            + MARKER_W
+            + STATUS_DOT_W
+            + cols.host
+            + GAP_W
+            + cols.name
+            + GAP_W
+            + cols.image
+            + GAP_W
+            + UPTIME_W;
+        assert_eq!(
+            consumed, 200,
+            "rendered row with HOST column spans full content width"
+        );
     }
 
     #[test]
@@ -3264,6 +3318,16 @@ mod tests {
             !text.contains("Env 12"),
             "Env count teaser dropped; full list not implemented"
         );
+        // Mode tags (rw/ro) must leave at least one column of breathing
+        // room before the right `│` so they do not press against the
+        // card edge. Other section helpers get this gap for free via
+        // their right-padding; the mounts row builds its own spacer.
+        for row in &mount_rows {
+            assert!(
+                row.ends_with("rw \u{2502}") || row.ends_with("ro \u{2502}"),
+                "mode tag must be followed by a space before the right border, got {row:?}"
+            );
+        }
     }
 
     #[test]
@@ -4008,6 +4072,41 @@ mod tests {
         let text = host_detail_text(&app, "host-x", 2, 0);
         assert!(text.contains("ACTIONS"));
         assert!(text.contains("nothing running"));
+    }
+
+    #[test]
+    fn host_detail_actions_verbs_align_with_card_value_column() {
+        // The ACTIONS card key column must use `design::SECTION_LABEL_W`
+        // so action verbs sit at the same X as the values in sibling
+        // cards (STATUS / FLEET / HOST). A regression to a narrower key
+        // column would make `Restart`, `Stop`, etc. land left of where
+        // `Docker`, `3 running`, `192.0.2.1:22` start.
+        let cache = cache_with(&[("host-z", &[("1", "n", "img", "running")])]);
+        let app = app_with_cache(cache);
+        let lines = build_host_detail_lines(&app, "host-z", 1, 1, 60, 40);
+        // Find the row that starts with the K action (Restart). It is
+        // styled in two spans (key + verb), so check the second span
+        // begins exactly at `SECTION_LABEL_W` columns past the leading
+        // `│ ` (2 cols).
+        let k_row = lines
+            .iter()
+            .find(|line| {
+                line.spans
+                    .iter()
+                    .any(|s| s.content == "Restart running on host")
+            })
+            .expect("ACTIONS card must include the K row");
+        // Layout: [│ ][K_padded_to_SECTION_LABEL_W][verb]...
+        let key_span = &k_row.spans[1];
+        assert_eq!(
+            key_span.content.len(),
+            design::SECTION_LABEL_W as usize,
+            "ACTIONS key column must be SECTION_LABEL_W wide so verbs align with sibling-card values"
+        );
+        assert!(
+            key_span.content.starts_with("K"),
+            "first ACTIONS row is the Restart binding"
+        );
     }
 
     #[test]
