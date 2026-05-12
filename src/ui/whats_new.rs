@@ -43,7 +43,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     // date. Toast-trigger logic (onboarding.rs) still uses versions_to_show
     // for the "has something new?" signal, but the overlay itself is a
     // browsable history.
-    const RECENT_CAP: usize = 5;
+    const RECENT_CAP: usize = 10;
     let shown: &[Section] = sections
         .get(..sections.len().min(RECENT_CAP))
         .unwrap_or(&[]);

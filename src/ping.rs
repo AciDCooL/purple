@@ -3,6 +3,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use log::{debug, warn};
+
 use crate::event::AppEvent;
 
 /// Ping a single host by attempting a TCP connection on the configured port.
@@ -65,8 +67,21 @@ fn ping_host_inner(
         let _ = done_tx.send(rtt_ms);
     });
 
-    let rtt_ms = done_rx.recv_timeout(Duration::from_secs(5)).unwrap_or(None);
+    let rtt_ms = match done_rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(rtt) => rtt,
+        Err(e) => {
+            warn!(
+                "[external] ping timeout: alias={} addr={} ({})",
+                alias, addr_str, e
+            );
+            None
+        }
+    };
 
+    debug!(
+        "[purple] ping result: alias={} addr={} rtt_ms={:?} gen={}",
+        alias, addr_str, rtt_ms, generation
+    );
     let _ = tx.send(AppEvent::PingResult {
         alias: alias.to_string(),
         rtt_ms,
@@ -79,6 +94,11 @@ fn ping_host_inner(
 /// to limit concurrent pings, preventing thread explosion on large host lists.
 pub fn ping_all(hosts: &[(String, String, u16)], tx: mpsc::Sender<AppEvent>, generation: u64) {
     let hosts = hosts.to_vec();
+    debug!(
+        "[purple] ping_all: hosts={} gen={}",
+        hosts.len(),
+        generation
+    );
     thread::spawn(move || {
         let max_concurrent: usize = 10;
         let (slot_tx, slot_rx) = mpsc::channel();

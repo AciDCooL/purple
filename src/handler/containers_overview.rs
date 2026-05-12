@@ -1,14 +1,14 @@
 //! Key handler for the global Containers tab (top_page = Containers).
 //!
 //! Routes navigation (j/k/g/G/PgUp/PgDn/Tab), search (`/`), sort (`s`),
-//! detail-panel toggle (`v`), group fold (`Space`/`Enter` on a host
-//! divider), refresh (`r`/`R`), add-host (`a`) and the destructive
-//! actions (`Enter` shell, `K` restart, `S` stop, `e` exec, `l` logs,
+//! detail-panel toggle (`v`), group fold (`Space` on a host divider),
+//! refresh (`r`/`R`), add-host (`a`) and the destructive actions
+//! (`Enter` shell, `K` restart, `S` stop, `e` exec, `l` logs,
 //! `Ctrl-K` stack restart). Single-target actions (Enter shell, l, e)
-//! gate on `selected_container_row`; host-scoped actions (K, S, r,
-//! fold) accept either a container row or a divider row, with the
-//! divider variant queuing a bulk action against every running
-//! container on the host.
+//! gate on `selected_container_row`; host-scoped actions (K, S, r)
+//! accept either a container row or a divider row, with the divider
+//! variant queuing a bulk action against every running container on
+//! the host.
 //!
 //! Enter queues an interactive shell session into the selected
 //! container; the main loop drains `pending_container_exec` and spawns
@@ -819,16 +819,12 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender
             app.top_page = app.top_page.prev();
             app.search.query = None;
         }
-        KeyCode::Enter => {
-            // Enter on a host-divider row toggles the group fold,
-            // mirroring Space, so the user has a one-handed shortcut
-            // either via Space (consistent with bulk pickers) or the
-            // most-natural list activation key.
-            if selected_header_alias(app).is_some() {
-                toggle_collapse_for_selected_host(app);
-            } else {
-                exec_into_selected_container(app);
-            }
+        // Enter on a container row queues an exec. On a host-header
+        // row Enter falls through silently; Space is the single binding
+        // for fold/unfold, consistent with purple's Space-toggles
+        // convention.
+        KeyCode::Enter if selected_header_alias(app).is_none() => {
+            exec_into_selected_container(app);
         }
         KeyCode::Char('l') => {
             if selected_header_alias(app).is_some() {
@@ -1365,8 +1361,13 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
                 .select(first_visible_idx(app));
         }
         KeyCode::Enter => {
+            // Mirror the main handler: silent no-op on host headers,
+            // exec on container rows. Clear search either way so the
+            // user always returns to the full listing.
             app.search.query = None;
-            exec_into_selected_container(app);
+            if selected_header_alias(app).is_none() {
+                exec_into_selected_container(app);
+            }
         }
         KeyCode::Down | KeyCode::Tab => select_next(app),
         KeyCode::Up | KeyCode::BackTab => select_prev(app),

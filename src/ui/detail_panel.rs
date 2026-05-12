@@ -224,8 +224,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
             String::new()
         };
         if !addr_str.is_empty() {
-            // Available width inside box: box_width - 2 (│ prefix+space) - 1 (closing │)
-            let inner = box_width.saturating_sub(3);
+            // Available width inside box: 2 cols left chrome (│ + space),
+            // 2 cols right chrome (space + │) so truncate at `sub(4)` to
+            // keep one column of breathing room before the right border.
+            let inner = box_width.saturating_sub(4);
             let truncated = super::truncate(&addr_str, inner);
             section_line(
                 &mut lines,

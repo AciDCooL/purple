@@ -75,6 +75,56 @@ fn renders_strict_glyph_prefixes() {
 }
 
 #[test]
+fn whats_new_shows_up_to_ten_recent_releases() {
+    // The overlay caps its history view at the ten newest releases.
+    // With twelve synthetic releases available, the eight newest plus
+    // two more must render; the oldest two must fall outside the cap.
+    let _guard = test_override_lock();
+    crate::preferences::tests_helpers::with_temp_prefs("whats_new_cap", |_| {
+        crate::preferences::save_last_seen_version("0.0.1").unwrap();
+        crate::ui::theme::init_with_mode(1);
+        let mut app = build_app();
+        app.screen = Screen::WhatsNew(WhatsNewState { scroll: 0 });
+
+        let mut fixture = String::new();
+        for i in (1..=12).rev() {
+            fixture.push_str(&format!("## 1.{i}.0 - 2026-01-01\n- feat: bullet\n\n"));
+        }
+        changelog::set_test_override(fixture);
+
+        let backend = TestBackend::new(120, 200);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let mut anim = AnimationState::default();
+        terminal
+            .draw(|f| crate::ui::render(f, &mut app, &mut anim))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let mut out = String::new();
+        for y in 0..200 {
+            for x in 0..120 {
+                out.push_str(buf[(x, y)].symbol());
+            }
+            out.push('\n');
+        }
+        changelog::clear_test_override();
+
+        assert!(out.contains("1.12.0"), "newest version must render");
+        assert!(
+            out.contains("1.3.0"),
+            "tenth-newest version must render within cap"
+        );
+        assert!(
+            !out.contains("1.2.0"),
+            "1.2.0 sits beyond RECENT_CAP and must not render"
+        );
+        assert!(
+            !out.contains("1.1.0"),
+            "1.1.0 sits beyond RECENT_CAP and must not render"
+        );
+    });
+}
+
+#[test]
 fn renders_scroll_indicator_when_content_overflows() {
     let _guard = test_override_lock();
     crate::ui::theme::init_with_mode(1);

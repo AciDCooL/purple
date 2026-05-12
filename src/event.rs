@@ -190,8 +190,9 @@ impl EventHandler {
                         }
                     }
                     Ok(false) => {}
-                    Err(_) => {
+                    Err(e) => {
                         // Poll error (e.g. stdin closed). Notify main loop and exit.
+                        log::error!("[external] crossterm poll failed: {e}");
                         let _ = event_tx.send(AppEvent::PollError);
                         return;
                     }

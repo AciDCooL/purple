@@ -632,6 +632,12 @@ fn execute_host(
             Some(guard)
         }
         Err(e) => {
+            log::warn!(
+                "[external] snippet ssh spawn failed: run_id={} alias={} err={}",
+                run_id,
+                alias,
+                e
+            );
             let _ = tx.send(crate::event::AppEvent::SnippetHostDone {
                 run_id,
                 alias: alias.to_string(),

@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent};
+use log::{debug, warn};
 
 use crate::app::{App, Screen};
 use crate::clipboard;
@@ -211,6 +212,12 @@ fn start_snippet_output(
         app.tunnels.active.keys().cloned().collect();
 
     let run_id = SNIPPET_RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
+    debug!(
+        "[purple] snippet run started: run_id={} name={:?} hosts={}",
+        run_id,
+        snippet.name,
+        target_aliases.len()
+    );
 
     app.snippets.output = Some(crate::app::SnippetOutputState {
         run_id,
@@ -675,6 +682,7 @@ fn submit_snippet_form(app: &mut App, target_aliases: &[String], editing: Option
     app.snippets.store.set(snippet);
 
     if let Err(e) = app.snippets.store.save() {
+        warn!("[config] snippet store save failed, rolling back: {e}");
         app.snippets.store.snippets = snapshot;
         app.notify_error(crate::messages::failed_to_save(&e));
         return;

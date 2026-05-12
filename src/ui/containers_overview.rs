@@ -375,7 +375,7 @@ where
     let always_on_with_image =
         |image: usize| HIGHLIGHT_W + MARKER_W + STATUS_DOT_W + host_segment + name + GAP_W + image;
 
-    // STATUS and HEALTH columns no longer exist — the per-row glyph
+    // STATUS and HEALTH columns no longer exist. The per-row glyph
     // encodes both signals via colour and shape. PORTS was demoted to
     // detail-panel-only because it was empty for most rows.
     let with_uptime_min = always_on_with_image(IMAGE_MIN) + GAP_W + UPTIME_W;
@@ -1605,7 +1605,7 @@ struct InspectSignals {
 /// Restart-count threshold above which a container is flagged as a
 /// restart loop in the host detail ATTENTION card. Five gives docker's
 /// `on-failure:5` policy room to do its job before purple raises
-/// the flag — only persistent loops past that policy show up here.
+/// the flag. Only persistent loops past that policy show up here.
 const RESTART_LOOP_THRESHOLD: u32 = 5;
 
 /// Maximum restart-loop rows to render inside one ATTENTION card. More
@@ -1920,7 +1920,10 @@ fn build_detail_lines(
             });
         if let Some(text) = cmd_text {
             design::section_open(&mut lines, "CMD", box_width);
-            let wrap_width = box_width.saturating_sub(3);
+            // Subtract one extra column so wrapped content keeps a
+            // space before the right `│`. MOUNTS and LOGS already
+            // breathe this way; CMD now matches.
+            let wrap_width = box_width.saturating_sub(4);
             for chunk in wrap_to_lines(&text, wrap_width, 3) {
                 design::section_line(
                     &mut lines,
@@ -3151,6 +3154,64 @@ mod tests {
     }
 
     #[test]
+    fn build_detail_lines_cmd_card_keeps_breathing_room_against_right_border() {
+        // The CMD card wraps long commands onto multiple lines. Every
+        // wrapped line must keep at least one column of padding before
+        // the right `│`, matching how MOUNTS and LOGS already breathe.
+        let row = ContainerRow {
+            id: "c3".to_string(),
+            alias: "h".to_string(),
+            name: "svc".to_string(),
+            image: "i:1".to_string(),
+            state: "running".to_string(),
+            status: "Up 1m".to_string(),
+            ports: String::new(),
+            uptime: Some("1m".to_string()),
+            cache_timestamp: 0,
+        };
+        // Long command that forces the wrapper to fill its wrap width
+        // on each line. With a tight breathing budget every emitted
+        // line is the worst case for right-edge padding.
+        let cmd = "a".repeat(200);
+        let inspect = crate::containers::ContainerInspect {
+            command: Some(vec![cmd]),
+            ..Default::default()
+        };
+        let result = Ok(inspect);
+        let lines = build_detail_lines(&row, Some(&result), false, 0, 48);
+        let mut in_cmd_card = false;
+        let mut content_lines_checked = 0;
+        for line in &lines {
+            let raw = line.to_string();
+            if raw.contains("CMD") && raw.contains("─") {
+                in_cmd_card = true;
+                continue;
+            }
+            if in_cmd_card {
+                if raw.starts_with('╰') {
+                    break;
+                }
+                if raw.contains('a') {
+                    let trimmed_end = raw.trim_end();
+                    let last_border = trimmed_end
+                        .rfind('│')
+                        .expect("CMD content line ends with right border");
+                    let before_border = &trimmed_end[..last_border];
+                    assert!(
+                        before_border.ends_with(' '),
+                        "CMD card content must keep at least one space before │, got: {raw:?}"
+                    );
+                    content_lines_checked += 1;
+                }
+            }
+        }
+        assert!(
+            content_lines_checked > 0,
+            "expected at least one CMD content line to verify"
+        );
+    }
+
+    #[test]
     fn build_detail_lines_no_inspect_shows_loading_when_in_flight() {
         let row = ContainerRow {
             id: "c3".to_string(),
@@ -4114,7 +4175,7 @@ mod tests {
         let cache = cache_with(&[("host-y", &[("1", "n", "img", "running")])]);
         let app = app_with_cache(cache);
         let lines = build_host_detail_lines(&app, "host-y", 1, 1, 60, 40);
-        // Panel height in lines is 40 — stretch_last_card must pad up
+        // Panel height in lines is 40. stretch_last_card must pad up
         // to that count so the bottom border lands flush.
         assert_eq!(lines.len(), 40);
         // The very last line is the closing border of the HOST card.
@@ -4277,7 +4338,7 @@ mod tests {
         let (info_at_6, _) = make(6);
         // Insert two synthetic inspects keyed by the same id, swapping
         // the restart_count between probes. Easier than building a
-        // ContainerInspect literal twice — assert via collect_inspect_signals.
+        // ContainerInspect literal twice. Assert via collect_inspect_signals.
         for rc in [5u32, 6u32] {
             let inspect = crate::containers::ContainerInspect {
                 restart_count: rc,

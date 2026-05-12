@@ -65,7 +65,12 @@ impl SyncRecord {
                 record.message
             ));
         }
-        let _ = crate::fs_util::atomic_write(&path, lines.join("\n").as_bytes());
+        if let Err(e) = crate::fs_util::atomic_write(&path, lines.join("\n").as_bytes()) {
+            log::warn!(
+                "[config] failed to save sync_history.tsv at {}: {e}",
+                path.display()
+            );
+        }
     }
 
     /// Parse sync history from TSV content string (for demo/test use).

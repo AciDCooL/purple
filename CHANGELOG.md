@@ -1,3 +1,10 @@
+## 3.12.3 - 2026-05-12
+
+- feat: Twice the release history and calmer detail panels.
+- feat: Browse the last ten releases at a glance with n, double what fit before.
+- feat: Container detail cards keep clean breathing room on every side, so CMD and host-header text never collide with a border.
+- change: Space folds container groups and Enter opens containers, no overlap.
+
 ## 3.12.2 - 2026-05-12
 
 - feat: Renames keep your status, containers and tunnels in step.

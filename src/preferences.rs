@@ -421,7 +421,11 @@ pub fn load_auto_ping() -> bool {
 /// Save auto_ping preference.
 #[allow(dead_code)]
 pub fn save_auto_ping(enabled: bool) -> io::Result<()> {
-    save_value("auto_ping", if enabled { "true" } else { "false" })
+    let value = if enabled { "true" } else { "false" };
+    log::debug!("[purple] saving auto_ping={}", value);
+    save_value("auto_ping", value).inspect_err(|e| {
+        log::warn!("[config] failed to save auto_ping={}: {}", value, e);
+    })
 }
 
 #[cfg(test)]

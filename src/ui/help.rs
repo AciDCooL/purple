@@ -510,7 +510,7 @@ fn containers_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         help_line_short("K", "restart running on host"),
         help_line_short("S", "stop running on host"),
         help_line_short("r", "refresh listing"),
-        help_line_short("Space/Enter", "fold group"),
+        help_line_short("Space", "fold group"),
         blank(),
         blank(),
         section_header("REFRESH"),

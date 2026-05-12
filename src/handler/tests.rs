@@ -9169,6 +9169,91 @@ fn containers_overview_search_filters_rows() {
 }
 
 #[test]
+fn containers_overview_search_enter_on_header_is_noop() {
+    // The search-mode Enter arm must mirror the main handler: clear
+    // the search query, but never toggle fold or queue an exec when
+    // the cursor sits on a host-header row.
+    let mut app = make_containers_overview_app();
+    app.search.query = Some(String::new());
+    let items = crate::ui::containers_overview::visible_items(&app);
+    let header_idx = items
+        .iter()
+        .position(|i| i.is_header())
+        .expect("test fixture must include at least one host-header row");
+    let header_alias = match &items[header_idx] {
+        crate::ui::containers_overview::ContainerListItem::HostHeader { alias, .. } => {
+            alias.clone()
+        }
+        _ => unreachable!(),
+    };
+    app.ui.containers_overview_state.select(Some(header_idx));
+    let was_collapsed = app
+        .containers_overview
+        .collapsed_hosts
+        .contains(&header_alias);
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+
+    assert!(
+        app.search.query.is_none(),
+        "Enter in search mode clears the query"
+    );
+    let now_collapsed = app
+        .containers_overview
+        .collapsed_hosts
+        .contains(&header_alias);
+    assert_eq!(
+        was_collapsed, now_collapsed,
+        "Enter on header during search must not toggle fold"
+    );
+    assert!(
+        app.pending_container_exec.is_none(),
+        "Enter on header during search must not queue an exec"
+    );
+}
+
+#[test]
+fn containers_overview_enter_on_host_header_is_noop() {
+    // Enter on a host-header row must not toggle the group fold and
+    // must not queue an exec. Space is the only binding that folds;
+    // Enter is reserved for primary actions on container rows.
+    let mut app = make_containers_overview_app();
+    let items = crate::ui::containers_overview::visible_items(&app);
+    let header_idx = items
+        .iter()
+        .position(|i| i.is_header())
+        .expect("test fixture must include at least one host-header row");
+    let header_alias = match &items[header_idx] {
+        crate::ui::containers_overview::ContainerListItem::HostHeader { alias, .. } => {
+            alias.clone()
+        }
+        _ => unreachable!(),
+    };
+    app.ui.containers_overview_state.select(Some(header_idx));
+    let was_collapsed = app
+        .containers_overview
+        .collapsed_hosts
+        .contains(&header_alias);
+
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+
+    let now_collapsed = app
+        .containers_overview
+        .collapsed_hosts
+        .contains(&header_alias);
+    assert_eq!(
+        was_collapsed, now_collapsed,
+        "Enter on host header must not toggle fold"
+    );
+    assert!(
+        app.pending_container_exec.is_none(),
+        "Enter on host header must not queue an exec"
+    );
+}
+
+#[test]
 fn containers_overview_enter_queues_exec_for_running_container() {
     let mut app = make_containers_overview_app();
     // AlphaHost asc → first row is db/postgres (running).

@@ -588,6 +588,10 @@ pub(crate) fn drive_refresh_batch(app: &mut App, alias: &str, events_tx: &mpsc::
     };
     if !batch.in_flight_aliases.remove(alias) {
         // Listing for an alias that is not part of this batch.
+        log::debug!(
+            "[purple] refresh_batch: alias={} not in batch in_flight, ignoring",
+            alias
+        );
         return;
     }
     batch.in_flight = batch.in_flight.saturating_sub(1);

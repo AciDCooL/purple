@@ -575,6 +575,12 @@ pub fn spawn_container_action<F>(
 {
     std::thread::spawn(move || {
         if let Err(e) = validate_container_id(&container_id) {
+            log::debug!(
+                "[purple] container action {} blocked on alias={}: invalid container_id: {}",
+                action.as_str(),
+                ctx.alias,
+                e
+            );
             send(ctx.alias, action, Err(e));
             return;
         }
