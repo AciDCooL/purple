@@ -2926,6 +2926,114 @@ fn test_submit_form_rename_migrates_per_host_state() {
     crate::app::jump::test_path::clear();
 }
 
+/// Regression: rename through `submit_form` must keep the host at its
+/// recency-based position in the display list. Pre-fix, `edit_host_from_form`
+/// triggered `reload_hosts -> apply_sort` BEFORE `apply_alias_renames`
+/// migrated the history under the new alias, so `last_connected(new_alias)`
+/// returned 0 and the host fell to the bottom on `MostRecent` /
+/// `Frecency` until a restart re-read history from disk.
+fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
+    let _g = crate::app::jump::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let recents_dir = tempfile::tempdir().expect("recents tempdir");
+    crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
+
+    // Three hosts. `top-old` has the most recent connection, so on
+    // MostRecent / Frecency it must appear at index 0 both before and
+    // after a rename to `top-new`.
+    let mut app = make_app(
+        "Host top-old\n  HostName 1.1.1.1\n\
+         Host mid\n  HostName 2.2.2.2\n\
+         Host bot\n  HostName 3.3.3.3\n",
+    );
+    app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
+    app.history.entries.insert(
+        "top-old".to_string(),
+        crate::history::HistoryEntry {
+            alias: "top-old".to_string(),
+            last_connected: 1_700_000_300,
+            count: 30,
+            timestamps: vec![1_700_000_100, 1_700_000_200, 1_700_000_300],
+        },
+    );
+    app.history.entries.insert(
+        "mid".to_string(),
+        crate::history::HistoryEntry {
+            alias: "mid".to_string(),
+            last_connected: 1_700_000_200,
+            count: 5,
+            timestamps: vec![1_700_000_200],
+        },
+    );
+    app.history.entries.insert(
+        "bot".to_string(),
+        crate::history::HistoryEntry {
+            alias: "bot".to_string(),
+            last_connected: 1_700_000_100,
+            count: 1,
+            timestamps: vec![1_700_000_100],
+        },
+    );
+    app.hosts_state.sort_mode = sort_mode;
+    app.apply_sort();
+
+    // Sanity: pre-rename, `top-old` sits at the top of the display list.
+    let alias_at = |app: &App, idx: usize| -> Option<String> {
+        match app.hosts_state.display_list.get(idx)? {
+            crate::app::HostListItem::Host { index } => {
+                app.hosts_state.list.get(*index).map(|h| h.alias.clone())
+            }
+            _ => None,
+        }
+    };
+    assert_eq!(
+        alias_at(&app, 0).as_deref(),
+        Some("top-old"),
+        "pre-rename: top-old must sit at index 0 on {:?}",
+        sort_mode
+    );
+
+    // Rename top-old -> top-new via the real submit_form flow.
+    app.screen = Screen::EditHost {
+        alias: "top-old".to_string(),
+    };
+    app.forms.host = crate::app::HostForm::new();
+    app.forms.host.alias = "top-new".to_string();
+    app.forms.host.hostname = "1.1.1.1".to_string();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+
+    // Post-rename, the migrated host must keep the top slot.
+    assert_eq!(
+        alias_at(&app, 0).as_deref(),
+        Some("top-new"),
+        "post-rename: top-new must keep index 0 on {:?} (history was migrated to the new alias and the sort must reflect that)",
+        sort_mode
+    );
+
+    // The cursor follows the rename: `submit_form` calls
+    // `select_host_by_alias(&target_alias)` after the rename.
+    assert_eq!(
+        app.ui.list_state.selected(),
+        Some(0),
+        "cursor must follow the renamed host to its new display position on {:?}",
+        sort_mode
+    );
+
+    crate::app::jump::test_path::clear();
+}
+
+#[test]
+fn test_submit_form_rename_keeps_position_on_most_recent() {
+    rename_keeps_position_under_sort(crate::app::SortMode::MostRecent);
+}
+
+#[test]
+fn test_submit_form_rename_keeps_position_on_frecency() {
+    rename_keeps_position_under_sort(crate::app::SortMode::Frecency);
+}
+
 #[test]
 fn test_history_rename_leaves_sibling_keys_untouched() {
     // `update_host` (ssh_config/model.rs:684) renames only the matching

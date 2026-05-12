@@ -287,12 +287,20 @@ impl App {
     /// because `update_host` rewrites only that line.
     ///
     /// Used by `submit_form` (host edit form) and `sync_provider_with_section`
-    /// (provider sync). Empty `renames` is a fast no-op.
+    /// (provider sync). Both call sites run `reload_hosts` (and therefore
+    /// `apply_sort`) BEFORE this function, so on `MostRecent` / `Frecency`
+    /// the sort initially reads `last_connected(new_alias) = 0` and parks
+    /// the renamed host at the bottom. Re-sort once at the end so the
+    /// migrated history takes effect immediately in the display list.
+    /// Empty `renames` is a fast no-op.
     pub fn apply_alias_renames(&mut self, renames: &[(String, String)]) {
+        let mut applied = false;
         for (old_alias, new_alias) in renames {
             if old_alias == new_alias {
                 continue;
             }
+            applied = true;
+            log::debug!("[purple] apply_alias_renames: {old_alias} -> {new_alias}");
             if let Some(tunnel) = self.tunnels.active.remove(old_alias) {
                 self.tunnels.active.insert(new_alias.clone(), tunnel);
             }
@@ -313,6 +321,9 @@ impl App {
                     log::warn!("[config] failed to save collapsed_hosts after rename: {e}");
                 }
             }
+        }
+        if applied {
+            self.apply_sort();
         }
     }
 

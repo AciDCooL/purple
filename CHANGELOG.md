@@ -1,3 +1,9 @@
+## 3.12.1 - 2026-05-12
+
+- feat: Renamed hosts hold their place on Most recent.
+- feat: Most recent and Frecency reorder the moment you save, so the host you just renamed stays in its rightful slot without a restart.
+- feat: Provider sync renames update the list ordering just as fast, so a cloud relabel never parks a busy host at the bottom.
+
 ## 3.12.0 - 2026-05-12
 
 - feat: Renames carry history, recents and your fleet view.
