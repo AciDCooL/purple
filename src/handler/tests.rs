@@ -2926,12 +2926,8 @@ fn test_submit_form_rename_migrates_per_host_state() {
     crate::app::jump::test_path::clear();
 }
 
-/// Regression: rename through `submit_form` must keep the host at its
-/// recency-based position in the display list. Pre-fix, `edit_host_from_form`
-/// triggered `reload_hosts -> apply_sort` BEFORE `apply_alias_renames`
-/// migrated the history under the new alias, so `last_connected(new_alias)`
-/// returned 0 and the host fell to the bottom on `MostRecent` /
-/// `Frecency` until a restart re-read history from disk.
+/// Rename keeps the host at its recency-based position on MostRecent
+/// and Frecency without waiting for a restart.
 fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
     let _g = crate::app::jump::tests::PATH_LOCK
         .lock()
@@ -3032,6 +3028,102 @@ fn test_submit_form_rename_keeps_position_on_most_recent() {
 #[test]
 fn test_submit_form_rename_keeps_position_on_frecency() {
     rename_keeps_position_under_sort(crate::app::SortMode::Frecency);
+}
+
+#[test]
+fn test_submit_form_rename_carries_ping_and_container_cache() {
+    // Rename preserves alias-keyed caches (ping, container_cache,
+    // in-flight dedup sets) end-to-end through submit_form.
+    let _g = crate::app::jump::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let recents_dir = tempfile::tempdir().expect("recents tempdir");
+    crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
+
+    let mut app = make_app("Host web-old\n  HostName 1.2.3.4\n");
+    // Isolate from any pre-existing ~/.purple/history.tsv on the runner.
+    app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
+    app.ping.status.insert(
+        "web-old".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 23 },
+    );
+    app.ping
+        .last_checked
+        .insert("web-old".to_string(), std::time::Instant::now());
+    app.container_cache.insert(
+        "web-old".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 1_700_000_000,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: Some("24.0.0".to_string()),
+            containers: vec![],
+        },
+    );
+    app.containers_overview
+        .auto_list_in_flight
+        .insert("web-old".to_string());
+    app.vault
+        .cert_checks_in_flight
+        .insert("web-old".to_string());
+
+    app.screen = Screen::EditHost {
+        alias: "web-old".to_string(),
+    };
+    app.forms.host = crate::app::HostForm::new();
+    app.forms.host.alias = "web-new".to_string();
+    app.forms.host.hostname = "1.2.3.4".to_string();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+
+    // Ping carried over.
+    assert!(
+        !app.ping.status.contains_key("web-old"),
+        "ping.status under old alias must be cleared"
+    );
+    assert!(
+        matches!(
+            app.ping.status.get("web-new"),
+            Some(crate::app::PingStatus::Reachable { rtt_ms: 23 })
+        ),
+        "ping.status must move to the new alias with the same RTT, got {:?}",
+        app.ping.status.get("web-new")
+    );
+    assert!(
+        !app.ping.last_checked.contains_key("web-old")
+            && app.ping.last_checked.contains_key("web-new"),
+        "ping.last_checked must follow the rename"
+    );
+
+    // Container cache carried over with payload intact.
+    assert!(
+        !app.container_cache.contains_key("web-old"),
+        "container_cache under old alias must be cleared"
+    );
+    let entry = app
+        .container_cache
+        .get("web-new")
+        .expect("container_cache must move to the new alias");
+    assert_eq!(entry.timestamp, 1_700_000_000);
+    assert_eq!(entry.engine_version.as_deref(), Some("24.0.0"));
+
+    // Alias-keyed in-flight dedup sets carried over.
+    assert!(
+        !app.containers_overview
+            .auto_list_in_flight
+            .contains("web-old")
+            && app
+                .containers_overview
+                .auto_list_in_flight
+                .contains("web-new"),
+        "auto_list_in_flight must follow the rename"
+    );
+    assert!(
+        !app.vault.cert_checks_in_flight.contains("web-old")
+            && app.vault.cert_checks_in_flight.contains("web-new"),
+        "vault.cert_checks_in_flight must follow the rename"
+    );
+
+    crate::app::jump::test_path::clear();
 }
 
 #[test]

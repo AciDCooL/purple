@@ -1,3 +1,11 @@
+## 3.12.2 - 2026-05-12
+
+- feat: Renames keep your status, containers and tunnels in step.
+- feat: A host edit carries its ping status, last-checked timer and cached container list straight over to the new alias, so the row never flashes to "unknown" mid-edit.
+- feat: Active SSH tunnels and in-flight container or Vault checks all follow the rename, so a relabel never strands work that was already in motion.
+- feat: `purple sync` migrates the same per-host caches when a cloud provider rewrites an alias, so the list stays warm across an automatic rename.
+- feat: Stale Vault SSH cert files clean up after themselves on rename, so an alias change never leaves a forgotten certificate behind on disk.
+
 ## 3.12.1 - 2026-05-12
 
 - feat: Renamed hosts hold their place on Most recent.

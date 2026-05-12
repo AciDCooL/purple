@@ -241,37 +241,17 @@ impl App {
         }
         // Form submit writes the full config including any pending vault mutations
         self.pending_vault_config_write = false;
-        // Migrate active tunnel handle if alias changed
-        if alias != old_alias {
-            if let Some(tunnel) = self.tunnels.active.remove(old_alias) {
-                self.tunnels.active.insert(alias.clone(), tunnel);
-            }
-            // Clean up old cert file on rename. Best-effort: a missing file is
-            // fine (NotFound is expected when no cert was ever signed) but any
-            // other error is surfaced via the status bar (never via eprintln,
-            // which would corrupt the ratatui screen in raw mode).
-            if !crate::demo_flag::is_demo() {
-                if let Ok(old_cert) = crate::vault_ssh::cert_path_for(old_alias) {
-                    match std::fs::remove_file(&old_cert) {
-                        Ok(()) => {}
-                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                        Err(e) => {
-                            self.vault.cleanup_warning = Some(format!(
-                                "Warning: failed to clean up old Vault SSH cert {}: {}",
-                                old_cert.display(),
-                                e
-                            ));
-                        }
-                    }
-                }
-            }
-        }
         self.update_last_modified();
-        self.reload_hosts();
-        // Refresh the cert cache so the detail panel reflects reality
-        // immediately after an edit (e.g. a newly set vault role, a custom
-        // CertificateFile path change, or role removal). When the alias
-        // itself changed, also clear the stale entry under the old alias.
+        let renames: Vec<(String, String)> = if alias != old_alias {
+            vec![(old_alias.to_string(), alias.clone())]
+        } else {
+            Vec::new()
+        };
+        self.rename_aliases(&renames);
+        // cert_cache is intentionally NOT migrated by rename_aliases; clear
+        // the stale entry under the old alias and refresh under the new one
+        // so the detail panel reflects the freshly-signed cert (or the
+        // absence of a vault role) immediately.
         if alias != old_alias {
             self.vault.cert_cache.remove(old_alias);
         }
@@ -279,21 +259,53 @@ impl App {
         Ok(format!("{} got a makeover.", alias))
     }
 
-    /// Migrate per-host state keyed by alias for every `(old, new)` pair.
-    /// Connection history, jump-bar recents, the collapsed-fleet preference
-    /// and active tunnel handles all key on the alias string and therefore
-    /// need an explicit move when the SSH config rewrites a `Host` line.
-    /// SSH directives, tunnel and Vault metadata survive automatically
-    /// because `update_host` rewrites only that line.
-    ///
-    /// Used by `submit_form` (host edit form) and `sync_provider_with_section`
-    /// (provider sync). Both call sites run `reload_hosts` (and therefore
-    /// `apply_sort`) BEFORE this function, so on `MostRecent` / `Frecency`
-    /// the sort initially reads `last_connected(new_alias) = 0` and parks
-    /// the renamed host at the bottom. Re-sort once at the end so the
-    /// migrated history takes effect immediately in the display list.
-    /// Empty `renames` is a fast no-op.
-    pub fn apply_alias_renames(&mut self, renames: &[(String, String)]) {
+    /// Apply a batch of `(old, new)` alias renames after the SSH config
+    /// has been written. Single entry point: orders cache migration,
+    /// stale-cert cleanup, reload and persistent-state migration so
+    /// callers cannot forget a step. Used by `submit_form` (host edit)
+    /// and provider sync. Empty `renames` collapses to a plain reload.
+    pub(crate) fn rename_aliases(&mut self, renames: &[(String, String)]) {
+        self.migrate_alias_keyed_caches(renames);
+        self.cleanup_stale_cert_files_for_renames(renames);
+        self.reload_hosts();
+        self.apply_alias_renames(renames);
+    }
+
+    /// Best-effort: remove on-disk Vault SSH cert files keyed under the
+    /// pre-rename alias. NotFound is fine (no cert was ever signed); any
+    /// other failure surfaces via `vault.cleanup_warning` so the status
+    /// bar shows it. Skipped in demo mode.
+    fn cleanup_stale_cert_files_for_renames(&mut self, renames: &[(String, String)]) {
+        if crate::demo_flag::is_demo() {
+            return;
+        }
+        for (old_alias, new_alias) in renames {
+            if old_alias == new_alias {
+                continue;
+            }
+            let Ok(old_cert) = crate::vault_ssh::cert_path_for(old_alias) else {
+                continue;
+            };
+            match std::fs::remove_file(&old_cert) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    self.vault.cleanup_warning = Some(format!(
+                        "Warning: failed to clean up old Vault SSH cert {}: {}",
+                        old_cert.display(),
+                        e
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Migrate persistent per-host state (history, jump recents,
+    /// collapsed-fleet preference) and re-sort. Must run AFTER
+    /// `reload_hosts` so `apply_sort` sees the migrated history.
+    /// Production callers go through `rename_aliases`; this is
+    /// `pub(crate)` only to keep whitebox unit tests possible.
+    pub(crate) fn apply_alias_renames(&mut self, renames: &[(String, String)]) {
         let mut applied = false;
         for (old_alias, new_alias) in renames {
             if old_alias == new_alias {
@@ -301,9 +313,6 @@ impl App {
             }
             applied = true;
             log::debug!("[purple] apply_alias_renames: {old_alias} -> {new_alias}");
-            if let Some(tunnel) = self.tunnels.active.remove(old_alias) {
-                self.tunnels.active.insert(new_alias.clone(), tunnel);
-            }
             self.history.rename(old_alias, new_alias);
             let mut recents = crate::app::jump::load_recents();
             if crate::app::jump::rename_host_recent(&mut recents, old_alias, new_alias) {
@@ -324,6 +333,51 @@ impl App {
         }
         if applied {
             self.apply_sort();
+        }
+    }
+
+    /// Move non-persistent alias-keyed caches and active tunnel handles
+    /// from `old` to `new`. Must run BEFORE `reload_hosts`, whose prune
+    /// step would otherwise drop entries still under the old alias.
+    /// `vault.cert_cache` is excluded: a rename invalidates the prior
+    /// cert path, so the caller refreshes it instead of migrating.
+    /// Production callers go through `rename_aliases`; this is
+    /// `pub(crate)` only to keep whitebox unit tests possible.
+    pub(crate) fn migrate_alias_keyed_caches(&mut self, renames: &[(String, String)]) {
+        let mut container_cache_changed = false;
+        for (old_alias, new_alias) in renames {
+            if old_alias == new_alias {
+                continue;
+            }
+            log::debug!("[purple] migrate_alias_keyed_caches: {old_alias} -> {new_alias}");
+            if let Some(v) = self.ping.status.remove(old_alias) {
+                self.ping.status.insert(new_alias.clone(), v);
+            }
+            if let Some(v) = self.ping.last_checked.remove(old_alias) {
+                self.ping.last_checked.insert(new_alias.clone(), v);
+            }
+            if let Some(v) = self.container_cache.remove(old_alias) {
+                self.container_cache.insert(new_alias.clone(), v);
+                container_cache_changed = true;
+            }
+            if self
+                .containers_overview
+                .auto_list_in_flight
+                .remove(old_alias)
+            {
+                self.containers_overview
+                    .auto_list_in_flight
+                    .insert(new_alias.clone());
+            }
+            if self.vault.cert_checks_in_flight.remove(old_alias) {
+                self.vault.cert_checks_in_flight.insert(new_alias.clone());
+            }
+            if let Some(t) = self.tunnels.active.remove(old_alias) {
+                self.tunnels.active.insert(new_alias.clone(), t);
+            }
+        }
+        if container_cache_changed {
+            crate::containers::save_container_cache(&self.container_cache);
         }
     }
 
@@ -452,8 +506,7 @@ impl App {
             }
             self.hosts_state.undo_stack.clear();
             self.update_last_modified();
-            self.reload_hosts();
-            self.apply_alias_renames(&result.renames);
+            self.rename_aliases(&result.renames);
         }
         let name = crate::providers::provider_display_name(provider);
         let mut msg = format!(

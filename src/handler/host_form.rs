@@ -359,23 +359,15 @@ pub(super) fn submit_form(app: &mut App) {
     }
 
     let target_alias = app.forms.host.alias.trim().to_string();
-    // Detect rename up front so the borrow on `app.screen` ends before
-    // the per-host state migration below mutates `app.history` and
-    // `app.containers_overview`.
-    let renamed_from: Option<String> = match &app.screen {
-        Screen::EditHost { alias } if *alias != target_alias => Some(alias.clone()),
-        _ => None,
-    };
-    // Editing a stale host means the user asserts it is still wanted
+    // Editing a stale host means the user asserts it is still wanted.
+    // `edit_host_from_form` already invoked `rename_aliases` which moves
+    // every alias-keyed cache and persistent state in one step, so
+    // submit_form no longer needs a separate migration call here.
     if let Screen::EditHost { ref alias } = app.screen {
         app.hosts_state.ssh_config.clear_host_stale(alias);
-        // If alias was renamed, also clear on the new alias
         if *alias != target_alias {
             app.hosts_state.ssh_config.clear_host_stale(&target_alias);
         }
-    }
-    if let Some(old) = renamed_from {
-        app.apply_alias_renames(&[(old, target_alias.clone())]);
     }
     app.clear_form_mtime();
     app.forms.host_baseline = None;

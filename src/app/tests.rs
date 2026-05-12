@@ -8233,6 +8233,195 @@ fn apply_alias_renames_migrates_history_recents_and_collapsed_in_batch() {
 }
 
 #[test]
+fn migrate_alias_keyed_caches_moves_ping_container_and_in_flight_sets() {
+    // Caches that disappear from `reload_hosts`' prune step on a rename
+    // (ping status/timing, container cache, and the alias-keyed in-flight
+    // dedup sets) must survive a rename when `migrate_alias_keyed_caches`
+    // runs first. cert_cache is intentionally NOT migrated here; the
+    // rename invalidates the certificate path so `refresh_cert_cache`
+    // rebuilds it under the new alias from scratch.
+    let dir = tempfile::tempdir().expect("tempdir");
+    crate::containers::set_path_override(dir.path().join("container_cache.jsonl"));
+
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
+
+    app.ping.status.insert(
+        "a".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 12 },
+    );
+    app.ping
+        .last_checked
+        .insert("a".to_string(), std::time::Instant::now());
+    app.container_cache.insert(
+        "a".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 0,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![],
+        },
+    );
+    app.containers_overview
+        .auto_list_in_flight
+        .insert("a".to_string());
+    app.vault.cert_checks_in_flight.insert("a".to_string());
+    // Pre-seed a stale cert_cache entry to prove it is left alone (the
+    // caller refreshes it via `refresh_cert_cache` after the rename).
+    app.vault.cert_cache.insert(
+        "a".to_string(),
+        (
+            std::time::Instant::now(),
+            crate::vault_ssh::CertStatus::Missing,
+            None,
+        ),
+    );
+
+    app.migrate_alias_keyed_caches(&[("a".to_string(), "b".to_string())]);
+
+    assert!(!app.ping.status.contains_key("a"));
+    assert!(matches!(
+        app.ping.status.get("b"),
+        Some(crate::app::PingStatus::Reachable { rtt_ms: 12 })
+    ));
+    assert!(!app.ping.last_checked.contains_key("a"));
+    assert!(app.ping.last_checked.contains_key("b"));
+    assert!(!app.container_cache.contains_key("a"));
+    assert!(app.container_cache.contains_key("b"));
+    assert!(!app.containers_overview.auto_list_in_flight.contains("a"));
+    assert!(app.containers_overview.auto_list_in_flight.contains("b"));
+    assert!(!app.vault.cert_checks_in_flight.contains("a"));
+    assert!(app.vault.cert_checks_in_flight.contains("b"));
+    // cert_cache MUST stay under the old key. The caller (edit_host_from_form)
+    // is responsible for clearing it and calling refresh_cert_cache on the
+    // new alias, which checks the disk-side cert path.
+    assert!(app.vault.cert_cache.contains_key("a"));
+    assert!(!app.vault.cert_cache.contains_key("b"));
+
+    crate::containers::clear_path_override();
+}
+
+#[test]
+fn migrate_alias_keyed_caches_identity_pair_is_noop() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    crate::containers::set_path_override(dir.path().join("container_cache.jsonl"));
+
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
+    app.ping.status.insert(
+        "a".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 7 },
+    );
+
+    app.migrate_alias_keyed_caches(&[("a".to_string(), "a".to_string())]);
+
+    assert!(matches!(
+        app.ping.status.get("a"),
+        Some(crate::app::PingStatus::Reachable { rtt_ms: 7 })
+    ));
+
+    crate::containers::clear_path_override();
+}
+
+#[test]
+fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
+    // Contract test for the single entry point `rename_aliases`.
+    // Verifies cache migration + reload + persistent migration + re-sort
+    // land in the right order. Pinned here because production callers
+    // (submit_form host edit, sync_provider_with_section provider sync)
+    // both route through this function; if a future refactor splits
+    // the protocol again, this test fails before the user sees a
+    // regression.
+    let _g = crate::app::jump::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let dir = tempfile::tempdir().expect("tempdir");
+    crate::app::jump::test_path::set(dir.path().join("recents.json"));
+    crate::preferences::set_path_override(dir.path().join("preferences"));
+    crate::containers::set_path_override(dir.path().join("container_cache.jsonl"));
+
+    // Two hosts. After rename the SSH config has top-new + bot; history
+    // for top-old should follow to top-new and keep its index-0 slot on
+    // MostRecent.
+    let mut app = make_app(
+        "Host top-new\n  HostName 1.1.1.1\n\
+         Host bot\n  HostName 2.2.2.2\n",
+    );
+    // Seed history under the OLD alias because the SSH config write has
+    // already happened (production callers run this AFTER ssh_config.write).
+    app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
+    app.history.entries.insert(
+        "top-old".to_string(),
+        crate::history::HistoryEntry {
+            alias: "top-old".to_string(),
+            last_connected: 1_700_000_300,
+            count: 30,
+            timestamps: vec![1_700_000_300],
+        },
+    );
+    app.history.entries.insert(
+        "bot".to_string(),
+        crate::history::HistoryEntry {
+            alias: "bot".to_string(),
+            last_connected: 1_700_000_100,
+            count: 1,
+            timestamps: vec![1_700_000_100],
+        },
+    );
+    app.ping.status.insert(
+        "top-old".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 42 },
+    );
+    app.container_cache.insert(
+        "top-old".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 1_700_000_000,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: Some("24.0.0".to_string()),
+            containers: vec![],
+        },
+    );
+    app.containers_overview
+        .collapsed_hosts
+        .insert("top-old".to_string());
+    app.hosts_state.sort_mode = crate::app::SortMode::MostRecent;
+
+    app.rename_aliases(&[("top-old".to_string(), "top-new".to_string())]);
+
+    // Cache migrated (would not survive reload_hosts prune without
+    // migrate_alias_keyed_caches running first).
+    assert!(
+        matches!(
+            app.ping.status.get("top-new"),
+            Some(crate::app::PingStatus::Reachable { rtt_ms: 42 })
+        ),
+        "ping.status must follow the rename through rename_aliases"
+    );
+    assert!(app.container_cache.contains_key("top-new"));
+
+    // History migrated (would stay under top-old without apply_alias_renames).
+    assert!(!app.history.entries.contains_key("top-old"));
+    assert_eq!(app.history.entries.get("top-new").unwrap().count, 30);
+    assert!(app.containers_overview.collapsed_hosts.contains("top-new"));
+
+    // Re-sort happened: top-new sits at index 0 of the display list
+    // (would be at the bottom without the trailing apply_sort).
+    let alias_at_0 = match app.hosts_state.display_list.first() {
+        Some(crate::app::HostListItem::Host { index }) => {
+            app.hosts_state.list.get(*index).map(|h| h.alias.as_str())
+        }
+        _ => None,
+    };
+    assert_eq!(
+        alias_at_0,
+        Some("top-new"),
+        "rename_aliases must re-sort so the migrated host keeps its recency slot"
+    );
+
+    crate::app::jump::test_path::clear();
+    crate::preferences::clear_path_override_for_tests();
+    crate::containers::clear_path_override();
+}
+
+#[test]
 fn apply_alias_renames_empty_input_is_no_op() {
     let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
     app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
