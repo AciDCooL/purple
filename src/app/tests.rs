@@ -8148,3 +8148,197 @@ fn post_init_silent_when_versions_equal() {
         );
     });
 }
+
+#[test]
+fn apply_alias_renames_migrates_history_recents_and_collapsed_in_batch() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    crate::app::jump::test_path::set(dir.path().join("recents.json"));
+    crate::preferences::set_path_override(dir.path().join("preferences"));
+
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\nHost c\n  HostName 5.6.7.8\n");
+    app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
+    app.history.entries.insert(
+        "a".to_string(),
+        crate::history::HistoryEntry {
+            alias: "a".to_string(),
+            last_connected: 1_700_000_000,
+            count: 3,
+            timestamps: vec![1_700_000_000],
+        },
+    );
+    app.history.entries.insert(
+        "c".to_string(),
+        crate::history::HistoryEntry {
+            alias: "c".to_string(),
+            last_connected: 1_700_000_500,
+            count: 7,
+            timestamps: vec![1_700_000_500],
+        },
+    );
+    app.containers_overview
+        .collapsed_hosts
+        .insert("a".to_string());
+
+    let mut seeded = crate::app::jump::RecentsFile::default();
+    seeded.entries.push(crate::app::jump::RecentEntry {
+        target: crate::app::jump::RecentRef::new(
+            crate::app::jump::SourceKind::Host,
+            "a".to_string(),
+        ),
+        last_used_unix: 100,
+    });
+    seeded.entries.push(crate::app::jump::RecentEntry {
+        target: crate::app::jump::RecentRef::new(
+            crate::app::jump::SourceKind::Host,
+            "c".to_string(),
+        ),
+        last_used_unix: 200,
+    });
+    crate::app::jump::save_recents(&seeded).expect("seed recents");
+
+    // Batch: real rename + an identity pair that must be a no-op. The
+    // identity pair guards against an accidental wipe when the SSH
+    // parser emits a (old, new) tuple where old == new on a no-op
+    // sync (the dry-run / unchanged path emits an empty `renames` list,
+    // but defensive-by-construction is cheap).
+    app.apply_alias_renames(&[
+        ("a".to_string(), "b".to_string()),
+        ("c".to_string(), "c".to_string()),
+    ]);
+
+    assert!(!app.history.entries.contains_key("a"));
+    assert!(app.history.entries.contains_key("b"));
+    assert!(
+        app.history.entries.contains_key("c"),
+        "non-renamed host history must stay"
+    );
+    assert_eq!(app.history.entries.get("b").unwrap().count, 3);
+    assert_eq!(app.history.entries.get("c").unwrap().count, 7);
+
+    assert!(app.containers_overview.collapsed_hosts.contains("b"));
+    assert!(!app.containers_overview.collapsed_hosts.contains("a"));
+
+    let reloaded = crate::app::jump::load_recents();
+    let mut host_keys: Vec<String> = reloaded
+        .entries
+        .iter()
+        .filter(|e| e.target.kind == crate::app::jump::SourceKind::Host)
+        .map(|e| e.target.key.clone())
+        .collect();
+    host_keys.sort();
+    assert_eq!(host_keys, vec!["b".to_string(), "c".to_string()]);
+
+    crate::app::jump::test_path::clear();
+    crate::preferences::clear_path_override_for_tests();
+}
+
+#[test]
+fn apply_alias_renames_empty_input_is_no_op() {
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
+    app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
+    app.history.entries.insert(
+        "a".to_string(),
+        crate::history::HistoryEntry {
+            alias: "a".to_string(),
+            last_connected: 42,
+            count: 1,
+            timestamps: vec![42],
+        },
+    );
+    app.apply_alias_renames(&[]);
+    assert_eq!(app.history.entries.get("a").unwrap().count, 1);
+}
+
+#[test]
+fn migrate_renames_persistent_state_moves_history_recents_and_collapsed_on_disk() {
+    // CLI `purple sync` has no `App`; the file-level helper must
+    // migrate `~/.purple/history.tsv`, `~/.purple/recents.json` and
+    // the `containers_collapsed_hosts` line of `~/.purple/preferences`
+    // when the SSH config rename lands on disk. Same migration as
+    // `App::apply_alias_renames` but without in-memory state.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let history_path = dir.path().join("history.tsv");
+    crate::history::test_path::set(history_path.clone());
+    crate::app::jump::test_path::set(dir.path().join("recents.json"));
+    crate::preferences::set_path_override(dir.path().join("preferences"));
+
+    // Seed history.tsv. Schema: alias \t last_connected \t count \t csv-of-timestamps.
+    std::fs::write(&history_path, "web-old\t1700000000\t12\t1700000000\n").unwrap();
+
+    // Seed recents.json with a host entry for the old alias.
+    let mut recents = crate::app::jump::RecentsFile::default();
+    recents.entries.push(crate::app::jump::RecentEntry {
+        target: crate::app::jump::RecentRef::new(
+            crate::app::jump::SourceKind::Host,
+            "web-old".to_string(),
+        ),
+        last_used_unix: 100,
+    });
+    crate::app::jump::save_recents(&recents).expect("seed recents");
+
+    // Seed the collapsed-hosts preference.
+    let mut collapsed = std::collections::HashSet::new();
+    collapsed.insert("web-old".to_string());
+    crate::preferences::save_containers_collapsed_hosts(&collapsed).expect("seed collapsed_hosts");
+
+    crate::app::migrate_renames_persistent_state(&[("web-old".to_string(), "web-new".to_string())]);
+
+    let history_after = std::fs::read_to_string(&history_path).unwrap();
+    // First three TSV columns: alias \t last_connected \t count.
+    // The fourth column (csv-of-timestamps) is dropped by the load-
+    // path retention prune because the seed timestamp is older than
+    // RETENTION_SECS. Assert the first three only.
+    assert!(
+        history_after.starts_with("web-new\t1700000000\t12"),
+        "history file must lead with new alias + ts + count: {history_after:?}"
+    );
+    assert!(
+        !history_after.contains("web-old"),
+        "old alias must be gone: {history_after:?}"
+    );
+
+    let recents_after = crate::app::jump::load_recents();
+    let host_keys: Vec<String> = recents_after
+        .entries
+        .iter()
+        .filter(|e| e.target.kind == crate::app::jump::SourceKind::Host)
+        .map(|e| e.target.key.clone())
+        .collect();
+    assert_eq!(host_keys, vec!["web-new".to_string()]);
+
+    let collapsed_after = crate::preferences::load_containers_collapsed_hosts();
+    assert!(collapsed_after.contains("web-new"));
+    assert!(!collapsed_after.contains("web-old"));
+
+    crate::history::test_path::clear();
+    crate::app::jump::test_path::clear();
+    crate::preferences::clear_path_override_for_tests();
+}
+
+#[test]
+fn migrate_renames_persistent_state_skips_identity_pairs() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let history_path = dir.path().join("history.tsv");
+    crate::history::test_path::set(history_path.clone());
+
+    // Seed an entry. An identity-pair rename must leave it untouched
+    // (same key, same count, same timestamps). Guards against a future
+    // refactor that accidentally rewrites the file on every call.
+    std::fs::write(&history_path, "web\t1700000000\t5\t1700000000\n").unwrap();
+
+    crate::app::migrate_renames_persistent_state(&[("web".to_string(), "web".to_string())]);
+
+    let after = std::fs::read_to_string(&history_path).unwrap();
+    assert!(after.contains("web\t1700000000\t5"));
+
+    crate::history::test_path::clear();
+}
+
+#[test]
+fn migrate_renames_persistent_state_empty_input_is_no_op() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    crate::history::test_path::set(dir.path().join("history.tsv"));
+    // History file deliberately absent. The helper must not panic.
+    crate::app::migrate_renames_persistent_state(&[]);
+    crate::history::test_path::clear();
+}

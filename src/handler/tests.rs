@@ -2843,6 +2843,128 @@ fn test_submit_form_no_keychain_removal_for_add() {
     assert!(old.is_none());
 }
 
+#[test]
+fn test_submit_form_rename_migrates_per_host_state() {
+    // SSH directives and tunnel/Vault metadata survive a rename via
+    // `update_host`. State keyed by alias outside the SSH config does
+    // not: connection history, jump-bar recents, and the collapsed-
+    // fleet preference must be migrated explicitly by submit_form.
+    let _g = crate::app::jump::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let recents_dir = tempfile::tempdir().expect("recents tempdir");
+    crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
+
+    let mut app = make_app("Host web-old\n  HostName 1.2.3.4\n");
+    // Isolate history from any pre-existing ~/.purple/history.tsv on
+    // the test runner. `from_entries` leaves `path` empty so the
+    // background `save()` is a silent no-op; we assert only the
+    // in-memory migration here.
+    app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
+    app.history.entries.insert(
+        "web-old".to_string(),
+        crate::history::HistoryEntry {
+            alias: "web-old".to_string(),
+            last_connected: 1_700_000_000,
+            count: 12,
+            timestamps: vec![1_700_000_000],
+        },
+    );
+    app.containers_overview
+        .collapsed_hosts
+        .insert("web-old".to_string());
+    // Seed a host recent for web-old on disk so the rename pulls it in.
+    let mut seeded = crate::app::jump::RecentsFile::default();
+    seeded.entries.push(crate::app::jump::RecentEntry {
+        target: crate::app::jump::RecentRef::new(
+            crate::app::jump::SourceKind::Host,
+            "web-old".to_string(),
+        ),
+        last_used_unix: 100,
+    });
+    crate::app::jump::save_recents(&seeded).expect("seed recents");
+
+    app.screen = Screen::EditHost {
+        alias: "web-old".to_string(),
+    };
+    app.forms.host = crate::app::HostForm::new();
+    app.forms.host.alias = "web-new".to_string();
+    app.forms.host.hostname = "1.2.3.4".to_string();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+
+    assert!(
+        !app.history.entries.contains_key("web-old"),
+        "history under the old alias must be cleared"
+    );
+    let migrated = app
+        .history
+        .entries
+        .get("web-new")
+        .expect("history must move under the new alias");
+    assert_eq!(migrated.count, 12);
+    assert_eq!(migrated.timestamps, vec![1_700_000_000]);
+
+    assert!(
+        !app.containers_overview.collapsed_hosts.contains("web-old"),
+        "collapsed-fleet preference must drop the old alias"
+    );
+    assert!(
+        app.containers_overview.collapsed_hosts.contains("web-new"),
+        "collapsed-fleet preference must carry over to the new alias"
+    );
+
+    let reloaded = crate::app::jump::load_recents();
+    let host_keys: Vec<&str> = reloaded
+        .entries
+        .iter()
+        .filter(|e| e.target.kind == crate::app::jump::SourceKind::Host)
+        .map(|e| e.target.key.as_str())
+        .collect();
+    assert_eq!(host_keys, vec!["web-new"]);
+
+    crate::app::jump::test_path::clear();
+}
+
+#[test]
+fn test_history_rename_leaves_sibling_keys_untouched() {
+    // `update_host` (ssh_config/model.rs:684) renames only the matching
+    // token in a multi-alias `Host` line. The history migration must
+    // therefore touch only the renamed alias. Asserted at the
+    // `ConnectionHistory::rename` level because `edit_host_from_form`
+    // has a pre-existing `debug_assert!` on `set_host_vault_addr` that
+    // refuses multi-alias blocks before the per-host migration runs.
+    let mut history =
+        crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
+    history.entries.insert(
+        "web-01".to_string(),
+        crate::history::HistoryEntry {
+            alias: "web-01".to_string(),
+            last_connected: 1_700_000_000,
+            count: 4,
+            timestamps: vec![1_700_000_000],
+        },
+    );
+    history.entries.insert(
+        "web-prod".to_string(),
+        crate::history::HistoryEntry {
+            alias: "web-prod".to_string(),
+            last_connected: 1_700_000_500,
+            count: 9,
+            timestamps: vec![1_700_000_500],
+        },
+    );
+
+    assert!(history.rename("web-prod", "web-new"));
+    assert!(history.entries.contains_key("web-01"));
+    assert!(!history.entries.contains_key("web-prod"));
+    let moved = history
+        .entries
+        .get("web-new")
+        .expect("renamed alias must carry over");
+    assert_eq!(moved.count, 9);
+}
+
 // =========================================================================
 // Snippet picker
 // =========================================================================
@@ -8961,6 +9083,34 @@ fn containers_overview_K_in_demo_mode_emits_warning_toast() {
     let toast = app.status_center.toast.as_ref().expect("toast");
     assert!(toast.text.contains("Demo mode"));
     assert_eq!(toast.class, crate::app::MessageClass::Warning);
+}
+
+#[test]
+fn containers_overview_l_in_demo_mode_opens_logs_view() {
+    // Logs are a read-only view and `spawn_container_logs_fetch` has a
+    // demo short-circuit that synthesises a deterministic 200-line
+    // stream. `l` must therefore go through in demo mode: open the
+    // overlay, queue the pending fetch, no "Demo mode" warning toast.
+    let mut app = make_containers_overview_app();
+    app.demo_mode = true;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('l')), &tx);
+    assert!(
+        matches!(app.screen, Screen::ContainerLogs { .. }),
+        "logs overlay must open in demo mode, got {:?}",
+        app.screen
+    );
+    assert!(
+        app.pending_container_logs.is_some(),
+        "logs fetch must be queued in demo mode (handler then short-circuits to demo_log_lines)"
+    );
+    if let Some(toast) = app.status_center.toast.as_ref() {
+        assert!(
+            !toast.text.contains("Demo mode"),
+            "logs must not surface a demo-disabled warning, got {:?}",
+            toast.text
+        );
+    }
 }
 
 #[test]

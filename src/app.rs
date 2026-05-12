@@ -47,6 +47,7 @@ mod forms;
 mod groups;
 mod host_state;
 mod hosts;
+pub(crate) use hosts::migrate_renames_persistent_state;
 pub(crate) mod jump;
 pub(crate) mod ping;
 mod provider_state;

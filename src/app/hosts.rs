@@ -279,6 +279,43 @@ impl App {
         Ok(format!("{} got a makeover.", alias))
     }
 
+    /// Migrate per-host state keyed by alias for every `(old, new)` pair.
+    /// Connection history, jump-bar recents, the collapsed-fleet preference
+    /// and active tunnel handles all key on the alias string and therefore
+    /// need an explicit move when the SSH config rewrites a `Host` line.
+    /// SSH directives, tunnel and Vault metadata survive automatically
+    /// because `update_host` rewrites only that line.
+    ///
+    /// Used by `submit_form` (host edit form) and `sync_provider_with_section`
+    /// (provider sync). Empty `renames` is a fast no-op.
+    pub fn apply_alias_renames(&mut self, renames: &[(String, String)]) {
+        for (old_alias, new_alias) in renames {
+            if old_alias == new_alias {
+                continue;
+            }
+            if let Some(tunnel) = self.tunnels.active.remove(old_alias) {
+                self.tunnels.active.insert(new_alias.clone(), tunnel);
+            }
+            self.history.rename(old_alias, new_alias);
+            let mut recents = crate::app::jump::load_recents();
+            if crate::app::jump::rename_host_recent(&mut recents, old_alias, new_alias) {
+                if let Err(e) = crate::app::jump::save_recents(&recents) {
+                    log::warn!("[config] failed to save recents after rename: {e}");
+                }
+            }
+            if self.containers_overview.collapsed_hosts.remove(old_alias) {
+                self.containers_overview
+                    .collapsed_hosts
+                    .insert(new_alias.clone());
+                if let Err(e) = crate::preferences::save_containers_collapsed_hosts(
+                    &self.containers_overview.collapsed_hosts,
+                ) {
+                    log::warn!("[config] failed to save collapsed_hosts after rename: {e}");
+                }
+            }
+        }
+    }
+
     /// Select a host in the display list (or filtered list) by alias.
     pub fn select_host_by_alias(&mut self, alias: &str) {
         if self.search.query.is_some() {
@@ -405,12 +442,7 @@ impl App {
             self.hosts_state.undo_stack.clear();
             self.update_last_modified();
             self.reload_hosts();
-            // Migrate active tunnel handles for renamed aliases
-            for (old_alias, new_alias) in &result.renames {
-                if let Some(tunnel) = self.tunnels.active.remove(old_alias) {
-                    self.tunnels.active.insert(new_alias.clone(), tunnel);
-                }
-            }
+            self.apply_alias_renames(&result.renames);
         }
         let name = crate::providers::provider_display_name(provider);
         let mut msg = format!(
@@ -456,5 +488,44 @@ impl App {
             }
         }
         false
+    }
+}
+
+/// File-level rename migration for the CLI `purple sync` subcommand,
+/// which writes the SSH config without an `App` in the picture and so
+/// cannot use `App::apply_alias_renames`. Performs the same persistent
+/// migrations: `~/.purple/history.tsv`, `~/.purple/recents.json`, and
+/// the `containers_collapsed_hosts` line in `~/.purple/preferences`.
+///
+/// Pairs where `old == new` are skipped so a caller can hand over the
+/// raw `SyncResult.renames` vec without filtering.
+///
+/// Errors during individual file writes are logged with `[config]` and
+/// the migration continues with the remaining state stores. Losing one
+/// store is a degradation; aborting the whole migration would leave the
+/// SSH config diverged from the on-disk per-host state stores.
+pub fn migrate_renames_persistent_state(renames: &[(String, String)]) {
+    for (old_alias, new_alias) in renames {
+        if old_alias == new_alias {
+            continue;
+        }
+        // ConnectionHistory::rename calls save() internally.
+        let mut history = crate::history::ConnectionHistory::load();
+        history.rename(old_alias, new_alias);
+
+        let mut recents = crate::app::jump::load_recents();
+        if crate::app::jump::rename_host_recent(&mut recents, old_alias, new_alias) {
+            if let Err(e) = crate::app::jump::save_recents(&recents) {
+                log::warn!("[config] failed to save recents after cli sync rename: {e}");
+            }
+        }
+
+        let mut collapsed = crate::preferences::load_containers_collapsed_hosts();
+        if collapsed.remove(old_alias) {
+            collapsed.insert(new_alias.clone());
+            if let Err(e) = crate::preferences::save_containers_collapsed_hosts(&collapsed) {
+                log::warn!("[config] failed to save collapsed_hosts after cli sync rename: {e}");
+            }
+        }
     }
 }

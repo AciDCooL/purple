@@ -3519,6 +3519,367 @@ fn update_host_full_pattern_rename_replaces_whole_pattern() {
     assert!(!output.contains("web-01"));
 }
 
+// =========================================================================
+// Rename preservation: `# purple:*` comments and unknown directives must
+// survive a rename byte-for-byte. `update_host` rewrites only the `Host`
+// line of the matched block; the block body must stay untouched. These
+// tests are the load-bearing guarantee for the per-host state migration
+// in `App::apply_alias_renames`. SSH config is a USP and round-trip
+// fidelity across a rename is non-negotiable.
+//
+// `# purple:*` comment vocabulary used in this section, all defined in
+// `src/ssh_config/host_block.rs`:
+//   askpass, vault-ssh, vault-addr, tags, provider_tags, provider, meta,
+//   stale. Tunnels are stored as plain `LocalForward`/`RemoteForward`/
+//   `DynamicForward` SSH directives in the block body, not as comments.
+// =========================================================================
+
+#[test]
+fn update_host_rename_preserves_forward_directives() {
+    // Tunnels live as plain SSH forward directives. Rename must keep
+    // every forward intact, in source order, with original spacing.
+    let input = "Host web\n  HostName 10.0.0.1\n  LocalForward 5432 db.internal:5432\n  RemoteForward 9090 localhost:3000\n  DynamicForward 1080\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "web-prod".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        ..Default::default()
+    };
+    config.update_host("web", &renamed);
+    let output = config.serialize();
+    assert!(output.contains("Host web-prod"));
+    assert!(output.contains("LocalForward 5432 db.internal:5432"));
+    assert!(output.contains("RemoteForward 9090 localhost:3000"));
+    assert!(output.contains("DynamicForward 1080"));
+    // Order: LocalForward before RemoteForward before DynamicForward.
+    let local_pos = output.find("LocalForward").unwrap();
+    let remote_pos = output.find("RemoteForward").unwrap();
+    let dynamic_pos = output.find("DynamicForward").unwrap();
+    assert!(local_pos < remote_pos && remote_pos < dynamic_pos);
+}
+
+#[test]
+fn update_host_rename_preserves_purple_vault_ssh_and_addr() {
+    let input = "Host bastion\n  HostName 10.0.0.1\n  # purple:vault-ssh prod-role\n  # purple:vault-addr https://vault.internal:8200\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "bastion-eu".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        ..Default::default()
+    };
+    config.update_host("bastion", &renamed);
+    let output = config.serialize();
+    assert!(output.contains("Host bastion-eu"));
+    assert!(
+        output.contains("# purple:vault-ssh prod-role"),
+        "vault-ssh role must survive: {output}"
+    );
+    assert!(
+        output.contains("# purple:vault-addr https://vault.internal:8200"),
+        "vault-addr override must survive: {output}"
+    );
+}
+
+#[test]
+fn update_host_rename_preserves_purple_askpass_each_source() {
+    // All four askpass source families: keychain, op:// (1Password),
+    // bw: (Bitwarden), vault: (HashiCorp Vault KV). Each must survive
+    // a rename byte-for-byte.
+    let cases = [
+        "keychain",
+        "op://Vault/Item/password",
+        "bw:my-ssh-server",
+        "vault:secret/data/ssh/web#password",
+    ];
+    for askpass in cases {
+        let input = format!("Host web\n  HostName 1.2.3.4\n  # purple:askpass {askpass}\n");
+        let mut config = parse_str(&input);
+        let renamed = HostEntry {
+            alias: "web-new".to_string(),
+            hostname: "1.2.3.4".to_string(),
+            ..Default::default()
+        };
+        config.update_host("web", &renamed);
+        let output = config.serialize();
+        let comment = format!("# purple:askpass {askpass}");
+        assert!(
+            output.contains(&comment),
+            "askpass comment {askpass:?} must survive: {output}"
+        );
+        assert!(output.contains("Host web-new"));
+    }
+}
+
+#[test]
+fn update_host_rename_preserves_purple_tags_provider_tags_provider() {
+    let input = "Host vm-01\n  HostName 10.0.0.1\n  # purple:tags ops,critical\n  # purple:provider_tags prod,europe\n  # purple:provider hetzner 12345\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "vm-frankfurt".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        ..Default::default()
+    };
+    config.update_host("vm-01", &renamed);
+    let output = config.serialize();
+    assert!(output.contains("Host vm-frankfurt"));
+    assert!(output.contains("# purple:tags ops,critical"));
+    assert!(output.contains("# purple:provider_tags prod,europe"));
+    assert!(output.contains("# purple:provider hetzner 12345"));
+}
+
+#[test]
+fn update_host_rename_preserves_purple_meta_and_stale() {
+    let input = "Host vm\n  HostName 1.2.3.4\n  # purple:meta region=eu-west-1,instance=t3.micro\n  # purple:stale 1700000000\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "vm-eu".to_string(),
+        hostname: "1.2.3.4".to_string(),
+        ..Default::default()
+    };
+    config.update_host("vm", &renamed);
+    let output = config.serialize();
+    assert!(output.contains("Host vm-eu"));
+    assert!(
+        output.contains("# purple:meta region=eu-west-1,instance=t3.micro"),
+        "meta comment must survive: {output}"
+    );
+    assert!(
+        output.contains("# purple:stale 1700000000"),
+        "stale comment must survive: {output}"
+    );
+}
+
+#[test]
+fn update_host_rename_preserves_unknown_directives_in_order() {
+    // Directives purple does not know about (Compression, ForwardAgent,
+    // ServerAliveInterval, IdentitiesOnly, etc.) must round-trip across
+    // a rename. Order matters: SSH applies directives top-down, so the
+    // writer must not reshuffle.
+    let input = "Host gpu-01\n  HostName 1.2.3.4\n  ServerAliveInterval 60\n  ServerAliveCountMax 3\n  Compression yes\n  ForwardAgent yes\n  IdentitiesOnly no\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "gpu-prod".to_string(),
+        hostname: "1.2.3.4".to_string(),
+        ..Default::default()
+    };
+    config.update_host("gpu-01", &renamed);
+    let output = config.serialize();
+    let body_start = output.find("Host gpu-prod").expect("renamed host present");
+    let body = &output[body_start..];
+    let interval_pos = body
+        .find("ServerAliveInterval 60")
+        .expect("interval present");
+    let countmax_pos = body
+        .find("ServerAliveCountMax 3")
+        .expect("countmax present");
+    let compression_pos = body.find("Compression yes").expect("compression present");
+    let forward_pos = body.find("ForwardAgent yes").expect("forward present");
+    let identities_pos = body
+        .find("IdentitiesOnly no")
+        .expect("identities-only present");
+    assert!(
+        interval_pos < countmax_pos
+            && countmax_pos < compression_pos
+            && compression_pos < forward_pos
+            && forward_pos < identities_pos,
+        "directive order must be preserved: {body}"
+    );
+}
+
+#[test]
+fn update_host_rename_preserves_blank_lines_and_inline_comments() {
+    // Authors interleave blank lines and user comments inside a Host
+    // block to group related directives. Round-trip fidelity demands
+    // both survive a rename.
+    let input = "Host db\n  HostName 10.0.0.1\n\n  # Use shared bastion\n  ProxyJump bastion\n\n  User deploy\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "db-prod".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        user: "deploy".to_string(),
+        proxy_jump: "bastion".to_string(),
+        ..Default::default()
+    };
+    config.update_host("db", &renamed);
+    let output = config.serialize();
+    assert!(output.contains("Host db-prod"));
+    assert!(
+        output.contains("# Use shared bastion"),
+        "user comment inside the block must survive: {output}"
+    );
+    assert!(output.contains("ProxyJump bastion"));
+}
+
+#[test]
+fn update_host_rename_full_round_trip_reparse_preserves_purple_metadata() {
+    // Parse → rename → serialize → reparse. The reparsed model must
+    // expose every `# purple:*` accessor with the same value as the
+    // original. Strongest possible guarantee that the writer did not
+    // mutate anything in the body.
+    let input = "Host web\n  HostName 10.0.0.1\n  User deploy\n  LocalForward 5432 db.internal:5432\n  # purple:vault-ssh prod-role\n  # purple:vault-addr https://vault.internal:8200\n  # purple:askpass keychain\n  # purple:tags ops,critical\n  # purple:provider_tags prod,europe\n  # purple:meta region=eu-west-1\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "web-prod".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        user: "deploy".to_string(),
+        ..Default::default()
+    };
+    config.update_host("web", &renamed);
+    let serialized = config.serialize();
+    let reparsed = parse_str(&serialized);
+    let block = first_block(&reparsed);
+    assert_eq!(block.host_pattern, "web-prod");
+    assert_eq!(block.askpass().as_deref(), Some("keychain"));
+    assert_eq!(block.vault_ssh().as_deref(), Some("prod-role"));
+    assert_eq!(
+        block.vault_addr().as_deref(),
+        Some("https://vault.internal:8200")
+    );
+    assert_eq!(
+        block.tags(),
+        vec!["ops".to_string(), "critical".to_string()]
+    );
+    assert_eq!(
+        block.provider_tags(),
+        vec!["prod".to_string(), "europe".to_string()]
+    );
+    let tunnels = block.tunnel_directives();
+    assert_eq!(tunnels.len(), 1);
+    assert_eq!(tunnels[0].bind_port, 5432);
+    assert_eq!(tunnels[0].remote_host, "db.internal");
+    assert_eq!(tunnels[0].remote_port, 5432);
+}
+
+#[test]
+fn update_host_rename_on_multi_alias_preserves_block_body() {
+    // Token rename in a multi-alias block must not disturb the body.
+    // The sibling alias `web-01` keeps the same directives and `# purple:*`
+    // comments after `web-prod` is renamed to `web-eu`.
+    let input = "Host web-01 web-prod\n  HostName 10.0.0.1\n  User deploy\n  LocalForward 5432 db.internal:5432\n  # purple:tags ops,critical\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "web-eu".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        user: "deploy".to_string(),
+        ..Default::default()
+    };
+    config.update_host("web-prod", &renamed);
+    let output = config.serialize();
+    assert!(
+        output.contains("Host web-01 web-eu"),
+        "only matching token renamed: {output}"
+    );
+    assert!(output.contains("LocalForward 5432 db.internal:5432"));
+    assert!(output.contains("# purple:tags ops,critical"));
+    assert!(output.contains("User deploy"));
+}
+
+#[test]
+fn update_host_rename_pattern_preserves_block_body() {
+    // Pattern rename keeps every directive and `# purple:*` comment.
+    let input = "Host *.prod\n  User deploy\n  ProxyJump bastion\n  # purple:tags prod\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "*.qa".to_string(),
+        user: "deploy".to_string(),
+        proxy_jump: "bastion".to_string(),
+        ..Default::default()
+    };
+    config.update_host("*.prod", &renamed);
+    let output = config.serialize();
+    assert!(output.contains("Host *.qa"));
+    assert!(!output.contains("Host *.prod"));
+    assert!(output.contains("ProxyJump bastion"));
+    assert!(output.contains("# purple:tags prod"));
+}
+
+#[test]
+fn update_host_rename_preserves_neighbouring_blocks_untouched() {
+    // A rename on `web` must not touch the `db` block that follows.
+    let input = "Host web\n  HostName 1.1.1.1\n  # purple:tags web\n\nHost db\n  HostName 2.2.2.2\n  # purple:vault-ssh db-role\n";
+    let mut config = parse_str(input);
+    let renamed = HostEntry {
+        alias: "web-new".to_string(),
+        hostname: "1.1.1.1".to_string(),
+        ..Default::default()
+    };
+    config.update_host("web", &renamed);
+    let output = config.serialize();
+    assert!(output.contains("Host web-new"));
+    assert!(output.contains("Host db\n"));
+    assert!(output.contains("HostName 2.2.2.2"));
+    assert!(output.contains("# purple:vault-ssh db-role"));
+}
+
+#[test]
+fn update_host_rename_preserves_crlf_line_endings() {
+    // Windows-authored configs use CRLF. After a rename the writer
+    // must keep CRLF intact; mixing LF and CRLF corrupts editors that
+    // detect line endings from the first line.
+    let input = "Host web\r\n  HostName 10.0.0.1\r\n  # purple:tags ops\r\n";
+    let mut config = SshConfigFile {
+        elements: SshConfigFile::parse_content(input),
+        path: test_config_path(),
+        crlf: true,
+        bom: false,
+    };
+    let renamed = HostEntry {
+        alias: "web-new".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        ..Default::default()
+    };
+    config.update_host("web", &renamed);
+    let output = config.serialize();
+    assert!(output.contains("Host web-new"));
+    assert!(
+        output.contains("\r\n"),
+        "CRLF line endings must be preserved: {output:?}"
+    );
+    // Every LF must be paired with a leading CR. Counting both bytes
+    // catches a mixed-ending corruption that text-only `contains`
+    // probes would miss.
+    let cr_count = output.bytes().filter(|&b| b == b'\r').count();
+    let lf_count = output.bytes().filter(|&b| b == b'\n').count();
+    assert_eq!(
+        cr_count, lf_count,
+        "CRLF must be paired: cr={cr_count} lf={lf_count} body={output:?}"
+    );
+    assert!(output.contains("# purple:tags ops"));
+}
+
+#[test]
+fn update_host_rename_preserves_bom_prefix() {
+    // Some Windows editors prepend a UTF-8 BOM. The writer must keep
+    // the BOM exactly once at the start of the file; a missing or
+    // duplicated BOM corrupts the file for those editors.
+    let input = "Host web\n  HostName 10.0.0.1\n  # purple:tags ops\n";
+    let mut config = SshConfigFile {
+        elements: SshConfigFile::parse_content(input),
+        path: test_config_path(),
+        crlf: false,
+        bom: true,
+    };
+    let renamed = HostEntry {
+        alias: "web-new".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        ..Default::default()
+    };
+    config.update_host("web", &renamed);
+    let output = config.serialize();
+    assert!(
+        output.starts_with('\u{feff}'),
+        "BOM must remain at the start: bytes start with {:?}",
+        output.chars().take(2).collect::<String>()
+    );
+    let trailing = &output[output.char_indices().nth(1).map(|(i, _)| i).unwrap_or(0)..];
+    assert!(
+        !trailing.contains('\u{feff}'),
+        "BOM must appear exactly once: {output:?}"
+    );
+    assert!(output.contains("Host web-new"));
+    assert!(output.contains("# purple:tags ops"));
+}
+
 #[test]
 fn delete_host_undoable_refuses_multi_alias_block() {
     // Undoable delete returns `None` for multi-alias blocks because

@@ -132,6 +132,47 @@ impl ConnectionHistory {
         }
     }
 
+    /// Move a host's entry from `old_alias` to `new_alias`. Called from the
+    /// host-form rename path so connection counts and timestamps survive a
+    /// rename. When both keys carry entries (defensive, should not occur in
+    /// practice because SSH config writes reject collisions) the two are
+    /// merged: counts sum, the most recent `last_connected` wins, and the
+    /// timestamp lists are concatenated then pruned by the same retention
+    /// and cap rules used on load.
+    ///
+    /// Returns `true` when the file changed.
+    pub fn rename(&mut self, old_alias: &str, new_alias: &str) -> bool {
+        if old_alias == new_alias {
+            return false;
+        }
+        let Some(mut moved) = self.entries.remove(old_alias) else {
+            return false;
+        };
+        moved.alias = new_alias.to_string();
+        if let Some(existing) = self.entries.remove(new_alias) {
+            moved.count = moved.count.saturating_add(existing.count);
+            moved.last_connected = moved.last_connected.max(existing.last_connected);
+            moved.timestamps.extend(existing.timestamps);
+            moved.timestamps.sort_unstable();
+            moved.timestamps.dedup();
+            let cutoff = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .saturating_sub(RETENTION_SECS);
+            moved.timestamps.retain(|&t| t >= cutoff);
+            if moved.timestamps.len() > MAX_TIMESTAMPS {
+                let excess = moved.timestamps.len() - MAX_TIMESTAMPS;
+                moved.timestamps.drain(..excess);
+            }
+        }
+        self.entries.insert(new_alias.to_string(), moved);
+        if let Err(e) = self.save() {
+            warn!("[config] Failed to save connection history after rename: {e}");
+        }
+        true
+    }
+
     /// Last connected timestamp for a host (0 if never connected).
     pub fn last_connected(&self, alias: &str) -> u64 {
         self.entries.get(alias).map_or(0, |e| e.last_connected)
@@ -212,7 +253,40 @@ impl ConnectionHistory {
     }
 
     fn history_path() -> Option<PathBuf> {
+        #[cfg(test)]
+        {
+            if let Some(p) = test_path::get() {
+                return Some(p);
+            }
+        }
         dirs::home_dir().map(|h| h.join(".purple/history.tsv"))
+    }
+}
+
+/// Thread-local path override for tests. Mirrors the pattern in
+/// `crate::app::jump::test_path` so a test can isolate
+/// `ConnectionHistory::load()` from `~/.purple/history.tsv` without
+/// mutating `HOME`. Thread-local so parallel `cargo test` threads
+/// cannot see each other's overrides.
+#[cfg(test)]
+pub mod test_path {
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+
+    thread_local! {
+        static OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+    }
+
+    pub fn set(path: PathBuf) {
+        OVERRIDE.with(|cell| *cell.borrow_mut() = Some(path));
+    }
+
+    pub fn clear() {
+        OVERRIDE.with(|cell| *cell.borrow_mut() = None);
+    }
+
+    pub fn get() -> Option<PathBuf> {
+        OVERRIDE.with(|cell| cell.borrow().clone())
     }
 }
 
@@ -430,5 +504,91 @@ mod tests {
         assert_eq!(ConnectionHistory::format_time_ago(now - 300), "5m");
         assert_eq!(ConnectionHistory::format_time_ago(now - 7200), "2h");
         assert_eq!(ConnectionHistory::format_time_ago(now - 172800), "2d");
+    }
+
+    fn make_entry(alias: &str, last: u64, count: u32, timestamps: Vec<u64>) -> HistoryEntry {
+        HistoryEntry {
+            alias: alias.to_string(),
+            last_connected: last,
+            count,
+            timestamps,
+        }
+    }
+
+    #[test]
+    fn rename_moves_entry_under_new_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.tsv");
+        let mut history = ConnectionHistory {
+            entries: HashMap::new(),
+            path: path.clone(),
+        };
+        let now = 1_700_000_000;
+        history.entries.insert(
+            "web-old".to_string(),
+            make_entry("web-old", now, 7, vec![now - 60, now]),
+        );
+
+        assert!(history.rename("web-old", "web-new"));
+        assert!(!history.entries.contains_key("web-old"));
+        let moved = history.entries.get("web-new").expect("entry under new key");
+        assert_eq!(moved.alias, "web-new");
+        assert_eq!(moved.count, 7);
+        assert_eq!(moved.last_connected, now);
+        assert_eq!(moved.timestamps, vec![now - 60, now]);
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.starts_with("web-new\t"));
+        assert!(!saved.contains("web-old"));
+    }
+
+    #[test]
+    fn rename_merges_when_new_key_already_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.tsv");
+        let mut history = ConnectionHistory {
+            entries: HashMap::new(),
+            path,
+        };
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        history.entries.insert(
+            "a".to_string(),
+            make_entry("a", now - 100, 3, vec![now - 200, now - 100]),
+        );
+        history.entries.insert(
+            "b".to_string(),
+            make_entry("b", now - 50, 5, vec![now - 100, now - 50]),
+        );
+
+        assert!(history.rename("a", "b"));
+        let merged = history.entries.get("b").expect("merged entry");
+        assert_eq!(merged.count, 8, "counts sum on collision");
+        assert_eq!(
+            merged.last_connected,
+            now - 50,
+            "most recent timestamp wins"
+        );
+        // Shared `now - 100` timestamp must be deduplicated.
+        assert_eq!(merged.timestamps, vec![now - 200, now - 100, now - 50]);
+        assert!(!history.entries.contains_key("a"));
+    }
+
+    #[test]
+    fn rename_noop_when_same_alias() {
+        let mut history = ConnectionHistory::default();
+        history
+            .entries
+            .insert("a".to_string(), make_entry("a", 1, 1, vec![1]));
+        assert!(!history.rename("a", "a"));
+        assert!(history.entries.contains_key("a"));
+    }
+
+    #[test]
+    fn rename_noop_when_old_absent() {
+        let mut history = ConnectionHistory::default();
+        assert!(!history.rename("ghost", "phantom"));
+        assert!(history.entries.is_empty());
     }
 }

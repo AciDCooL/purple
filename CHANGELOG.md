@@ -1,3 +1,13 @@
+## 3.12.0 - 2026-05-12
+
+- feat: Renames carry history, recents and your fleet view.
+- feat: Edit a host's alias and your connection history follows it, so your top hosts stay top after a typo fix or a provider relabel.
+- feat: Jump-bar recents move with the rename, so the universal `:` bar still surfaces the host you actually use.
+- feat: Collapsed fleets in the containers tab survive a rename, so big fleets stay tidy across edits.
+- feat: `purple sync` migrates the same per-host state when a cloud provider rewrites an alias, so a relabel never orphans your context.
+- feat: Container logs (`l`) open in demo mode, so `--demo` shows off the search and filter UI without a remote shell.
+- change: SSH config rename keeps `# purple:*` metadata, unknown directives, CRLF endings and the UTF-8 BOM byte-for-byte. New round-trip tests lock it in.
+
 ## 3.11.0 - 2026-05-11
 
 - feat: Live-search container logs without leaving purple.

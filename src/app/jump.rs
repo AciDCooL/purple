@@ -322,6 +322,48 @@ pub fn save_recents(file: &RecentsFile) -> std::io::Result<()> {
     atomic_write(&path, &bytes)
 }
 
+/// Rewrite host recents from `old_alias` to `new_alias`. Called from the
+/// host-form rename path so the jump bar's RECENT section keeps the host
+/// after a rename. When both aliases already have entries (defensive) the
+/// newer `last_used_unix` wins and the duplicate is dropped.
+///
+/// Returns `true` when the file changed.
+pub fn rename_host_recent(file: &mut RecentsFile, old_alias: &str, new_alias: &str) -> bool {
+    if old_alias == new_alias {
+        return false;
+    }
+    let old_idx = file
+        .entries
+        .iter()
+        .position(|e| e.target.kind == SourceKind::Host && e.target.key == old_alias);
+    let Some(old_idx) = old_idx else {
+        return false;
+    };
+    let new_idx = file
+        .entries
+        .iter()
+        .position(|e| e.target.kind == SourceKind::Host && e.target.key == new_alias);
+    if let Some(new_idx) = new_idx {
+        let drop_idx =
+            if file.entries[old_idx].last_used_unix >= file.entries[new_idx].last_used_unix {
+                new_idx
+            } else {
+                old_idx
+            };
+        let keep_idx = if drop_idx == new_idx {
+            old_idx
+        } else {
+            new_idx
+        };
+        file.entries[keep_idx].target.key = new_alias.to_string();
+        file.entries.remove(drop_idx);
+    } else {
+        file.entries[old_idx].target.key = new_alias.to_string();
+    }
+    file.version = RECENTS_VERSION;
+    true
+}
+
 /// Insert or move-to-front a recent ref. Caps the list at `RECENTS_CAP`.
 pub fn touch_recent(file: &mut RecentsFile, target: RecentRef) {
     file.version = RECENTS_VERSION;
@@ -420,5 +462,70 @@ pub mod tests {
             let loaded = load_recents();
             assert!(loaded.entries.is_empty());
         });
+    }
+
+    fn host_entry(alias: &str, ts: i64) -> RecentEntry {
+        RecentEntry {
+            target: RecentRef::new(SourceKind::Host, alias.to_string()),
+            last_used_unix: ts,
+        }
+    }
+
+    #[test]
+    fn rename_host_recent_rewrites_key() {
+        let mut file = RecentsFile::default();
+        file.entries.push(host_entry("web-old", 100));
+        file.entries.push(RecentEntry {
+            target: RecentRef::new(SourceKind::Tunnel, "web-old:5432".to_string()),
+            last_used_unix: 90,
+        });
+
+        assert!(rename_host_recent(&mut file, "web-old", "web-new"));
+        assert_eq!(file.entries[0].target.kind, SourceKind::Host);
+        assert_eq!(file.entries[0].target.key, "web-new");
+        // Non-host entries with a coincidental key prefix are untouched.
+        assert_eq!(file.entries[1].target.kind, SourceKind::Tunnel);
+        assert_eq!(file.entries[1].target.key, "web-old:5432");
+    }
+
+    #[test]
+    fn rename_host_recent_dedups_on_collision_keeping_most_recent() {
+        let mut file = RecentsFile::default();
+        // Old entry is more recent. After rename the newer timestamp must
+        // survive and the older duplicate must be dropped.
+        file.entries.push(host_entry("a", 200));
+        file.entries.push(host_entry("b", 100));
+
+        assert!(rename_host_recent(&mut file, "a", "b"));
+        assert_eq!(file.entries.len(), 1);
+        assert_eq!(file.entries[0].target.key, "b");
+        assert_eq!(file.entries[0].last_used_unix, 200);
+    }
+
+    #[test]
+    fn rename_host_recent_dedups_when_new_key_is_newer() {
+        let mut file = RecentsFile::default();
+        file.entries.push(host_entry("a", 100));
+        file.entries.push(host_entry("b", 200));
+
+        assert!(rename_host_recent(&mut file, "a", "b"));
+        assert_eq!(file.entries.len(), 1);
+        assert_eq!(file.entries[0].target.key, "b");
+        assert_eq!(file.entries[0].last_used_unix, 200);
+    }
+
+    #[test]
+    fn rename_host_recent_noop_when_same() {
+        let mut file = RecentsFile::default();
+        file.entries.push(host_entry("a", 10));
+        assert!(!rename_host_recent(&mut file, "a", "a"));
+        assert_eq!(file.entries.len(), 1);
+    }
+
+    #[test]
+    fn rename_host_recent_noop_when_absent() {
+        let mut file = RecentsFile::default();
+        assert!(!rename_host_recent(&mut file, "ghost", "phantom"));
+        assert!(file.entries.is_empty());
     }
 }

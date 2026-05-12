@@ -430,6 +430,10 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
 ///   podman),
 /// - demo mode is active.
 fn exec_into_selected_container(app: &mut App) {
+    if app.demo_mode {
+        app.notify_warning(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
+        return;
+    }
     let Some((row, runtime, askpass)) = selected_running_row_with_runtime(app) else {
         return;
     };
@@ -451,8 +455,11 @@ fn exec_into_selected_container(app: &mut App) {
 
 /// Resolve the cursor to a row, validate that it is running, and
 /// resolve runtime + askpass + stale-host hint. Used as the prelude
-/// for `l`, `K`, `S`, and `e`. Returns `None` (with a toast already
-/// emitted by the called helpers) when any precondition fails.
+/// for `l`, `K`, `S`, `e` and `E`. Returns `None` (with a toast
+/// already emitted by the called helpers) when any precondition
+/// fails. Demo guards live on the individual callers because `l`
+/// has a demo short-circuit in `spawn_container_logs_fetch` and
+/// must reach this prelude even in demo mode.
 fn selected_running_row_with_runtime(
     app: &mut App,
 ) -> Option<(
@@ -460,10 +467,6 @@ fn selected_running_row_with_runtime(
     crate::containers::ContainerRuntime,
     Option<String>,
 )> {
-    if app.demo_mode {
-        app.notify_warning(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
-        return None;
-    }
     let row = selected_container_row(app)?;
     if !row.state.eq_ignore_ascii_case("running") {
         app.notify_warning(crate::messages::container_not_running(&row.name));
@@ -525,6 +528,10 @@ fn queue_logs_fetch_for_selected(app: &mut App) {
 }
 
 fn open_restart_confirm(app: &mut App) {
+    if app.demo_mode {
+        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+        return;
+    }
     let Some((row, _runtime, _askpass)) = selected_running_row_with_runtime(app) else {
         return;
     };
@@ -550,6 +557,10 @@ fn open_restart_confirm(app: &mut App) {
 }
 
 fn open_stop_confirm(app: &mut App) {
+    if app.demo_mode {
+        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+        return;
+    }
     let Some((row, _runtime, _askpass)) = selected_running_row_with_runtime(app) else {
         return;
     };
@@ -694,6 +705,10 @@ fn open_stack_restart_confirm(app: &mut App) {
 }
 
 fn open_exec_prompt(app: &mut App) {
+    if app.demo_mode {
+        app.notify_warning(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
+        return;
+    }
     let Some((row, _runtime, _askpass)) = selected_running_row_with_runtime(app) else {
         return;
     };

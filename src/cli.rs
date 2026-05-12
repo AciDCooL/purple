@@ -206,6 +206,7 @@ pub(super) fn handle_sync(
     let mut any_changes = false;
     let mut any_failures = false;
     let mut any_hard_failures = false;
+    let mut all_renames: Vec<(String, String)> = Vec::new();
 
     for section in &sections {
         let provider = match providers::get_provider_with_config(section.provider(), section) {
@@ -321,6 +322,9 @@ pub(super) fn handle_sync(
         if result.added > 0 || result.updated > 0 || result.removed > 0 || result.stale > 0 {
             any_changes = true;
         }
+        if !dry_run {
+            all_renames.extend(result.renames);
+        }
     }
 
     if any_changes && !dry_run {
@@ -331,6 +335,17 @@ pub(super) fn handle_sync(
             log::debug!("[config] cli sync: writing ssh config");
             config.write()?;
             log::info!("[purple] cli sync: ssh config written");
+            // Migrate per-host state keyed by alias for every host the
+            // sync renamed. Tied to the successful config write: a
+            // skipped or failed write must not move history/recents
+            // to a new alias that did not land in `~/.ssh/config`.
+            if !all_renames.is_empty() {
+                log::info!(
+                    "[purple] cli sync: migrating per-host state for {} rename(s)",
+                    all_renames.len()
+                );
+                crate::app::migrate_renames_persistent_state(&all_renames);
+            }
         }
     }
 
