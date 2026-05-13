@@ -1061,6 +1061,8 @@ footer .sep { margin: 0 0.3em; }
           <div><span class="prompt-char-dim">$</span> brew install erickochen/purple/purple</div>
           <div><span class="prompt-char-dim">$</span> cargo install purple-ssh</div>
           <div><span class="prompt-char-dim">$</span> nix profile install github:erickochen/purple</div>
+          <div><span class="prompt-char-dim">$</span> paru -S purple-bin</div>
+          <div><span class="prompt-char-dim">$</span> yay -S purple-bin</div>
         </div>
       </div>
     </div>
@@ -1402,6 +1404,7 @@ curl -fsSL getpurple.sh | sh
 brew install erickochen/purple/purple
 cargo install purple-ssh
 nix profile install github:erickochen/purple
+paru -S purple-bin                  # Arch Linux (AUR), or: yay -S purple-bin. Also: purple (source build) or purple-git (rolling)
 
 ## Usage
 
@@ -1646,7 +1649,7 @@ Q: How does provider sync handle name conflicts?
 A: Synced hosts get an alias prefix (e.g. do-web-1 for DigitalOcean). If a name collides, purple appends a numeric suffix (do-web-1-2).
 
 Q: How do I install purple?
-A: Four options: \`curl -fsSL getpurple.sh | sh\` (macOS and Linux, recommended), \`brew install erickochen/purple/purple\` (Homebrew on macOS), \`cargo install purple-ssh\` (any platform with Rust) or \`nix profile install github:erickochen/purple\` (Nix and NixOS).
+A: Five options: \`curl -fsSL getpurple.sh | sh\` (macOS and Linux, recommended), \`brew install erickochen/purple/purple\` (Homebrew on macOS), \`cargo install purple-ssh\` (any platform with Rust), \`nix profile install github:erickochen/purple\` (Nix and NixOS) or \`paru -S purple-bin\` (Arch Linux, also \`yay -S purple-bin\` or any other AUR helper, plus \`purple\` for source build and \`purple-git\` for rolling).
 
 Q: Can I transfer files with purple?
 A: Yes. Press F on any host to open the remote file explorer. It shows your local files on the left and the remote server on the right. Navigate directories with j/k and Enter, select files with Ctrl+Space and press Enter to copy via scp. Works through ProxyJump, password sources and active tunnels. Paths are remembered per host.

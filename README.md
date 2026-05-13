@@ -23,7 +23,7 @@ curl -fsSL getpurple.sh | sh
 ```
 
 <details>
-<summary>brew, cargo, nix or from source</summary>
+<summary>brew, cargo, nix, aur or from source</summary>
 
 ```
 brew install erickochen/purple/purple
@@ -33,6 +33,12 @@ cargo install purple-ssh
 ```
 ```
 nix profile install github:erickochen/purple
+```
+```
+paru -S purple-bin
+```
+```
+yay -S purple-bin
 ```
 ```
 git clone https://github.com/erickochen/purple.git
