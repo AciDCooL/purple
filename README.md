@@ -23,7 +23,7 @@ curl -fsSL getpurple.sh | sh
 ```
 
 <details>
-<summary>brew, cargo, nix, aur or from source</summary>
+<summary>brew, cargo, nix, AUR or from source</summary>
 
 ```
 brew install erickochen/purple/purple

@@ -1,0 +1,144 @@
+name: Publish AUR packages
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (without v prefix, e.g. 3.12.3)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-aur
+  cancel-in-progress: false
+
+jobs:
+  resolve-version:
+    runs-on: ubuntu-latest
+    permissions: {}
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.set.outputs.version }}
+    steps:
+      - id: set
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+            version="${MANUAL_VERSION}"
+          else
+            version="${RELEASE_TAG#v}"
+          fi
+          case "${version}" in
+            *[!0-9.]* | "" | *.*.*.* )
+              echo "Refusing to publish: version '${version}' is not a SemVer triple"
+              exit 1 ;;
+          esac
+          if ! printf '%s\n' "${version}" | grep -qxE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Refusing to publish: version '${version}' did not match SemVer triple regex"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Publishing AUR packages for version ${version}"
+
+  purple:
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Substitute version into PKGBUILD
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          sed -i "s|__VERSION__|${VERSION}|g" packaging/aur/purple/PKGBUILD
+          if grep -q '__VERSION__' packaging/aur/purple/PKGBUILD; then
+            echo "Substitution failed: __VERSION__ still present" >&2
+            exit 1
+          fi
+      - name: Push to AUR
+        # KSXGitHub/github-actions-deploy-aur v4.1.3 pinned to SHA
+        uses: KSXGitHub/github-actions-deploy-aur@da03e160361ce01bf087e790b6ffd196d7dccff7
+        with:
+          pkgname: purple
+          pkgbuild: ./packaging/aur/purple/PKGBUILD
+          commit_username: 'Eric Kochen'
+          commit_email: 'eric@getpurple.sh'
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "upgpkg: purple ${{ needs.resolve-version.outputs.version }}-1"
+          updpkgsums: true
+          test: true
+          # --syncdeps installs cargo via pacman inside the test container.
+          test_flags: '--clean --cleanbuild --syncdeps --noconfirm'
+          allow_empty_commits: false
+
+  purple-bin:
+    needs: resolve-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Substitute version and fetch arch-specific sha256 sidecars
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          PKGBUILD=packaging/aur/purple-bin/PKGBUILD
+
+          sed -i "s|__VERSION__|${VERSION}|g" "$PKGBUILD"
+          if grep -q '__VERSION__' "$PKGBUILD"; then
+            echo "Substitution failed: __VERSION__ still present" >&2
+            exit 1
+          fi
+
+          # updpkgsums runs on x86_64 and cannot download aarch64 binaries, so it
+          # writes the x86_64 hash to both arch slots. We fetch the upstream
+          # .sha256 sidecars directly to avoid that bug.
+          BASE="https://github.com/erickochen/purple/releases/download/v${VERSION}"
+          LICENSE_URL="https://raw.githubusercontent.com/erickochen/purple/refs/tags/v${VERSION}/LICENSE"
+
+          fetch_sidecar() {
+            local url="$1"
+            local hash
+            hash=$(curl -fsSL "${url}" | awk '{print $1}')
+            if ! printf '%s' "${hash}" | grep -qxE '^[0-9a-f]{64}$'; then
+              echo "Invalid sha256 from ${url}: '${hash}'" >&2
+              return 1
+            fi
+            printf '%s' "${hash}"
+          }
+
+          LICENSE_HASH=$(curl -fsSL "${LICENSE_URL}" | sha256sum | awk '{print $1}')
+          X86_HASH=$(fetch_sidecar "${BASE}/purple-${VERSION}-x86_64-unknown-linux-gnu.tar.gz.sha256")
+          AARCH_HASH=$(fetch_sidecar "${BASE}/purple-${VERSION}-aarch64-unknown-linux-gnu.tar.gz.sha256")
+
+          PLACEHOLDER='0000000000000000000000000000000000000000000000000000000000000000'
+          sed -i "s|sha256sums=('${PLACEHOLDER}')|sha256sums=('${LICENSE_HASH}')|" "$PKGBUILD"
+          sed -i "s|sha256sums_x86_64=('${PLACEHOLDER}')|sha256sums_x86_64=('${X86_HASH}')|" "$PKGBUILD"
+          sed -i "s|sha256sums_aarch64=('${PLACEHOLDER}')|sha256sums_aarch64=('${AARCH_HASH}')|" "$PKGBUILD"
+
+          if grep -q "${PLACEHOLDER}" "$PKGBUILD"; then
+            echo "FAIL: at least one sha256 placeholder was not substituted" >&2
+            exit 1
+          fi
+      - name: Push to AUR
+        # KSXGitHub/github-actions-deploy-aur v4.1.3 pinned to SHA
+        uses: KSXGitHub/github-actions-deploy-aur@da03e160361ce01bf087e790b6ffd196d7dccff7
+        with:
+          pkgname: purple-bin
+          pkgbuild: ./packaging/aur/purple-bin/PKGBUILD
+          commit_username: 'Eric Kochen'
+          commit_email: 'eric@getpurple.sh'
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "upgpkg: purple-bin ${{ needs.resolve-version.outputs.version }}-1"
+          # updpkgsums disabled: we pre-computed checksums above to handle both architectures correctly.
+          updpkgsums: false
+          test: true
+          allow_empty_commits: false
