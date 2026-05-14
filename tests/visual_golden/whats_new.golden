@@ -1,7 +1,7 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ 25 ── ●17 ✖2 ╭ What's new ────────────────────────────────────────────────────────╮──────────────╮
+╭ 26 ── ●17 ✖2 ╭ What's new ────────────────────────────────────────────────────────╮──────────────╮
 │     NAME     │                                                                    │        LAST▾ │
 │──────────────│                                     ╮                              │──────────────│
 │▌  ● bastion-a│                        ╭─╮╷ ╷╭─ ╭─╮ │ ╭─╮                          │         <1m  │
@@ -9,7 +9,7 @@
 │   ● monitorin│                        ├─╯╰─╯╵  ├─╯╶┴╴╰─╴ ▪                        │          2h  │
 │   ● gateway-v│                        ╵        ╵                                  │          3h  │
 │   ● podman-ed│                                                                    │          4h  │
-│   ● aws-api-p│                      welcome to purple 3.12.3                      │          5h  │
+│   ● aws-api-p│                      welcome to purple 3.13.0                      │          5h  │
 │   ● aws-api-s│                                                                    │          6h  │
 │   ● aws-worke│                                                                    │          7h  │
 │   ● aws-batch│  2.41.0  2026-04-15                                                │          8h  │
@@ -21,11 +21,11 @@
 │   ● pve-redis│                                                                    │         19h  │
 │   ● pve-mail │  2.40.0                                                            │         20h  │
 │   ● pve-monit│                                                                    │mox      21h  │
-│   ○ do-work-w│  + feat    Vault SSH role override                                 │ean        -  │
+│   ○ db-proton│  + feat    Vault SSH role override                                 │           -  │
+│   ○ do-work-w│                                                                    │ean        -  │
 │   ○ do-work-s│                                                                    │           -  │
-│   ○ do-work-w│                                                                    │           -  │
-│   ○ do-work-c╰────────────────────────────────────────────────────────────────────╯           -  │
-│   ○ do-person esc/q/n  close   j/k  scroll    g/G  top/bottom                      n          -  │
+│   ○ do-work-w╰────────────────────────────────────────────────────────────────────╯           -  │
+│   ○ do-work-c esc/q/n  close   j/k  scroll    g/G  top/bottom                                 -  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---

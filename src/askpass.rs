@@ -45,6 +45,11 @@ pub const PASSWORD_SOURCES: &[PasswordSourceOption] = &[
         hint: "vault:secret/path#field",
     },
     PasswordSourceOption {
+        label: "Proton Pass",
+        value: "proton:",
+        hint: "proton:Vault/Item/field",
+    },
+    PasswordSourceOption {
         label: "Custom command",
         value: "cmd:",
         hint: "cmd %a %h",
@@ -300,6 +305,9 @@ fn retrieve_password(source: &str, alias: &str, hostname: &str) -> Result<String
     }
     if let Some(rest) = source.strip_prefix("vault:") {
         return retrieve_from_vault(rest);
+    }
+    if let Some(spec) = source.strip_prefix("proton:") {
+        return retrieve_from_proton_pass(spec);
     }
     // Custom command (with or without cmd: prefix)
     let cmd = source.strip_prefix("cmd:").unwrap_or(source);
@@ -568,6 +576,8 @@ pub fn describe_source(source: &str) -> &str {
         "OS Keychain"
     } else if source.starts_with("op://") {
         "1Password"
+    } else if source.starts_with("proton:") {
+        "Proton Pass"
     } else if source.starts_with("pass:") {
         "pass"
     } else if source.starts_with("bw:") {
@@ -634,6 +644,108 @@ pub fn bw_unlock(password: &str) -> Result<String> {
         anyhow::bail!("Bitwarden unlock returned empty session token");
     }
     Ok(token)
+}
+
+/// Proton Pass CLI authentication status.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProtonStatus {
+    Authenticated,
+    NotAuthenticated,
+    NotInstalled,
+}
+
+/// Check whether `pass-cli` is installed and the user is logged in. Uses
+/// `pass-cli test` (not `info`) because in pass-cli 2.x `info` exits 0 even
+/// without a session and only reports the error on stderr. `test` is the
+/// command that actually exits non-zero when authentication is missing.
+pub fn proton_status() -> ProtonStatus {
+    let result = Command::new("pass-cli").arg("test").output();
+    let status = match result {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => ProtonStatus::NotInstalled,
+        Err(_) => ProtonStatus::NotAuthenticated,
+        Ok(out) if out.status.success() => ProtonStatus::Authenticated,
+        Ok(_) => ProtonStatus::NotAuthenticated,
+    };
+    debug!("Proton Pass status: {status:?}");
+    status
+}
+
+/// Log in to Proton Pass with a Personal Access Token.
+/// PAT is supplied via the `PROTON_PASS_PERSONAL_ACCESS_TOKEN` env var so it
+/// never appears in argv. Returns an error wrapping pass-cli's stderr on
+/// non-zero exit so the prompt loop can surface it.
+pub fn proton_login(pat: &str) -> Result<()> {
+    if pat.is_empty() {
+        anyhow::bail!("empty PAT");
+    }
+    let output = Command::new("pass-cli")
+        .arg("login")
+        .env("PROTON_PASS_PERSONAL_ACCESS_TOKEN", pat)
+        .output()
+        .context("Failed to run Proton Pass CLI (pass-cli)")?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        debug!("Proton Pass login failed: {}", stderr.trim());
+        anyhow::bail!("{}", stderr.trim());
+    }
+    debug!("Proton Pass login succeeded");
+    Ok(())
+}
+
+/// Parse a `proton:Vault/Item/field` askpass spec into its three components.
+/// Vault and item segments cannot contain `/`; the field segment is everything
+/// after the second `/`. All three segments must be non-empty.
+fn parse_proton_spec(spec: &str) -> Result<(&str, &str, &str)> {
+    let (vault, rest) = spec
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("Proton Pass spec must be Vault/Item/field"))?;
+    let (item, field) = rest
+        .split_once('/')
+        .ok_or_else(|| anyhow::anyhow!("Proton Pass spec must be Vault/Item/field"))?;
+    if vault.is_empty() || item.is_empty() || field.is_empty() {
+        anyhow::bail!("Proton Pass spec segments must be non-empty");
+    }
+    Ok((vault, item, field))
+}
+
+/// Retrieve a secret from Proton Pass via `pass-cli item view`. The askpass
+/// spec `proton:Vault/Item/field` is mapped to name-based lookup flags
+/// (`--vault-name`, `--item-title`, `--field`) rather than the URI form, so
+/// purple users can refer to their vaults and items by human-readable names
+/// instead of opaque share/item IDs.
+fn retrieve_from_proton_pass(spec: &str) -> Result<String> {
+    let (vault, item, field) = parse_proton_spec(spec)?;
+    let result = Command::new("pass-cli")
+        .args([
+            "item",
+            "view",
+            "--vault-name",
+            vault,
+            "--item-title",
+            item,
+            "--field",
+            field,
+        ])
+        .output();
+    let output = match result {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            error!("[config] Password manager binary not found: pass-cli");
+            return Err(e).context("Failed to run Proton Pass CLI (pass-cli)");
+        }
+        other => other.context("Failed to run Proton Pass CLI (pass-cli)")?,
+    };
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!("[external] Proton Pass lookup failed: {}", stderr.trim());
+        anyhow::bail!("Proton Pass lookup failed");
+    }
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
+        warn!("[external] Proton Pass returned empty secret");
+        anyhow::bail!("Proton Pass returned empty secret");
+    }
+    debug!("Proton Pass lookup succeeded");
+    Ok(value)
 }
 
 #[cfg(test)]

@@ -1512,13 +1512,55 @@ fn test_password_picker_select_vault() {
     assert_eq!(app.forms.host.focused_field, FormField::AskPass);
 }
 
+// --- Enter selects source: Proton Pass (prefix) ---
+
+#[test]
+fn test_password_picker_select_proton_pass() {
+    let mut app = make_form_app();
+    app.ui.password_picker.open_at(5); // Proton Pass
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(!app.ui.password_picker.open);
+    assert_eq!(app.forms.host.askpass, "proton:");
+    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+}
+
+// --- Host form writes proton askpass comment and round-trips ---
+
+#[test]
+fn test_host_form_proton_askpass_writes_comment() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = dir.path().join("test_config");
+    std::fs::write(&config_path, "Host srv\n    HostName srv.example.com\n").unwrap();
+
+    let mut config = SshConfigFile::parse(&config_path).expect("parse");
+    config.set_host_askpass("srv", "proton:Personal/srv/p");
+    config.write().expect("write");
+
+    let on_disk = std::fs::read_to_string(&config_path).expect("read");
+    assert!(
+        on_disk.contains("# purple:askpass proton:Personal/srv/p"),
+        "expected proton askpass comment on disk, got:\n{on_disk}"
+    );
+
+    let reparsed = SshConfigFile::parse(&config_path).expect("reparse");
+    let entry = reparsed
+        .raw_host_entry("srv")
+        .expect("srv block survives round-trip");
+    assert_eq!(
+        entry.askpass.as_deref(),
+        Some("proton:Personal/srv/p"),
+        "askpass must round-trip through parse-write-parse"
+    );
+}
+
 // --- Enter selects source: Custom command ---
 
 #[test]
 fn test_password_picker_select_custom() {
     let mut app = make_form_app();
     app.forms.host.askpass = "old-value".to_string();
-    app.ui.password_picker.open_at(5); // Custom command
+    app.ui.password_picker.open_at(6); // Custom command
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
@@ -1531,7 +1573,7 @@ fn test_password_picker_select_custom() {
 fn test_password_picker_select_none() {
     let mut app = make_form_app();
     app.forms.host.askpass = "keychain".to_string();
-    app.ui.password_picker.open_at(6); // None
+    app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
@@ -1901,7 +1943,7 @@ fn test_picker_keychain_sets_status_message() {
 fn test_picker_none_sets_cleared_status() {
     let mut app = make_form_app();
     app.forms.host.askpass = "keychain".to_string();
-    app.ui.password_picker.open_at(6); // None
+    app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(
@@ -2052,7 +2094,7 @@ fn test_password_sources_fit_picker_width() {
 
 #[test]
 fn test_password_picker_item_count_matches_sources() {
-    assert_eq!(crate::askpass::PASSWORD_SOURCES.len(), 7);
+    assert_eq!(crate::askpass::PASSWORD_SOURCES.len(), 8);
 }
 
 // =========================================================================
@@ -2548,7 +2590,7 @@ fn test_password_picker_keychain_sets_status_message() {
 fn test_password_picker_none_sets_cleared_status() {
     let mut app = make_form_app();
     app.forms.host.askpass = "keychain".to_string();
-    app.ui.password_picker.open_at(6); // None
+    app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     let toast = app.status_center.toast.as_ref().unwrap();
@@ -2742,7 +2784,7 @@ fn test_bw_session_none_for_non_bw_source() {
 fn test_password_picker_ctrl_d_closes_picker() {
     // Use "None" to avoid writing a value to the real preferences file
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(6); // None
+    app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('d'), &tx);
     assert!(!app.ui.password_picker.open);
@@ -2752,7 +2794,7 @@ fn test_password_picker_ctrl_d_closes_picker() {
 fn test_password_picker_ctrl_d_does_not_change_form_askpass() {
     let mut app = make_form_app();
     app.forms.host.askpass = "old".to_string();
-    app.ui.password_picker.open_at(6); // None
+    app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('d'), &tx);
     // Ctrl+D only sets the global default, not the form field
@@ -2762,7 +2804,7 @@ fn test_password_picker_ctrl_d_does_not_change_form_askpass() {
 #[test]
 fn test_password_picker_ctrl_d_none_sets_status() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(6); // None
+    app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('d'), &tx);
     // Shows "cleared" on success or "Failed to save" if ~/.purple doesn't exist

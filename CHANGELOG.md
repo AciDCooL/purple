@@ -1,3 +1,11 @@
+## 3.13.0 - 2026-05-14
+
+- feat: Pull SSH passwords from your Proton Pass vault.
+- feat: Pick Proton Pass on any host and purple resolves the secret from your vault on every connect.
+- feat: One pass-cli login carries you across reconnects. A quick re-auth prompt catches expired sessions.
+- feat: Your Personal Access Token rides an env var into the login call, never argv or any later subprocess.
+- Proton Pass support suggested by @W4ff1e (#66).
+
 ## 3.12.3 - 2026-05-12
 
 - feat: Twice the release history and calmer detail panels.

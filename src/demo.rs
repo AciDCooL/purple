@@ -30,6 +30,13 @@ Host db-primary
   # purple:tags production,database
   # purple:askpass op://vault/prod-db
 
+Host db-proton
+  HostName db1.example.com
+  User dba
+  ProxyJump bastion-ams
+  # purple:tags production,database
+  # purple:askpass proton:Production/db-server/password
+
 Host monitoring
   HostName 10.30.2.10
   User admin
@@ -2033,8 +2040,8 @@ mod tests {
     #[test]
     fn demo_app_has_expected_hosts() {
         let (app, _guard) = demo_app();
-        // 22 original + 2 do-personal + 1 podman-edge = 25
-        assert_eq!(app.hosts_state.list.len(), 25);
+        // 22 original + 2 do-personal + 1 podman-edge + 1 db-proton = 26
+        assert_eq!(app.hosts_state.list.len(), 26);
     }
 
     #[test]

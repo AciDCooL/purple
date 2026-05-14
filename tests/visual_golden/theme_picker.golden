@@ -1,7 +1,7 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ 25 ── ●17 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
+╭ 26 ── ●17 ✖2 ○7 ─────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   ADDRESS                         TAGS                            LAST▾ │
 │──────────────────────────────────────────────────────────────────────────────────────────────────│
 │▌  ● bastion-ams            140.82.121.3 ⇄                  production vpn                   <1m  │
@@ -21,11 +21,11 @@
 │   ● pve-redi╰──────────────────────────────────────────────────────────────────────╯        19h  │
 │   ● pve-mail Enter  select    Esc  back                                                     20h  │
 │   ● pve-monitor            192.168.1.60 ⇄                  monitoring internal proxmox      21h  │
+│   ○ db-proton              db1.example.com ↗               production database                -  │
 │   ○ do-work-web-ams        104.248.38.91                   production web digitalocean        -  │
 │   ○ do-work-staging-ams    104.248.38.92 ⇄                 staging web digitalocean           -  │
 │   ○ do-work-worker-ams     104.248.38.93                   worker digitalocean                -  │
 │   ○ do-work-ci-runner      104.248.38.94 ↗                 ci digitalocean                    -  │
-│   ○ do-personal-blog       167.99.42.10                    personal web digitalocean          -  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---
@@ -1631,6 +1631,10 @@
 (39,23) fg=Reset bg=Reset mod=DIM
 (40,23) fg=Reset bg=Reset mod=DIM
 (41,23) fg=Reset bg=Reset mod=DIM
+(42,23) fg=Reset bg=Reset mod=DIM
+(43,23) fg=Reset bg=Reset mod=DIM
+(44,23) fg=Reset bg=Reset mod=DIM
+(45,23) fg=Reset bg=Reset mod=DIM
 (61,23) fg=Magenta bg=Reset mod=-
 (62,23) fg=Magenta bg=Reset mod=-
 (63,23) fg=Magenta bg=Reset mod=-
@@ -1644,18 +1648,11 @@
 (72,23) fg=Magenta bg=Reset mod=-
 (73,23) fg=Magenta bg=Reset mod=-
 (74,23) fg=Magenta bg=Reset mod=-
-(76,23) fg=Reset bg=Reset mod=DIM
-(77,23) fg=Reset bg=Reset mod=DIM
-(78,23) fg=Reset bg=Reset mod=DIM
-(79,23) fg=Reset bg=Reset mod=DIM
-(80,23) fg=Reset bg=Reset mod=DIM
-(81,23) fg=Reset bg=Reset mod=DIM
-(82,23) fg=Reset bg=Reset mod=DIM
-(83,23) fg=Reset bg=Reset mod=DIM
-(84,23) fg=Reset bg=Reset mod=DIM
-(85,23) fg=Reset bg=Reset mod=DIM
-(86,23) fg=Reset bg=Reset mod=DIM
-(87,23) fg=Reset bg=Reset mod=DIM
+(75,23) fg=Magenta bg=Reset mod=-
+(76,23) fg=Magenta bg=Reset mod=-
+(77,23) fg=Magenta bg=Reset mod=-
+(78,23) fg=Magenta bg=Reset mod=-
+(79,23) fg=Magenta bg=Reset mod=-
 (93,23) fg=Reset bg=Reset mod=DIM
 (94,23) fg=Reset bg=Reset mod=DIM
 (95,23) fg=Reset bg=Reset mod=DIM
@@ -1700,8 +1697,6 @@
 (39,24) fg=Reset bg=Reset mod=DIM
 (40,24) fg=Reset bg=Reset mod=DIM
 (41,24) fg=Reset bg=Reset mod=DIM
-(42,24) fg=Reset bg=Reset mod=DIM
-(43,24) fg=Reset bg=Reset mod=DIM
 (61,24) fg=Magenta bg=Reset mod=-
 (62,24) fg=Magenta bg=Reset mod=-
 (63,24) fg=Magenta bg=Reset mod=-
@@ -1709,12 +1704,12 @@
 (65,24) fg=Magenta bg=Reset mod=-
 (66,24) fg=Magenta bg=Reset mod=-
 (67,24) fg=Magenta bg=Reset mod=-
+(68,24) fg=Magenta bg=Reset mod=-
 (69,24) fg=Magenta bg=Reset mod=-
 (70,24) fg=Magenta bg=Reset mod=-
-(71,24) fg=Magenta bg=Reset mod=-
-(73,24) fg=Reset bg=Reset mod=DIM
-(74,24) fg=Reset bg=Reset mod=DIM
-(75,24) fg=Reset bg=Reset mod=DIM
+(72,24) fg=Magenta bg=Reset mod=-
+(73,24) fg=Magenta bg=Reset mod=-
+(74,24) fg=Magenta bg=Reset mod=-
 (76,24) fg=Reset bg=Reset mod=DIM
 (77,24) fg=Reset bg=Reset mod=DIM
 (78,24) fg=Reset bg=Reset mod=DIM
@@ -1724,6 +1719,9 @@
 (82,24) fg=Reset bg=Reset mod=DIM
 (83,24) fg=Reset bg=Reset mod=DIM
 (84,24) fg=Reset bg=Reset mod=DIM
+(85,24) fg=Reset bg=Reset mod=DIM
+(86,24) fg=Reset bg=Reset mod=DIM
+(87,24) fg=Reset bg=Reset mod=DIM
 (93,24) fg=Reset bg=Reset mod=DIM
 (94,24) fg=Reset bg=Reset mod=DIM
 (95,24) fg=Reset bg=Reset mod=DIM
@@ -1768,17 +1766,18 @@
 (39,25) fg=Reset bg=Reset mod=DIM
 (40,25) fg=Reset bg=Reset mod=DIM
 (41,25) fg=Reset bg=Reset mod=DIM
+(42,25) fg=Reset bg=Reset mod=DIM
+(43,25) fg=Reset bg=Reset mod=DIM
 (61,25) fg=Magenta bg=Reset mod=-
 (62,25) fg=Magenta bg=Reset mod=-
 (63,25) fg=Magenta bg=Reset mod=-
 (64,25) fg=Magenta bg=Reset mod=-
 (65,25) fg=Magenta bg=Reset mod=-
 (66,25) fg=Magenta bg=Reset mod=-
-(68,25) fg=Reset bg=Reset mod=DIM
-(69,25) fg=Reset bg=Reset mod=DIM
-(70,25) fg=Reset bg=Reset mod=DIM
-(71,25) fg=Reset bg=Reset mod=DIM
-(72,25) fg=Reset bg=Reset mod=DIM
+(67,25) fg=Magenta bg=Reset mod=-
+(69,25) fg=Magenta bg=Reset mod=-
+(70,25) fg=Magenta bg=Reset mod=-
+(71,25) fg=Magenta bg=Reset mod=-
 (73,25) fg=Reset bg=Reset mod=DIM
 (74,25) fg=Reset bg=Reset mod=DIM
 (75,25) fg=Reset bg=Reset mod=DIM
@@ -1786,6 +1785,11 @@
 (77,25) fg=Reset bg=Reset mod=DIM
 (78,25) fg=Reset bg=Reset mod=DIM
 (79,25) fg=Reset bg=Reset mod=DIM
+(80,25) fg=Reset bg=Reset mod=DIM
+(81,25) fg=Reset bg=Reset mod=DIM
+(82,25) fg=Reset bg=Reset mod=DIM
+(83,25) fg=Reset bg=Reset mod=DIM
+(84,25) fg=Reset bg=Reset mod=DIM
 (93,25) fg=Reset bg=Reset mod=DIM
 (94,25) fg=Reset bg=Reset mod=DIM
 (95,25) fg=Reset bg=Reset mod=DIM
@@ -1830,14 +1834,12 @@
 (39,26) fg=Reset bg=Reset mod=DIM
 (40,26) fg=Reset bg=Reset mod=DIM
 (41,26) fg=Reset bg=Reset mod=DIM
-(42,26) fg=Reset bg=Reset mod=DIM
-(43,26) fg=Reset bg=Reset mod=DIM
 (61,26) fg=Magenta bg=Reset mod=-
 (62,26) fg=Magenta bg=Reset mod=-
-(64,26) fg=Reset bg=Reset mod=DIM
-(65,26) fg=Reset bg=Reset mod=DIM
-(66,26) fg=Reset bg=Reset mod=DIM
-(67,26) fg=Reset bg=Reset mod=DIM
+(63,26) fg=Magenta bg=Reset mod=-
+(64,26) fg=Magenta bg=Reset mod=-
+(65,26) fg=Magenta bg=Reset mod=-
+(66,26) fg=Magenta bg=Reset mod=-
 (68,26) fg=Reset bg=Reset mod=DIM
 (69,26) fg=Reset bg=Reset mod=DIM
 (70,26) fg=Reset bg=Reset mod=DIM
@@ -1846,6 +1848,10 @@
 (73,26) fg=Reset bg=Reset mod=DIM
 (74,26) fg=Reset bg=Reset mod=DIM
 (75,26) fg=Reset bg=Reset mod=DIM
+(76,26) fg=Reset bg=Reset mod=DIM
+(77,26) fg=Reset bg=Reset mod=DIM
+(78,26) fg=Reset bg=Reset mod=DIM
+(79,26) fg=Reset bg=Reset mod=DIM
 (93,26) fg=Reset bg=Reset mod=DIM
 (94,26) fg=Reset bg=Reset mod=DIM
 (95,26) fg=Reset bg=Reset mod=DIM
@@ -1889,29 +1895,23 @@
 (38,27) fg=Reset bg=Reset mod=DIM
 (39,27) fg=Reset bg=Reset mod=DIM
 (40,27) fg=Reset bg=Reset mod=DIM
+(41,27) fg=Reset bg=Reset mod=DIM
+(42,27) fg=Reset bg=Reset mod=DIM
+(43,27) fg=Reset bg=Reset mod=DIM
 (61,27) fg=Magenta bg=Reset mod=-
 (62,27) fg=Magenta bg=Reset mod=-
-(63,27) fg=Magenta bg=Reset mod=-
-(64,27) fg=Magenta bg=Reset mod=-
-(65,27) fg=Magenta bg=Reset mod=-
-(66,27) fg=Magenta bg=Reset mod=-
-(67,27) fg=Magenta bg=Reset mod=-
-(68,27) fg=Magenta bg=Reset mod=-
-(70,27) fg=Magenta bg=Reset mod=-
-(71,27) fg=Magenta bg=Reset mod=-
-(72,27) fg=Magenta bg=Reset mod=-
+(64,27) fg=Reset bg=Reset mod=DIM
+(65,27) fg=Reset bg=Reset mod=DIM
+(66,27) fg=Reset bg=Reset mod=DIM
+(67,27) fg=Reset bg=Reset mod=DIM
+(68,27) fg=Reset bg=Reset mod=DIM
+(69,27) fg=Reset bg=Reset mod=DIM
+(70,27) fg=Reset bg=Reset mod=DIM
+(71,27) fg=Reset bg=Reset mod=DIM
+(72,27) fg=Reset bg=Reset mod=DIM
+(73,27) fg=Reset bg=Reset mod=DIM
 (74,27) fg=Reset bg=Reset mod=DIM
 (75,27) fg=Reset bg=Reset mod=DIM
-(76,27) fg=Reset bg=Reset mod=DIM
-(77,27) fg=Reset bg=Reset mod=DIM
-(78,27) fg=Reset bg=Reset mod=DIM
-(79,27) fg=Reset bg=Reset mod=DIM
-(80,27) fg=Reset bg=Reset mod=DIM
-(81,27) fg=Reset bg=Reset mod=DIM
-(82,27) fg=Reset bg=Reset mod=DIM
-(83,27) fg=Reset bg=Reset mod=DIM
-(84,27) fg=Reset bg=Reset mod=DIM
-(85,27) fg=Reset bg=Reset mod=DIM
 (93,27) fg=Reset bg=Reset mod=DIM
 (94,27) fg=Reset bg=Reset mod=DIM
 (95,27) fg=Reset bg=Reset mod=DIM

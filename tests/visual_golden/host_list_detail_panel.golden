@@ -1,7 +1,7 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ 25 ── ●17 ✖2 ○6 ─────────────────────────────────────────╮╭─ bastion-ams ────────────────────────╮
+╭ 26 ── ●17 ✖2 ○7 ─────────────────────────────────────────╮╭─ bastion-ams ────────────────────────╮
 │     NAME                             TAGS          LAST▾ ││ ops@140.82.121.3:22                  │
 │──────────────────────────────────────────────────────────││ ● online (7ms)  checked just now     │
 │▌  ● bastion-ams ⇄                    production     <1m  │╰──────────────────────────────────────╯
@@ -21,11 +21,11 @@
 │   ● pve-redis ⇄                      cache          19h  ││ 1y             ~6mo              now │
 │   ● pve-mail                         mail           20h  │╰──────────────────────────────────────╯
 │   ● pve-monitor ⇄                    monitoring     21h  │╭─ TAGS ───────────────────────────────╮
-│   ○ do-work-web-ams                  production       -  ││ production, vpn                      │
-│   ○ do-work-staging-ams ⇄            staging          -  │╰──────────────────────────────────────╯
-│   ○ do-work-worker-ams               worker           -  │╭─ TUNNELS ────────────────────────────╮
-│   ○ do-work-ci-runner ↗              ci               -  ││ D 1080                               │
-│   ○ do-personal-blog                 personal         -  ││ L 8443 → internal.corp:443           │
+│   ○ db-proton ↗                      production       -  ││ production, vpn                      │
+│   ○ do-work-web-ams                  production       -  │╰──────────────────────────────────────╯
+│   ○ do-work-staging-ams ⇄            staging          -  │╭─ TUNNELS ────────────────────────────╮
+│   ○ do-work-worker-ams               worker           -  ││ D 1080                               │
+│   ○ do-work-ci-runner ↗              ci               -  ││ L 8443 → internal.corp:443           │
 ╰──────────────────────────────────────────── getpurple.sh ╯╰──────────────────────────────────────╯
  Enter  connect    /  search    #  tag    v  compact    :  jump                              ?  more
 ---STYLES---
@@ -1549,12 +1549,8 @@
 (12,23) fg=Reset bg=Reset mod=BOLD
 (13,23) fg=Reset bg=Reset mod=BOLD
 (14,23) fg=Reset bg=Reset mod=BOLD
-(15,23) fg=Reset bg=Reset mod=BOLD
-(16,23) fg=Reset bg=Reset mod=BOLD
-(17,23) fg=Reset bg=Reset mod=BOLD
-(18,23) fg=Reset bg=Reset mod=BOLD
-(19,23) fg=Reset bg=Reset mod=BOLD
-(20,23) fg=Reset bg=Reset mod=BOLD
+(15,23) fg=Reset bg=Reset mod=DIM
+(16,23) fg=Reset bg=Reset mod=DIM
 (39,23) fg=Magenta bg=Reset mod=-
 (40,23) fg=Magenta bg=Reset mod=-
 (41,23) fg=Magenta bg=Reset mod=-
@@ -1608,12 +1604,6 @@
 (18,24) fg=Reset bg=Reset mod=BOLD
 (19,24) fg=Reset bg=Reset mod=BOLD
 (20,24) fg=Reset bg=Reset mod=BOLD
-(21,24) fg=Reset bg=Reset mod=BOLD
-(22,24) fg=Reset bg=Reset mod=BOLD
-(23,24) fg=Reset bg=Reset mod=BOLD
-(24,24) fg=Reset bg=Reset mod=BOLD
-(25,24) fg=Reset bg=Reset mod=DIM
-(26,24) fg=Reset bg=Reset mod=DIM
 (39,24) fg=Magenta bg=Reset mod=-
 (40,24) fg=Magenta bg=Reset mod=-
 (41,24) fg=Magenta bg=Reset mod=-
@@ -1621,6 +1611,9 @@
 (43,24) fg=Magenta bg=Reset mod=-
 (44,24) fg=Magenta bg=Reset mod=-
 (45,24) fg=Magenta bg=Reset mod=-
+(46,24) fg=Magenta bg=Reset mod=-
+(47,24) fg=Magenta bg=Reset mod=-
+(48,24) fg=Magenta bg=Reset mod=-
 (53,24) fg=Reset bg=Reset mod=DIM
 (54,24) fg=Reset bg=Reset mod=DIM
 (55,24) fg=Reset bg=Reset mod=DIM
@@ -1689,12 +1682,16 @@
 (21,25) fg=Reset bg=Reset mod=BOLD
 (22,25) fg=Reset bg=Reset mod=BOLD
 (23,25) fg=Reset bg=Reset mod=BOLD
+(24,25) fg=Reset bg=Reset mod=BOLD
+(25,25) fg=Reset bg=Reset mod=DIM
+(26,25) fg=Reset bg=Reset mod=DIM
 (39,25) fg=Magenta bg=Reset mod=-
 (40,25) fg=Magenta bg=Reset mod=-
 (41,25) fg=Magenta bg=Reset mod=-
 (42,25) fg=Magenta bg=Reset mod=-
 (43,25) fg=Magenta bg=Reset mod=-
 (44,25) fg=Magenta bg=Reset mod=-
+(45,25) fg=Magenta bg=Reset mod=-
 (53,25) fg=Reset bg=Reset mod=DIM
 (54,25) fg=Reset bg=Reset mod=DIM
 (55,25) fg=Reset bg=Reset mod=DIM
@@ -1762,10 +1759,13 @@
 (20,26) fg=Reset bg=Reset mod=BOLD
 (21,26) fg=Reset bg=Reset mod=BOLD
 (22,26) fg=Reset bg=Reset mod=BOLD
-(23,26) fg=Reset bg=Reset mod=DIM
-(24,26) fg=Reset bg=Reset mod=DIM
+(23,26) fg=Reset bg=Reset mod=BOLD
 (39,26) fg=Magenta bg=Reset mod=-
 (40,26) fg=Magenta bg=Reset mod=-
+(41,26) fg=Magenta bg=Reset mod=-
+(42,26) fg=Magenta bg=Reset mod=-
+(43,26) fg=Magenta bg=Reset mod=-
+(44,26) fg=Magenta bg=Reset mod=-
 (53,26) fg=Reset bg=Reset mod=DIM
 (54,26) fg=Reset bg=Reset mod=DIM
 (55,26) fg=Reset bg=Reset mod=DIM
@@ -1801,14 +1801,11 @@
 (19,27) fg=Reset bg=Reset mod=BOLD
 (20,27) fg=Reset bg=Reset mod=BOLD
 (21,27) fg=Reset bg=Reset mod=BOLD
+(22,27) fg=Reset bg=Reset mod=BOLD
+(23,27) fg=Reset bg=Reset mod=DIM
+(24,27) fg=Reset bg=Reset mod=DIM
 (39,27) fg=Magenta bg=Reset mod=-
 (40,27) fg=Magenta bg=Reset mod=-
-(41,27) fg=Magenta bg=Reset mod=-
-(42,27) fg=Magenta bg=Reset mod=-
-(43,27) fg=Magenta bg=Reset mod=-
-(44,27) fg=Magenta bg=Reset mod=-
-(45,27) fg=Magenta bg=Reset mod=-
-(46,27) fg=Magenta bg=Reset mod=-
 (53,27) fg=Reset bg=Reset mod=DIM
 (54,27) fg=Reset bg=Reset mod=DIM
 (55,27) fg=Reset bg=Reset mod=DIM

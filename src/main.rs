@@ -43,7 +43,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser};
 use clap_complete::generate;
-use log::warn;
+use log::{debug, warn};
 
 use app::App;
 use cli_args::{Cli, Commands, VaultCommands};
@@ -370,6 +370,7 @@ fn run_direct_connect(alias: String, config: &mut SshConfigFile, config_path: &P
         .as_ref()
         .and_then(|h| h.askpass.clone())
         .or_else(preferences::load_askpass_default);
+    ensure_proton_login(askpass.as_deref());
     let bw_session = ensure_bw_session(None, askpass.as_deref());
     ensure_keychain_password(&alias, askpass.as_deref());
     let result = connection::connect(
@@ -417,6 +418,7 @@ fn run_positional_alias(
             .askpass
             .clone()
             .or_else(preferences::load_askpass_default);
+        ensure_proton_login(askpass.as_deref());
         let bw_session = ensure_bw_session(None, askpass.as_deref());
         ensure_keychain_password(&alias, askpass.as_deref());
         print!("{}", crate::messages::cli::beaming_up(&alias));
@@ -898,6 +900,90 @@ pub(crate) fn ensure_bw_session(existing: Option<&str>, askpass: Option<&str>) -
                 }
             }
             None
+        }
+    }
+}
+
+/// Pre-flight Proton Pass login. If the askpass source is `proton:` and the
+/// CLI is installed but the user is not authenticated, prompt for a Personal
+/// Access Token on stdin and run `pass-cli login`. Two attempts. Returns `()`
+/// because pass-cli persists its session on disk; no token to propagate.
+pub(crate) fn ensure_proton_login(askpass: Option<&str>) {
+    ensure_proton_login_with(askpass, askpass::proton_status, || {
+        cli::prompt_hidden_input(crate::messages::askpass::PROTON_LOGIN_PROMPT)
+    });
+}
+
+/// Test seam for `ensure_proton_login`. Inject the status check and the PAT
+/// prompt so the routing logic can be exercised without a real `pass-cli` or a
+/// real stdin tty. Production code calls `ensure_proton_login`; tests call
+/// this function with fakes.
+///
+/// `prompt_pat` is invoked once per attempt and must return what
+/// `cli::prompt_hidden_input` would: `Ok(Some(value))` for an entered PAT
+/// (possibly empty), `Ok(None)` for Esc/EOF, `Err(_)` for a read error.
+pub(crate) fn ensure_proton_login_with<S, P>(askpass: Option<&str>, status_fn: S, mut prompt_pat: P)
+where
+    S: FnOnce() -> askpass::ProtonStatus,
+    P: FnMut() -> Result<Option<String>>,
+{
+    let Some(askpass) = askpass else {
+        return;
+    };
+    if !askpass.starts_with("proton:") {
+        return;
+    }
+    match status_fn() {
+        askpass::ProtonStatus::Authenticated => {
+            debug!("Proton Pass pre-flight: already authenticated");
+        }
+        askpass::ProtonStatus::NotInstalled => {
+            debug!("Proton Pass pre-flight: pass-cli not installed");
+            eprintln!("{}", crate::messages::askpass::PROTON_NOT_FOUND);
+        }
+        askpass::ProtonStatus::NotAuthenticated => {
+            debug!("Proton Pass pre-flight: not authenticated, prompting for PAT");
+            for attempt in 0..2 {
+                let pat = match prompt_pat() {
+                    Ok(Some(p)) if !p.is_empty() => p,
+                    Ok(Some(_)) => {
+                        debug!("Proton Pass pre-flight: empty PAT, aborting");
+                        eprintln!("{}", crate::messages::askpass::EMPTY_PASSWORD);
+                        return;
+                    }
+                    Ok(None) => {
+                        debug!("Proton Pass pre-flight: PAT prompt dismissed (Esc/EOF)");
+                        return;
+                    }
+                    Err(e) => {
+                        warn!("[config] Proton Pass PAT prompt read failed: {e}");
+                        eprintln!("{}", crate::messages::askpass::read_failed(&e));
+                        return;
+                    }
+                };
+                match askpass::proton_login(&pat) {
+                    Ok(()) => {
+                        debug!("Proton Pass pre-flight: login succeeded on attempt {attempt}");
+                        eprintln!("{}", crate::messages::askpass::PROTON_LOGIN_SUCCESS);
+                        return;
+                    }
+                    Err(e) => {
+                        debug!("Proton Pass pre-flight: login attempt {attempt} failed: {e}");
+                        if attempt == 0 {
+                            eprintln!(
+                                "{}",
+                                crate::messages::askpass::proton_login_failed_retry(&e)
+                            );
+                        } else {
+                            warn!("[external] Proton Pass login failed after retries: {e}");
+                            eprintln!(
+                                "{}",
+                                crate::messages::askpass::proton_login_failed_prompt(&e)
+                            );
+                        }
+                    }
+                }
+            }
         }
     }
 }

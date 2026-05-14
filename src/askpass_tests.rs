@@ -127,7 +127,7 @@ fn retrieve_password_routes_vault() {
 
 #[test]
 fn password_sources_count() {
-    assert_eq!(PASSWORD_SOURCES.len(), 7);
+    assert_eq!(PASSWORD_SOURCES.len(), 8);
 }
 
 #[test]
@@ -219,12 +219,12 @@ fn password_sources_none_empty_value() {
 #[test]
 fn prefix_sources_end_with_colon_or_slash() {
     // Sources that are prefixes should end with : or //
-    // These are: op://, bw:, pass:, vault:
+    // These are: op://, bw:, pass:, vault:, proton:, cmd:
     let prefix_sources: Vec<&PasswordSourceOption> = PASSWORD_SOURCES
         .iter()
         .filter(|s| !s.value.is_empty() && s.value != "keychain")
         .collect();
-    assert_eq!(prefix_sources.len(), 5, "Expected 5 prefix sources");
+    assert_eq!(prefix_sources.len(), 6, "Expected 6 prefix sources");
     for src in &prefix_sources {
         assert!(
             src.value.ends_with(':') || src.value.ends_with("//"),
@@ -338,7 +338,11 @@ fn describe_source_matches_password_sources_labels() {
     assert_eq!(describe_source("bw:anything"), PASSWORD_SOURCES[2].label);
     assert_eq!(describe_source("pass:anything"), PASSWORD_SOURCES[3].label);
     assert_eq!(describe_source("vault:anything"), PASSWORD_SOURCES[4].label);
-    assert_eq!(describe_source("some-cmd"), PASSWORD_SOURCES[5].label);
+    assert_eq!(
+        describe_source("proton:anything"),
+        PASSWORD_SOURCES[5].label
+    );
+    assert_eq!(describe_source("some-cmd"), PASSWORD_SOURCES[6].label);
 }
 
 // -- describe_source does not confuse prefixes --
@@ -385,15 +389,16 @@ fn vault_spec_field_at_right_of_last_hash() {
 
 #[test]
 fn password_sources_order_matches_routing() {
-    // The order should be: keychain, op://, bw:, pass:, vault:, custom, none
+    // The order should be: keychain, op://, bw:, pass:, vault:, proton:, custom, none
     // This matches the if-chain order in retrieve_password
     assert_eq!(PASSWORD_SOURCES[0].value, "keychain");
     assert_eq!(PASSWORD_SOURCES[1].value, "op://");
     assert_eq!(PASSWORD_SOURCES[2].value, "bw:");
     assert_eq!(PASSWORD_SOURCES[3].value, "pass:");
     assert_eq!(PASSWORD_SOURCES[4].value, "vault:");
-    assert_eq!(PASSWORD_SOURCES[5].label, "Custom command");
-    assert_eq!(PASSWORD_SOURCES[6].label, "None");
+    assert_eq!(PASSWORD_SOURCES[5].value, "proton:");
+    assert_eq!(PASSWORD_SOURCES[6].label, "Custom command");
+    assert_eq!(PASSWORD_SOURCES[7].label, "None");
 }
 
 // =========================================================================
@@ -827,6 +832,7 @@ fn describe_source_with_exact_picker_values() {
     assert_eq!(describe_source("bw:"), "Bitwarden"); // just the prefix
     assert_eq!(describe_source("pass:"), "pass"); // just the prefix
     assert_eq!(describe_source("vault:"), "HashiCorp Vault KV"); // just the prefix
+    assert_eq!(describe_source("proton:"), "Proton Pass"); // just the prefix
 }
 
 // =========================================================================
@@ -992,6 +998,9 @@ fn routing_backend(source: &str) -> &str {
     if source.strip_prefix("vault:").is_some() {
         return "vault";
     }
+    if source.strip_prefix("proton:").is_some() {
+        return "proton";
+    }
     "command"
 }
 
@@ -1003,6 +1012,7 @@ fn routing_all_password_sources_have_backend() {
         "bitwarden",
         "pass",
         "vault",
+        "proton",
         "command",
         "command",
     ];
@@ -1985,4 +1995,389 @@ Host UnrelatedServer
         resolved, None,
         "foreign-host prompt must not resolve to an unrelated entry"
     );
+}
+
+#[cfg(unix)]
+fn with_mock_passcli<F: FnOnce()>(tag: &str, stderr: &str, stdout: &str, exit_code: i32, f: F) {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+
+    let dir = tempfile::Builder::new()
+        .prefix(&format!("purple_mock_passcli_{tag}_"))
+        .tempdir()
+        .unwrap();
+    let script = dir.path().join("pass-cli");
+    let escape = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    let body = format!(
+        "#!/bin/sh\nprintf '%s' \"{}\" >&2\nprintf '%s' \"{}\"\nexit {}\n",
+        escape(stderr),
+        escape(stdout),
+        exit_code
+    );
+    std::fs::write(&script, body).unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{old_path}", dir.path().display());
+    // SAFETY: PATH_LOCK serializes all PATH mutations across the crate.
+    unsafe { std::env::set_var("PATH", &new_path) };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    unsafe { std::env::set_var("PATH", &old_path) };
+    drop(dir);
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+#[cfg(unix)]
+fn with_empty_path<F: FnOnce()>(f: F) {
+    let _guard = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    // SAFETY: PATH_LOCK guards all PATH mutations.
+    unsafe { std::env::set_var("PATH", "/nonexistent-purple-test-path") };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+    unsafe { std::env::set_var("PATH", &old_path) };
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn proton_status_authenticated_via_exit_code() {
+    with_mock_passcli(
+        "status_ok",
+        "",
+        "garbage on stdout we should ignore",
+        0,
+        || {
+            assert_eq!(super::proton_status(), super::ProtonStatus::Authenticated);
+        },
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn proton_status_not_authenticated_via_exit_code() {
+    with_mock_passcli("status_fail", "not logged in\n", "", 1, || {
+        assert_eq!(
+            super::proton_status(),
+            super::ProtonStatus::NotAuthenticated
+        );
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn proton_status_not_installed() {
+    with_empty_path(|| {
+        assert_eq!(super::proton_status(), super::ProtonStatus::NotInstalled);
+    });
+}
+
+#[test]
+fn proton_login_empty_pat_rejected() {
+    let err = super::proton_login("").expect_err("empty PAT must be rejected");
+    assert!(err.to_string().to_lowercase().contains("empty"));
+}
+
+#[cfg(unix)]
+#[test]
+fn proton_login_pat_via_env_not_argv() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+
+    let dir = tempfile::Builder::new()
+        .prefix("purple_mock_passcli_login_")
+        .tempdir()
+        .unwrap();
+    let argv_log = dir.path().join("argv.log");
+    let env_log = dir.path().join("env.log");
+    let script = dir.path().join("pass-cli");
+    let body = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{argv}\"\nenv | grep '^PROTON_PASS_' > \"{env}\" || true\nexit 0\n",
+        argv = argv_log.display(),
+        env = env_log.display(),
+    );
+    std::fs::write(&script, body).unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{old_path}", dir.path().display());
+    // SAFETY: PATH_LOCK held.
+    unsafe { std::env::set_var("PATH", &new_path) };
+    let pat = "pst_secret-value::tokenkey";
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::proton_login(pat).expect("login should succeed");
+    }));
+    unsafe { std::env::set_var("PATH", &old_path) };
+
+    let argv = std::fs::read_to_string(&argv_log).expect("mock did not write argv.log");
+    let env = std::fs::read_to_string(&env_log).expect("mock did not write env.log");
+    drop(dir);
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+
+    assert!(
+        !argv.contains("pst_secret-value"),
+        "PAT leaked into argv: {argv}"
+    );
+    let argv_lines: Vec<&str> = argv
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(argv_lines, vec!["login"], "argv should be just ['login']");
+    assert!(
+        env.contains(&format!("PROTON_PASS_PERSONAL_ACCESS_TOKEN={pat}")),
+        "PAT not in env: {env}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn proton_login_propagates_stderr() {
+    with_mock_passcli("login_fail", "invalid PAT\n", "", 2, || {
+        let err = super::proton_login("pst_bogus::key").expect_err("non-zero exit must return Err");
+        let msg = err.to_string();
+        assert!(msg.contains("invalid PAT"), "stderr not surfaced: {msg}");
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn retrieve_from_proton_pass_constructs_uri() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+
+    let dir = tempfile::Builder::new()
+        .prefix("purple_mock_passcli_view_")
+        .tempdir()
+        .unwrap();
+    let argv_log = dir.path().join("argv.log");
+    let script = dir.path().join("pass-cli");
+    let body = format!(
+        "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"{argv}\"\nprintf 'secret-value'\nexit 0\n",
+        argv = argv_log.display()
+    );
+    std::fs::write(&script, body).unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{old_path}", dir.path().display());
+    // SAFETY: PATH_LOCK held.
+    unsafe { std::env::set_var("PATH", &new_path) };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let got = super::retrieve_from_proton_pass("Personal/web/password").unwrap();
+        assert_eq!(got, "secret-value");
+    }));
+    unsafe { std::env::set_var("PATH", &old_path) };
+
+    let argv = std::fs::read_to_string(&argv_log).expect("mock did not write argv.log");
+    drop(dir);
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+    let argv_lines: Vec<&str> = argv
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(
+        argv_lines,
+        vec![
+            "item",
+            "view",
+            "--vault-name",
+            "Personal",
+            "--item-title",
+            "web",
+            "--field",
+            "password",
+        ]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn retrieve_from_proton_pass_empty_stdout_bails() {
+    with_mock_passcli("view_empty", "", "", 0, || {
+        let err =
+            super::retrieve_from_proton_pass("Foo/Bar/p").expect_err("empty stdout must bail");
+        assert!(err.to_string().to_lowercase().contains("empty"));
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn retrieve_from_proton_pass_not_installed() {
+    with_empty_path(|| {
+        let err =
+            super::retrieve_from_proton_pass("Foo/Bar/p").expect_err("missing binary must error");
+        let root = err.root_cause();
+        let io_err = root
+            .downcast_ref::<std::io::Error>()
+            .expect("root cause should be io::Error");
+        assert_eq!(io_err.kind(), std::io::ErrorKind::NotFound);
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn retrieve_from_proton_pass_nonzero_exit_bails() {
+    with_mock_passcli("view_fail", "no such item\n", "", 1, || {
+        let err =
+            super::retrieve_from_proton_pass("Foo/Bar/p").expect_err("non-zero exit must bail");
+        assert!(err.to_string().contains("Proton Pass lookup failed"));
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn retrieve_from_proton_pass_env_not_propagated() {
+    // Invariant 2: PROTON_PASS_PERSONAL_ACCESS_TOKEN must NOT be set on the
+    // `pass-cli view` child. Only the login child gets the env var. This
+    // catches any regression that copies the login env through.
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+
+    let dir = tempfile::Builder::new()
+        .prefix("purple_mock_passcli_view_env_")
+        .tempdir()
+        .unwrap();
+    let env_log = dir.path().join("env.log");
+    let script = dir.path().join("pass-cli");
+    let body = format!(
+        "#!/bin/sh\nenv | grep '^PROTON_PASS_' > \"{env}\" || true\nprintf 'secret'\nexit 0\n",
+        env = env_log.display(),
+    );
+    std::fs::write(&script, body).unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{old_path}", dir.path().display());
+    // SAFETY: PATH_LOCK held.
+    unsafe { std::env::set_var("PATH", &new_path) };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::retrieve_from_proton_pass("Foo/Bar/p").expect("view should succeed");
+    }));
+    unsafe { std::env::set_var("PATH", &old_path) };
+
+    let env = std::fs::read_to_string(&env_log).expect("mock did not write env.log");
+    drop(dir);
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+    assert!(
+        env.trim().is_empty(),
+        "no PROTON_PASS_* env var should reach the view child, got: {env}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn retrieve_from_proton_pass_logout_after_status_bails() {
+    // Race scenario: a separate `pass-cli test` call returned exit 0
+    // (Authenticated) earlier, but by the time `pass-cli item view` runs the
+    // session has been invalidated (user ran `pass-cli logout` in another
+    // terminal). The mock simulates this by exiting non-zero on `item view`.
+    with_mock_passcli("view_logout_race", "not logged in\n", "", 1, || {
+        let err =
+            super::retrieve_from_proton_pass("Foo/Bar/p").expect_err("view after logout must bail");
+        assert!(err.to_string().contains("Proton Pass lookup failed"));
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn proton_login_empty_pat_does_not_spawn() {
+    // Invariant 1 reinforcement: an empty PAT must reject BEFORE any subprocess
+    // spawn. The mock would record any invocation; we assert the log file is
+    // never created.
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+
+    let dir = tempfile::Builder::new()
+        .prefix("purple_mock_passcli_empty_pat_")
+        .tempdir()
+        .unwrap();
+    let spawn_log = dir.path().join("spawn.log");
+    let script = dir.path().join("pass-cli");
+    let body = format!(
+        "#!/bin/sh\nprintf 'spawned' > \"{log}\"\nexit 0\n",
+        log = spawn_log.display(),
+    );
+    std::fs::write(&script, body).unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{old_path}", dir.path().display());
+    // SAFETY: PATH_LOCK held.
+    unsafe { std::env::set_var("PATH", &new_path) };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let err = super::proton_login("").expect_err("empty PAT must reject");
+        assert!(err.to_string().to_lowercase().contains("empty"));
+    }));
+    unsafe { std::env::set_var("PATH", &old_path) };
+
+    let spawned = spawn_log.exists();
+    drop(dir);
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+    assert!(!spawned, "proton_login(\"\") must not spawn pass-cli");
+}
+
+#[test]
+fn describe_source_proton() {
+    assert_eq!(
+        super::describe_source("proton:Personal/srv/password"),
+        "Proton Pass"
+    );
+}
+
+#[test]
+fn describe_source_discriminates_pass_vs_proton() {
+    // Guards Invariant 4: the proton: and pass: arms are independent.
+    assert_eq!(super::describe_source("pass:servers/web"), "pass");
+    assert_eq!(
+        super::describe_source("proton:Personal/web/p"),
+        "Proton Pass"
+    );
+}
+
+#[test]
+fn password_sources_proton_present() {
+    let found = super::PASSWORD_SOURCES
+        .iter()
+        .any(|o| o.label == "Proton Pass" && o.value == "proton:");
+    assert!(found, "Proton Pass entry missing from PASSWORD_SOURCES");
+}
+
+#[test]
+fn password_sources_none_remains_last() {
+    assert_eq!(super::PASSWORD_SOURCES.last().unwrap().label, "None");
 }

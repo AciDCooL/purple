@@ -93,7 +93,7 @@ I wanted one place for all of that. So I built it.
 
 🪄 Multi-host command execution with snippets.
 
-🗝️ Automatic password retrieval from OS Keychain, 1Password, Bitwarden, pass and the HashiCorp Vault KV secrets engine.
+🗝️ Automatic password retrieval from OS Keychain, 1Password, Bitwarden, pass, the HashiCorp Vault KV secrets engine and Proton Pass.
 
 🎫 Short-lived SSH certificates signed via the HashiCorp Vault SSH secrets engine.
 

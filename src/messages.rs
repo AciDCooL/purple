@@ -1381,6 +1381,24 @@ pub mod askpass {
             e
         )
     }
+
+    pub const PROTON_NOT_FOUND: &str =
+        "Proton Pass CLI (pass-cli) not found. SSH will prompt for password.";
+
+    pub const PROTON_LOGIN_PROMPT: &str = "Proton Pass PAT: ";
+
+    pub const PROTON_LOGIN_SUCCESS: &str = "Logged in to Proton Pass.";
+
+    pub fn proton_login_failed_retry(e: &impl std::fmt::Display) -> String {
+        format!("Proton Pass login failed: {}. Try again.", e)
+    }
+
+    pub fn proton_login_failed_prompt(e: &impl std::fmt::Display) -> String {
+        format!(
+            "Proton Pass login failed: {}. SSH will prompt for password.",
+            e
+        )
+    }
 }
 
 // ── Logging ─────────────────────────────────────────────────────────

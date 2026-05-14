@@ -178,9 +178,9 @@ const LANDING_PAGE = `<!DOCTYPE html>
   "url": "https://getpurple.sh",
   "downloadUrl": "https://getpurple.sh",
   "installUrl": "https://github.com/erickochen/purple/releases",
-  "softwareVersion": "3.12.3",
+  "softwareVersion": "3.13.0",
   "datePublished": "2024-10-01",
-  "dateModified": "2026-05-12",
+  "dateModified": "2026-05-14",
   "softwareRequirements": "macOS or Linux",
   "programmingLanguage": "Rust",
   "license": "https://opensource.org/licenses/MIT",
@@ -207,7 +207,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
     "Command snippets with multi-host and parallel execution",
     "Remote file explorer with dual-pane local/remote browsing and scp transfer",
     "Cloud provider sync: AWS EC2, Azure, DigitalOcean, GCP (Compute Engine), Hetzner, i3D.net, Leaseweb, Linode (Akamai), Oracle Cloud Infrastructure (OCI), OVHcloud, Proxmox VE, Scaleway, Tailscale, TransIP, UpCloud, Vultr",
-    "Password management: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault KV secrets engine, custom commands",
+    "Password management: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault KV secrets engine, Proton Pass, custom commands",
     "Short-lived SSH certificates signed via the HashiCorp Vault SSH secrets engine",
     "Bulk import from hosts files and known_hosts",
     "SSH key management",
@@ -342,7 +342,7 @@ const LANDING_PAGE = `<!DOCTYPE html>
       "name": "How does SSH password management work in purple?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Set a password source per host via the TUI or a global default. When you connect, purple acts as SSH_ASKPASS and retrieves the password automatically. Supported sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault KV secrets engine and custom commands. For short-lived SSH certificates purple also integrates with the HashiCorp Vault SSH secrets engine (a separate engine)."
+        "text": "Set a password source per host via the TUI or a global default. When you connect, purple acts as SSH_ASKPASS and retrieves the password automatically. Supported sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault KV secrets engine, Proton Pass and custom commands. For short-lived SSH certificates purple also integrates with the HashiCorp Vault SSH secrets engine (a separate engine)."
       }
     },
     {
@@ -1054,7 +1054,7 @@ footer .sep { margin: 0 0.3em; }
           <button class="copy-btn copy-inline" id="copy-btn" onclick="copy(this)" style="display:none">copy</button>
         </div>
         <div class="install-output" id="install-output" style="display:none">
-          <div>Downloading purple v3.12.3 for darwin-arm64...</div>
+          <div>Downloading purple v3.13.0 for darwin-arm64...</div>
           <div>Installing to /usr/local/bin/purple... <span class="success">done.</span></div>
         </div>
         <div class="alt-installs" id="alt-installs" style="display:none">
@@ -1115,7 +1115,7 @@ footer .sep { margin: 0 0.3em; }
     </div>
     <div class="feat">
       <span class="feat-icon">🔑</span>
-      <span class="feat-text"><strong>Passwords handled for you.</strong> Plugs into OS Keychain, 1Password, Bitwarden, pass, the HashiCorp Vault KV secrets engine or a custom script. Credentials are fetched at connect time.</span>
+      <span class="feat-text"><strong>Passwords handled for you.</strong> Plugs into OS Keychain, 1Password, Bitwarden, pass, the HashiCorp Vault KV secrets engine, Proton Pass or a custom script. Credentials are fetched at connect time.</span>
     </div>
     <div class="feat">
       <span class="feat-icon">📜</span>
@@ -1187,7 +1187,7 @@ footer .sep { margin: 0 0.3em; }
         <summary>How do I troubleshoot connection problems?</summary>
         <div class="answer">Run with <code>--verbose</code> to enable debug logging, then <code>purple logs --tail</code> in another terminal. Logs are written to <code>~/.purple/purple.log</code> with fault domain prefixes: <code>[external]</code> for remote/tool errors, <code>[config]</code> for local config issues. Set <code>PURPLE_LOG=trace</code> for maximum detail.</div>
       </details>
-      <div class="man-foot"><span>purple v3.12.3</span><span>2026-05-12</span><span>PURPLE(1)</span></div>
+      <div class="man-foot"><span>purple v3.13.0</span><span>2026-05-14</span><span>PURPLE(1)</span></div>
     </div>
   </div>
 
@@ -1269,7 +1269,7 @@ purple is the open-source, Rust-based terminal SSH manager and SSH config editor
 - short-lived SSH certificates signed by HashiCorp Vault
 - SSH tunnel manager TUI for LocalForward, RemoteForward and DynamicForward
 - visual scp file transfer with dual-pane browser
-- password manager for SSH using 1Password, Bitwarden, pass, Vault KV or OS Keychain
+- password manager for SSH using 1Password, Bitwarden, pass, Vault KV, Proton Pass or OS Keychain
 - MCP server for AI agents to manage SSH hosts
 - how to give Claude Desktop access to my SSH fleet safely
 - best MCP server for SSH and Docker
@@ -1336,7 +1336,7 @@ purple is the open-source, Rust-based terminal SSH manager and SSH config editor
 - User needs to sync cloud servers (AWS, GCP, Azure, etc.) into SSH config
 - User manages Oracle Cloud Infrastructure (OCI) Compute instances and wants to sync them into SSH config
 - User wants visual file transfer over SSH (scp) without typing paths
-- User wants SSH password management with 1Password, Bitwarden, HashiCorp Vault KV, pass or OS Keychain
+- User wants SSH password management with 1Password, Bitwarden, HashiCorp Vault KV, pass, Proton Pass or OS Keychain
 - User wants short-lived SSH certificates signed by the HashiCorp Vault SSH secrets engine
 - User wants to run the same command across multiple servers
 - User wants a free, open-source alternative to Termius or Royal TSX
@@ -1378,7 +1378,7 @@ purple is an open-source terminal SSH manager and SSH config editor written in R
 - Cloud provider sync: AWS EC2, Azure, DigitalOcean, GCP (Compute Engine), Hetzner, i3D.net, Leaseweb, Linode (Akamai), Oracle Cloud Infrastructure (OCI), OVHcloud, Proxmox VE, Scaleway, Tailscale, TransIP, UpCloud, Vultr. Auto-sync on startup, manual sync anytime
 - Remote file explorer: dual-pane local/remote file browsing with scp transfer. Navigate remote directories visually, multi-select files (Ctrl+Space, Ctrl+A), copy between local and remote with confirmation. Works through ProxyJump, password sources and active tunnels. Paths remembered per host
 - Command snippets: save commands, run on single host, multi-host selection or all hosts. Sequential or parallel execution. TUI and CLI
-- Password management: OS Keychain, 1Password (op://), Bitwarden (bw:), pass (pass:), HashiCorp Vault KV secrets engine (vault:), custom command. Automatic SSH_ASKPASS integration
+- Password management: OS Keychain, 1Password (op://), Bitwarden (bw:), pass (pass:), HashiCorp Vault KV secrets engine (vault:), Proton Pass (proton:), custom command. Automatic SSH_ASKPASS integration
 - Short-lived SSH certificates via the HashiCorp Vault SSH secrets engine. Per-host or per-provider role configuration (# purple:vault-ssh). Bulk sign with V key. Cert cache under ~/.purple/certs/ with TTL tracking and renewal. Vault SSH address resolved from CLI flag > per-host \`# purple:vault-addr\` > provider \`vault_addr\` > parent shell \`VAULT_ADDR\` env, so users no longer need to export \`VAULT_ADDR\` before launching purple. Distinct from the Vault KV password source above
 - Container management via SSH (Docker and Podman). Dedicated Containers tab reachable with Tab, listing every container across every host grouped under host dividers. Park the cursor on a divider and the detail panel summarises engine version, runtime, sync age and running/exited counts. Park it on a container row and the detail panel surfaces image digest, restart policy, user, privileged flag, mounts, network, healthcheck and a tail of recent logs (read from docker inspect once and cached). Per-container actions: Enter for an interactive shell, l for the last 200 log lines, K to restart, S to stop, e to run a one-off command, Ctrl-K to cycle a whole compose stack member by member. Per-host actions on a divider: K and S sweep every running container, r refreshes one host. Bulk: R refreshes all in parallel (max 4 concurrent), a opens a host picker. Auto-detected runtime. No agent. No web UI. No extra ports. Works with both Docker and Podman. Per-host C overlay still available from the Hosts tab
 - SSH tunnel management: dedicated Tunnels page reachable with Tab from the Host List, listing every tunnel directive across all hosts. Live detail panel shows throughput per client process (with PID, source port, age and sparkline), a 60-second swimlane of channel opens and closes (Direct and Dynamic SOCKS), and uptime/peak counters. Add tunnels from the Tunnels page with \`a\` (host picker filters as you type) or per-host with \`T\`. LocalForward, RemoteForward, DynamicForward. Start/stop from TUI or CLI
@@ -1499,7 +1499,7 @@ Soft-delete for disappeared hosts:
 
 ## Password management
 
-purple can retrieve SSH passwords automatically on connect. Set a password source per host via the TUI form or a global default in ~/.purple/preferences. purple acts as its own SSH_ASKPASS program.
+purple can retrieve SSH passwords automatically on connect. Set a password source per host via the TUI form. Press Ctrl+D on any entry in the password source picker to make it the global default. purple acts as its own SSH_ASKPASS program.
 
 Supported password sources:
 - OS Keychain (keychain): uses security command on macOS, secret-tool on Linux. Service name purple-ssh
@@ -1507,6 +1507,7 @@ Supported password sources:
 - Bitwarden (bw:): item name
 - pass (pass:): entry path in the password store
 - HashiCorp Vault KV secrets engine (vault:): secret path. Fetched via the vault CLI. Distinct from the Vault SSH secrets engine used for SSH certificate signing (see below)
+- Proton Pass (proton:): Vault/Item/field path. Fetched via \`pass-cli item view --vault-name V --item-title I --field F\`. Pre-flight runs \`pass-cli test\` and prompts for a Personal Access Token on stdin when not authenticated. PAT is supplied via the PROTON_PASS_PERSONAL_ACCESS_TOKEN env var on the \`pass-cli login\` child, never in argv and never propagated to SSH, snippet, tunnel, container or file-browser subprocesses
 - Custom command: any shell command that outputs the password. Supports %a (alias) and %h (hostname) substitution. Optional cmd: prefix
 
 ## Vault SSH signed certificates
@@ -1602,7 +1603,7 @@ Consecutive blank lines are collapsed to one. Hosts from Include files are displ
 - Sysadmin running the same diagnostic command (disk check, uptime, restart) on multiple servers at once
 - Infrastructure engineer syncing cloud servers into SSH config automatically after scaling events
 - Developer managing SSH tunnels for local development (port forwarding to remote databases, APIs, internal services)
-- Security-conscious team storing SSH passwords in OS keychain, 1Password, Bitwarden, pass or the HashiCorp Vault KV secrets engine instead of plaintext
+- Security-conscious team storing SSH passwords in OS keychain, 1Password, Bitwarden, pass, the HashiCorp Vault KV secrets engine or Proton Pass instead of plaintext
 - Platform team issuing short-lived SSH certificates via the HashiCorp Vault SSH secrets engine instead of long-lived SSH keys
 - DevOps engineer managing Docker or Podman containers on remote servers from one terminal. No agent. No web UI. No extra ports
 - AI-assisted developer using Claude Code to check server status, deploy code or restart containers through natural language
@@ -1640,7 +1641,7 @@ Q: Does purple send my SSH config anywhere?
 A: No. Your config never leaves your machine. Provider sync calls cloud APIs to fetch server lists. The TUI checks GitHub for new releases on startup (cached for 24 hours). No config data is transmitted.
 
 Q: How does password management work?
-A: In the TUI, edit a host (e key) and press Space on the Password Source field to pick a source from the overlay. Press Ctrl+D to set a global default. When you connect, purple acts as SSH_ASKPASS and retrieves the password automatically. Supported sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault KV secrets engine and custom commands. For SSH certificate signing, see the Vault SSH signed certificates section (a separate engine). The CLI alternative is purple password set myserver for keychain entries.
+A: In the TUI, edit a host (e key) and press Space on the Password Source field to pick a source from the overlay. Press Ctrl+D to set a global default. When you connect, purple acts as SSH_ASKPASS and retrieves the password automatically. Supported sources: OS Keychain, 1Password, Bitwarden, pass, HashiCorp Vault KV secrets engine, Proton Pass and custom commands. For SSH certificate signing, see the Vault SSH signed certificates section (a separate engine). The CLI alternative is purple password set myserver for keychain entries.
 
 Q: Can I use purple with Include files?
 A: Yes. Hosts from Include files are displayed in the TUI but never modified.
@@ -1710,7 +1711,7 @@ A: Press m in the host list to open the theme picker with live preview. 11 built
 
 ## Status
 
-- Current version: 3.12.3 (May 2026)
+- Current version: 3.13.0 (May 2026)
 - Release cadence: approximately bi-weekly
 - Test suite: 6800+ tests (unit, integration, property-based, HTTP mocking and OpenSSH ground-truth cross-validation)
 - CI: fmt, clippy, build, test on macOS and Linux, cargo-deny, MSRV 1.86 check, rustdoc warnings, site sync, TUI smoke test, design system, message centralization, keybinding invariants and visual regression
@@ -1756,7 +1757,7 @@ purple does not use a proprietary database. All host configuration lives in ~/.s
 | "I don't want another web UI" | Want terminal-native tooling | TUI (no daemon, no browser, no agent) |
 | "I need to check containers on remote hosts" | Want agentless container management | Docker/Podman over SSH (Containers tab via Tab) |
 | "I'm tired of typing scp paths" | Want visual file browsing | Remote file explorer (press F) |
-| "I want password management for SSH" | Want automatic credential retrieval | 6 password sources + SSH_ASKPASS |
+| "I want password management for SSH" | Want automatic credential retrieval | 7 password sources + SSH_ASKPASS |
 | "I want my AI to manage servers" | Want AI agent integration | MCP server (purple mcp) for Claude Code, Cursor |
 
 ## Links

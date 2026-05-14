@@ -1,7 +1,7 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  purple       hosts      tunnels      containers                                                 │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ 25 ── ●17 ✖2 ○6 ─────────────────────────────────────────────────────────────────────────────────╮
+╭ 26 ── ●17 ✖2 ○7 ─────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   ADDRESS                         TAGS                            LAST▾ │
 │──────────────╭ Providers ─────────────────────────────────────────────────────────╮──────────────│
 │▌  ● bastion-a│   AWS EC2       ✓  Synced 6 hosts (2 regions), 1 stale, <1m ago    │         <1m  │
@@ -21,11 +21,11 @@
 │   ● pve-redis│   UpCloud                                                          │         19h  │
 │   ● pve-mail │   Vultr                                                            │         20h  │
 │   ● pve-monit│                                                                    │mox      21h  │
-│   ○ do-work-w╰────────────────────────────────────────────────────────────────────╯ean        -  │
-│   ○ do-work-s Enter  edit    a  add    s  sync    d  del    Esc  back                         -  │
+│   ○ db-proton╰────────────────────────────────────────────────────────────────────╯           -  │
+│   ○ do-work-w Enter  edit    a  add    s  sync    d  del    Esc  back              ean        -  │
+│   ○ do-work-staging-ams    104.248.38.92 ⇄                 staging web digitalocean           -  │
 │   ○ do-work-worker-ams     104.248.38.93                   worker digitalocean                -  │
 │   ○ do-work-ci-runner      104.248.38.94 ↗                 ci digitalocean                    -  │
-│   ○ do-personal-blog       167.99.42.10                    personal web digitalocean          -  │
 ╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
  Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
 ---STYLES---

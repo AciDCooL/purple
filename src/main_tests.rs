@@ -1673,3 +1673,183 @@ fn expand_user_path_tilde_other_user_not_expanded() {
     let result = super::expand_user_path("~root").unwrap();
     assert_eq!(result, std::path::PathBuf::from("~root"));
 }
+
+#[test]
+fn ensure_proton_login_skips_non_proton_askpass() {
+    // Every non-proton: askpass must early-return without spawning a subprocess.
+    super::ensure_proton_login(Some("bw:foo"));
+    super::ensure_proton_login(Some("keychain"));
+    super::ensure_proton_login(Some("op://Vault/Item/p"));
+    super::ensure_proton_login(None);
+}
+
+#[cfg(unix)]
+#[test]
+fn ensure_proton_login_skips_when_not_installed() {
+    let _guard = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    // SAFETY: PATH_LOCK held.
+    unsafe { std::env::set_var("PATH", "/nonexistent-purple-test-path") };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::ensure_proton_login(Some("proton:Foo/Bar/p"));
+    }));
+    unsafe { std::env::set_var("PATH", &old_path) };
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn ensure_proton_login_skips_when_authenticated() {
+    use std::os::unix::fs::PermissionsExt;
+    let _guard = crate::vault_ssh::tests::PATH_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+
+    let dir = tempfile::Builder::new()
+        .prefix("purple_mock_passcli_ensure_")
+        .tempdir()
+        .unwrap();
+    let script = dir.path().join("pass-cli");
+    std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let new_path = format!("{}:{old_path}", dir.path().display());
+    unsafe { std::env::set_var("PATH", &new_path) };
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        super::ensure_proton_login(Some("proton:Foo/Bar/p"));
+    }));
+    unsafe { std::env::set_var("PATH", &old_path) };
+    drop(dir);
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+#[cfg(test)]
+mod proton_di_tests {
+    use crate::askpass::ProtonStatus;
+    use std::cell::RefCell;
+
+    /// Run `ensure_proton_login_with` with a scripted prompt sequence and
+    /// return the number of times the prompt closure was invoked. The
+    /// returned count plus the production code's hardcoded `0..2` loop bound
+    /// fully describes the retry behaviour to the test assertions.
+    fn run_with<S, P>(askpass: Option<&str>, status: S, prompts: P) -> usize
+    where
+        S: FnOnce() -> ProtonStatus,
+        P: IntoIterator<Item = anyhow::Result<Option<String>>>,
+    {
+        let count = RefCell::new(0usize);
+        let mut iter = prompts.into_iter();
+        super::super::ensure_proton_login_with(askpass, status, || {
+            *count.borrow_mut() += 1;
+            iter.next()
+                .unwrap_or_else(|| Ok(Some("unexpected-extra-prompt".to_string())))
+        });
+        count.into_inner()
+    }
+
+    #[test]
+    fn skip_when_askpass_none() {
+        let attempts = run_with(None, || panic!("status_fn must not run"), Vec::new());
+        assert_eq!(attempts, 0, "must not invoke prompt");
+    }
+
+    #[test]
+    fn skip_when_askpass_not_proton() {
+        let attempts = run_with(
+            Some("bw:foo"),
+            || panic!("status_fn must not run"),
+            Vec::new(),
+        );
+        assert_eq!(attempts, 0, "must not invoke prompt");
+    }
+
+    #[test]
+    fn skip_when_authenticated_no_prompt() {
+        let attempts = run_with(
+            Some("proton:Foo/Bar/p"),
+            || ProtonStatus::Authenticated,
+            Vec::new(),
+        );
+        assert_eq!(attempts, 0, "must not invoke prompt");
+    }
+
+    #[test]
+    fn skip_when_not_installed_no_prompt() {
+        let attempts = run_with(
+            Some("proton:Foo/Bar/p"),
+            || ProtonStatus::NotInstalled,
+            Vec::new(),
+        );
+        assert_eq!(attempts, 0, "must not invoke prompt");
+    }
+
+    #[test]
+    fn empty_pat_aborts_after_first_prompt() {
+        let attempts = run_with(
+            Some("proton:Foo/Bar/p"),
+            || ProtonStatus::NotAuthenticated,
+            vec![Ok(Some(String::new()))],
+        );
+        assert_eq!(attempts, 1, "empty PAT must not retry");
+    }
+
+    #[test]
+    fn esc_eof_aborts_after_first_prompt() {
+        let attempts = run_with(
+            Some("proton:Foo/Bar/p"),
+            || ProtonStatus::NotAuthenticated,
+            vec![Ok(None)],
+        );
+        assert_eq!(attempts, 1, "Esc/EOF must not retry");
+    }
+
+    #[test]
+    fn read_error_aborts_after_first_prompt() {
+        let err = anyhow::anyhow!("tty broken");
+        let attempts = run_with(
+            Some("proton:Foo/Bar/p"),
+            || ProtonStatus::NotAuthenticated,
+            vec![Err(err)],
+        );
+        assert_eq!(attempts, 1, "read error must not retry");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn at_most_two_attempts_when_login_keeps_failing() {
+        // proton_login spawns `pass-cli` via PATH. To force every login attempt
+        // to fail (and prove the retry loop caps at 2), point PATH at a
+        // guaranteed-non-existent directory under PATH_LOCK so concurrent
+        // PATH-mutating tests cannot accidentally provide a working pass-cli
+        // shim.
+        let _guard = crate::vault_ssh::tests::PATH_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let old_path = std::env::var("PATH").unwrap_or_default();
+        // SAFETY: PATH_LOCK held.
+        unsafe { std::env::set_var("PATH", "/nonexistent-purple-di-test-path") };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_with(
+                Some("proton:Foo/Bar/p"),
+                || ProtonStatus::NotAuthenticated,
+                vec![
+                    Ok(Some("pst_first::key".to_string())),
+                    Ok(Some("pst_second::key".to_string())),
+                    Ok(Some("pst_should_not_be_used::key".to_string())),
+                ],
+            )
+        }));
+        unsafe { std::env::set_var("PATH", &old_path) };
+        let attempts = result.unwrap_or_else(|e| std::panic::resume_unwind(e));
+        assert_eq!(attempts, 2, "must cap at 2 attempts");
+    }
+}

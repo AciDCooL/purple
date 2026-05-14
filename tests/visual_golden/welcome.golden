@@ -1,7 +1,7 @@
 ╭─────────────────────╭──────────────────────────────────────────────────────╮─────────────────────╮
 │  purple       hosts │                                                      │                     │
 ╰─────────────────────│                                                      │─────────────────────╯
-╭ 25 ── ●17 ✖2 ○6 ────│                                                      │─────────────────────╮
+╭ 26 ── ●17 ✖2 ○7 ────│                                                      │─────────────────────╮
 │     NAME            │                              ╮                       │               LAST▾ │
 │─────────────────────│                 ╭─╮╷ ╷╭─ ╭─╮ │ ╭─╮                   │─────────────────────│
 │▌  ● bastion-ams     │                 │ ││ ││  │ │ │ ├─╯                   │                <1m  │
@@ -21,11 +21,11 @@
 │   ● pve-redis       │        Your original config has been backed up       │oxmox           19h  │
 │   ● pve-mail        │             to ~/.purple/config.original             │xmox            20h  │
 │   ● pve-monitor     │                                                      │al proxmox      21h  │
-│   ○ do-work-web-ams │                    Enter  continue                   │gitalocean        -  │
+│   ○ db-proton       │                    Enter  continue                   │se                -  │
+│   ○ do-work-web-ams │                                                      │gitalocean        -  │
 │   ○ do-work-staging-│                                                      │alocean           -  │
 │   ○ do-work-worker-a│                                                      │an                -  │
 │   ○ do-work-ci-runne│                                                      │                  -  │
-│   ○ do-personal-blog│                                                      │talocean          -  │
 ╰─────────────────────│                                                      │─────── getpurple.sh ╯
  Enter  connect    /  ╰──────────────────────────────────────────────────────╯               ?  more
 ---STYLES---

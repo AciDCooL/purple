@@ -13,8 +13,8 @@ use crate::event::{self, AppEvent, EventHandler};
 use crate::ssh_config::model::SshConfigFile;
 use crate::{
     animation, askpass, connection, ensure_bw_session, ensure_keychain_password,
-    ensure_vault_ssh_chain_if_needed, first_launch_init, handler, import, ping, preferences,
-    snippet, tui, update, vault_ssh,
+    ensure_proton_login, ensure_vault_ssh_chain_if_needed, first_launch_init, handler, import,
+    ping, preferences, snippet, tui, update, vault_ssh,
 };
 
 pub(crate) fn run_tui(mut app: App) -> Result<()> {
@@ -508,6 +508,7 @@ fn handle_pending_connect(
     } else {
         None
     };
+    ensure_proton_login(askpass.as_deref());
     if let Some(token) = ensure_bw_session(app.bw_session.as_deref(), askpass.as_deref()) {
         app.bw_session = Some(token);
     }
@@ -828,6 +829,7 @@ fn handle_pending_snippet(
             .find(|h| h.alias == *alias)
             .and_then(|h| h.askpass.clone())
             .or_else(preferences::load_askpass_default);
+        ensure_proton_login(askpass.as_deref());
         if let Some(token) = ensure_bw_session(app.bw_session.as_deref(), askpass.as_deref()) {
             app.bw_session = Some(token);
         }

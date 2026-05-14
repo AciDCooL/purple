@@ -1087,6 +1087,7 @@ pub(super) fn handle_snippet_command(
                     .askpass
                     .clone()
                     .or_else(preferences::load_askpass_default);
+                super::ensure_proton_login(askpass.as_deref());
                 let bw_session = super::ensure_bw_session(None, askpass.as_deref());
                 super::ensure_keychain_password(&host.alias, askpass.as_deref());
                 match snippet::run_snippet(
@@ -1134,6 +1135,16 @@ pub(super) fn handle_snippet_command(
                 } else {
                     None
                 };
+                // Resolve Proton Pass login if any target uses it. Proton Pass
+                // persists its session on disk; we do not propagate a token, we
+                // only ensure the user is logged in once before the batch starts.
+                let target_askpass: Vec<Option<String>> =
+                    targets.iter().map(|h| h.askpass.clone()).collect();
+                if let Some(askpass) =
+                    select_proton_askpass(&target_askpass, preferences::load_askpass_default())
+                {
+                    super::ensure_proton_login(Some(&askpass));
+                }
                 let targets_info: Vec<_> = targets
                     .iter()
                     .map(|h| {
@@ -1193,6 +1204,7 @@ pub(super) fn handle_snippet_command(
                         .askpass
                         .clone()
                         .or_else(preferences::load_askpass_default);
+                    super::ensure_proton_login(askpass.as_deref());
                     if let Some(token) =
                         super::ensure_bw_session(bw_session.as_deref(), askpass.as_deref())
                     {
@@ -1465,6 +1477,29 @@ pub(super) fn handle_vault_sign_command(
     Ok(())
 }
 
+/// Pick the askpass value that drives a single Proton Pass pre-flight call for
+/// a batch of hosts. Returns `Some(value)` if any host uses a `proton:` source
+/// (per-host override OR the global default), preferring the first `proton:`
+/// value by position in the slice before falling back to the default. Returns
+/// `None` when no host in the batch uses Proton Pass.
+pub(super) fn select_proton_askpass(
+    target_askpass: &[Option<String>],
+    default: Option<String>,
+) -> Option<String> {
+    let any_proton = target_askpass.iter().any(|a| {
+        let resolved = a.clone().or_else(|| default.clone());
+        resolved.as_deref().unwrap_or("").starts_with("proton:")
+    });
+    if !any_proton {
+        return None;
+    }
+    target_askpass
+        .iter()
+        .find_map(|a| a.as_ref().filter(|s| s.starts_with("proton:")))
+        .cloned()
+        .or(default)
+}
+
 pub(super) fn run_whats_new(since: Option<&str>) -> Result<String> {
     use crate::changelog::{self, EntryKind};
     use semver::Version;
@@ -1523,5 +1558,92 @@ mod whats_new_tests {
     fn whats_new_cli_returns_error_on_bad_version() {
         let result = run_whats_new(Some("not-a-version"));
         assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod select_proton_askpass_tests {
+    use super::*;
+
+    #[test]
+    fn returns_none_when_no_target_uses_proton_and_no_default() {
+        let targets = vec![
+            Some("bw:foo".to_string()),
+            Some("keychain".to_string()),
+            None,
+        ];
+        assert_eq!(select_proton_askpass(&targets, None), None);
+    }
+
+    #[test]
+    fn returns_none_when_no_target_uses_proton_and_default_is_not_proton() {
+        let targets = vec![Some("bw:foo".to_string()), None];
+        let default = Some("keychain".to_string());
+        assert_eq!(select_proton_askpass(&targets, default), None);
+    }
+
+    #[test]
+    fn returns_proton_value_when_one_target_uses_proton() {
+        let targets = vec![
+            Some("bw:other".to_string()),
+            Some("proton:Vault/Item/p".to_string()),
+            None,
+        ];
+        assert_eq!(
+            select_proton_askpass(&targets, None),
+            Some("proton:Vault/Item/p".to_string())
+        );
+    }
+
+    #[test]
+    fn prefers_first_per_host_proton_value_over_default() {
+        let targets = vec![
+            Some("proton:First/Item/p".to_string()),
+            Some("proton:Second/Item/p".to_string()),
+        ];
+        let default = Some("proton:Default/Item/p".to_string());
+        assert_eq!(
+            select_proton_askpass(&targets, default),
+            Some("proton:First/Item/p".to_string())
+        );
+    }
+
+    #[test]
+    fn falls_back_to_default_when_no_per_host_proton_value_but_default_is_proton() {
+        let targets = vec![None, Some("bw:foo".to_string()), None];
+        let default = Some("proton:Default/Item/p".to_string());
+        assert_eq!(
+            select_proton_askpass(&targets, default),
+            Some("proton:Default/Item/p".to_string())
+        );
+    }
+
+    #[test]
+    fn handles_all_proton_targets() {
+        let targets = vec![
+            Some("proton:A/x/p".to_string()),
+            Some("proton:B/y/p".to_string()),
+        ];
+        assert_eq!(
+            select_proton_askpass(&targets, None),
+            Some("proton:A/x/p".to_string())
+        );
+    }
+
+    #[test]
+    fn handles_empty_target_list_with_proton_default() {
+        let default = Some("proton:Default/Item/p".to_string());
+        assert_eq!(select_proton_askpass(&[], default), None);
+    }
+
+    #[test]
+    fn handles_empty_target_list_with_no_default() {
+        assert_eq!(select_proton_askpass(&[], None), None);
+    }
+
+    #[test]
+    fn empty_string_askpass_does_not_match_proton() {
+        let targets = vec![Some(String::new()), Some("bw:foo".to_string())];
+        assert_eq!(select_proton_askpass(&targets, None), None);
     }
 }
