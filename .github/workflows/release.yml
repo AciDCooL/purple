@@ -313,3 +313,29 @@ jobs:
           git diff --cached --quiet && echo "No changes to commit" && exit 0
           git commit -m "purple ${VERSION}"
           git push
+
+  trigger-aur:
+    name: Trigger AUR publish
+    # Releases created with GITHUB_TOKEN do not fire `release: published` on
+    # other workflows, so aur.yml never runs from the implicit chain. Dispatch
+    # it explicitly; workflow_dispatch is exempt from that restriction.
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Derive version
+        id: version
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          TAG="${INPUT_TAG:-$REF_NAME}"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch aur.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: gh workflow run aur.yml -f version="$VERSION" --repo "$REPO"
