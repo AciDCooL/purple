@@ -410,6 +410,78 @@ fn columns_detail_mode_no_host() {
 }
 
 #[test]
+fn columns_alias_grows_beyond_32_on_wide_terminal() {
+    // Reporter (issue #67): long aliases were clamped to 32 cols even on
+    // wide terminals. With ample room, the alias column must scale to its
+    // full padded content width and never truncate.
+    let cols = Columns::compute(60, 9, 0, 0, 0, 200, false);
+    assert_eq!(
+        cols.alias,
+        Columns::padded(60),
+        "alias column must grow to full padded width on a wide terminal, got {}",
+        cols.alias
+    );
+    assert!(
+        cols.alias > 32,
+        "alias must be able to exceed the legacy 32-cap, got {}",
+        cols.alias
+    );
+}
+
+#[test]
+fn columns_alias_full_when_other_columns_drop() {
+    // 60-char alias plus address, tags and history on a 90-col terminal.
+    // The fit-pass should drop history/tags (and shrink/hide host) so the
+    // alias keeps its full content width.
+    let cols = Columns::compute(60, 9, 0, 4, 6, 90, false);
+    assert_eq!(
+        cols.alias,
+        Columns::padded(60),
+        "alias must keep full width when right cluster can collapse to make room"
+    );
+}
+
+#[test]
+fn columns_alias_shrinks_when_terminal_cannot_fit_full_width() {
+    // 60-char alias on a 50-col terminal, no other columns. After everything
+    // else has collapsed the alias itself must shrink so the row still fits.
+    // Without an alias shrink step this would overflow the row.
+    let cols = Columns::compute(60, 0, 0, 0, 0, 50, false);
+    // Available for alias: content - marker(2) - highlight(1) - status(2) = 45
+    assert!(
+        cols.alias <= 45,
+        "alias must shrink to fit available width, got {}",
+        cols.alias
+    );
+}
+
+#[test]
+fn columns_alias_shrinks_in_detail_mode_on_very_narrow_terminal() {
+    // detail_mode forces host=0, so the fit-pass for alias must operate
+    // without a host segment. With a 40-char alias on a 15-col terminal
+    // (no tags or history), the alias must shrink below its padded width.
+    let cols = Columns::compute(40, 0, 0, 0, 0, 15, true);
+    assert_eq!(cols.host, 0, "detail_mode forces host to 0");
+    assert!(
+        cols.alias < Columns::padded(40),
+        "alias must shrink in detail_mode when terminal is too narrow, got {}",
+        cols.alias
+    );
+}
+
+#[test]
+fn columns_short_alias_keeps_floor_of_8() {
+    // 3-char alias: padded(3)=4, but the column floor is 8 so aliases stay
+    // readable even when the SSH config contains very short labels.
+    let cols = Columns::compute(3, 0, 0, 0, 0, 200, false);
+    assert_eq!(
+        cols.alias, 8,
+        "alias column must keep an 8-col floor for short aliases, got {}",
+        cols.alias
+    );
+}
+
+#[test]
 fn format_rtt_millis() {
     assert_eq!(super::format_rtt(42), "42ms");
 }

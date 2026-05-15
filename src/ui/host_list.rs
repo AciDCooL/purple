@@ -91,8 +91,10 @@ impl Columns {
         detail_mode: bool,
     ) -> Self {
         // All columns get ~110% of their content width for breathing room.
-        // Columns are capped — they never grow beyond content needs.
-        let alias = Self::padded(alias_w).clamp(8, 32);
+        // Alias has only a lower floor (8) so long aliases scale with the
+        // terminal. The fit-pass below shrinks alias as a last resort when
+        // the row would otherwise overflow.
+        let mut alias = Self::padded(alias_w).max(8);
         // `host_min_w` is the irreducible width of the widest IP address in
         // the visible list. Truncating an IP yields garbage you cannot copy
         // or verify, so we treat IPs as must-fit data and shrink DNS-only
@@ -168,6 +170,25 @@ impl Columns {
                     host = 0;
                 }
             }
+        }
+
+        // Shrink NAME as a last resort. With the upper alias cap removed
+        // long aliases use whatever room the row has; if even that is not
+        // enough after the right cluster and ADDRESS have collapsed, the
+        // alias itself shrinks here. `truncate(...)` in `push_name_column`
+        // appends the ellipsis. We let the column drop below the 8-col
+        // floor in this branch because the terminal is already too narrow
+        // for normal use and any width is better than overflowing the row.
+        let host_segment = if !detail_mode && host > 0 {
+            gap + host
+        } else {
+            0
+        };
+        let rw_segment = if rw > 0 { gap + rw } else { 0 };
+        let alias_needed = MARKER_WIDTH + 1 + 2 + alias + host_segment + rw_segment;
+        if alias_needed > content {
+            let excess = alias_needed - content;
+            alias = alias.saturating_sub(excess);
         }
 
         // Flex gap: remaining space between left and right clusters

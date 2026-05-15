@@ -1,3 +1,11 @@
+## 3.13.1 - 2026-05-15
+
+- feat: Long hostnames render in full on every terminal.
+- feat: The NAME column scales to your longest alias instead of stopping at 32 characters.
+- feat: Whether your aliases are short labels or 50-character FQDNs, they appear unabbreviated when there is room.
+- feat: On narrow terminals the column shrinks last, after LAST and TAGS step aside, so meaningful detail stays in view.
+- Reported by @matthew-pakulski (#67).
+
 ## 3.13.0 - 2026-05-14
 
 - feat: Pull SSH passwords from your Proton Pass vault.
