@@ -5,33 +5,38 @@ use std::path::PathBuf;
 /// Top-level page selected via the top navigation bar.
 ///
 /// Orthogonal to [`Screen`]. `Screen` tracks overlays and modal forms,
-/// `TopPage` tracks which base view (hosts, tunnels, containers) renders
-/// behind them. Tab/Shift+Tab cycles through the variants when no overlay
-/// is active.
+/// `TopPage` tracks which base view (hosts, tunnels, containers, keys)
+/// renders behind them. Tab/Shift+Tab cycles through the variants when
+/// no overlay is active.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TopPage {
     #[default]
     Hosts,
     Tunnels,
     Containers,
+    Keys,
 }
 
 impl TopPage {
-    /// Cycle to the next page (Hosts -> Tunnels -> Containers -> Hosts).
+    /// Cycle to the next page
+    /// (Hosts -> Tunnels -> Containers -> Keys -> Hosts).
     pub fn next(self) -> Self {
         match self {
             TopPage::Hosts => TopPage::Tunnels,
             TopPage::Tunnels => TopPage::Containers,
-            TopPage::Containers => TopPage::Hosts,
+            TopPage::Containers => TopPage::Keys,
+            TopPage::Keys => TopPage::Hosts,
         }
     }
 
-    /// Cycle to the previous page (Hosts -> Containers -> Tunnels -> Hosts).
+    /// Cycle to the previous page
+    /// (Hosts -> Keys -> Containers -> Tunnels -> Hosts).
     pub fn prev(self) -> Self {
         match self {
-            TopPage::Hosts => TopPage::Containers,
+            TopPage::Hosts => TopPage::Keys,
             TopPage::Tunnels => TopPage::Hosts,
             TopPage::Containers => TopPage::Tunnels,
+            TopPage::Keys => TopPage::Containers,
         }
     }
 }
@@ -47,7 +52,7 @@ pub struct WhatsNewState {
 ///
 /// Modeless: while the struct is `Some`, every keystroke either edits
 /// the query (chars / cursor / delete) or navigates matches
-/// (Tab / Shift+Tab). There is no "confirm" step — matches are
+/// (Tab / Shift+Tab). There is no "confirm" step: matches are
 /// recomputed live and `Esc` exits search outright.
 ///
 /// `matches` are line indices into the rendered body; `current`
@@ -142,6 +147,26 @@ pub enum Screen {
     KeyList,
     KeyDetail {
         index: usize,
+    },
+    /// Multi-host picker reached from the Keys tab by pressing `p`.
+    /// `key_index` points into `app.keys.list` for the key to push. The picker
+    /// shows hosts with checkbox selection; hosts whose `vault_ssh` role
+    /// is configured are dimmed and not selectable (Vault SSH workflow
+    /// uses signed certs, not authorized_keys appends).
+    KeyPushPicker {
+        key_index: usize,
+    },
+    /// Destructive confirm shown after the picker commits. Footer renders
+    /// action verbs both sides via `design::confirm_footer_destructive`.
+    /// On y the worker thread is spawned and the screen returns to
+    /// HostList; on n/Esc returns to the picker with selection intact.
+    ///
+    /// The frozen alias list lives on `app.keys.push.committed` instead
+    /// of inside the Screen variant: keeping the vec out of the enum
+    /// prevents per-frame clones during overlay redraws and keeps the
+    /// `Screen` payload uniformly small.
+    ConfirmKeyPush {
+        key_index: usize,
     },
     HostDetail {
         index: usize,
@@ -317,6 +342,8 @@ impl Screen {
             Screen::Help { .. } => "Help",
             Screen::KeyList => "KeyList",
             Screen::KeyDetail { .. } => "KeyDetail",
+            Screen::KeyPushPicker { .. } => "KeyPushPicker",
+            Screen::ConfirmKeyPush { .. } => "ConfirmKeyPush",
             Screen::HostDetail { .. } => "HostDetail",
             Screen::TagPicker => "TagPicker",
             Screen::ThemePicker => "ThemePicker",

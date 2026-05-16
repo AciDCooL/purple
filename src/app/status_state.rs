@@ -147,6 +147,19 @@ impl StatusCenter {
         });
     }
 
+    /// Drop the sticky footer status (set by `set_sticky_status` /
+    /// `notify_progress`). Long-running operations call this when they
+    /// finish so the "Pushing X..." line does not linger after the
+    /// transient success/partial toast lands on top of it.
+    pub fn clear_sticky_status(&mut self) {
+        if let Some(s) = &self.status {
+            if s.sticky {
+                log::debug!("footer <- clear sticky: {}", s.text);
+                self.status = None;
+            }
+        }
+    }
+
     /// Tick the toast message timer. Uses wall-clock time via `created_at`
     /// so expiry is independent of the tick rate. Called every tick; the
     /// actual check is `created_at.elapsed() > timeout_ms()`.

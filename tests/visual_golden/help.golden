@@ -1,33 +1,33 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │  pur╭ Help ────────────────────────────────────────────────────────────────────────────────╮     │
 ╰─────│                                                                                      │─────╯
-╭ 26 ─│                                              ╮                                       │─────╮
-│     │                                 ╭─╮╷ ╷╭─ ╭─╮ │ ╭─╮                                   │AST▾ │
-│─────│                                 │ ││ ││  │ │ │ ├─╯                                   │─────│
-│▌  ● │                                 ├─╯╰─╯╵  ├─╯╶┴╴╰─╴ ▪                                 │<1m  │
-│   ● │                                 ╵        ╵                                           │ 1h  │
-│   ● │                                                                                      │ 2h  │
-│   ● │                                                                                      │ 3h  │
-│   ● │           NAVIGATE                                MANAGE HOSTS                       │ 4h  │
-│   ● │                                                                                      │ 5h  │
-│   ● │               j/k ↑↓  up / down                         a  add host                  │ 6h  │
-│   ● │            PgDn/PgUp  page down / up                    e  edit                      │ 7h  │
-│   ● │                Enter  connect                           d  del                       │ 8h  │
-│   ● │                    /  search (scoped)                   u  undo del                  │ 9h  │
-│   ● │                    #  tag picker                        t  tag (bulk if se           │15h  │
-│   ● │                  Esc  clear filter / selection                                       │16h  │
-│   ● │                                                                                      │17h  │
-│   ● │           VIEW                                    CONNECT AND RUN                    │18h  │
-│   ● │                                                                                      │19h  │
-│   ● │                    v  detail panel                  Space  multi-select              │20h  │
-│   ● │                                                                                      │21h  │
-│   ○ │                                                                                      │  -  │
-│   ○ │           All commands and docs:  github.com/erickochen/purple/wiki                  │  -  │
-│   ○ │           Got an idea or a bug?   github.com/erickochen/purple/issues                │  -  │
-│   ○ │                                                                                      │  -  │
-│   ○ ╰────────────────────────────────────────────────────────── v3.13.1 (built 1 Jan 2000) ╯  -  │
-╰───── j/k  scroll  [1/10]   Esc  close                                                       e.sh ╯
- Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
+╭ 31 ─│                                              ╮                                       │─────╮
+│     │                                 ╭─╮╷ ╷╭─ ╭─╮ │ ╭─╮                                   │     │
+│─────│                                 │ ││ ││  │ │ │ ├─╯                                   │     │
+│▌  ● │                                 ├─╯╰─╯╵  ├─╯╶┴╴╰─╴ ▪                                 │─────╯
+│   ● │                                 ╵        ╵                                           │─────╮
+│   ● │                                                                                      │     │
+│   ● │                                                                                      │     │
+│   ● │           NAVIGATE                                MANAGE HOSTS                       │     │
+│   ● │                                                                                      │     │
+│   ● │               j/k ↑↓  up / down                         a  add host                  │     │
+│   ● │            PgDn/PgUp  page down / up                    e  edit                      │─────╯
+│   ● │                Enter  connect                           d  del                       │─────╮
+│   ✖ │                    /  search (scoped)                   u  undo del                  │     │
+│   ● │                    #  tag picker                        t  tag (bulk if se           │     │
+│   ● │                  Esc  clear filter / selection                                       │     │
+│   ● │                                                                                      │▁    │
+│   ● │           VIEW                                    CONNECT AND RUN                    │█▇▄▂ │
+│   ● │                                                                                      │ now │
+│   ● │                    v  detail panel                  Space  multi-select              │─────╯
+│   ● │                                                                                      │─────╮
+│   ● │                                                                                      │     │
+│   ● │           All commands and docs:  github.com/erickochen/purple/wiki                  │─────╯
+│   ● │           Got an idea or a bug?   github.com/erickochen/purple/issues                │─────╮
+│   ● │                                                                                      │     │
+│   ● ╰────────────────────────────────────────────────────────── v3.14.0 (built 1 Jan 2000) ╯     │
+╰───── j/k  scroll  [1/10]   Esc  close                                                       ─────╯
+ Enter  connect    /  search    #  tag    v  compact    :  jump                              ?  more
 ---STYLES---
 (0,0) fg=DarkGray bg=Reset mod=DIM
 (1,0) fg=DarkGray bg=Reset mod=DIM
@@ -305,10 +305,10 @@
 (58,4) fg=Magenta bg=Reset mod=BOLD
 (59,4) fg=Cyan bg=Reset mod=BOLD
 (93,4) fg=Reset bg=Reset mod=DIM
-(94,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(95,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(96,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(97,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(94,4) fg=DarkGray bg=Reset mod=DIM
+(95,4) fg=DarkGray bg=Reset mod=DIM
+(96,4) fg=DarkGray bg=Reset mod=DIM
+(97,4) fg=DarkGray bg=Reset mod=DIM
 (98,4) fg=DarkGray bg=Reset mod=DIM
 (99,4) fg=DarkGray bg=Reset mod=DIM
 (0,5) fg=DarkGray bg=Reset mod=DIM
@@ -373,11 +373,11 @@
 (58,6) fg=Magenta bg=Reset mod=BOLD
 (59,6) fg=Cyan bg=Reset mod=BOLD
 (93,6) fg=Reset bg=Reset mod=DIM
-(94,6) fg=White bg=Magenta mod=BOLD|DIM
-(95,6) fg=White bg=Magenta mod=BOLD|DIM
-(96,6) fg=White bg=Magenta mod=BOLD|DIM
-(97,6) fg=White bg=Magenta mod=BOLD|DIM
-(98,6) fg=White bg=Magenta mod=BOLD|DIM
+(94,6) fg=DarkGray bg=Reset mod=DIM
+(95,6) fg=DarkGray bg=Reset mod=DIM
+(96,6) fg=DarkGray bg=Reset mod=DIM
+(97,6) fg=DarkGray bg=Reset mod=DIM
+(98,6) fg=DarkGray bg=Reset mod=DIM
 (99,6) fg=DarkGray bg=Reset mod=DIM
 (0,7) fg=DarkGray bg=Reset mod=DIM
 (1,7) fg=DarkGray bg=Reset mod=DIM
@@ -643,8 +643,8 @@
 (1,15) fg=DarkGray bg=Reset mod=DIM
 (2,15) fg=DarkGray bg=Reset mod=BOLD|DIM
 (3,15) fg=DarkGray bg=Reset mod=BOLD|DIM
-(4,15) fg=DarkGray bg=Reset mod=DIM
-(5,15) fg=DarkGray bg=Reset mod=DIM
+(4,15) fg=DarkGray bg=Reset mod=BOLD|DIM
+(5,15) fg=DarkGray bg=Reset mod=BOLD|DIM
 (6,15) fg=Reset bg=Reset mod=DIM
 (18,15) fg=Magenta bg=Reset mod=BOLD
 (19,15) fg=Magenta bg=Reset mod=BOLD
@@ -815,10 +815,10 @@
 (5,18) fg=DarkGray bg=Reset mod=DIM
 (6,18) fg=Reset bg=Reset mod=DIM
 (93,18) fg=Reset bg=Reset mod=DIM
-(94,18) fg=DarkGray bg=Reset mod=DIM
-(95,18) fg=DarkGray bg=Reset mod=DIM
-(96,18) fg=DarkGray bg=Reset mod=DIM
-(97,18) fg=DarkGray bg=Reset mod=DIM
+(94,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(95,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(96,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(97,18) fg=DarkGray bg=Reset mod=BOLD|DIM
 (98,18) fg=DarkGray bg=Reset mod=DIM
 (99,18) fg=DarkGray bg=Reset mod=DIM
 (0,19) fg=DarkGray bg=Reset mod=DIM
@@ -848,10 +848,10 @@
 (71,19) fg=Reset bg=Reset mod=BOLD
 (72,19) fg=Reset bg=Reset mod=BOLD
 (93,19) fg=Reset bg=Reset mod=DIM
-(94,19) fg=DarkGray bg=Reset mod=DIM
-(95,19) fg=DarkGray bg=Reset mod=DIM
-(96,19) fg=DarkGray bg=Reset mod=DIM
-(97,19) fg=DarkGray bg=Reset mod=DIM
+(94,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(95,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(96,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(97,19) fg=DarkGray bg=Reset mod=BOLD|DIM
 (98,19) fg=DarkGray bg=Reset mod=DIM
 (99,19) fg=DarkGray bg=Reset mod=DIM
 (0,20) fg=DarkGray bg=Reset mod=DIM
@@ -1310,10 +1310,10 @@
 (51,29) fg=DarkGray bg=Reset mod=DIM
 (52,29) fg=DarkGray bg=Reset mod=DIM
 (53,29) fg=DarkGray bg=Reset mod=DIM
-(54,29) fg=White bg=DarkGray mod=DIM
+(54,29) fg=DarkGray bg=Reset mod=DIM
 (55,29) fg=White bg=DarkGray mod=DIM
 (56,29) fg=White bg=DarkGray mod=DIM
-(57,29) fg=DarkGray bg=Reset mod=DIM
+(57,29) fg=White bg=DarkGray mod=DIM
 (58,29) fg=DarkGray bg=Reset mod=DIM
 (59,29) fg=DarkGray bg=Reset mod=DIM
 (60,29) fg=DarkGray bg=Reset mod=DIM

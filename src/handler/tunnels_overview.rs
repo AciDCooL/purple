@@ -102,11 +102,13 @@ fn toggle_tunnel(app: &mut App) {
             // Tunnel start spawns a real ssh session, same as a shell
             // connect, so record it in connection history.
             app.history.record(&alias);
+            app.record_key_use(&alias, crate::key_activity::now_secs());
             app.apply_sort();
             reposition_cursor_on(app, &alias, &rule);
             app.notify(crate::messages::tunnel_started(&alias));
         }
         Err(e) => {
+            log::error!("[external] tunnel start failed: alias={alias}: {e}");
             app.notify_error(crate::messages::tunnel_start_failed(&e));
         }
     }
@@ -266,11 +268,11 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
             app.open_jump(crate::app::JumpMode::Tunnels);
         }
         KeyCode::Tab => {
-            app.top_page = app.top_page.next();
+            app.cycle_top_page_next();
             app.search.query = None;
         }
         KeyCode::BackTab => {
-            app.top_page = app.top_page.prev();
+            app.cycle_top_page_prev();
             app.search.query = None;
         }
         KeyCode::Char('a') => {

@@ -22,6 +22,8 @@ mod host_detail;
 mod host_form;
 mod host_list;
 mod jump;
+pub(crate) mod key_push_picker;
+mod keys_overview;
 mod picker;
 mod ping;
 mod provider;
@@ -129,6 +131,7 @@ pub fn handle_key_event(
                 crate::app::TopPage::Containers => {
                     containers_overview::handle_keys(app, key, events_tx);
                 }
+                crate::app::TopPage::Keys => keys_overview::handle_keys(app, key),
                 crate::app::TopPage::Hosts => {
                     if app.search.query.is_some() {
                         host_list::handle_host_list_search(app, key, events_tx);
@@ -157,6 +160,8 @@ pub fn handle_key_event(
         Screen::Help { .. } => help::handle_help(app, key),
         Screen::KeyList => help::handle_key_list(app, key),
         Screen::KeyDetail { .. } => help::handle_key_detail(app, key),
+        Screen::KeyPushPicker { .. } => key_push_picker::handle_keys(app, key),
+        Screen::ConfirmKeyPush { .. } => confirm::handle_confirm_key_push(app, key, events_tx),
         Screen::HostDetail { .. } => host_detail::handle_host_detail(app, key),
         Screen::TagPicker => tag_picker::handle_tag_picker_screen(app, key),
         Screen::BulkTagEditor => bulk_tag_editor::handle_bulk_tag_editor_screen(app, key),

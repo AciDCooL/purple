@@ -4,7 +4,7 @@
 
 Spin up a VM on AWS, GCP, Azure, Hetzner, Proxmox or 11 other cloud providers and it shows up in your host list. Destroy it and the entry dims. No more hand-editing `~/.ssh/config` after every Terraform run, no more grepping cloud consoles for the right IP.
 
-A fast Rust TUI with fuzzy search across hundreds of hosts, file transfer, Docker and Podman over SSH, short-lived HashiCorp Vault SSH certificates and an MCP server for AI agents.
+A fast Rust TUI with fuzzy search across hundreds of hosts, file transfer, Docker and Podman over SSH, multi-host SSH key push, short-lived HashiCorp Vault SSH certificates and an MCP server for AI agents.
 
 Keyboard-driven. Single binary. MIT licensed.
 
@@ -87,6 +87,10 @@ I wanted one place for all of that. So I built it.
 
 ![live tunnels](screenshots/tunnels.png)
 
+🗝️ **Push any SSH key to your fleet from one tab.** Dedicated Keys page with strength score, randomart fingerprint and a per-key activity sparkline. Press `p` to push the highlighted key to multiple hosts at once. Vault-managed hosts skip automatically so cert-managed hosts stay cert-managed. `Tab` from the Hosts page.
+
+![keys](screenshots/keys.png)
+
 **And more.**
 
 🚚 Visual file transfer with split-pane explorer.
@@ -105,7 +109,7 @@ See the [wiki](https://github.com/erickochen/purple/wiki) for details.
 
 purple reads `~/.ssh/config` directly. No database, no daemon, no account. Comments, indentation, include files, unknown directives. All preserved.
 
-Written in Rust. Single binary. 6800+ tests. MIT license.
+Written in Rust. Single binary. 7300+ tests. MIT license.
 
 ## Links
 

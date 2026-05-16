@@ -164,8 +164,8 @@ fi
 # 6. No hardcoded format!("[A-Z]...") in library modules whose Result
 # chains surface to the user as toasts or CLI eprintln output.
 #
-# These five files form the "library modules with known user-error
-# chains": clipboard, import, snippet, vault_ssh, containers. Errors
+# These files form the "library modules with known user-error chains":
+# clipboard, import, snippet, vault_ssh, containers, key_push. Errors
 # they construct via `format!`, `.map_err`, or `.with_context` flow
 # unmodified to a `notify_error` toast or `eprintln!("{}", e)`. The
 # message-centralization rule strictly scopes to handler/CLI/UI code,
@@ -183,6 +183,7 @@ LIBRARY_FILES=(
     "$SCAN_ROOT/snippet.rs"
     "$SCAN_ROOT/vault_ssh.rs"
     "$SCAN_ROOT/containers.rs"
+    "$SCAN_ROOT/key_push.rs"
 )
 for f in "${LIBRARY_FILES[@]}"; do
     [ -f "$f" ] || continue

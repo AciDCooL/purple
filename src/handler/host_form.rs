@@ -232,7 +232,7 @@ fn open_picker_for_focused_field(app: &mut App) {
             app.scan_keys();
             app.ui.key_picker.open = true;
             app.ui.key_picker.list = ListState::default();
-            if !app.keys.is_empty() {
+            if !app.keys.list.is_empty() {
                 app.ui.key_picker.list.select(Some(0));
             }
         }

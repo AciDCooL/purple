@@ -756,6 +756,172 @@ pub fn key_selected(name: &str) -> String {
     format!("Locked and loaded with {}.", name)
 }
 
+// ── Keys tab ────────────────────────────────────────────────────────
+
+/// Copy succeeded. Toast tells the user which key landed on the clipboard.
+pub fn keys_copy_success(name: &str) -> String {
+    format!("Copied {}.pub to clipboard.", name)
+}
+
+/// The .pub file could not be read from disk (deleted, permission denied).
+pub fn keys_copy_read_failed(name: &str) -> String {
+    format!("Could not read {}.pub from disk.", name)
+}
+
+/// Empty-state message for the keys tab when ~/.ssh/ has no public keys.
+/// Kept short so it fits the narrow master pane on responsive collapse.
+pub const KEYS_EMPTY_HINT: &str = "No SSH keys in ~/.ssh/. Run ssh-keygen.";
+
+/// Empty-state message for the key-push picker when ~/.ssh/config has
+/// no host entries to target.
+pub const KEY_PUSH_NO_HOSTS: &str =
+    "No hosts in ~/.ssh/config. Add a host first, then come back here.";
+
+/// Header line for the Vault SSH strip when there is no Valid cached
+/// cert. Tells the user how to populate the strip.
+pub const VAULT_STRIP_EMPTY: &str =
+    "  No active certs. Press V to sign all Vault SSH hosts at once.";
+
+/// Inline tag appended to vault-ssh host rows in the push picker to
+/// document why they cannot be selected.
+pub const KEY_PUSH_VAULT_TAG: &str = "  (vault)";
+
+/// Picker overlay title formats.
+pub fn key_push_picker_title_eligible(key_label: &str, eligible: usize, total: usize) -> String {
+    format!(
+        "Push {} \u{203A} Select Hosts ({} eligible of {})",
+        key_label, eligible, total
+    )
+}
+
+pub fn key_push_picker_title_selected(
+    key_label: &str,
+    selected: usize,
+    total: usize,
+    eligible: usize,
+) -> String {
+    format!(
+        "Push {} \u{203A} {} selected of {} ({} eligible)",
+        key_label, selected, total, eligible
+    )
+}
+
+/// Toast when the user presses `p` but no public key file is readable.
+pub fn key_push_no_pubkey(name: &str) -> String {
+    format!(
+        "Cannot read {}.pub. The file is missing or unreadable.",
+        name
+    )
+}
+
+/// Toast when the user committed the picker with zero hosts selected.
+pub const KEY_PUSH_NONE_SELECTED: &str = "Select at least one host with Space.";
+
+/// Toast shown when the user tries to select a vault-ssh host. These
+/// hosts are managed via signed certs (`V`), not static authorized_keys
+/// appends.
+pub const KEY_PUSH_VAULT_SKIP: &str =
+    "Vault SSH host. Use V on the host list to sign a cert instead.";
+
+/// Progress toast at the start of a push run.
+pub fn key_push_in_progress(key_name: &str, host_count: usize) -> String {
+    format!("Pushing {} to {} host(s)...", key_name, host_count)
+}
+
+/// Error toast when std::thread::spawn fails (essentially OOM / rlimit).
+pub fn key_push_thread_spawn_failed() -> String {
+    "Could not spawn push worker thread. Check resource limits.".to_string()
+}
+
+/// Warning toast when the user presses `p` while a push is still
+/// running. Tells them how to recover.
+pub const KEY_PUSH_ALREADY_IN_PROGRESS: &str =
+    "A push is already running. Press Esc to cancel first.";
+
+/// Error toast when the `.pub` file is not a regular file, is a symlink,
+/// or could not be opened with `O_NOFOLLOW`. Stops the push before any
+/// remote SSH call is made.
+pub fn key_push_pubkey_not_regular(name: &str) -> String {
+    format!("{}.pub is not a regular file. Symlinks are rejected.", name)
+}
+
+/// Error toast when the `.pub` file exceeds the 16 KiB cap. The most
+/// common cause is a `.pub` symlink that resolved to a log file or a
+/// truncated dump from an unrelated tool.
+pub fn key_push_pubkey_too_large(name: &str, bytes: u64) -> String {
+    format!(
+        "{}.pub is {} bytes, larger than the 16 KiB push limit.",
+        name, bytes
+    )
+}
+
+/// Error toast when the `.pub` file does not parse as a single, valid
+/// `authorized_keys` line. Catches multi-line content (which silently
+/// installs multiple entries, including embedded `command=` clauses),
+/// unsupported algorithms, and malformed base64 blobs.
+pub fn key_push_invalid_pubkey(name: &str, detail: &str) -> String {
+    format!("{}.pub failed validation: {}. Push aborted.", name, detail)
+}
+
+/// Error toast when the picker commits with zero eligible aliases. The
+/// picker should always block this earlier, but the worker guard exists
+/// as a defence-in-depth so the progress toast never sticks.
+pub const KEY_PUSH_NO_HOSTS_SELECTED: &str =
+    "Picker committed with no eligible hosts. Push aborted.";
+
+/// Error toast when the user tries to push a certificate file. Pushing
+/// a cert into authorized_keys bypasses its TTL and undermines the
+/// signed-cert workflow.
+pub const KEY_PUSH_CERT_NOT_PUSHABLE: &str =
+    "Certificates cannot be pushed as static keys. Sign with V instead.";
+
+/// Toast after the user pressed Esc to cancel an in-flight push run.
+/// Names the per-host progress at the moment of cancel so the user
+/// knows what may or may not have already been authorized.
+pub fn key_push_cancelled(done: usize, total: usize) -> String {
+    format!(
+        "Push cancelled after {} of {} host(s). Re-run to finish the rest.",
+        done, total,
+    )
+}
+
+/// Body line shown inside the confirm dialog.
+pub fn key_push_confirm_body(key_name: &str, host_count: usize) -> String {
+    if host_count == 1 {
+        format!("Push {} to 1 host?", key_name)
+    } else {
+        format!("Push {} to {} hosts?", key_name, host_count)
+    }
+}
+
+/// Toast after a fully successful push run.
+pub fn key_push_success(appended: usize, already: usize) -> String {
+    if appended == 0 && already > 0 {
+        format!("Key already present on {} host(s). Nothing to do.", already)
+    } else if already == 0 {
+        format!("Pushed to {} host(s).", appended)
+    } else {
+        format!(
+            "Pushed to {} host(s). Already present on {}.",
+            appended, already
+        )
+    }
+}
+
+/// Toast after a partial-failure push run. The detailed per-host errors
+/// land in the sticky-error overlay rendered separately.
+pub fn key_push_partial_failure(succeeded: usize, failed: usize) -> String {
+    format!("Pushed to {} host(s). {} failed.", succeeded, failed)
+}
+
+/// Sticky-error overlay body when every host failed.
+pub fn key_push_all_failed(count: usize) -> String {
+    format!(
+        "Push failed for all {} host(s). Check the host log for details.",
+        count
+    )
+}
+
 pub fn proxy_jump_set(alias: &str) -> String {
     format!("Jumping through {}.", alias)
 }

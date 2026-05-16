@@ -61,8 +61,10 @@ pub(super) fn clone_selected(app: &mut App) {
 
 /// `V` — collect all hosts with a Vault SSH role, filter the ones that need
 /// renewal, and transition to the bulk-sign confirmation screen. Cancels an
-/// in-progress signing thread if one is already running.
-pub(super) fn initiate_bulk_vault_sign(app: &mut App) {
+/// in-progress signing thread if one is already running. Shared between the
+/// Host list tab and the Keys tab; both surfaces operate on the global host
+/// list so the entry point lives here.
+pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
     if !app.has_any_vault_role() {
         app.notify(crate::messages::VAULT_NO_ROLE_CONFIGURED);
         return;

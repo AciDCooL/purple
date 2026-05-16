@@ -62,6 +62,18 @@ pub enum AppEvent {
         completed: usize,
         total: usize,
     },
+    /// Result of one host in a key-push run. Aggregated in
+    /// `app.keys.push.results` by the main loop; the summary toast / sticky
+    /// error overlay fires once `results.len() == expected_count`.
+    ///
+    /// `run_id` matches `app.keys.push.run_id` at the moment the worker
+    /// was spawned. Results whose `run_id` no longer matches the current
+    /// run are stale (a previous cancelled run's tail event) and dropped
+    /// before they touch the accumulator.
+    KeyPushResult {
+        run_id: u64,
+        result: crate::key_push::KeyPushResult,
+    },
     ContainerListing {
         alias: String,
         result: Result<crate::containers::ContainerListing, crate::containers::ContainerError>,
@@ -258,6 +270,7 @@ impl EventHandler {
                 | AppEvent::SnippetHostDone { .. }
                 | AppEvent::SnippetAllDone { .. }
                 | AppEvent::SnippetProgress { .. }
+                | AppEvent::KeyPushResult { .. }
                 | AppEvent::ContainerListing { .. }
                 | AppEvent::ContainerActionComplete { .. }
                 | AppEvent::ContainerInspectComplete { .. }

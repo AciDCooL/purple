@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                 │
+│  purple       hosts      tunnels      containers      keys                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 25 ──────────────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                IMAGE                                                            UPTIME  │
@@ -18,7 +18,7 @@
 │   ● pg-exporter         prometheuscommunity/postgres-exporter:0.15                          30d  │
 │   ● pgbouncer           pgbouncer:1.21                                                      30d  │
 │   ● postgres-primary    postgres:16-alpine                                                  30d  │
-│  ── do-web-ams ────────────────────────────────────────────────────────────────────────────────  │
+│  ── do-work-web-ams ───────────────────────────────────────────────────────────────────────────  │
 │   ● app                 myapp:3.2.1                                                          8d  │
 │   ● nginx               nginx:1.25                                                           8d  │
 │   ● redis               redis:7-alpine                                                       8d  │
@@ -160,6 +160,10 @@
 (47,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (48,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (49,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
+(56,1) fg=Reset bg=Reset mod=DIM
+(57,1) fg=Reset bg=Reset mod=DIM
+(58,1) fg=Reset bg=Reset mod=DIM
+(59,1) fg=Reset bg=Reset mod=DIM
 (99,1) fg=Reset bg=Reset mod=DIM
 (0,2) fg=Reset bg=Reset mod=DIM
 (1,2) fg=Reset bg=Reset mod=DIM
@@ -1819,11 +1823,11 @@
 (14,20) fg=Reset bg=Reset mod=BOLD
 (15,20) fg=Reset bg=Reset mod=BOLD
 (16,20) fg=Reset bg=Reset mod=BOLD
-(17,20) fg=Reset bg=Reset mod=DIM
-(18,20) fg=Reset bg=Reset mod=DIM
-(19,20) fg=Reset bg=Reset mod=DIM
-(20,20) fg=Reset bg=Reset mod=DIM
-(21,20) fg=Reset bg=Reset mod=DIM
+(17,20) fg=Reset bg=Reset mod=BOLD
+(18,20) fg=Reset bg=Reset mod=BOLD
+(19,20) fg=Reset bg=Reset mod=BOLD
+(20,20) fg=Reset bg=Reset mod=BOLD
+(21,20) fg=Reset bg=Reset mod=BOLD
 (22,20) fg=Reset bg=Reset mod=DIM
 (23,20) fg=Reset bg=Reset mod=DIM
 (24,20) fg=Reset bg=Reset mod=DIM

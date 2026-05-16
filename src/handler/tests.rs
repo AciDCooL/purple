@@ -3370,6 +3370,14 @@ fn test_snippet_picker_d_last_item_selects_none() {
 
 #[test]
 fn test_snippet_picker_d_rollback_on_save_failure() {
+    // Skip under root (e.g. inside CI Docker containers): root can
+    // mkdir -p any path including /nonexistent/dir, so the save would
+    // actually succeed and the rollback assertion would fire spuriously.
+    // SAFETY: getuid() is a thread-safe POSIX call with no preconditions.
+    #[cfg(unix)]
+    if unsafe { libc::getuid() } == 0 {
+        return;
+    }
     let mut app = make_snippet_app();
     // Point to a non-writable path to force save failure
     app.snippets.store.path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
@@ -3546,6 +3554,12 @@ fn test_snippet_form_submit_rejects_duplicate_name() {
 
 #[test]
 fn test_snippet_form_submit_rollback_on_save_failure() {
+    // Skip under root: see test_snippet_picker_d_rollback_on_save_failure
+    // for the explanation.
+    #[cfg(unix)]
+    if unsafe { libc::getuid() } == 0 {
+        return;
+    }
     let mut app = make_snippet_app();
     // Force save failure
     app.snippets.store.path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
@@ -3568,6 +3582,12 @@ fn test_snippet_form_submit_rollback_on_save_failure() {
 
 #[test]
 fn test_snippet_form_edit_rename_rollback_on_save_failure() {
+    // Skip under root: see test_snippet_picker_d_rollback_on_save_failure
+    // for the explanation.
+    #[cfg(unix)]
+    if unsafe { libc::getuid() } == 0 {
+        return;
+    }
     let mut app = make_snippet_app();
     // Force save failure
     app.snippets.store.path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
@@ -5854,13 +5874,14 @@ fn shift_tab_on_host_list_switches_pages() {
         &tx,
     );
 
-    // Three-tab cycle: Hosts <- Containers <- Tunnels <- Hosts.
-    assert_eq!(app.top_page, crate::app::TopPage::Containers);
+    // Four-tab cycle: Hosts <- Keys <- Containers <- Tunnels <- Hosts.
+    // One BackTab from Hosts lands on Keys.
+    assert_eq!(app.top_page, crate::app::TopPage::Keys);
     assert!(matches!(app.screen, Screen::HostList));
 }
 
 #[test]
-fn tab_three_times_returns_to_hosts_page() {
+fn tab_four_times_returns_to_hosts_page() {
     let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
     assert_eq!(app.top_page, crate::app::TopPage::Hosts);
 
@@ -5869,6 +5890,8 @@ fn tab_three_times_returns_to_hosts_page() {
     assert_eq!(app.top_page, crate::app::TopPage::Tunnels);
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(app.top_page, crate::app::TopPage::Containers);
+    let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
+    assert_eq!(app.top_page, crate::app::TopPage::Keys);
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
 
     assert_eq!(app.top_page, crate::app::TopPage::Hosts);
@@ -9163,12 +9186,12 @@ fn containers_overview_s_keeps_cursor_on_same_alias_after_flip() {
 }
 
 #[test]
-fn containers_overview_tab_advances_to_hosts() {
+fn containers_overview_tab_advances_to_keys() {
     let mut app = make_containers_overview_app();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    // Containers -> Hosts (cycle: Hosts -> Tunnels -> Containers -> Hosts).
-    assert!(matches!(app.top_page, crate::app::TopPage::Hosts));
+    // Containers -> Keys (cycle: Hosts -> Tunnels -> Containers -> Keys -> Hosts).
+    assert!(matches!(app.top_page, crate::app::TopPage::Keys));
     assert!(matches!(app.screen, Screen::HostList));
 }
 

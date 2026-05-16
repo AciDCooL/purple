@@ -266,7 +266,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
 /// Render the key picker popup overlay. Public for reuse from provider form.
 pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
-    if app.keys.is_empty() {
+    if app.keys.list.is_empty() {
         super::render_picker_empty_overlay(frame, "Select Key", "No keys found in ~/.ssh/");
         return;
     }
@@ -284,6 +284,7 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
 
     let name_w = design::padded_usize(
         app.keys
+            .list
             .iter()
             .map(|k| k.name.len())
             .max()
@@ -292,6 +293,7 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
     );
     let type_w = design::padded_usize(
         app.keys
+            .list
             .iter()
             .map(|k| k.type_display().len())
             .max()
@@ -304,6 +306,7 @@ pub fn render_key_picker_overlay(frame: &mut Frame, app: &mut App) {
 
     let items: Vec<ListItem> = app
         .keys
+        .list
         .iter()
         .map(|key| {
             let type_display = key.type_display();

@@ -196,6 +196,70 @@ pub fn render_confirm_purge_stale(
     frame.render_widget(Paragraph::new(footer), footer_area);
 }
 
+/// Destructive confirm: append `<key>.pub` to `authorized_keys` on every
+/// host in `aliases`. Body lists up to 6 aliases (then `+N more`) so the
+/// user sees what is about to happen. Footer renders action verbs both
+/// sides via `design::confirm_footer_destructive("push", "keep")`.
+pub fn render_key_push(frame: &mut Frame, app: &App, key_index: usize, aliases: &[String]) {
+    let key_name = app
+        .keys
+        .list
+        .get(key_index)
+        .map(|k| format!("{}.pub", k.name))
+        .unwrap_or_else(|| "key".to_string());
+    let count = aliases.len();
+
+    let max_shown = 6;
+    let mut host_lines: Vec<Line> = aliases
+        .iter()
+        .take(max_shown)
+        .map(|a| {
+            let truncated = super::truncate(a, 46);
+            Line::from(Span::styled(truncated, theme::muted()))
+        })
+        .collect();
+    if count > max_shown {
+        let remaining = count - max_shown;
+        host_lines.push(Line::from(Span::styled(
+            format!(
+                "+{} more host{}",
+                remaining,
+                if remaining == 1 { "" } else { "s" }
+            ),
+            theme::muted(),
+        )));
+    }
+
+    // Block chrome: 2 border rows + 1 row top padding + 1 row bottom
+    // padding = 4 rows around the body. Body = blank + question +
+    // host_lines.
+    let inner_height = 2 + host_lines.len();
+    let height = (inner_height + 4) as u16;
+    let area = super::centered_rect_fixed(56, height, frame.area());
+
+    frame.render_widget(Clear, area);
+
+    // Push is idempotent (it appends a public key) — not a destructive
+    // action like delete or stop, so use the standard overlay block
+    // instead of the red `danger_block`. Padding matches the rhythm of
+    // the other confirm dialogs (host detail, snippet picker).
+    let block =
+        design::overlay_block("Push Key").padding(ratatui::widgets::Padding::new(1, 1, 1, 1));
+    let question = Line::from(Span::styled(
+        crate::messages::key_push_confirm_body(&key_name, count),
+        theme::bold(),
+    ));
+    let mut text = vec![question, Line::from("")];
+    text.extend(host_lines);
+
+    let paragraph = Paragraph::new(text).block(block);
+    frame.render_widget(paragraph, area);
+
+    let footer_area = design::render_overlay_footer(frame, area);
+    let footer = design::confirm_footer_destructive("push", "keep").to_line();
+    frame.render_widget(Paragraph::new(footer), footer_area);
+}
+
 pub fn render_confirm_vault_sign(frame: &mut Frame, _app: &App, signable: &[String]) {
     let count = signable.len();
     // Preview first 5 aliases, append "...and N more" when truncated.

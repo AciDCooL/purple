@@ -323,6 +323,15 @@ Host beta
 fn vault_cert_write_failure_leaves_disk_byte_identical() {
     use std::os::unix::fs::PermissionsExt;
 
+    // Skip under root (e.g. inside CI Docker containers): root ignores
+    // filesystem mode bits, so the 0o555 parent dir below would not
+    // actually block atomic_write and the write_result.is_err()
+    // assertion would fire spuriously.
+    // SAFETY: getuid() is a thread-safe POSIX call with no preconditions.
+    if unsafe { libc::getuid() } == 0 {
+        return;
+    }
+
     let tmp = TempDir::new("writefail");
     let config_path = tmp.path().join("config");
     let original = "\

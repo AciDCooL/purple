@@ -782,7 +782,7 @@ pub(super) fn handle_provider_form(
                 app.scan_keys();
                 app.ui.key_picker.open = true;
                 app.ui.key_picker.list = ratatui::widgets::ListState::default();
-                if !app.keys.is_empty() {
+                if !app.keys.list.is_empty() {
                     app.ui.key_picker.list.select(Some(0));
                 }
             } else if f == crate::app::ProviderFormField::Regions {

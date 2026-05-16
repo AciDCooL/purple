@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                 │
+│  purple       hosts      tunnels      containers      keys                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   FORWARD                                     SPEED     UPTIME    LAST▾ │
@@ -9,11 +9,11 @@
 │   ○ db-pri│                                                                         │        1h  │
 │   ○ db-pri│  ╭───────────────────────────────────────────────────────────────────╮  │        1h  │
 │   ○ monito│  │ █ Find anything                                                   │  │        2h  │
-│   ○ pve-db│  ╰───────────────────────────────────────────────────────────────────╯  │       17h  │
-│   ○ pve-re│                                                                         │       19h  │
-│   ○ pve-mo│   Actions   6 of 32                                                     │       21h  │
-│   ○ pve-mo│   Tunnels: Add tunnel                                               a   │       21h  │
-│   ○ do-wor│   Tunnels: Edit tunnel                                              e   │         —  │
+│   ○ do-wor│  ╰───────────────────────────────────────────────────────────────────╯  │       17h  │
+│   ○ pve-db│                                                                         │        1d  │
+│   ○ pve-re│   Actions   6 of 35                                                     │        1d  │
+│   ○ pve-mo│   Tunnels: Add tunnel                                               a   │        1d  │
+│   ○ pve-mo│   Tunnels: Edit tunnel                                              e   │        1d  │
 │           │   Tunnels: Delete tunnel                                            d   │            │
 │           │   Hosts: Add host                                                   a   │            │
 │           │   Tunnels: Manage tunnels                                           T   │            │

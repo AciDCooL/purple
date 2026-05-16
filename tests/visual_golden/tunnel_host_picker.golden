@@ -1,27 +1,27 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                 │
+│  purple       hosts      tunnels      containers      keys                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   FORWARD                                     SPEED     UPTIME    LAST▾ │
-│ ──────────────────╭ Add Tunnel › Select Host (26) ───────────────────────────╮────────────────── │
+│ ──────────────────╭ Add Tunnel › Select Host (31) ───────────────────────────╮────────────────── │
 │ ▌ ○ bastion-ams   │  type to filter hosts...                                 │              <1m  │
 │   ○ bastion-ams   │ ─────────────────────────────────────────────────────────│              <1m  │
 │   ○ db-primary    │  bastion-ams  140.82.121.3                               │               1h  │
 │   ○ db-primary    │  db-primary  10.30.1.5                                   │               1h  │
 │   ○ monitoring    │  db-proton  db1.example.com                              │               2h  │
-│   ○ pve-db-01     │  monitoring  10.30.2.10                                  │              17h  │
-│   ○ pve-redis     │  gateway-vpn  185.199.108.5                              │              19h  │
-│   ○ pve-monitor   │  podman-edge  10.20.30.40                                │              21h  │
-│   ○ pve-monitor   │  aws-api-prod  52.47.100.23                              │              21h  │
-│   ○ do-work-stagin│  aws-api-staging  52.47.100.24                           │                —  │
+│   ○ do-work-stagin│  monitoring  10.30.2.10                                  │              17h  │
+│   ○ pve-db-01     │  gateway-vpn  185.199.108.5                              │               1d  │
+│   ○ pve-redis     │  podman-edge  10.20.30.40                                │               1d  │
+│   ○ pve-monitor   │  prod-eu1  195.144.107.61                                │               1d  │
+│   ○ pve-monitor   │  prod-eu2  195.144.107.62                                │               1d  │
+│                   │  customer-jump  198.51.100.10                            │                   │
+│                   │  customer-db-1  198.51.100.20                            │                   │
+│                   │  legacy-prod  203.0.113.45                               │                   │
+│                   │  aws-api-prod  52.47.100.23                              │                   │
+│                   │  aws-api-staging  52.47.100.24                           │                   │
 │                   │  aws-worker-eu  3.120.55.17                              │                   │
 │                   │  aws-batch-us  52.47.100.25                              │                   │
 │                   │  aws-ml-eu  3.120.55.18                                  │                   │
-│                   │  aws-cache-eu  3.120.55.19                               │                   │
-│                   │  do-work-web-ams  104.248.38.91                          │                   │
-│                   │  do-work-staging-ams  104.248.38.92                      │                   │
-│                   │  do-work-worker-ams  104.248.38.93                       │                   │
-│                   │  do-work-ci-runner  104.248.38.94                        │                   │
 │                   ╰──────────────────────────────────────────────────────────╯                   │
 │                    Enter  select    ↑↓  select    Esc  cancel                                    │
 │                                                                                                  │
@@ -1244,10 +1244,10 @@
 (28,14) fg=Reset bg=Reset mod=BOLD
 (29,14) fg=Reset bg=Reset mod=BOLD
 (30,14) fg=Reset bg=Reset mod=BOLD
-(31,14) fg=Reset bg=Reset mod=BOLD
-(32,14) fg=Reset bg=Reset mod=BOLD
-(33,14) fg=Reset bg=Reset mod=BOLD
-(34,14) fg=Reset bg=Reset mod=BOLD
+(33,14) fg=Reset bg=Reset mod=DIM
+(34,14) fg=Reset bg=Reset mod=DIM
+(35,14) fg=Reset bg=Reset mod=DIM
+(36,14) fg=Reset bg=Reset mod=DIM
 (37,14) fg=Reset bg=Reset mod=DIM
 (38,14) fg=Reset bg=Reset mod=DIM
 (39,14) fg=Reset bg=Reset mod=DIM
@@ -1258,8 +1258,6 @@
 (44,14) fg=Reset bg=Reset mod=DIM
 (45,14) fg=Reset bg=Reset mod=DIM
 (46,14) fg=Reset bg=Reset mod=DIM
-(47,14) fg=Reset bg=Reset mod=DIM
-(48,14) fg=Reset bg=Reset mod=DIM
 (79,14) fg=Reset bg=Reset mod=DIM
 (80,14) fg=DarkGray bg=Reset mod=DIM
 (81,14) fg=DarkGray bg=Reset mod=DIM
@@ -1310,13 +1308,13 @@
 (28,15) fg=Reset bg=Reset mod=BOLD
 (29,15) fg=Reset bg=Reset mod=BOLD
 (30,15) fg=Reset bg=Reset mod=BOLD
-(31,15) fg=Reset bg=Reset mod=BOLD
-(32,15) fg=Reset bg=Reset mod=BOLD
-(33,15) fg=Reset bg=Reset mod=BOLD
-(34,15) fg=Reset bg=Reset mod=BOLD
-(35,15) fg=Reset bg=Reset mod=BOLD
-(36,15) fg=Reset bg=Reset mod=BOLD
-(37,15) fg=Reset bg=Reset mod=BOLD
+(33,15) fg=Reset bg=Reset mod=DIM
+(34,15) fg=Reset bg=Reset mod=DIM
+(35,15) fg=Reset bg=Reset mod=DIM
+(36,15) fg=Reset bg=Reset mod=DIM
+(37,15) fg=Reset bg=Reset mod=DIM
+(38,15) fg=Reset bg=Reset mod=DIM
+(39,15) fg=Reset bg=Reset mod=DIM
 (40,15) fg=Reset bg=Reset mod=DIM
 (41,15) fg=Reset bg=Reset mod=DIM
 (42,15) fg=Reset bg=Reset mod=DIM
@@ -1324,11 +1322,6 @@
 (44,15) fg=Reset bg=Reset mod=DIM
 (45,15) fg=Reset bg=Reset mod=DIM
 (46,15) fg=Reset bg=Reset mod=DIM
-(47,15) fg=Reset bg=Reset mod=DIM
-(48,15) fg=Reset bg=Reset mod=DIM
-(49,15) fg=Reset bg=Reset mod=DIM
-(50,15) fg=Reset bg=Reset mod=DIM
-(51,15) fg=Reset bg=Reset mod=DIM
 (79,15) fg=Reset bg=Reset mod=DIM
 (80,15) fg=DarkGray bg=Reset mod=DIM
 (81,15) fg=DarkGray bg=Reset mod=DIM
@@ -1395,6 +1388,8 @@
 (46,16) fg=Reset bg=Reset mod=DIM
 (47,16) fg=Reset bg=Reset mod=DIM
 (48,16) fg=Reset bg=Reset mod=DIM
+(49,16) fg=Reset bg=Reset mod=DIM
+(50,16) fg=Reset bg=Reset mod=DIM
 (79,16) fg=Reset bg=Reset mod=DIM
 (80,16) fg=DarkGray bg=Reset mod=DIM
 (81,16) fg=DarkGray bg=Reset mod=DIM
@@ -1449,7 +1444,7 @@
 (32,17) fg=Reset bg=Reset mod=BOLD
 (33,17) fg=Reset bg=Reset mod=BOLD
 (34,17) fg=Reset bg=Reset mod=BOLD
-(37,17) fg=Reset bg=Reset mod=DIM
+(35,17) fg=Reset bg=Reset mod=BOLD
 (38,17) fg=Reset bg=Reset mod=DIM
 (39,17) fg=Reset bg=Reset mod=DIM
 (40,17) fg=Reset bg=Reset mod=DIM
@@ -1461,6 +1456,8 @@
 (46,17) fg=Reset bg=Reset mod=DIM
 (47,17) fg=Reset bg=Reset mod=DIM
 (48,17) fg=Reset bg=Reset mod=DIM
+(49,17) fg=Reset bg=Reset mod=DIM
+(50,17) fg=Reset bg=Reset mod=DIM
 (79,17) fg=Reset bg=Reset mod=DIM
 (80,17) fg=DarkGray bg=Reset mod=DIM
 (81,17) fg=DarkGray bg=Reset mod=DIM
@@ -1512,8 +1509,8 @@
 (29,18) fg=Reset bg=Reset mod=BOLD
 (30,18) fg=Reset bg=Reset mod=BOLD
 (31,18) fg=Reset bg=Reset mod=BOLD
-(34,18) fg=Reset bg=Reset mod=DIM
-(35,18) fg=Reset bg=Reset mod=DIM
+(32,18) fg=Reset bg=Reset mod=BOLD
+(33,18) fg=Reset bg=Reset mod=BOLD
 (36,18) fg=Reset bg=Reset mod=DIM
 (37,18) fg=Reset bg=Reset mod=DIM
 (38,18) fg=Reset bg=Reset mod=DIM
@@ -1523,6 +1520,9 @@
 (42,18) fg=Reset bg=Reset mod=DIM
 (43,18) fg=Reset bg=Reset mod=DIM
 (44,18) fg=Reset bg=Reset mod=DIM
+(45,18) fg=Reset bg=Reset mod=DIM
+(46,18) fg=Reset bg=Reset mod=DIM
+(47,18) fg=Reset bg=Reset mod=DIM
 (79,18) fg=Reset bg=Reset mod=DIM
 (80,18) fg=DarkGray bg=Reset mod=DIM
 (81,18) fg=DarkGray bg=Reset mod=DIM
@@ -1588,6 +1588,7 @@
 (45,19) fg=Reset bg=Reset mod=DIM
 (46,19) fg=Reset bg=Reset mod=DIM
 (47,19) fg=Reset bg=Reset mod=DIM
+(48,19) fg=Reset bg=Reset mod=DIM
 (79,19) fg=Reset bg=Reset mod=DIM
 (80,19) fg=DarkGray bg=Reset mod=DIM
 (81,19) fg=DarkGray bg=Reset mod=DIM
@@ -1657,7 +1658,6 @@
 (49,20) fg=Reset bg=Reset mod=DIM
 (50,20) fg=Reset bg=Reset mod=DIM
 (51,20) fg=Reset bg=Reset mod=DIM
-(52,20) fg=Reset bg=Reset mod=DIM
 (79,20) fg=Reset bg=Reset mod=DIM
 (80,20) fg=DarkGray bg=Reset mod=DIM
 (81,20) fg=DarkGray bg=Reset mod=DIM
@@ -1713,25 +1713,17 @@
 (33,21) fg=Reset bg=Reset mod=BOLD
 (34,21) fg=Reset bg=Reset mod=BOLD
 (35,21) fg=Reset bg=Reset mod=BOLD
-(36,21) fg=Reset bg=Reset mod=BOLD
-(37,21) fg=Reset bg=Reset mod=BOLD
-(38,21) fg=Reset bg=Reset mod=BOLD
-(39,21) fg=Reset bg=Reset mod=BOLD
-(40,21) fg=Reset bg=Reset mod=BOLD
-(41,21) fg=Reset bg=Reset mod=BOLD
+(38,21) fg=Reset bg=Reset mod=DIM
+(39,21) fg=Reset bg=Reset mod=DIM
+(40,21) fg=Reset bg=Reset mod=DIM
+(41,21) fg=Reset bg=Reset mod=DIM
+(42,21) fg=Reset bg=Reset mod=DIM
+(43,21) fg=Reset bg=Reset mod=DIM
 (44,21) fg=Reset bg=Reset mod=DIM
 (45,21) fg=Reset bg=Reset mod=DIM
 (46,21) fg=Reset bg=Reset mod=DIM
 (47,21) fg=Reset bg=Reset mod=DIM
 (48,21) fg=Reset bg=Reset mod=DIM
-(49,21) fg=Reset bg=Reset mod=DIM
-(50,21) fg=Reset bg=Reset mod=DIM
-(51,21) fg=Reset bg=Reset mod=DIM
-(52,21) fg=Reset bg=Reset mod=DIM
-(53,21) fg=Reset bg=Reset mod=DIM
-(54,21) fg=Reset bg=Reset mod=DIM
-(55,21) fg=Reset bg=Reset mod=DIM
-(56,21) fg=Reset bg=Reset mod=DIM
 (79,21) fg=Reset bg=Reset mod=DIM
 (80,21) fg=DarkGray bg=Reset mod=DIM
 (81,21) fg=DarkGray bg=Reset mod=DIM
@@ -1786,25 +1778,18 @@
 (32,22) fg=Reset bg=Reset mod=BOLD
 (33,22) fg=Reset bg=Reset mod=BOLD
 (34,22) fg=Reset bg=Reset mod=BOLD
-(35,22) fg=Reset bg=Reset mod=BOLD
-(36,22) fg=Reset bg=Reset mod=BOLD
-(37,22) fg=Reset bg=Reset mod=BOLD
-(38,22) fg=Reset bg=Reset mod=BOLD
-(39,22) fg=Reset bg=Reset mod=BOLD
-(40,22) fg=Reset bg=Reset mod=BOLD
+(37,22) fg=Reset bg=Reset mod=DIM
+(38,22) fg=Reset bg=Reset mod=DIM
+(39,22) fg=Reset bg=Reset mod=DIM
+(40,22) fg=Reset bg=Reset mod=DIM
+(41,22) fg=Reset bg=Reset mod=DIM
+(42,22) fg=Reset bg=Reset mod=DIM
 (43,22) fg=Reset bg=Reset mod=DIM
 (44,22) fg=Reset bg=Reset mod=DIM
 (45,22) fg=Reset bg=Reset mod=DIM
 (46,22) fg=Reset bg=Reset mod=DIM
 (47,22) fg=Reset bg=Reset mod=DIM
 (48,22) fg=Reset bg=Reset mod=DIM
-(49,22) fg=Reset bg=Reset mod=DIM
-(50,22) fg=Reset bg=Reset mod=DIM
-(51,22) fg=Reset bg=Reset mod=DIM
-(52,22) fg=Reset bg=Reset mod=DIM
-(53,22) fg=Reset bg=Reset mod=DIM
-(54,22) fg=Reset bg=Reset mod=DIM
-(55,22) fg=Reset bg=Reset mod=DIM
 (79,22) fg=Reset bg=Reset mod=DIM
 (80,22) fg=DarkGray bg=Reset mod=DIM
 (81,22) fg=DarkGray bg=Reset mod=DIM
@@ -1856,27 +1841,17 @@
 (29,23) fg=Reset bg=Reset mod=BOLD
 (30,23) fg=Reset bg=Reset mod=BOLD
 (31,23) fg=Reset bg=Reset mod=BOLD
-(32,23) fg=Reset bg=Reset mod=BOLD
-(33,23) fg=Reset bg=Reset mod=BOLD
-(34,23) fg=Reset bg=Reset mod=BOLD
-(35,23) fg=Reset bg=Reset mod=BOLD
-(36,23) fg=Reset bg=Reset mod=BOLD
-(37,23) fg=Reset bg=Reset mod=BOLD
-(38,23) fg=Reset bg=Reset mod=BOLD
-(39,23) fg=Reset bg=Reset mod=BOLD
+(34,23) fg=Reset bg=Reset mod=DIM
+(35,23) fg=Reset bg=Reset mod=DIM
+(36,23) fg=Reset bg=Reset mod=DIM
+(37,23) fg=Reset bg=Reset mod=DIM
+(38,23) fg=Reset bg=Reset mod=DIM
+(39,23) fg=Reset bg=Reset mod=DIM
+(40,23) fg=Reset bg=Reset mod=DIM
+(41,23) fg=Reset bg=Reset mod=DIM
 (42,23) fg=Reset bg=Reset mod=DIM
 (43,23) fg=Reset bg=Reset mod=DIM
 (44,23) fg=Reset bg=Reset mod=DIM
-(45,23) fg=Reset bg=Reset mod=DIM
-(46,23) fg=Reset bg=Reset mod=DIM
-(47,23) fg=Reset bg=Reset mod=DIM
-(48,23) fg=Reset bg=Reset mod=DIM
-(49,23) fg=Reset bg=Reset mod=DIM
-(50,23) fg=Reset bg=Reset mod=DIM
-(51,23) fg=Reset bg=Reset mod=DIM
-(52,23) fg=Reset bg=Reset mod=DIM
-(53,23) fg=Reset bg=Reset mod=DIM
-(54,23) fg=Reset bg=Reset mod=DIM
 (79,23) fg=Reset bg=Reset mod=DIM
 (80,23) fg=DarkGray bg=Reset mod=DIM
 (81,23) fg=DarkGray bg=Reset mod=DIM

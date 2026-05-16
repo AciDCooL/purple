@@ -398,6 +398,7 @@ pub(crate) fn top_bar_spans(app: &App) -> Vec<Span<'static>> {
     let host_active = app.top_page == TopPage::Hosts;
     let tunnel_active = app.top_page == TopPage::Tunnels;
     let containers_active = app.top_page == TopPage::Containers;
+    let keys_active = app.top_page == TopPage::Keys;
 
     vec![
         Span::styled(" purple ", theme::brand_badge()),
@@ -423,6 +424,15 @@ pub(crate) fn top_bar_spans(app: &App) -> Vec<Span<'static>> {
         Span::styled(
             "containers",
             if containers_active {
+                theme::nav_active()
+            } else {
+                theme::muted()
+            },
+        ),
+        Span::raw(TOP_BAR_GAP),
+        Span::styled(
+            "keys",
+            if keys_active {
                 theme::nav_active()
             } else {
                 theme::muted()

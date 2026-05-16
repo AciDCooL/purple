@@ -1,7 +1,5 @@
 use std::io;
 use std::path::PathBuf;
-#[cfg(test)]
-use std::sync::Mutex;
 
 use log::debug;
 
@@ -19,14 +17,14 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// Cross-suite test lock for the `demo_flag` global. `with_temp_prefs` and
-/// `visual_regression_tests::setup` both acquire it so they cannot run
-/// concurrently: a visual test's `build_demo_app()` flips the demo flag,
-/// which would cause a parallel `preferences::tests` `save_value` call to
-/// short-circuit. The path override is thread-local and no longer needs
-/// this lock.
+/// Cross-suite test lock for the `demo_flag` global. Aliases the
+/// library's `purple_ssh::demo_flag::GLOBAL_TEST_LOCK` so binary-only
+/// callers (here, plus visual regression) share the same mutex with
+/// library-only callers (key_activity tests). One mutex per process is
+/// the invariant; the binary-vs-library crate split must not produce
+/// two distinct locks.
 #[cfg(test)]
-pub(crate) static GLOBAL_TEST_IO_LOCK: Mutex<()> = Mutex::new(());
+pub(crate) use crate::demo_flag::GLOBAL_TEST_LOCK as GLOBAL_TEST_IO_LOCK;
 
 /// Override the preferences file path (used in tests to avoid writing to ~/.purple).
 /// Scoped to the calling thread only.

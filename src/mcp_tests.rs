@@ -1249,6 +1249,13 @@ fn audit_log_creates_parent_directory() {
 #[test]
 fn audit_log_init_failure_does_not_break_dispatch() {
     use std::os::unix::fs::PermissionsExt;
+    // Skip under root (e.g. inside CI Docker containers): root ignores
+    // filesystem mode bits, so the 0o555 parent below would not actually
+    // block file creation and the assertion would fire spuriously.
+    // SAFETY: getuid() is a thread-safe POSIX call with no preconditions.
+    if unsafe { libc::getuid() } == 0 {
+        return;
+    }
     // Build an unwriteable parent in a tempdir so the test is portable
     // across Linux and macOS (no /proc dependency).
     let dir = tempfile::tempdir().unwrap();

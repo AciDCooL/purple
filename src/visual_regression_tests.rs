@@ -386,6 +386,240 @@ fn visual_tunnel_host_picker_filtered() {
     assert_golden("tunnel_host_picker_filtered", &actual);
 }
 
+/// Keys tab default layout: master list + Vault SSH TTL strip on top.
+/// The demo config has at least one host with a `purple:vault-ssh` role
+/// and a populated `vault.cert_cache` so the strip renders with several
+/// gauge rows in distinct color tiers.
+#[test]
+fn visual_keys_overview() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    app.keys.list_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("keys_overview", &actual);
+}
+
+/// Keys tab with the cursor on a hardware-bound `sk-ed25519` key. The
+/// detail pane exercises the hardware-token Drunken Bishop variant and
+/// the `sk-ed` algorithm badge styling.
+#[test]
+fn visual_keys_overview_hardware_key() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    // Demo key #1 is yubikey_work (sk-ED25519).
+    app.keys.list_state.select(Some(1));
+    let actual = render_screen(&mut app);
+    assert_golden("keys_overview_hardware", &actual);
+}
+
+/// Keys tab without any configured Vault SSH role. The strip stays hidden
+/// and the master pane takes the full vertical space minus the top bar
+/// and footer. Built by clearing the demo host list's `vault_ssh` field.
+#[test]
+fn visual_keys_overview_no_vault() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    app.keys.list_state.select(Some(0));
+    for host in &mut app.hosts_state.list {
+        host.vault_ssh = None;
+    }
+    app.vault.cert_cache.clear();
+    let actual = render_screen(&mut app);
+    assert_golden("keys_overview_no_vault", &actual);
+}
+
+/// Keys tab on a wide + tall terminal (200x40). At this size the hero
+/// renders three side-by-side cards (Keys list / Randomart / Info) and
+/// the Linked Hosts grid below. Pins the layout under visual regression
+/// so a future refactor cannot silently regress it.
+#[test]
+fn visual_keys_overview_two_cards() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    app.keys.list_state.select(Some(0));
+    let backend = TestBackend::new(200, 40);
+    let mut terminal = Terminal::new(backend).expect("create terminal");
+    let mut anim = AnimationState::default();
+    terminal
+        .draw(|frame| ui::render(frame, &mut app, &mut anim))
+        .expect("render frame");
+    let buf = terminal.backend().buffer().clone();
+    assert_golden("keys_overview_two_cards", &serialize_buffer(&buf));
+}
+
+/// Keys tab on a wide terminal with 31 synthetic linked hosts so the
+/// Linked Hosts card distributes across three balanced columns and the
+/// Drunken Bishop card renders at its large 25×13 size. Uses a real
+/// 32-byte SHA256 fingerprint so the bishop walk fills the larger grid
+/// with the same density as the canonical 17×9 OpenSSH art.
+#[test]
+fn visual_keys_overview_many_linked_hosts() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    app.keys.list_state.select(Some(0));
+    app.keys.list[0].fingerprint = "SHA256:1LayGj+CVIvJfOnQqADAT52DoJHhSa30feF/23wbRuE".to_string();
+    let synthetic: Vec<String> = (1..=31).map(|i| format!("host-{:02}", i)).collect();
+    app.keys.list[0].linked_hosts = synthetic.clone();
+    for alias in &synthetic {
+        app.hosts_state
+            .list
+            .push(crate::ssh_config::model::HostEntry {
+                alias: alias.clone(),
+                hostname: format!("10.0.{}.{}", alias.len(), alias.len() * 3 % 250),
+                ..Default::default()
+            });
+    }
+    let backend = TestBackend::new(200, 40);
+    let mut terminal = Terminal::new(backend).expect("create terminal");
+    let mut anim = AnimationState::default();
+    terminal
+        .draw(|frame| ui::render(frame, &mut app, &mut anim))
+        .expect("render frame");
+    let buf = terminal.backend().buffer().clone();
+    assert_golden("keys_overview_many_linked_hosts", &serialize_buffer(&buf));
+}
+
+/// Keys tab on a narrow terminal (80 cols, below `HERO_MIN_WIDTH = 60`
+/// after the Keys list eats its share). The hero falls back to a single
+/// stacked card. Confirms the responsive collapse path renders without
+/// the side-by-side info card.
+#[test]
+fn visual_keys_overview_narrow() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    app.keys.list_state.select(Some(0));
+    let backend = TestBackend::new(80, 30);
+    let mut terminal = Terminal::new(backend).expect("create terminal");
+    let mut anim = AnimationState::default();
+    terminal
+        .draw(|frame| ui::render(frame, &mut app, &mut anim))
+        .expect("render frame");
+    let buf = terminal.backend().buffer().clone();
+    assert_golden("keys_overview_narrow", &serialize_buffer(&buf));
+}
+
+/// Keys tab in search mode with a query that matches a subset of keys.
+/// Confirms the search bar renders above the column header, the master
+/// pane title shows `<query> (N/M)` with the filtered count, and the
+/// list contains only matching rows.
+#[test]
+fn visual_keys_overview_search() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    app.search.query = Some("rsa".to_string());
+    app.keys.list_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("keys_overview_search", &actual);
+}
+
+/// Keys tab in search mode with a query that matches nothing. Confirms
+/// the master pane renders an empty list with the search bar's
+/// filtered count showing 0.
+#[test]
+fn visual_keys_overview_search_no_match() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    app.search.query = Some("xyzzy".to_string());
+    app.keys.list_state.select(None);
+    let actual = render_screen(&mut app);
+    assert_golden("keys_overview_search_no_match", &actual);
+}
+
+/// Push-host picker freshly opened: no hosts selected yet. Vault-ssh
+/// hosts render with `[-]` and a `(vault)` tag. Confirms the checkbox
+/// column, vault-disabled style and overlay title.
+#[test]
+fn visual_keys_push_picker() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    app.keys.list_state.select(Some(0));
+    app.screen = Screen::KeyPushPicker { key_index: 0 };
+    app.keys.push.list_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("keys_push_picker", &actual);
+}
+
+/// Push-host picker with two hosts toggled on. Confirms the `[x]` mark
+/// renders for selected non-vault hosts and the title shows the
+/// "<N> selected of <total>" tally.
+#[test]
+fn visual_keys_push_picker_selected() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    // Lock the demo host count so the picker title `2 selected of 31
+    // (N eligible)` is stable under demo-data drift. If a new host is
+    // added or removed from the demo this assertion fails with a clear
+    // message instead of an opaque golden diff.
+    assert_eq!(
+        app.hosts_state.list.len(),
+        31,
+        "demo host count drifted; update this assertion and regenerate the golden"
+    );
+    app.top_page = crate::app::TopPage::Keys;
+    app.keys.list_state.select(Some(0));
+    app.screen = Screen::KeyPushPicker { key_index: 0 };
+    app.keys.push.list_state.select(Some(0));
+    // Pick two non-vault hosts so the selected glyph renders.
+    let to_select: Vec<String> = app
+        .hosts_state
+        .list
+        .iter()
+        .filter(|h| h.vault_ssh.is_none())
+        .take(2)
+        .map(|h| h.alias.clone())
+        .collect();
+    for a in to_select {
+        app.keys.push.selected.insert(a);
+    }
+    let actual = render_screen(&mut app);
+    assert_golden("keys_push_picker_selected", &actual);
+}
+
+/// Push confirm dialog with the selected aliases listed. Footer uses
+/// the destructive action-verb pair `push` / `keep` via
+/// `design::confirm_footer_destructive`.
+#[test]
+fn visual_keys_push_confirm() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    let aliases: Vec<String> = app
+        .hosts_state
+        .list
+        .iter()
+        .filter(|h| h.vault_ssh.is_none())
+        .take(3)
+        .map(|h| h.alias.clone())
+        .collect();
+    app.keys.push.committed = aliases;
+    app.screen = Screen::ConfirmKeyPush { key_index: 0 };
+    let actual = render_screen(&mut app);
+    assert_golden("keys_push_confirm", &actual);
+}
+
+/// Keys tab with zero keys discovered. Shows the empty-state hint inside
+/// the master pane. Confirms the empty path renders the hint message and
+/// not the table header.
+#[test]
+fn visual_keys_overview_empty() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Keys;
+    app.keys.list.clear();
+    app.keys.list_state.select(None);
+    let actual = render_screen(&mut app);
+    assert_golden("keys_overview_empty", &actual);
+}
+
 #[test]
 fn visual_containers_overview() {
     let _g = setup();

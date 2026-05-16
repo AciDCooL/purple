@@ -1471,3 +1471,178 @@ fn resolve_vault_addr_legacy_marker_falls_back_to_first_match() {
     let addr = resolve_vault_addr(None, Some("digitalocean"), None, &config);
     assert_eq!(addr.as_deref(), Some("https://vault-work:8200"));
 }
+
+fn host_with_vault(alias: &str, role: Option<&str>) -> crate::ssh_config::model::HostEntry {
+    crate::ssh_config::model::HostEntry {
+        alias: alias.to_string(),
+        vault_ssh: role.map(|s| s.to_string()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn vault_ssh_in_use_false_when_no_roles() {
+    let hosts = vec![host_with_vault("a", None), host_with_vault("b", None)];
+    assert!(!vault_ssh_in_use(&hosts));
+}
+
+#[test]
+fn vault_ssh_in_use_true_when_any_role_present() {
+    let hosts = vec![
+        host_with_vault("a", None),
+        host_with_vault("b", Some("ops/prod")),
+    ];
+    assert!(vault_ssh_in_use(&hosts));
+}
+
+#[test]
+fn active_certs_for_strip_filters_to_valid_only() {
+    let hosts = vec![
+        host_with_vault("prod", Some("ops/prod")),
+        host_with_vault("stg", Some("ops/stg")),
+        host_with_vault("dev", Some("ops/dev")),
+        host_with_vault("nope", None),
+    ];
+    let mut cache = std::collections::HashMap::new();
+    cache.insert(
+        "prod".to_string(),
+        (
+            std::time::Instant::now(),
+            CertStatus::Valid {
+                expires_at: 0,
+                remaining_secs: 1200,
+                total_secs: 1800,
+            },
+            None,
+        ),
+    );
+    cache.insert(
+        "stg".to_string(),
+        (std::time::Instant::now(), CertStatus::Expired, None),
+    );
+    cache.insert(
+        "dev".to_string(),
+        (
+            std::time::Instant::now(),
+            CertStatus::Valid {
+                expires_at: 0,
+                remaining_secs: 900,
+                total_secs: 1800,
+            },
+            None,
+        ),
+    );
+    let rows = active_certs_for_strip(&hosts, &cache);
+    assert_eq!(rows.len(), 2);
+    // Sorted longest-remaining first
+    assert_eq!(rows[0].alias, "prod");
+    assert_eq!(rows[1].alias, "dev");
+}
+
+#[test]
+fn active_certs_for_strip_skips_hosts_without_role() {
+    let hosts = vec![host_with_vault("noole", None)];
+    let mut cache = std::collections::HashMap::new();
+    cache.insert(
+        "noole".to_string(),
+        (
+            std::time::Instant::now(),
+            CertStatus::Valid {
+                expires_at: 0,
+                remaining_secs: 600,
+                total_secs: 1800,
+            },
+            None,
+        ),
+    );
+    assert!(active_certs_for_strip(&hosts, &cache).is_empty());
+}
+
+#[test]
+fn cert_fill_ratio_clamps_edges() {
+    assert_eq!(cert_fill_ratio(0, 1800), 0.0);
+    assert_eq!(cert_fill_ratio(-10, 1800), 0.0);
+    assert_eq!(cert_fill_ratio(1800, 1800), 1.0);
+    assert_eq!(cert_fill_ratio(3600, 1800), 1.0);
+    assert_eq!(cert_fill_ratio(900, 0), 0.0);
+}
+
+#[test]
+fn cert_file_in_purple_dir_matches_purple_certs_path() {
+    assert!(cert_file_in_purple_dir(
+        "/Users/eric/.purple/certs/web01-cert.pub"
+    ));
+    assert!(cert_file_in_purple_dir("~/.purple/certs/api-prod-cert.pub"));
+}
+
+#[test]
+fn cert_file_in_purple_dir_rejects_other_paths() {
+    assert!(!cert_file_in_purple_dir(""));
+    assert!(!cert_file_in_purple_dir("~/.ssh/web01-cert.pub"));
+    assert!(!cert_file_in_purple_dir("/etc/ssh/cert.pub"));
+}
+
+#[test]
+fn has_purple_vault_context_via_marker_only() {
+    let mut h = host_with_vault("a", Some("ops/prod"));
+    h.certificate_file = String::new();
+    assert!(has_purple_vault_context(&h));
+}
+
+#[test]
+fn has_purple_vault_context_via_cert_file_only() {
+    let mut h = host_with_vault("a", None);
+    h.certificate_file = "/Users/eric/.purple/certs/a-cert.pub".to_string();
+    assert!(has_purple_vault_context(&h));
+}
+
+#[test]
+fn has_purple_vault_context_negative_when_neither_present() {
+    let mut h = host_with_vault("a", None);
+    h.certificate_file = "~/.ssh/random-cert.pub".to_string();
+    assert!(!has_purple_vault_context(&h));
+}
+
+#[test]
+fn vault_ssh_in_use_true_when_cert_file_points_at_purple_dir() {
+    let mut h = host_with_vault("a", None);
+    h.certificate_file = "/Users/eric/.purple/certs/a-cert.pub".to_string();
+    assert!(vault_ssh_in_use(&[h]));
+}
+
+#[test]
+fn active_certs_for_strip_includes_hosts_without_role_when_cert_path_is_purple() {
+    let mut h = host_with_vault("cli-signed", None);
+    h.certificate_file = "/Users/eric/.purple/certs/cli-signed-cert.pub".to_string();
+    let hosts = vec![h];
+    let mut cache = std::collections::HashMap::new();
+    cache.insert(
+        "cli-signed".to_string(),
+        (
+            std::time::Instant::now(),
+            CertStatus::Valid {
+                expires_at: 0,
+                remaining_secs: 1500,
+                total_secs: 1800,
+            },
+            None,
+        ),
+    );
+    let rows = active_certs_for_strip(&hosts, &cache);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].alias, "cli-signed");
+    // Role is empty when the marker is absent. The strip renders the
+    // alias and TTL gauge regardless; the role column just stays blank.
+    assert_eq!(rows[0].role, "");
+}
+
+#[test]
+fn cert_fill_ratio_forever_returns_one() {
+    assert_eq!(cert_fill_ratio(i64::MAX, i64::MAX), 1.0);
+}
+
+#[test]
+fn cert_fill_ratio_midpoint() {
+    // 900s of 1800s = exactly 50%.
+    assert!((cert_fill_ratio(900, 1800) - 0.5).abs() < 0.0001);
+}

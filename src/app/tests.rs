@@ -6631,11 +6631,13 @@ fn jump_commands_have_unique_keys_per_target() {
     let mut seen_hosts = std::collections::HashSet::new();
     let mut seen_tunnels = std::collections::HashSet::new();
     let mut seen_containers = std::collections::HashSet::new();
+    let mut seen_keys = std::collections::HashSet::new();
     for cmd in commands {
         let bucket = match cmd.target {
             crate::app::JumpActionTarget::Hosts => &mut seen_hosts,
             crate::app::JumpActionTarget::Tunnels => &mut seen_tunnels,
             crate::app::JumpActionTarget::Containers => &mut seen_containers,
+            crate::app::JumpActionTarget::Keys => &mut seen_keys,
         };
         assert!(
             bucket.insert(cmd.key),
@@ -8150,6 +8152,39 @@ fn post_init_silent_when_versions_equal() {
 }
 
 #[test]
+fn post_init_invokes_scan_keys() {
+    crate::preferences::tests_helpers::with_temp_prefs("post_init_scan_keys", |_path| {
+        crate::preferences::save_last_seen_version(env!("CARGO_PKG_VERSION")).unwrap();
+        let mut app = make_app("");
+        // Sentinel that only survives if scan_keys is NOT called: scan_keys
+        // unconditionally replaces self.keys.list when dirs::home_dir() returns Some.
+        app.keys.list.push(crate::ssh_keys::SshKeyInfo {
+            name: "_post_init_sentinel".into(),
+            display_path: String::new(),
+            key_type: String::new(),
+            bits: String::new(),
+            fingerprint: String::new(),
+            comment: String::new(),
+            linked_hosts: vec![],
+            bishop_art: String::new(),
+            strength_score: 0,
+            encrypted: false,
+            agent_loaded: false,
+            is_certificate: false,
+            mtime_ts: None,
+        });
+        app.post_init();
+        assert!(
+            !app.keys
+                .list
+                .iter()
+                .any(|k| k.name == "_post_init_sentinel"),
+            "post_init must invoke scan_keys so the Keys tab is populated on first Tab navigation"
+        );
+    });
+}
+
+#[test]
 fn apply_alias_renames_migrates_history_recents_and_collapsed_in_batch() {
     let dir = tempfile::tempdir().expect("tempdir");
     crate::app::jump::test_path::set(dir.path().join("recents.json"));
@@ -8530,4 +8565,47 @@ fn migrate_renames_persistent_state_empty_input_is_no_op() {
     // History file deliberately absent. The helper must not panic.
     crate::app::migrate_renames_persistent_state(&[]);
     crate::history::test_path::clear();
+}
+
+#[test]
+fn record_key_use_persists_via_app_boundary() {
+    use crate::key_activity::KeyActivityLog;
+
+    // Hold the cross-crate lock for the full duration of the test.
+    // `app.record_key_use` calls `KeyActivityLog::flush`, which reads
+    // `demo_flag::is_demo()` and early-returns when demo mode is active.
+    // A concurrent visual test flipping the flag would silently skip
+    // our write, breaking the event-count assertion below.
+    let _lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+
+    let activity_dir = tempfile::tempdir().expect("activity tempdir");
+    crate::key_activity::set_path_override(activity_dir.path().join("key_activity.json"));
+
+    let scratch = tempfile::tempdir().expect("scratch tempdir");
+    crate::preferences::set_path_override(scratch.path().join("preferences"));
+    let config = crate::ssh_config::model::SshConfigFile {
+        elements: crate::ssh_config::model::SshConfigFile::parse_content(""),
+        path: scratch.path().join("test_config"),
+        crlf: false,
+        bom: false,
+    };
+    let mut app = crate::app::App::new(config);
+
+    let before = crate::key_activity::now_secs();
+    app.record_key_use("prod-eu1", crate::key_activity::now_secs());
+    let after = crate::key_activity::now_secs();
+
+    let reloaded = KeyActivityLog::load();
+    assert_eq!(reloaded.events.len(), 1);
+    assert_eq!(reloaded.events[0].alias, "prod-eu1");
+    // Verify the timestamp came from the wall clock, not a stale or
+    // hardcoded source. A future regression that accidentally fed
+    // DEMO_NOW_SECS (or zero) into record would land outside this range.
+    let ts = reloaded.events[0].ts;
+    assert!(
+        ts >= before && ts <= after,
+        "event timestamp {ts} not in [{before}, {after}]"
+    );
 }

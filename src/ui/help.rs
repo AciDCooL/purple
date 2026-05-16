@@ -31,17 +31,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         matches!(return_screen, Screen::HostList) && matches!(app.top_page, TopPage::Tunnels);
     let is_containers_tab =
         matches!(return_screen, Screen::HostList) && matches!(app.top_page, TopPage::Containers);
+    let is_keys_tab =
+        matches!(return_screen, Screen::HostList) && matches!(app.top_page, TopPage::Keys);
     let is_host_list = !is_tunnels_tab
         && !is_containers_tab
+        && !is_keys_tab
         && matches!(return_screen, Screen::HostList | Screen::Welcome { .. });
     // All top-level tabs share the same overlay chrome: logo, version,
     // wiki/issues info block, two-column body. Sub-screens use a
     // smaller compact layout.
-    let is_main_view = is_host_list || is_tunnels_tab || is_containers_tab;
+    let is_main_view = is_host_list || is_tunnels_tab || is_containers_tab || is_keys_tab;
     let title_text = if is_tunnels_tab {
         "Tunnels"
     } else if is_containers_tab {
         "Containers"
+    } else if is_keys_tab {
+        "Keys"
     } else {
         context_title(return_screen)
     };
@@ -53,6 +58,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         tunnels_overview_columns()
     } else if is_containers_tab {
         containers_overview_columns()
+    } else if is_keys_tab {
+        keys_overview_columns()
     } else {
         let lines = match return_screen {
             Screen::FileBrowser { .. } => file_browser_lines(),
@@ -525,6 +532,61 @@ fn containers_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         help_line_short("Tab", "switch tabs"),
         help_line_short("n", "what's new"),
         blank(),
+        help_line_short("q", "quit"),
+    ];
+
+    (col1, col2)
+}
+
+/// Two-column help content for the Keys tab. Layout mirrors the rhythm
+/// of the Tunnels and Containers help pages: NAVIGATE / ACTIONS on the
+/// left, AT-A-GLANCE column legend and NAVIGATE TABS on the right.
+fn keys_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
+    // Layout aligns headers with the col2 rhythm so the two columns read
+    // as paired sections (NAVIGATE ↔ AT A GLANCE on row 1, ACTIONS ↔
+    // VAULT STRIP on row 10, NAVIGATE TABS appears on both columns on
+    // row 15).
+    // Mirrors host_list rhythm: NAVIGATE + ACTIONS in col1 (24-char
+    // descriptions fit `push (ssh-copy-id)` and `sign Vault SSH cert`);
+    // STRENGTH legend + VAULT STRIP legend + TABS in col2 (15-char
+    // descriptions via help_line_short).
+    let col1 = vec![
+        blank(),                    // row 0
+        section_header("NAVIGATE"), // row 1
+        blank(),
+        help_line("j/k ↑↓", "up / down"),
+        help_line("PgDn/PgUp", "page down / up"),
+        help_line("g/G", "first / last"),
+        help_line("/", "search (scoped)"),
+        help_line(":", "jump (search anything)"),
+        help_line("Esc", "clear filter"),
+        blank(),
+        section_header("ACTIONS"),
+        blank(),
+        help_line("Enter", "copy public key"),
+        help_line("p", "push (ssh-copy-id)"),
+        help_line("V", "sign Vault SSH cert"),
+    ];
+
+    let col2 = vec![
+        blank(),                    // row 0
+        section_header("STRENGTH"), // row 1
+        blank(),
+        help_line_short("strong", "ED25519, sk-*"),
+        help_line_short("ok", "RSA 3072+"),
+        help_line_short("weak", "RSA 2048"),
+        help_line_short("poor", "DSA, RSA <2048"),
+        blank(),
+        section_header("VAULT STRIP"),
+        blank(),
+        help_line_short("green", "> 5 min left"),
+        help_line_short("amber", "2 – 5 min left"),
+        help_line_short("red", "< 2 min, soon"),
+        blank(),
+        section_header("TABS"),
+        blank(),
+        help_line_short("Tab", "switch tabs"),
+        help_line_short("n", "what's new"),
         help_line_short("q", "quit"),
     ];
 

@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                                     │
+│  purple       hosts      tunnels      containers      keys                                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   FORWARD                                                         SPEED     UPTIME    LAST▾ │
@@ -9,11 +9,11 @@
 │   ● db-primary             5432 → localhost:5432                                      335.9 KB/s    47m 12s     now  │
 │   ● db-primary             9090 → localhost:9090                                      335.9 KB/s    47m 12s     now  │
 │   ● monitoring             3000 → localhost:3000                                        5.9 KB/s     2h 14m     now  │
+│   ● do-work-staging-ams    5432 → localhost:5432                                      105.5 KB/s     5m 22s     now  │
 │   ● pve-db-01              5432 → localhost:5432                                      259.8 KB/s     22m 4s     now  │
 │   ● pve-redis              6379 → localhost:6379                                      140.6 KB/s     8m 33s     now  │
 │   ● pve-monitor            3000 → localhost:3000                                       62.5 KB/s    18m 41s     now  │
 │   ● pve-monitor            9090 → localhost:9090                                       62.5 KB/s    18m 41s     now  │
-│   ○ do-work-staging-ams    5432 → localhost:5432                                               —                  —  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
 ╭ ● active · up 12m 47s ───────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                                      │
@@ -200,6 +200,10 @@
 (47,1) fg=Reset bg=Reset mod=DIM
 (48,1) fg=Reset bg=Reset mod=DIM
 (49,1) fg=Reset bg=Reset mod=DIM
+(56,1) fg=Reset bg=Reset mod=DIM
+(57,1) fg=Reset bg=Reset mod=DIM
+(58,1) fg=Reset bg=Reset mod=DIM
+(59,1) fg=Reset bg=Reset mod=DIM
 (119,1) fg=Reset bg=Reset mod=DIM
 (0,2) fg=Reset bg=Reset mod=DIM
 (1,2) fg=Reset bg=Reset mod=DIM
@@ -1293,8 +1297,8 @@
 (116,14) fg=Green bg=Reset mod=-
 (119,14) fg=Reset bg=Reset mod=DIM
 (0,15) fg=Reset bg=Reset mod=DIM
-(4,15) fg=Reset bg=Reset mod=DIM
-(5,15) fg=Reset bg=Reset mod=DIM
+(4,15) fg=Green bg=Reset mod=-
+(5,15) fg=Green bg=Reset mod=-
 (6,15) fg=Reset bg=Reset mod=BOLD
 (7,15) fg=Reset bg=Reset mod=BOLD
 (8,15) fg=Reset bg=Reset mod=BOLD
@@ -1338,16 +1342,16 @@
 (50,15) fg=Reset bg=Reset mod=DIM
 (51,15) fg=Reset bg=Reset mod=DIM
 (52,15) fg=Reset bg=Reset mod=DIM
-(88,15) fg=Reset bg=Reset mod=DIM
-(89,15) fg=Reset bg=Reset mod=DIM
-(90,15) fg=Reset bg=Reset mod=DIM
-(91,15) fg=Reset bg=Reset mod=DIM
-(92,15) fg=Reset bg=Reset mod=DIM
-(93,15) fg=Reset bg=Reset mod=DIM
-(94,15) fg=Reset bg=Reset mod=DIM
-(95,15) fg=Reset bg=Reset mod=DIM
-(96,15) fg=Reset bg=Reset mod=DIM
-(97,15) fg=Reset bg=Reset mod=DIM
+(88,15) fg=Magenta bg=Reset mod=BOLD
+(89,15) fg=Magenta bg=Reset mod=BOLD
+(90,15) fg=Magenta bg=Reset mod=BOLD
+(91,15) fg=Magenta bg=Reset mod=BOLD
+(92,15) fg=Magenta bg=Reset mod=BOLD
+(93,15) fg=Magenta bg=Reset mod=BOLD
+(94,15) fg=Magenta bg=Reset mod=BOLD
+(95,15) fg=Magenta bg=Reset mod=BOLD
+(96,15) fg=Magenta bg=Reset mod=BOLD
+(97,15) fg=Magenta bg=Reset mod=BOLD
 (102,15) fg=Reset bg=Reset mod=DIM
 (103,15) fg=Reset bg=Reset mod=DIM
 (104,15) fg=Reset bg=Reset mod=DIM
@@ -1355,10 +1359,10 @@
 (106,15) fg=Reset bg=Reset mod=DIM
 (107,15) fg=Reset bg=Reset mod=DIM
 (108,15) fg=Reset bg=Reset mod=DIM
-(113,15) fg=Reset bg=Reset mod=DIM
-(114,15) fg=Reset bg=Reset mod=DIM
-(115,15) fg=Reset bg=Reset mod=DIM
-(116,15) fg=Reset bg=Reset mod=DIM
+(113,15) fg=Green bg=Reset mod=-
+(114,15) fg=Green bg=Reset mod=-
+(115,15) fg=Green bg=Reset mod=-
+(116,15) fg=Green bg=Reset mod=-
 (119,15) fg=Reset bg=Reset mod=DIM
 (0,16) fg=Reset bg=Reset mod=DIM
 (1,16) fg=Reset bg=Reset mod=DIM

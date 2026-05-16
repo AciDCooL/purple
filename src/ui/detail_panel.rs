@@ -450,7 +450,8 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                         );
                     }
                 } else {
-                    let chart_lines = activity_sparkline(&entry.timestamps, chart_width);
+                    let chart_lines =
+                        super::activity_chart::render(&entry.timestamps, chart_width, now);
                     if !chart_lines.is_empty() {
                         // Empty separator row inside the box
                         section_line(&mut lines, vec![], box_width);
@@ -1088,166 +1089,16 @@ fn meta_label(key: &str) -> String {
     }
 }
 
-// Block sparkline using lower block elements (▁▂▃▄▅▆▇█).
-// 2 rows tall = 16 height levels. Auto-scales from 5 days to 1 year.
-// History retains 365 days of timestamps; chart range adapts to data age.
-const BLOCKS: [char; 9] = [
-    ' ', '\u{2581}', '\u{2582}', '\u{2583}', '\u{2584}', '\u{2585}', '\u{2586}', '\u{2587}',
-    '\u{2588}',
-];
-/// Predefined time ranges for auto-scaling the sparkline.
-/// The smallest range that contains the oldest timestamp is used.
-/// Predefined time ranges for auto-scaling the sparkline.
-/// (days, left_label, midpoint_label)
-const CHART_RANGES: &[(u64, &str, &str)] = &[
-    (5, "5d", "~2d"),
-    (10, "10d", "~5d"),
-    (14, "2w", "~1w"),
-    (21, "3w", "~10d"),
-    (30, "30d", "~2w"),
-    (60, "2mo", "~1mo"),
-    (84, "12w", "~6w"),
-    (180, "6mo", "~3mo"),
-    (365, "1y", "~6mo"),
-];
-
+/// Thin wrapper kept for the in-module tests that exercise the
+/// auto-scaling sparkline. Production code now uses
+/// `super::activity_chart::render` directly.
+#[cfg(test)]
 fn activity_sparkline(timestamps: &[u64], chart_width: usize) -> Vec<Line<'static>> {
-    if chart_width == 0 {
-        return Vec::new();
-    }
-
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-
-    // Auto-scale: pick the smallest range that contains the oldest timestamp
-    let oldest = timestamps
-        .iter()
-        .copied()
-        .filter(|&t| t <= now)
-        .min()
-        .unwrap_or(now);
-    let data_age_days = now.saturating_sub(oldest) / 86400 + 1;
-    let chart_days = CHART_RANGES
-        .iter()
-        .find(|(days, _, _)| *days >= data_age_days)
-        .map(|(days, _, _)| *days)
-        .unwrap_or(CHART_RANGES.last().unwrap().0);
-
-    let range_secs = chart_days * 86400;
-    let bucket_secs = range_secs as f64 / chart_width as f64;
-    let cutoff = now.saturating_sub(range_secs);
-
-    let mut buckets = vec![0u64; chart_width];
-    for &ts in timestamps {
-        if ts < cutoff || ts > now {
-            continue;
-        }
-        let age = now.saturating_sub(ts);
-        let idx =
-            chart_width - 1 - ((age as f64 / bucket_secs).floor() as usize).min(chart_width - 1);
-        buckets[idx] += 1;
-    }
-
-    if buckets.iter().all(|&v| v == 0) {
-        return Vec::new();
-    }
-
-    let max_val = buckets.iter().copied().max().unwrap_or(1).max(1);
-    let total_levels = 16usize; // 2 rows x 8 levels
-
-    let heights: Vec<usize> = buckets
-        .iter()
-        .map(|&v| {
-            if v == 0 {
-                0
-            } else {
-                ((v as f64 / max_val as f64) * total_levels as f64).ceil() as usize
-            }
-        })
-        .collect();
-
-    let mut chart_lines = Vec::new();
-
-    // Top row (only rendered if any bar exceeds half height)
-    if heights.iter().any(|&h| h > 8) {
-        let mut top = String::with_capacity(chart_width * 3);
-        for &h in &heights {
-            if h > 8 {
-                top.push(BLOCKS[(h - 8).min(8)]);
-            } else {
-                top.push(' ');
-            }
-        }
-        chart_lines.push(Line::from(Span::styled(top, theme::bold())));
-    }
-
-    // Bottom row with dotted baseline for empty buckets
-    let mut bottom_spans: Vec<Span<'static>> = Vec::new();
-    let mut run_empty = String::new();
-    let mut run_filled = String::new();
-
-    for &h in &heights {
-        if h == 0 {
-            if !run_filled.is_empty() {
-                bottom_spans.push(Span::styled(std::mem::take(&mut run_filled), theme::bold()));
-            }
-            run_empty.push('\u{00B7}'); // · (middle dot)
-        } else {
-            if !run_empty.is_empty() {
-                bottom_spans.push(Span::styled(std::mem::take(&mut run_empty), theme::muted()));
-            }
-            if h >= 8 {
-                run_filled.push(BLOCKS[8]);
-            } else {
-                run_filled.push(BLOCKS[h]);
-            }
-        }
-    }
-    // Flush remaining runs
-    if !run_filled.is_empty() {
-        bottom_spans.push(Span::styled(run_filled, theme::bold()));
-    }
-    if !run_empty.is_empty() {
-        bottom_spans.push(Span::styled(run_empty, theme::muted()));
-    }
-    chart_lines.push(Line::from(bottom_spans));
-
-    // Axis labels: left ... midpoint ... now
-    let range_entry = CHART_RANGES.iter().find(|(days, _, _)| *days == chart_days);
-    let left_label = range_entry
-        .map(|(_, label, _)| label.to_string())
-        .unwrap_or_else(|| format!("{}d", chart_days));
-    let mid_label = range_entry
-        .map(|(_, _, mid)| mid.to_string())
-        .unwrap_or_default();
-    let right_label = "now";
-
-    let labels_width = left_label.len() + mid_label.len() + right_label.len();
-    if !mid_label.is_empty() && chart_width > labels_width + 4 {
-        // Three-point axis: left ... mid ... now
-        let total_gap = chart_width.saturating_sub(labels_width);
-        let gap_left = total_gap / 2;
-        let gap_right = total_gap - gap_left;
-        chart_lines.push(Line::from(vec![
-            Span::styled(left_label, theme::muted()),
-            Span::raw(" ".repeat(gap_left)),
-            Span::styled(mid_label, theme::muted()),
-            Span::raw(" ".repeat(gap_right)),
-            Span::styled(right_label.to_string(), theme::muted()),
-        ]));
-    } else {
-        // Two-point axis (narrow panel): left ... now
-        let gap = chart_width.saturating_sub(left_label.len() + right_label.len());
-        chart_lines.push(Line::from(vec![
-            Span::styled(left_label, theme::muted()),
-            Span::raw(" ".repeat(gap)),
-            Span::styled(right_label.to_string(), theme::muted()),
-        ]));
-    }
-
-    chart_lines
+    super::activity_chart::render(timestamps, chart_width, now)
 }
 
 fn find_tunnel_rules(elements: &[ConfigElement], alias: &str) -> Vec<String> {

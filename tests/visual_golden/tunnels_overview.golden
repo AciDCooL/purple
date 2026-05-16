@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                 │
+│  purple       hosts      tunnels      containers      keys                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                   FORWARD                                     SPEED     UPTIME    LAST▾ │
@@ -9,11 +9,11 @@
 │   ○ db-primary             5432 → localhost:5432                           —                 1h  │
 │   ○ db-primary             9090 → localhost:9090                           —                 1h  │
 │   ○ monitoring             3000 → localhost:3000                           —                 2h  │
-│   ○ pve-db-01              5432 → localhost:5432                           —                17h  │
-│   ○ pve-redis              6379 → localhost:6379                           —                19h  │
-│   ○ pve-monitor            3000 → localhost:3000                           —                21h  │
-│   ○ pve-monitor            9090 → localhost:9090                           —                21h  │
-│   ○ do-work-staging-ams    5432 → localhost:5432                           —                  —  │
+│   ○ do-work-staging-ams    5432 → localhost:5432                           —                17h  │
+│   ○ pve-db-01              5432 → localhost:5432                           —                 1d  │
+│   ○ pve-redis              6379 → localhost:6379                           —                 1d  │
+│   ○ pve-monitor            3000 → localhost:3000                           —                 1d  │
+│   ○ pve-monitor            9090 → localhost:9090                           —                 1d  │
 │                                                                                                  │
 │                                                                                                  │
 │                                                                                                  │
@@ -160,6 +160,10 @@
 (47,1) fg=Reset bg=Reset mod=DIM
 (48,1) fg=Reset bg=Reset mod=DIM
 (49,1) fg=Reset bg=Reset mod=DIM
+(56,1) fg=Reset bg=Reset mod=DIM
+(57,1) fg=Reset bg=Reset mod=DIM
+(58,1) fg=Reset bg=Reset mod=DIM
+(59,1) fg=Reset bg=Reset mod=DIM
 (99,1) fg=Reset bg=Reset mod=DIM
 (0,2) fg=Reset bg=Reset mod=DIM
 (1,2) fg=Reset bg=Reset mod=DIM

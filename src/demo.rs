@@ -56,6 +56,46 @@ Host podman-edge
   # purple:tags edge,podman
   # purple:meta os=Fedora CoreOS 41,runtime=podman 5.8
 
+# EU production (work yubikey)
+
+Host prod-eu1
+  HostName 195.144.107.61
+  User ops
+  IdentityFile ~/.ssh/yubikey_work
+  # purple:tags production,api,eu
+  # purple:vault-ssh ssh-client-signer/sign/admin
+
+Host prod-eu2
+  HostName 195.144.107.62
+  User ops
+  IdentityFile ~/.ssh/yubikey_work
+  # purple:tags production,api,eu
+  # purple:vault-ssh ssh-client-signer/sign/admin
+
+# Customer environment (customer-x identity)
+
+Host customer-jump
+  HostName 198.51.100.10
+  User contractor
+  IdentityFile ~/.ssh/customer-x
+  # purple:tags customer,bastion
+  # purple:askpass keychain
+
+Host customer-db-1
+  HostName 198.51.100.20
+  User dbadmin
+  ProxyJump customer-jump
+  IdentityFile ~/.ssh/customer-x
+  # purple:tags customer,database
+
+# Legacy
+
+Host legacy-prod
+  HostName 203.0.113.45
+  User root
+  IdentityFile ~/.ssh/id_rsa_legacy
+  # purple:tags production,legacy
+
 # AWS EC2
 
 Host aws-api-prod
@@ -234,6 +274,26 @@ description=Last 50 syslog lines
 [restart-nginx]
 command=sudo systemctl restart nginx
 description=Restart nginx service
+
+[deploy]
+command=cd /opt/{{app}} && git pull && docker compose pull && docker compose up -d --no-deps {{service:web}}
+description=Pull and roll a service
+
+[backup-db]
+command=pg_dump -U postgres -Fc {{db:appdb}} | gzip > /backups/{{db:appdb}}-$(date +%F).sql.gz
+description=Snapshot a Postgres database
+
+[log-rotate]
+command=sudo logrotate -f /etc/logrotate.conf
+description=Force a log rotation
+
+[container-prune]
+command=docker system df && docker system prune -af --volumes
+description=Show disk usage then purge unused images, networks and volumes
+
+[certbot-renew]
+command=sudo certbot renew --quiet && sudo systemctl reload nginx
+description=Renew Let's Encrypt certificates and reload nginx
 ";
 
 const DEMO_PROVIDERS: &str = "\
@@ -276,16 +336,23 @@ const DEMO_HISTORY_SPEC: &[(&str, u32, u64)] = &[
     ("monitoring", 121, 280),
     ("gateway-vpn", 31, 300),
     ("podman-edge", 18, 60),
+    ("prod-eu1", 188, 280),
+    ("prod-eu2", 145, 260),
+    ("customer-jump", 52, 180),
+    ("customer-db-1", 24, 120),
+    ("legacy-prod", 4, 60),
     ("aws-api-prod", 180, 300),
     ("aws-api-staging", 90, 200),
     ("aws-worker-eu", 65, 180),
     ("aws-batch-us", 160, 300),
     ("aws-ml-eu", 25, 80),
     ("aws-cache-eu", 8, 40),
-    ("do-web-ams", 130, 250),
-    ("do-staging-ams", 76, 180),
-    ("do-worker-ams", 50, 150),
-    ("do-ci-runner", 95, 200),
+    ("do-work-web-ams", 130, 250),
+    ("do-work-staging-ams", 76, 180),
+    ("do-work-worker-ams", 50, 150),
+    ("do-work-ci-runner", 95, 200),
+    ("do-personal-blog", 64, 220),
+    ("do-personal-mail", 38, 200),
     ("pve-web-01", 110, 280),
     ("pve-web-02", 85, 250),
     ("pve-db-01", 70, 200),
@@ -386,7 +453,7 @@ fn build_demo_container_cache() -> String {
     format!(
         r#"{{"alias":"bastion-ams","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"f1a2b3c4d5e6","Names":"nginx-proxy","Image":"nginx:1.25-alpine","State":"running","Status":"Up 12 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"a2b3c4d5e6f7","Names":"app-backend","Image":"myapp:v2.14.1","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:8080->8080/tcp"}},{{"ID":"b3c4d5e6f7a8","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:6379->6379/tcp"}},{{"ID":"c4d5e6f7a8b9","Names":"postgres","Image":"postgres:16-alpine","State":"running","Status":"Up 12 days","Ports":"127.0.0.1:5432->5432/tcp"}},{{"ID":"d5e6f7a8b9c0","Names":"prometheus","Image":"prom/prometheus:v2.48","State":"running","Status":"Up 5 days","Ports":"127.0.0.1:9090->9090/tcp"}},{{"ID":"e6f7a8b9c0d1","Names":"grafana","Image":"grafana/grafana:10.2","State":"running","Status":"Up 5 days","Ports":"127.0.0.1:3000->3000/tcp"}},{{"ID":"f7a8b9c0d1e2","Names":"certbot","Image":"certbot/certbot:v2.7","State":"exited","Status":"Exited (0) 2 days ago","Ports":""}}]}}
 {{"alias":"db-primary","timestamp":{},"runtime":"Docker","engine_version":"24.0.7","containers":[{{"ID":"a8b9c0d1e2f3","Names":"postgres-primary","Image":"postgres:16-alpine","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:5432->5432/tcp"}},{{"ID":"b9c0d1e2f3a4","Names":"pgbouncer","Image":"pgbouncer:1.21","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:6432->6432/tcp"}},{{"ID":"c0d1e2f3a4b5","Names":"pg-exporter","Image":"prometheuscommunity/postgres-exporter:0.15","State":"running","Status":"Up 30 days","Ports":"127.0.0.1:9187->9187/tcp"}}]}}
-{{"alias":"do-web-ams","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"d1e2f3a4b5c6","Names":"nginx","Image":"nginx:1.25","State":"running","Status":"Up 8 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"e2f3a4b5c6d7","Names":"app","Image":"myapp:3.2.1","State":"running","Status":"Up 8 days","Ports":"8080/tcp"}},{{"ID":"f3a4b5c6d7e8","Names":"worker","Image":"myapp:3.2.1","State":"running","Status":"Up 8 days","Ports":""}},{{"ID":"a4b5c6d7e8f9","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 8 days","Ports":"6379/tcp"}},{{"ID":"b5c6d7e8f9a0","Names":"sidekiq","Image":"myapp:3.2.1","State":"exited","Status":"Exited (1) 3 hours ago","Ports":""}}]}}
+{{"alias":"do-work-web-ams","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"d1e2f3a4b5c6","Names":"nginx","Image":"nginx:1.25","State":"running","Status":"Up 8 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"e2f3a4b5c6d7","Names":"app","Image":"myapp:3.2.1","State":"running","Status":"Up 8 days","Ports":"8080/tcp"}},{{"ID":"f3a4b5c6d7e8","Names":"worker","Image":"myapp:3.2.1","State":"running","Status":"Up 8 days","Ports":""}},{{"ID":"a4b5c6d7e8f9","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 8 days","Ports":"6379/tcp"}},{{"ID":"b5c6d7e8f9a0","Names":"sidekiq","Image":"myapp:3.2.1","State":"exited","Status":"Exited (1) 3 hours ago","Ports":""}}]}}
 {{"alias":"pve-web-01","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"c6d7e8f9a0b1","Names":"nginx","Image":"nginx:1.25","State":"running","Status":"Up 20 days","Ports":"0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp"}},{{"ID":"d7e8f9a0b1c2","Names":"webapp","Image":"internal/webapp:1.8.3","State":"running","Status":"Up 20 days","Ports":"127.0.0.1:3000->3000/tcp"}},{{"ID":"e8f9a0b1c2d3","Names":"celery","Image":"internal/webapp:1.8.3","State":"running","Status":"Up 20 days","Ports":""}}]}}
 {{"alias":"aws-api-staging","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"f9a0b1c2d3e4","Names":"api","Image":"myteam/api:v4.1.0-rc2","State":"running","Status":"Up 2 days","Ports":"0.0.0.0:8080->8080/tcp"}},{{"ID":"a0b1c2d3e4f5","Names":"nginx","Image":"nginx:1.25-alpine","State":"running","Status":"Up 2 days","Ports":"0.0.0.0:443->443/tcp"}},{{"ID":"b1c2d3e4f5a6","Names":"datadog-agent","Image":"datadog/agent:7","State":"running","Status":"Up 2 days","Ports":""}},{{"ID":"c2d3e4f5a6b7","Names":"redis","Image":"redis:7-alpine","State":"running","Status":"Up 2 days","Ports":"127.0.0.1:6379->6379/tcp"}}]}}
 {{"alias":"aws-batch-us","timestamp":{},"runtime":"Docker","engine_version":"25.0.3","containers":[{{"ID":"d3e4f5a6b7c8","Names":"scheduler","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:8080->8080/tcp"}},{{"ID":"e4f5a6b7c8d9","Names":"worker-1","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":""}},{{"ID":"f5a6b7c8d9e0","Names":"worker-2","Image":"myteam/batch:2.9.0","State":"running","Status":"Up 14 days","Ports":""}},{{"ID":"a6b7c8d9e0f1","Names":"rabbitmq","Image":"rabbitmq:3.13-management","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:5672->5672/tcp, 127.0.0.1:15672->15672/tcp"}},{{"ID":"b7c8d9e0f1a2","Names":"flower","Image":"mher/flower:2.0","State":"running","Status":"Up 14 days","Ports":"127.0.0.1:5555->5555/tcp"}}]}}
@@ -1168,15 +1235,39 @@ pub fn build_demo_app() -> App {
     app.ping
         .status
         .insert("aws-cache-eu".into(), PingStatus::Unreachable);
-    // DigitalOcean
-    app.ping.status.insert("do-web-ams".into(), reachable(12));
+    // EU production (work yubikey)
+    app.ping.status.insert("prod-eu1".into(), reachable(34));
+    app.ping.status.insert("prod-eu2".into(), reachable(36));
+    // Customer environment
     app.ping
         .status
-        .insert("do-staging-ams".into(), reachable(14));
+        .insert("customer-jump".into(), reachable(48));
     app.ping
         .status
-        .insert("do-worker-ams".into(), reachable(15));
-    app.ping.status.insert("do-ci-runner".into(), reachable(42));
+        .insert("customer-db-1".into(), reachable(51));
+    // Legacy
+    app.ping
+        .status
+        .insert("legacy-prod".into(), PingStatus::Unreachable);
+    // DigitalOcean (work + personal)
+    app.ping
+        .status
+        .insert("do-work-web-ams".into(), reachable(12));
+    app.ping
+        .status
+        .insert("do-work-staging-ams".into(), reachable(14));
+    app.ping
+        .status
+        .insert("do-work-worker-ams".into(), reachable(15));
+    app.ping
+        .status
+        .insert("do-work-ci-runner".into(), reachable(42));
+    app.ping
+        .status
+        .insert("do-personal-blog".into(), reachable(19));
+    app.ping
+        .status
+        .insert("do-personal-mail".into(), reachable(21));
     // Proxmox
     app.ping.status.insert("pve-web-01".into(), reachable(3));
     app.ping.status.insert("pve-web-02".into(), reachable(3));
@@ -1265,37 +1356,43 @@ pub fn build_demo_app() -> App {
                 None,
             ),
         );
+        // prod-eu1: valid cert, 5h remaining out of 8h
+        app.vault.cert_cache.insert(
+            "prod-eu1".into(),
+            (
+                now,
+                CertStatus::Valid {
+                    expires_at: 0,
+                    remaining_secs: 18000,
+                    total_secs: 28800,
+                },
+                None,
+            ),
+        );
+        // prod-eu2: valid cert, 90 seconds remaining out of 8h (red tier — about to expire)
+        app.vault.cert_cache.insert(
+            "prod-eu2".into(),
+            (
+                now,
+                CertStatus::Valid {
+                    expires_at: 0,
+                    remaining_secs: 90,
+                    total_secs: 28800,
+                },
+                None,
+            ),
+        );
         // Others left as Missing (Not signed) for variety
     }
 
-    // SSH keys (fake metadata)
-    app.keys = vec![
-        SshKeyInfo {
-            name: "id_ed25519".into(),
-            display_path: "~/.ssh/id_ed25519".into(),
-            key_type: "ED25519".into(),
-            bits: "256".into(),
-            fingerprint: "SHA256:dGVzdGRlbW9rZXlmb3JwdXJwbGVzc2g".into(),
-            comment: "ops@bastion".into(),
-            linked_hosts: vec![
-                "bastion-ams".into(),
-                "aws-api-prod".into(),
-                "aws-api-staging".into(),
-            ],
-        },
-        SshKeyInfo {
-            name: "id_rsa".into(),
-            display_path: "~/.ssh/id_rsa".into(),
-            key_type: "RSA".into(),
-            bits: "4096".into(),
-            fingerprint: "SHA256:cnNhdGVzdGtleWZvcnB1cnBsZXNzaGRl".into(),
-            comment: "deploy@legacy".into(),
-            linked_hosts: vec![],
-        },
-    ];
+    app.keys.list = demo_keys();
+    app.keys.activity = demo_key_activity();
 
-    // Preferences
-    app.hosts_state.view_mode = ViewMode::Compact;
+    // Preferences. Demo boots into Detailed view on both the Host List and
+    // the Containers tab so screenshots and the demo recording land on a
+    // fully-populated detail panel without an extra `v` keystroke.
+    app.hosts_state.view_mode = ViewMode::Detailed;
+    app.containers_overview.view_mode = ViewMode::Detailed;
     app.hosts_state.sort_mode = SortMode::MostRecent;
     app.hosts_state.group_by = GroupBy::None;
     app.ping.auto_ping = true;
@@ -1305,6 +1402,221 @@ pub fn build_demo_app() -> App {
     app.select_first_host();
 
     app
+}
+
+/// Deterministic demo keys covering the five visual states the Keys tab
+/// needs to render: encrypted ed25519, hardware-bound FIDO2, encrypted
+/// ed25519 not in agent, plaintext weak RSA, and an orphan deprecated key.
+/// The Drunken Bishop blocks are stable strings so visual goldens lock
+/// the layout without depending on a real `ssh-keygen` install.
+fn demo_keys() -> Vec<SshKeyInfo> {
+    vec![
+        SshKeyInfo {
+            name: "id_ed25519".into(),
+            display_path: "~/.ssh/id_ed25519".into(),
+            key_type: "ED25519".into(),
+            bits: "256".into(),
+            fingerprint: "SHA256:dGVzdGRlbW9rZXlmb3JwdXJwbGVzc2gNcAdGhI".into(),
+            comment: "eric@MacBook".into(),
+            linked_hosts: vec![
+                "bastion-ams".into(),
+                "aws-api-prod".into(),
+                "aws-api-staging".into(),
+            ],
+            bishop_art: [
+                "+--[ED25519 256]--+",
+                "|       .o*+      |",
+                "|     . o .=      |",
+                "|    o = . .o     |",
+                "|   o.o.@.. ..    |",
+                "|   +oo*.S +      |",
+                "|    +o+. + .     |",
+                "|    ..o.o E      |",
+                "|     .   . .     |",
+                "|        . .o     |",
+                "+----[SHA256]-----+",
+            ]
+            .join("\n"),
+            strength_score: 95,
+            encrypted: true,
+            agent_loaded: true,
+            is_certificate: false,
+            mtime_ts: Some(1711540800),
+        },
+        SshKeyInfo {
+            name: "yubikey_work".into(),
+            display_path: "~/.ssh/yubikey_work".into(),
+            key_type: "sk-ED25519".into(),
+            bits: "256".into(),
+            fingerprint: "SHA256:eXVia2V5d29ya2RlbW9rZXlmb3JwdXJwbGUA1bN".into(),
+            comment: "yubikey@serial-14829301".into(),
+            linked_hosts: vec!["prod-eu1".into(), "prod-eu2".into(), "bastion-ams".into()],
+            bishop_art: [
+                "+-[SK-ED25519 256]+",
+                "|       . o       |",
+                "|      o O .      |",
+                "|     . O = .     |",
+                "|    . X B S      |",
+                "|   . o O B *     |",
+                "|    o + B + E    |",
+                "|     . = + .     |",
+                "|      o + .      |",
+                "|       . .       |",
+                "+----[SHA256]-----+",
+            ]
+            .join("\n"),
+            strength_score: 100,
+            encrypted: false,
+            agent_loaded: true,
+            is_certificate: false,
+            mtime_ts: Some(1758196800),
+        },
+        SshKeyInfo {
+            name: "customer-x".into(),
+            display_path: "~/.ssh/customer-x".into(),
+            key_type: "ED25519".into(),
+            bits: "256".into(),
+            fingerprint: "SHA256:Y3VzdG9tZXJ4ZGVtb2tleWZvcnB1cnBsZXNzaHhUdFg".into(),
+            comment: "eric@customer-x".into(),
+            linked_hosts: vec!["customer-jump".into(), "customer-db-1".into()],
+            bishop_art: [
+                "+--[ED25519 256]--+",
+                "|         .   .   |",
+                "|        + + . o  |",
+                "|       o S + . . |",
+                "|        + B o.. =|",
+                "|         X = +.+ |",
+                "|        + B B *E |",
+                "|         o + * X.|",
+                "|              o +|",
+                "|               o |",
+                "+----[SHA256]-----+",
+            ]
+            .join("\n"),
+            strength_score: 95,
+            encrypted: true,
+            agent_loaded: false,
+            is_certificate: false,
+            mtime_ts: Some(1732276800),
+        },
+        SshKeyInfo {
+            name: "id_rsa_legacy".into(),
+            display_path: "~/.ssh/id_rsa_legacy".into(),
+            key_type: "RSA".into(),
+            bits: "2048".into(),
+            fingerprint: "SHA256:bGVnYWN5cnNha2V5Zm9ycHVycGxlc3NocFB6TA".into(),
+            comment: "deploy@legacy".into(),
+            linked_hosts: vec!["legacy-prod".into()],
+            bishop_art: [
+                "+---[RSA 2048]----+",
+                "|     .o++.       |",
+                "|    .+o.o.       |",
+                "|   . o..*        |",
+                "|    o O.B        |",
+                "|   . = S +       |",
+                "|    o + o ..     |",
+                "|     . . + o.    |",
+                "|        ..=+E    |",
+                "|        .oo+o+.  |",
+                "+----[SHA256]-----+",
+            ]
+            .join("\n"),
+            strength_score: 45,
+            encrypted: false,
+            agent_loaded: true,
+            is_certificate: false,
+            mtime_ts: Some(1621252800),
+        },
+        SshKeyInfo {
+            name: "id_rsa.bak".into(),
+            display_path: "~/.ssh/id_rsa.bak".into(),
+            key_type: "RSA".into(),
+            bits: "1024".into(),
+            fingerprint: "SHA256:b2xkcnNha2V5Zm9ycHVycGxlc3NoYmFja3VwelpxTA".into(),
+            comment: "legacy@old".into(),
+            linked_hosts: vec![],
+            bishop_art: [
+                "+---[RSA 1024]----+",
+                "|         .       |",
+                "|        ..       |",
+                "|       .  .      |",
+                "|      .  . o     |",
+                "|      ..S +      |",
+                "|       =.+ +     |",
+                "|      o O + .    |",
+                "|       + B oE    |",
+                "|        +.+.     |",
+                "+----[SHA256]-----+",
+            ]
+            .join("\n"),
+            strength_score: 5,
+            encrypted: false,
+            agent_loaded: false,
+            is_certificate: false,
+            mtime_ts: Some(1526644800),
+        },
+    ]
+}
+
+/// Deterministic activity log for `--demo`. Seeds varied patterns:
+///   - id_ed25519: heavy daily use (1-4 events/day, last touch 14m ago)
+///   - yubikey_work: bursty, every 2-3 days
+///   - customer-x: once per week
+///   - id_rsa_legacy: cold, single touch 14 days ago
+///   - id_rsa.bak: no activity (no linked hosts)
+///
+/// `NOW` is pinned to `key_activity::DEMO_NOW_SECS` (2026-05-16 12:00 UTC)
+/// so visual goldens land byte-stable regardless of wall-clock.
+fn demo_key_activity() -> crate::key_activity::KeyActivityLog {
+    use crate::key_activity::{ConnectEvent, DEMO_NOW_SECS, KeyActivityLog};
+    const NOW: u64 = DEMO_NOW_SECS;
+    const DAY: u64 = 86_400;
+
+    let mut events: Vec<ConnectEvent> = Vec::new();
+    let push = |events: &mut Vec<ConnectEvent>, alias: &str, ts: u64| {
+        events.push(ConnectEvent {
+            alias: alias.into(),
+            ts,
+        });
+    };
+
+    // id_ed25519: heavy daily use with a peak around day 7.
+    for d in 0u64..30 {
+        let count = match d {
+            0 => 3,
+            1..=2 => 2,
+            6..=8 => 4,
+            14..=15 => 3,
+            21..=22 => 2,
+            _ => 1,
+        };
+        for i in 0..count {
+            push(&mut events, "bastion-ams", NOW - d * DAY + i * 1800);
+        }
+        if d % 3 == 0 {
+            push(&mut events, "aws-api-prod", NOW - d * DAY + 3600);
+        }
+        if d % 5 == 0 {
+            push(&mut events, "aws-api-staging", NOW - d * DAY + 7200);
+        }
+    }
+    push(&mut events, "bastion-ams", NOW - 14 * 60);
+
+    // yubikey_work: bursty pattern, every 2-3 days.
+    for &d in &[1u64, 3, 5, 8, 10, 12, 15, 18, 21, 25, 28] {
+        push(&mut events, "prod-eu1", NOW - d * DAY);
+        push(&mut events, "prod-eu2", NOW - d * DAY + 600);
+    }
+
+    // customer-x: weekly cadence.
+    for &d in &[2u64, 9, 16, 23] {
+        push(&mut events, "customer-jump", NOW - d * DAY);
+    }
+
+    // id_rsa_legacy: one cold touch two weeks ago.
+    push(&mut events, "legacy-prod", NOW - 14 * DAY);
+
+    KeyActivityLog { events }
 }
 
 /// Seed deterministic tunnel-live snapshots for `--demo` and visual
@@ -1750,12 +2062,12 @@ pub fn seed_tunnel_live_snapshots(app: &mut App) {
         },
     );
 
-    // do-staging-ams: just-opened staging Postgres tunnel. CI just pushed
+    // do-work-staging-ams: just-opened staging Postgres tunnel. CI just pushed
     // a migration, so the panel exercises the "fresh tunnel + active
     // psql session" combination. Lower throughput than db-primary, fewer
     // clients, no decay trail yet (uptime < 1 channel rotation).
     app.tunnels.demo_live_snapshots.insert(
-        "do-staging-ams".to_string(),
+        "do-work-staging-ams".to_string(),
         TunnelLiveSnapshot {
             uptime_secs: 5 * 60 + 22,
             active_channels: 2,
@@ -2040,8 +2352,9 @@ mod tests {
     #[test]
     fn demo_app_has_expected_hosts() {
         let (app, _guard) = demo_app();
-        // 22 original + 2 do-personal + 1 podman-edge + 1 db-proton = 26
-        assert_eq!(app.hosts_state.list.len(), 26);
+        // 22 original + 2 do-personal + 1 podman-edge + 1 db-proton
+        // + 5 (prod-eu1, prod-eu2, customer-jump, customer-db-1, legacy-prod) = 31
+        assert_eq!(app.hosts_state.list.len(), 31);
     }
 
     #[test]
@@ -2054,13 +2367,15 @@ mod tests {
     #[test]
     fn demo_app_has_history() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.history.entries.len(), 23);
+        // 23 original + 5 new EU/customer/legacy + 2 do-personal = 30
+        assert_eq!(app.history.entries.len(), 30);
     }
 
     #[test]
     fn demo_app_has_snippets() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.snippets.store.snippets.len(), 5);
+        // 5 original + 5 new (deploy, backup-db, log-rotate, container-prune, certbot-renew) = 10
+        assert_eq!(app.snippets.store.snippets.len(), 10);
     }
 
     #[test]
@@ -2069,7 +2384,7 @@ mod tests {
         assert_eq!(app.container_cache.len(), 8);
         assert!(app.container_cache.contains_key("bastion-ams"));
         assert!(app.container_cache.contains_key("db-primary"));
-        assert!(app.container_cache.contains_key("do-web-ams"));
+        assert!(app.container_cache.contains_key("do-work-web-ams"));
         assert!(app.container_cache.contains_key("pve-web-01"));
         assert!(app.container_cache.contains_key("aws-api-staging"));
         assert!(app.container_cache.contains_key("aws-batch-us"));
@@ -2107,7 +2422,30 @@ mod tests {
     #[test]
     fn demo_app_has_keys() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.keys.len(), 2);
+        // Five keys covering the five visual states the tab must render:
+        // encrypted ed25519, hardware-bound FIDO2, encrypted ed25519 not in
+        // agent, plaintext weak RSA, and an orphan deprecated key.
+        assert_eq!(app.keys.list.len(), 5);
+    }
+
+    #[test]
+    fn demo_keys_have_bishop_art_and_strength() {
+        let (app, _guard) = demo_app();
+        // Every demo key must populate the new SshKeyInfo fields so the
+        // visual goldens render bishop blocks and strength meters.
+        for key in &app.keys.list {
+            assert!(
+                key.bishop_art.lines().count() == 11,
+                "demo key {} should have 11 bishop lines, got {}",
+                key.name,
+                key.bishop_art.lines().count(),
+            );
+            assert!(
+                key.strength_score > 0,
+                "demo key {} has zero strength",
+                key.name
+            );
+        }
     }
 
     #[test]
@@ -2209,7 +2547,8 @@ mod tests {
     #[test]
     fn demo_app_has_correct_preferences() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.hosts_state.view_mode, ViewMode::Compact);
+        assert_eq!(app.hosts_state.view_mode, ViewMode::Detailed);
+        assert_eq!(app.containers_overview.view_mode, ViewMode::Detailed);
         assert_eq!(app.hosts_state.sort_mode, SortMode::MostRecent);
         assert_eq!(app.hosts_state.group_by, GroupBy::None);
         assert!(app.ping.auto_ping);

@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                                                                                                                     │
+│  purple       hosts      tunnels      containers      keys                                                                                                                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 29 ──────────────────────────────────────────────────────────────────────────────────────────────────╮╭─ STATUS ─────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                IMAGE                                                                UPTIME  ││ Ping          ● 28ms                                                                         │
@@ -22,7 +22,7 @@
 │   ● pg-exporter         prometheuscommunity/postgres-exporter:0.15                              30d  ││ r             Refresh listing  last sync 11m ago                                             │
 │   ● pgbouncer           pgbouncer:1.21                                                          30d  ││ Space         Collapse group                                                                 │
 │   ● postgres-primary    postgres:16-alpine                                                      30d  │╰──────────────────────────────────────────────────────────────────────────────────────────────╯
-│  ── do-web-ams ────────────────────────────────────────────────────────────────────────────────────  │╭─ HOST ───────────────────────────────────────────────────────────────────────────────────────╮
+│  ── do-work-web-ams ───────────────────────────────────────────────────────────────────────────────  │╭─ HOST ───────────────────────────────────────────────────────────────────────────────────────╮
 │   ● app                 myapp:3.2.1                                                              8d  ││ Address       10.20.30.40                                                                    │
 │   ● nginx               nginx:1.25                                                               8d  ││ User          core                                                                           │
 │   ● redis               redis:7-alpine                                                           8d  ││ Tags          edge, podman                                                                   │
@@ -290,6 +290,10 @@
 (47,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (48,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (49,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
+(56,1) fg=Reset bg=Reset mod=DIM
+(57,1) fg=Reset bg=Reset mod=DIM
+(58,1) fg=Reset bg=Reset mod=DIM
+(59,1) fg=Reset bg=Reset mod=DIM
 (199,1) fg=Reset bg=Reset mod=DIM
 (0,2) fg=Reset bg=Reset mod=DIM
 (1,2) fg=Reset bg=Reset mod=DIM
@@ -3689,11 +3693,11 @@
 (14,24) fg=Reset bg=Reset mod=BOLD
 (15,24) fg=Reset bg=Reset mod=BOLD
 (16,24) fg=Reset bg=Reset mod=BOLD
-(17,24) fg=Reset bg=Reset mod=DIM
-(18,24) fg=Reset bg=Reset mod=DIM
-(19,24) fg=Reset bg=Reset mod=DIM
-(20,24) fg=Reset bg=Reset mod=DIM
-(21,24) fg=Reset bg=Reset mod=DIM
+(17,24) fg=Reset bg=Reset mod=BOLD
+(18,24) fg=Reset bg=Reset mod=BOLD
+(19,24) fg=Reset bg=Reset mod=BOLD
+(20,24) fg=Reset bg=Reset mod=BOLD
+(21,24) fg=Reset bg=Reset mod=BOLD
 (22,24) fg=Reset bg=Reset mod=DIM
 (23,24) fg=Reset bg=Reset mod=DIM
 (24,24) fg=Reset bg=Reset mod=DIM

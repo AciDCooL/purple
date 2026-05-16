@@ -1,3 +1,12 @@
+## 3.14.0 - 2026-05-16
+
+- feat: Browse, push and inspect every SSH key from one tab.
+- feat: A new Keys tab joins Hosts, Tunnels and Containers in the Tab cycle. Every key in `~/.ssh/` lands there with strength score, encryption status, randomart fingerprint and last-touch.
+- feat: Press `p` on a key to push it to a multi-host picker. Vault-managed hosts skip the prompt so cert-managed hosts stay cert-managed.
+- feat: Per-key activity sparkline auto-scales the time window as your usage history grows, from a tight 5 days out to a full year.
+- feat: A Vault SSH strip at the top of the tab shows time-to-expiry for every active signed cert, colour-coded green to red as the clock runs out.
+- feat: Search keys with `/`, copy the highlighted public key with `Enter` or `c`, sign Vault SSH certs in bulk with `V`.
+
 ## 3.13.1 - 2026-05-15
 
 - feat: Long hostnames render in full on every terminal.

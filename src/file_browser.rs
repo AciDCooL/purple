@@ -418,16 +418,33 @@ pub fn fetch_remote_listing(
         Ok(r) if r.status.success() => Ok(parse_ls_output(&r.stdout, show_hidden, sort)),
         Ok(r) => {
             let msg = filter_ssh_warnings(r.stderr.trim());
+            let code = r.status.code().unwrap_or(1);
+            log::warn!(
+                "[external] remote ls failed: alias={} path={} exit={} stderr={}",
+                ctx.alias,
+                remote_path,
+                code,
+                if msg.is_empty() {
+                    "<empty>"
+                } else {
+                    msg.as_str()
+                },
+            );
             if msg.is_empty() {
-                Err(format!(
-                    "ls exited with code {}.",
-                    r.status.code().unwrap_or(1)
-                ))
+                Err(format!("ls exited with code {}.", code))
             } else {
                 Err(msg)
             }
         }
-        Err(e) => Err(e.to_string()),
+        Err(e) => {
+            log::error!(
+                "[external] remote ls spawn failed: alias={} path={}: {}",
+                ctx.alias,
+                remote_path,
+                e
+            );
+            Err(e.to_string())
+        }
     }
 }
 
@@ -497,11 +514,26 @@ pub fn run_scp(
         cmd.env("BW_SESSION", token);
     }
 
-    let output = cmd
-        .output()
-        .map_err(|e| anyhow::anyhow!("Failed to run scp: {}", e))?;
+    let output = cmd.output().map_err(|e| {
+        log::error!("[external] scp spawn failed: alias={alias}: {e}");
+        anyhow::anyhow!("Failed to run scp: {}", e)
+    })?;
 
     let stderr_output = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        let scrubbed = filter_ssh_warnings(stderr_output.trim());
+        log::warn!(
+            "[external] scp transfer failed: alias={} exit={} stderr={}",
+            alias,
+            output.status.code().unwrap_or(-1),
+            if scrubbed.is_empty() {
+                "<empty>"
+            } else {
+                scrubbed.as_str()
+            },
+        );
+    }
 
     Ok(ScpResult {
         status: output.status,

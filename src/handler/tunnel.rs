@@ -184,10 +184,12 @@ pub(super) fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
                         // Tunnel start spawns a real ssh session, same as a
                         // shell connect, so record it in connection history.
                         app.history.record(&alias);
+                        app.record_key_use(&alias, crate::key_activity::now_secs());
                         app.apply_sort();
                         app.notify(crate::messages::tunnel_started(&alias));
                     }
                     Err(e) => {
+                        log::error!("[external] tunnel start failed: alias={alias}: {e}");
                         app.notify_error(crate::messages::tunnel_start_failed(&e));
                     }
                 }

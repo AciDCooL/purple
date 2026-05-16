@@ -1,8 +1,11 @@
 use anyhow::{Context, Result};
 use log::{debug, error, info};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Instant, SystemTime};
+
+use crate::ssh_config::model::HostEntry;
 
 /// Result of a certificate signing operation.
 #[derive(Debug)]
@@ -816,6 +819,115 @@ fn parse_proxy_jump_host(jump: &str) -> &str {
         }
     }
     after_user.split(':').next().unwrap_or(after_user)
+}
+
+/// One row in the Keys-tab Vault SSH strip.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActiveCert {
+    /// Host alias the cert belongs to.
+    pub alias: String,
+    /// Role name from `# purple:vault-ssh <role>`.
+    pub role: String,
+    /// Seconds remaining on the cert.
+    pub remaining_secs: i64,
+    /// Total signed-cert validity window in seconds. Used by the gauge
+    /// to compute `remaining/total` for the fill ratio.
+    pub total_secs: i64,
+}
+
+/// True iff a host has any purple-managed Vault context: either an
+/// explicit `# purple:vault-ssh` role marker, or a `CertificateFile`
+/// directive pointing into `~/.purple/certs/`. The second branch covers
+/// users who sign certs directly with the `vault` CLI and wire them in
+/// via `CertificateFile` without setting the role marker.
+pub fn has_purple_vault_context(host: &HostEntry) -> bool {
+    host.vault_ssh.is_some() || cert_file_in_purple_dir(&host.certificate_file)
+}
+
+/// `CertificateFile` path looks like a purple-managed cert when it
+/// references the per-user `.purple/certs/` directory. We match on the
+/// substring so the check works regardless of whether the path is
+/// tilde-expanded or absolute.
+pub fn cert_file_in_purple_dir(cert_file: &str) -> bool {
+    !cert_file.is_empty() && cert_file.contains("/.purple/certs/")
+}
+
+/// True when any host has a purple-managed Vault context. The Keys-tab
+/// strip renders iff this returns true. Even hosts whose cert is not
+/// yet cached count, so the strip appears the moment the user
+/// configures their first Vault role or sets a cert path.
+pub fn vault_ssh_in_use(hosts: &[HostEntry]) -> bool {
+    hosts.iter().any(has_purple_vault_context)
+}
+
+/// Build the strip's row list from the cert cache. Hosts that have a
+/// configured role (or a purple-managed cert path) but no cached
+/// `Valid` status are omitted; the gauge has nothing to fill until the
+/// lazy cert check populates the cache. Sort: longest remaining first
+/// so the user sees healthy certs at the top and expiring ones at the
+/// bottom.
+pub fn active_certs_for_strip(
+    hosts: &[HostEntry],
+    cache: &HashMap<String, (Instant, CertStatus, Option<SystemTime>)>,
+) -> Vec<ActiveCert> {
+    // Recompute `remaining_secs` against the current wall clock instead
+    // of using the cached snapshot. The cached number was correct only
+    // at the moment the check ran; the strip is redrawn on every event
+    // tick (~20× per second), so deriving from `expires_at - now` gives
+    // a per-second countdown without re-running the cert validation.
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let mut rows: Vec<ActiveCert> = hosts
+        .iter()
+        .filter(|h| has_purple_vault_context(h))
+        .filter_map(|h| {
+            let role = h.vault_ssh.clone().unwrap_or_default();
+            match cache.get(&h.alias) {
+                Some((
+                    _,
+                    CertStatus::Valid {
+                        expires_at,
+                        remaining_secs,
+                        total_secs,
+                    },
+                    _,
+                )) => {
+                    // `expires_at == 0` is the demo sentinel for "no
+                    // wall clock"; fall back to the static cached value
+                    // so visual fixtures stay byte-deterministic.
+                    let live_remaining = if *expires_at == 0 {
+                        *remaining_secs
+                    } else {
+                        (*expires_at - now).max(0)
+                    };
+                    Some(ActiveCert {
+                        alias: h.alias.clone(),
+                        role,
+                        remaining_secs: live_remaining,
+                        total_secs: *total_secs,
+                    })
+                }
+                _ => None,
+            }
+        })
+        .collect();
+    rows.sort_by_key(|r| std::cmp::Reverse(r.remaining_secs));
+    rows
+}
+
+/// Compute the fill ratio (0.0..=1.0) for a Vault SSH cert TTL gauge.
+/// Clamped so a cert in renewal-overlap or one whose `total_secs` was
+/// recorded as `i64::MAX` ("Valid: forever") does not produce NaN.
+pub fn cert_fill_ratio(remaining_secs: i64, total_secs: i64) -> f32 {
+    if total_secs <= 0 || remaining_secs <= 0 {
+        return 0.0;
+    }
+    if total_secs == i64::MAX || remaining_secs >= total_secs {
+        return 1.0;
+    }
+    (remaining_secs as f32 / total_secs as f32).clamp(0.0, 1.0)
 }
 
 /// Format remaining certificate time for display.

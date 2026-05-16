@@ -153,6 +153,7 @@ pub enum JumpActionTarget {
     Hosts,
     Tunnels,
     Containers,
+    Keys,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

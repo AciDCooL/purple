@@ -90,7 +90,7 @@ pub(super) fn handle_key_picker_shared(app: &mut App, key: KeyEvent, for_provide
         }
         KeyCode::Enter => {
             if let Some(index) = app.ui.key_picker.list.selected() {
-                if let Some(key_info) = app.keys.get(index) {
+                if let Some(key_info) = app.keys.list.get(index) {
                     if for_provider {
                         app.providers.form.identity_file = key_info.display_path.clone();
                         app.providers.form.sync_cursor_to_end();

@@ -105,7 +105,7 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
         JumpHit::Action(action) => execute_action(app, action, events_tx),
         JumpHit::Host(h) => {
             app.top_page = TopPage::Hosts;
-            app.screen = Screen::HostList;
+            app.set_screen(Screen::HostList);
             app.select_host_by_alias(&h.alias);
             // Default action on a host: trigger the connect flow exactly like
             // pressing Enter on the host list.
@@ -117,7 +117,7 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
         }
         JumpHit::Tunnel(t) => {
             app.top_page = TopPage::Tunnels;
-            app.screen = Screen::HostList;
+            app.set_screen(Screen::HostList);
             app.select_host_by_alias(&t.alias);
             // The tunnels overview reads its highlight from
             // `tunnels_overview_state`, NOT the host list. Compute the
@@ -139,7 +139,7 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
             // through to the first visible row when the cache no
             // longer carries the container.
             app.top_page = TopPage::Containers;
-            app.screen = Screen::HostList;
+            app.set_screen(Screen::HostList);
             let target_idx = crate::ui::containers_overview::position_of_container(
                 app,
                 &c.alias,
@@ -176,9 +176,9 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
                 app.notify_warning(crate::messages::PALETTE_SNIPPET_NEEDS_HOST);
                 return;
             }
-            app.screen = Screen::SnippetPicker {
+            app.set_screen(Screen::SnippetPicker {
                 target_aliases: target,
-            };
+            });
         }
     }
 }
@@ -205,8 +205,13 @@ fn execute_action(
         }
         JumpActionTarget::Containers => {
             app.top_page = TopPage::Containers;
-            app.screen = Screen::HostList;
+            app.set_screen(Screen::HostList);
             super::containers_overview::handle_keys(app, key, events_tx);
+        }
+        JumpActionTarget::Keys => {
+            app.top_page = TopPage::Keys;
+            app.set_screen(Screen::HostList);
+            super::keys_overview::handle_keys(app, key);
         }
     }
 }

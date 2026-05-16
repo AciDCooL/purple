@@ -1,11 +1,11 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                 │
+│  purple       hosts      tunnels      containers      keys                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 34 ──────────────────────────────────────────────────────────────────────────────────────────────╮
 │     HOST               NAME ▾              IMAGE                                         UPTIME  │
 │ ──────────────────────────────────────────────────────────────────────────────────────────────── │
 │ ▌ ● aws-api-staging    api                 myteam/api:v4.1.0-rc2                             2d  │
-│   ● do-web-ams         app                 myapp:3.2.1                                       8d  │
+│   ● do-work-web-ams    app                 myapp:3.2.1                                       8d  │
 │   ● bastion-ams        app-backend         myapp:v2.14.1                                    12d  │
 │   ● podman-edge        caddy               docker.io/library/caddy:2.8-alpine                 -  │
 │   ● pve-web-01         celery              internal/webapp:1.8.3                            20d  │
@@ -15,7 +15,7 @@
 │   ● bastion-ams        grafana             grafana/grafana:10.2                              5d  │
 │   ✖ podman-edge        loki                docker.io/grafana/loki:3.2                         -  │
 │   ● aws-api-staging    nginx               nginx:1.25-alpine                                 2d  │
-│   ● do-web-ams         nginx               nginx:1.25                                        8d  │
+│   ● do-work-web-ams    nginx               nginx:1.25                                        8d  │
 │   ● pve-web-01         nginx               nginx:1.25                                       20d  │
 │   ● bastion-ams        nginx-proxy         nginx:1.25-alpine                                12d  │
 │   ● db-primary         pg-exporter         prometheuscommunity/postgres-exporter:0…         30d  │
@@ -160,6 +160,10 @@
 (47,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (48,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (49,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
+(56,1) fg=Reset bg=Reset mod=DIM
+(57,1) fg=Reset bg=Reset mod=DIM
+(58,1) fg=Reset bg=Reset mod=DIM
+(59,1) fg=Reset bg=Reset mod=DIM
 (99,1) fg=Reset bg=Reset mod=DIM
 (0,2) fg=Reset bg=Reset mod=DIM
 (1,2) fg=Reset bg=Reset mod=DIM

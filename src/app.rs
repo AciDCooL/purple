@@ -5,7 +5,6 @@ use ratatui::widgets::ListState;
 
 use crate::history::ConnectionHistory;
 use crate::ssh_config::model::SshConfigFile;
-use crate::ssh_keys::SshKeyInfo;
 
 /// Case-insensitive substring check without allocation.
 /// Uses a byte-window approach for ASCII strings (the common case for SSH
@@ -49,6 +48,8 @@ mod host_state;
 mod hosts;
 pub(crate) use hosts::migrate_renames_persistent_state;
 pub(crate) mod jump;
+mod key_push_state;
+mod keys_state;
 pub(crate) mod ping;
 mod provider_state;
 mod reload_state;
@@ -80,6 +81,8 @@ pub use host_state::{
     DeletedHost, GroupBy, HostListItem, HostState, ProxyJumpCandidate, SortMode, ViewMode,
     health_summary_spans, health_summary_spans_for,
 };
+pub use key_push_state::KeyPushState;
+pub use keys_state::KeysState;
 pub use ping::{
     PingState, PingStatus, classify_ping, ping_sort_key, propagate_ping_to_dependents, status_glyph,
 };
@@ -118,6 +121,10 @@ impl Drop for App {
         if let Some(handle) = self.vault.sign_thread.take() {
             let _ = handle.join();
         }
+        // Same dance for key-push workers: signal cancel, join, so a
+        // panic or early exit cannot leave a thread writing to remote
+        // authorized_keys after the App is gone.
+        self.keys.push.shutdown();
     }
 }
 
@@ -158,8 +165,9 @@ pub struct App {
     pub reload: ReloadState,
     pub conflict: ConflictState,
 
-    // Keys
-    pub keys: Vec<SshKeyInfo>,
+    // Keys-tab state: discovered key list, master cursor, activity log,
+    // and push run state. See app/keys_state.rs.
+    pub keys: KeysState,
 
     // Tags
     pub tags: TagState,
@@ -254,7 +262,12 @@ impl App {
             search: SearchState::default(),
             reload,
             conflict: ConflictState::default(),
-            keys: Vec::new(),
+            keys: KeysState {
+                list: Vec::new(),
+                list_state: ratatui::widgets::ListState::default(),
+                activity: crate::key_activity::KeyActivityLog::load(),
+                push: KeyPushState::default(),
+            },
             tags: TagState::default(),
             forms: FormState::default(),
             history: ConnectionHistory::load(),
@@ -278,6 +291,15 @@ impl App {
             jump: None,
             esc_quit_hint_shown: false,
         }
+    }
+
+    /// Record an SSH session against `alias` in the activity log. Appends
+    /// in memory and flushes to `~/.purple/key_activity.json`. Failures
+    /// during flush are logged at debug level only; an activity-log write
+    /// failure must never interrupt the user's connect flow. Caller
+    /// passes `now`; production call sites pass `key_activity::now_secs()`.
+    pub fn record_key_use(&mut self, alias: &str, now: u64) {
+        crate::key_activity::record_and_flush(&mut self.keys.activity, alias, now);
     }
 
     /// Snapshot the alias of every host currently loaded. Used as
@@ -740,6 +762,7 @@ impl App {
                         (JumpMode::Hosts, JumpActionTarget::Hosts)
                             | (JumpMode::Tunnels, JumpActionTarget::Tunnels)
                             | (JumpMode::Containers, JumpActionTarget::Containers)
+                            | (JumpMode::Keys, JumpActionTarget::Keys)
                     );
                     let bump = if mode_match { 20_000 } else { 10_000 };
                     best = best.saturating_add(bump);
@@ -876,6 +899,10 @@ impl App {
         if let Some(text) = outcome.upgrade_toast {
             self.enqueue_sticky_toast(text);
         }
+        // Seed the Keys tab so the first Tab navigation lands on a
+        // populated list. Subsequent reloads run via R or after a host
+        // form save / provider sync.
+        self.scan_keys();
     }
 
     fn enqueue_sticky_toast(&mut self, text: String) {
@@ -1085,6 +1112,67 @@ impl App {
                 self.notify_background(crate::messages::config_reloaded(count));
                 self.queue_new_aliases_since(&before_aliases);
             }
+        }
+    }
+
+    /// Detect external changes to `~/.ssh/` keys and refresh `self.keys.list`
+    /// when something has moved. Mirrors `check_config_changed` for the
+    /// keys tab so users see new key files (or deletions, or rotations)
+    /// without pressing R. Cheap: a single dir stat plus one stat per
+    /// tracked key. Called from the 4-second throttle in `handle_tick`.
+    ///
+    /// Skips during demo mode (the demo seeds a fixed key list and never
+    /// reads from disk) and when a form is open that could be mutating
+    /// the same data.
+    pub fn check_keys_changed(&mut self) {
+        if self.demo_mode {
+            return;
+        }
+        if matches!(
+            self.screen,
+            Screen::AddHost | Screen::EditHost { .. } | Screen::ProviderForm { .. }
+        ) {
+            return;
+        }
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let ssh_dir = home.join(".ssh");
+        let current_dir_mtime = reload_state::get_mtime(&ssh_dir);
+        let dir_changed = current_dir_mtime != self.reload.keys_dir_mtime;
+        let files_changed = self
+            .reload
+            .key_file_mtimes
+            .iter()
+            .any(|(path, old)| reload_state::get_mtime(path) != *old);
+        if !dir_changed && !files_changed {
+            return;
+        }
+        log::debug!(
+            "[purple] check_keys_changed: drift detected on {} (dir={} files={}) -> rescan",
+            ssh_dir.display(),
+            dir_changed,
+            files_changed,
+        );
+        let previous = self.keys.list.len();
+        self.scan_keys();
+        let after = self.keys.list.len();
+        // Keep the selection valid after a rescan: clamp to the new list
+        // length, or land on the first row when the list grew from empty.
+        if let Some(sel) = self.keys.list_state.selected() {
+            if sel >= after {
+                let next = after.checked_sub(1);
+                self.keys.list_state.select(next);
+            }
+        } else if after > 0 {
+            self.keys.list_state.select(Some(0));
+        }
+        if previous != after {
+            log::debug!(
+                "[purple] check_keys_changed: rescan {} -> {} keys",
+                previous,
+                after
+            );
         }
     }
 
@@ -1452,6 +1540,30 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         aliases: &["show details", "hide details", "compact view"],
         target: JumpActionTarget::Containers,
     },
+    // Keys tab. Mirror the footer + handler bindings on the Keys tab so
+    // typing `:` followed by part of a verb (e.g. `push`, `sign`, `copy`)
+    // surfaces the same actions the keyboard shortcuts already trigger.
+    JumpAction {
+        key: 'c',
+        key_str: "c",
+        label: "Keys: Copy public key",
+        aliases: &["yank", "clipboard", "pubkey"],
+        target: JumpActionTarget::Keys,
+    },
+    JumpAction {
+        key: 'p',
+        key_str: "p",
+        label: "Keys: Push to host",
+        aliases: &["install", "ssh-copy-id", "deploy", "upload"],
+        target: JumpActionTarget::Keys,
+    },
+    JumpAction {
+        key: 'V',
+        key_str: "V",
+        label: "Keys: Sign Vault SSH certificate",
+        aliases: &["vault", "renew cert", "sign"],
+        target: JumpActionTarget::Keys,
+    },
 ];
 
 /// Which command set the jump bar displays. Determined by the screen that
@@ -1463,6 +1575,7 @@ pub enum JumpMode {
     Hosts,
     Tunnels,
     Containers,
+    Keys,
 }
 
 /// Cap on hits rendered per section. Broad queries (e.g. one character)
@@ -1830,6 +1943,7 @@ impl JumpState {
             JumpMode::Hosts => None,
             JumpMode::Tunnels => Some(JumpActionTarget::Tunnels),
             JumpMode::Containers => Some(JumpActionTarget::Containers),
+            JumpMode::Keys => Some(JumpActionTarget::Keys),
         };
         let actions = match preferred_target {
             Some(t) => round_robin_actions_with_bias(filtered.into_iter(), t, EMPTY_STATE_TAB_BIAS),

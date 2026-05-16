@@ -12,6 +12,14 @@ pub struct ReloadState {
     pub last_modified: Option<SystemTime>,
     pub include_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
     pub include_dir_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+    /// mtime of `~/.ssh/` itself. Changes when a key file is created,
+    /// renamed or removed; combined with `key_file_mtimes` this gives a
+    /// full add/remove/modify signal without needing a real watcher.
+    pub keys_dir_mtime: Option<SystemTime>,
+    /// mtime per known `*.pub` (or private) key path. Touch-only edits
+    /// (re-encrypt, passphrase change) move the file mtime without
+    /// touching the parent directory, so we track both.
+    pub key_file_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
 }
 
 /// Form conflict detection mtimes.
@@ -36,6 +44,8 @@ impl ReloadState {
             last_modified,
             include_mtimes,
             include_dir_mtimes,
+            keys_dir_mtime: None,
+            key_file_mtimes: Vec::new(),
         }
     }
 }
@@ -65,6 +75,23 @@ pub fn snapshot_include_dir_mtimes(config: &SshConfigFile) -> Vec<(PathBuf, Opti
         .map(|p| {
             let mtime = get_mtime(&p);
             (p, mtime)
+        })
+        .collect()
+}
+
+/// Snapshot the mtime of every discovered key's public-key file. The
+/// caller passes the live `discover_keys` result; we resolve each
+/// `display_path` (with the leading `~` expanded) back to an absolute
+/// path under `ssh_dir` so we can stat it cheaply on each tick.
+pub fn snapshot_key_mtimes(
+    ssh_dir: &Path,
+    keys: &[crate::ssh_keys::SshKeyInfo],
+) -> Vec<(PathBuf, Option<SystemTime>)> {
+    keys.iter()
+        .map(|k| {
+            let pub_path = ssh_dir.join(format!("{}.pub", k.name));
+            let mtime = get_mtime(&pub_path);
+            (pub_path, mtime)
         })
         .collect()
 }

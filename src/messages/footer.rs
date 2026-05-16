@@ -94,6 +94,18 @@ pub const ACTION_START: &str = " start ";
 pub const ACTION_STOP: &str = " stop ";
 pub const ACTION_LOGS: &str = " logs ";
 
+/// Keys tab footer labels. Centralised here so the design-system gate
+/// (`./scripts/check-design-system.sh`) does not flag inline literals
+/// at the keys_overview call sites.
+pub const ACTION_PUSH: &str = " push ";
+
+/// Bulk Vault SSH sign trigger, shared between the host list and the
+/// Keys tab so the wording stays in sync with the actual handler.
+pub const ACTION_VAULT_SIGN: &str = " sign cert ";
+
+/// Key-push picker primary action. Enter advances to the confirm dialog.
+pub const ENTER_CONFIRM: &str = " confirm ";
+
 /// Logs overlay footer keycaps. Kept here so the design-system gate
 /// (`./scripts/check-design-system.sh`) does not flag inline literals
 /// at the call sites.

@@ -8,16 +8,16 @@ use super::theme;
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let title = if app.keys.is_empty() {
+    let title = if app.keys.list.is_empty() {
         "SSH Keys".to_string()
     } else {
-        let pos = app.ui.key_list_state.selected().map(|i| i + 1).unwrap_or(0);
-        format!("SSH Keys {}/{}", pos, app.keys.len())
+        let pos = app.keys.list_state.selected().map(|i| i + 1).unwrap_or(0);
+        format!("SSH Keys {}/{}", pos, app.keys.list.len())
     };
 
     // Overlay: percentage-based width, height fits content. Reserve 1 row
     // below the block for the external footer.
-    let item_count = app.keys.len().max(1);
+    let item_count = app.keys.list.len().max(1);
     let height = (item_count as u16 + 5).min(frame.area().height.saturating_sub(5));
     let area = design::overlay_area(frame, design::OVERLAY_W, design::OVERLAY_H, height);
     frame.render_widget(Clear, area);
@@ -27,7 +27,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if app.keys.is_empty() {
+    if app.keys.list.is_empty() {
         design::render_empty(
             frame,
             inner,
@@ -45,6 +45,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let name_w = design::padded_usize(
         app.keys
+            .list
             .iter()
             .map(|k| k.name.len())
             .max()
@@ -53,6 +54,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     );
     let type_w = design::padded_usize(
         app.keys
+            .list
             .iter()
             .map(|k| k.type_display().len())
             .max()
@@ -61,6 +63,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     );
     let hosts_w = design::padded_usize(
         app.keys
+            .list
             .iter()
             .map(|k| {
                 let n = k.linked_hosts.len();
@@ -102,6 +105,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let items: Vec<ListItem> = app
         .keys
+        .list
         .iter()
         .map(|key| {
             let type_display = key.type_display();
@@ -143,7 +147,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .highlight_style(theme::selected_row())
         .highlight_symbol(design::LIST_HIGHLIGHT);
 
-    frame.render_stateful_widget(list, inner_chunks[1], &mut app.ui.key_list_state);
+    frame.render_stateful_widget(list, inner_chunks[1], &mut app.keys.list_state);
 
     // Footer below the block
     let footer_area = design::render_overlay_footer(frame, area);

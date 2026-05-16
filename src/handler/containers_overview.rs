@@ -812,11 +812,11 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender
             app.open_jump(JumpMode::Containers);
         }
         KeyCode::Tab => {
-            app.top_page = app.top_page.next();
+            app.cycle_top_page_next();
             app.search.query = None;
         }
         KeyCode::BackTab => {
-            app.top_page = app.top_page.prev();
+            app.cycle_top_page_prev();
             app.search.query = None;
         }
         // Enter on a container row queues an exec. On a host-header

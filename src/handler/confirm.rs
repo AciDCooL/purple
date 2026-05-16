@@ -555,3 +555,350 @@ fn queue_container_action(
             action,
         });
 }
+
+/// Confirm for the `p` push action from the Keys tab. Stakes test:
+/// pushing modifies remote `authorized_keys`, so the footer uses
+/// action verbs (`push` / `keep`) and we only accept y/n/Esc.
+pub(super) fn handle_confirm_key_push(
+    app: &mut App,
+    key: KeyEvent,
+    events_tx: &mpsc::Sender<AppEvent>,
+) {
+    match super::route_confirm_key(key) {
+        super::ConfirmAction::Yes => {
+            let key_index = match &app.screen {
+                Screen::ConfirmKeyPush { key_index } => *key_index,
+                _ => return,
+            };
+            let aliases = std::mem::take(&mut app.keys.push.committed);
+            app.set_screen(Screen::HostList);
+            start_key_push(app, key_index, aliases, events_tx);
+        }
+        super::ConfirmAction::No => {
+            // Return to the picker with the selection still intact so the
+            // user can refine it.
+            let key_index = match &app.screen {
+                Screen::ConfirmKeyPush { key_index } => *key_index,
+                _ => return,
+            };
+            app.keys.push.committed.clear();
+            app.set_screen(Screen::KeyPushPicker { key_index });
+        }
+        super::ConfirmAction::Ignored => {}
+    }
+}
+
+/// Spawn the background push worker. Reads the pubkey from disk on the
+/// main thread (cheap) so we surface an early error toast before
+/// committing to the run. On read failure we abort and stay on
+/// HostList. Refuses to start a second push while a first is still in
+/// flight (`expected_count > 0`); the user must press Esc to cancel
+/// before triggering another run.
+fn start_key_push(
+    app: &mut App,
+    key_index: usize,
+    aliases: Vec<String>,
+    events_tx: &mpsc::Sender<AppEvent>,
+) {
+    // Refuse second push while a previous run still has live state OR a
+    // worker handle that has not been observed to finish. Belt-and-braces:
+    // expected_count protects the in-flight branch, worker.is_finished()
+    // protects the post-cancel branch where the worker is still draining
+    // but its results no longer count toward any expected total.
+    if app.keys.push.expected_count > 0
+        || app
+            .keys
+            .push
+            .worker
+            .as_ref()
+            .is_some_and(|h| !h.is_finished())
+    {
+        log::debug!(
+            "[purple] key_push: rejected second push, run already in progress ({} of {})",
+            app.keys.push.results.len(),
+            app.keys.push.expected_count
+        );
+        app.notify_warning(crate::messages::KEY_PUSH_ALREADY_IN_PROGRESS);
+        return;
+    }
+    if aliases.is_empty() {
+        log::debug!("[purple] key_push: rejected, no aliases committed");
+        app.notify_error(crate::messages::KEY_PUSH_NO_HOSTS_SELECTED);
+        return;
+    }
+    let Some(key_info) = app.keys.list.get(key_index).cloned() else {
+        return;
+    };
+    if key_info.is_certificate {
+        app.notify_error(crate::messages::KEY_PUSH_CERT_NOT_PUSHABLE);
+        return;
+    }
+    let pub_path = crate::key_push::pubkey_path_for(&key_info.display_path);
+    let raw = match crate::key_push::read_pubkey_file(&pub_path) {
+        Ok(s) => s,
+        Err(crate::key_push::PubkeyValidationError::TooLarge(n)) => {
+            log::warn!(
+                "[purple] key_push: pubkey too large path={} bytes={}",
+                pub_path.display(),
+                n
+            );
+            app.notify_error(crate::messages::key_push_pubkey_too_large(
+                &key_info.name,
+                n,
+            ));
+            return;
+        }
+        Err(crate::key_push::PubkeyValidationError::NotARegularFile) => {
+            log::warn!(
+                "[purple] key_push: pubkey not a regular file path={}",
+                pub_path.display()
+            );
+            app.notify_error(crate::messages::key_push_pubkey_not_regular(&key_info.name));
+            return;
+        }
+        Err(_) => {
+            // Other validation variants are unreachable here (read_pubkey_file
+            // only returns TooLarge / NotARegularFile / IO collapsed into
+            // NotARegularFile). Defensive fallthrough.
+            app.notify_error(crate::messages::key_push_no_pubkey(&key_info.name));
+            return;
+        }
+    };
+    let pubkey = match crate::key_push::validate_pubkey(&raw) {
+        Ok(s) => s,
+        Err(err) => {
+            let detail = match &err {
+                crate::key_push::PubkeyValidationError::Empty => "file is empty",
+                crate::key_push::PubkeyValidationError::MultiLine => {
+                    "must be a single line; multi-line input is rejected"
+                }
+                crate::key_push::PubkeyValidationError::UnsupportedType(_) => {
+                    "key algorithm not allowed for static push"
+                }
+                crate::key_push::PubkeyValidationError::MalformedBase64 => {
+                    "base64 key body did not parse"
+                }
+                _ => "unexpected format",
+            };
+            log::warn!(
+                "[purple] key_push: invalid pubkey path={} err={:?}",
+                pub_path.display(),
+                err
+            );
+            app.notify_error(crate::messages::key_push_invalid_pubkey(
+                &key_info.name,
+                detail,
+            ));
+            return;
+        }
+    };
+
+    // Reset accumulators for this run.
+    app.keys.push.results.clear();
+    app.keys.push.expected_count = aliases.len();
+    app.keys.push.run_id = app.keys.push.run_id.wrapping_add(1);
+    let run_id = app.keys.push.run_id;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    app.keys.push.cancel = Some(cancel.clone());
+
+    app.notify_progress(crate::messages::key_push_in_progress(
+        &key_info.name,
+        aliases.len(),
+    ));
+
+    let config_path = app.hosts_state.ssh_config.path.clone();
+    let tx = events_tx.clone();
+    let pubkey_payload = pubkey;
+    let handle = std::thread::Builder::new()
+        .name("key-push".into())
+        .spawn(move || {
+            for alias in aliases {
+                if cancel.load(Ordering::Relaxed) {
+                    break;
+                }
+                let outcome =
+                    crate::key_push::push_to_host(&pubkey_payload, &alias, &config_path, &cancel);
+                let _ = tx.send(AppEvent::KeyPushResult {
+                    run_id,
+                    result: crate::key_push::KeyPushResult { alias, outcome },
+                });
+            }
+        });
+    match handle {
+        Ok(h) => {
+            app.keys.push.worker = Some(h);
+        }
+        Err(e) => {
+            log::error!("[purple] key_push: failed to spawn worker: {}", e);
+            // Drop the progress toast through the status-center invariant
+            // so the user does not see "Pushing..." stuck under the
+            // failure message.
+            app.status_center.clear_sticky_status();
+            app.notify_error(crate::messages::key_push_thread_spawn_failed());
+            app.keys.push.cancel = None;
+            app.keys.push.expected_count = 0;
+            app.keys.push.worker = None;
+        }
+    }
+}
+
+#[cfg(test)]
+mod key_push_confirm_tests {
+    //! Coverage for the gate functions wrapping the push-worker spawn.
+    //! Every test exercises a guard path (already-running, missing pubkey,
+    //! certificate key, empty selection, return-to-picker) and asserts the
+    //! observable state. The happy-spawn path is intentionally not unit
+    //! tested here because it forks an ssh subprocess; that path is
+    //! covered by the event-loop tests against the run-completion flow.
+    use super::*;
+    use crate::ssh_config::model::SshConfigFile;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn make_app() -> (App, std::path::PathBuf) {
+        let scratch = tempfile::tempdir().expect("tempdir").keep();
+        crate::preferences::set_path_override(scratch.join("preferences"));
+        crate::containers::set_path_override(scratch.join("container_cache.jsonl"));
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content("Host h1\n  HostName 1.1.1.1\n"),
+            path: scratch.join("test_config"),
+            crlf: false,
+            bom: false,
+        };
+        let mut app = App::new(config);
+        // Seed a non-cert key whose .pub file lives in the scratch dir so
+        // `read_pubkey_file` succeeds via the override path.
+        let pub_path = scratch.join("id_test.pub");
+        std::fs::write(
+            &pub_path,
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBnSCk/2pwG7QHQHIvF2UxYZsMP1qJ4XbJjT7mxBSBb1 test@host\n",
+        )
+        .unwrap();
+        app.keys.list.push(crate::ssh_keys::SshKeyInfo {
+            name: "id_test".into(),
+            display_path: pub_path.with_extension("").to_string_lossy().into_owned(),
+            key_type: "ED25519".into(),
+            bits: "256".into(),
+            fingerprint: String::new(),
+            comment: "test@host".into(),
+            linked_hosts: vec![],
+            bishop_art: String::new(),
+            strength_score: 95,
+            encrypted: false,
+            agent_loaded: false,
+            is_certificate: false,
+            mtime_ts: None,
+        });
+        (app, scratch)
+    }
+
+    fn k(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn n_returns_to_picker_with_key_index_preserved() {
+        let (mut app, _scratch) = make_app();
+        app.keys.push.committed = vec!["h1".into()];
+        app.screen = Screen::ConfirmKeyPush { key_index: 0 };
+        let (tx, _rx) = mpsc::channel();
+        handle_confirm_key_push(&mut app, k(KeyCode::Char('n')), &tx);
+        match app.screen {
+            Screen::KeyPushPicker { key_index } => assert_eq!(key_index, 0),
+            ref other => panic!("expected KeyPushPicker, got {:?}", other),
+        }
+        assert!(
+            app.keys.push.committed.is_empty(),
+            "n should drop the frozen selection"
+        );
+    }
+
+    #[test]
+    fn esc_routes_through_route_confirm_key_and_returns_to_picker() {
+        let (mut app, _scratch) = make_app();
+        app.keys.push.committed = vec!["h1".into()];
+        app.screen = Screen::ConfirmKeyPush { key_index: 0 };
+        let (tx, _rx) = mpsc::channel();
+        handle_confirm_key_push(&mut app, k(KeyCode::Esc), &tx);
+        assert!(matches!(app.screen, Screen::KeyPushPicker { .. }));
+    }
+
+    #[test]
+    fn start_rejects_when_a_previous_run_is_still_in_flight() {
+        let (mut app, _scratch) = make_app();
+        app.keys.push.expected_count = 2;
+        app.keys.push.results.push(crate::key_push::KeyPushResult {
+            alias: "h1".into(),
+            outcome: crate::key_push::KeyPushOutcome::Appended,
+        });
+        let (tx, _rx) = mpsc::channel();
+        start_key_push(&mut app, 0, vec!["h1".into()], &tx);
+        assert_eq!(
+            app.keys.push.expected_count, 2,
+            "guard must not reset in-flight state"
+        );
+        let toast = app.status_center.toast.as_ref().expect("toast set");
+        assert!(
+            toast.text.contains("already running"),
+            "expected 'already running' warning, got: {}",
+            toast.text
+        );
+    }
+
+    #[test]
+    fn start_rejects_empty_aliases_and_does_not_spawn_worker() {
+        let (mut app, _scratch) = make_app();
+        let (tx, _rx) = mpsc::channel();
+        start_key_push(&mut app, 0, Vec::new(), &tx);
+        assert_eq!(app.keys.push.expected_count, 0);
+        assert!(app.keys.push.worker.is_none());
+        let toast = app.status_center.toast.as_ref().expect("toast set");
+        assert!(toast.is_error());
+    }
+
+    #[test]
+    fn start_rejects_certificate_key() {
+        let (mut app, _scratch) = make_app();
+        app.keys.list[0].is_certificate = true;
+        let (tx, _rx) = mpsc::channel();
+        start_key_push(&mut app, 0, vec!["h1".into()], &tx);
+        assert_eq!(app.keys.push.expected_count, 0);
+        assert!(app.keys.push.worker.is_none());
+        let toast = app.status_center.toast.as_ref().expect("toast set");
+        assert!(toast.is_error());
+        assert!(toast.text.contains("Certificates"));
+    }
+
+    #[test]
+    fn start_rejects_missing_pubkey_file() {
+        let (mut app, _scratch) = make_app();
+        app.keys.list[0].display_path = "/tmp/purple-this-file-does-not-exist".into();
+        let (tx, _rx) = mpsc::channel();
+        start_key_push(&mut app, 0, vec!["h1".into()], &tx);
+        assert_eq!(app.keys.push.expected_count, 0);
+        let toast = app.status_center.toast.as_ref().expect("toast set");
+        assert!(toast.is_error());
+    }
+
+    #[test]
+    fn start_rejects_invalid_pubkey_content() {
+        let (mut app, scratch) = make_app();
+        // Multi-line pubkey: the canonical command-injection PoC. Must be
+        // rejected without spawning the worker.
+        let pub_path = scratch.join("id_bad.pub");
+        std::fs::write(
+            &pub_path,
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBnSCk/2pwG7QHQHIvF2UxYZsMP1qJ4XbJjT7mxBSBb1 real\ncommand=\"evil\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBnSCk/2pwG7QHQHIvF2UxYZsMP1qJ4XbJjT7mxBSBb2 hack\n",
+        )
+        .unwrap();
+        app.keys.list[0].display_path = pub_path.with_extension("").to_string_lossy().into_owned();
+        app.keys.list[0].name = "id_bad".into();
+        let (tx, _rx) = mpsc::channel();
+        start_key_push(&mut app, 0, vec!["h1".into()], &tx);
+        assert_eq!(app.keys.push.expected_count, 0);
+        assert!(app.keys.push.worker.is_none());
+        let toast = app.status_center.toast.as_ref().expect("toast set");
+        assert!(toast.is_error());
+        assert!(toast.text.contains("validation"));
+    }
+}

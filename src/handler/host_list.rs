@@ -8,7 +8,7 @@ use crate::event::AppEvent;
 use crate::preferences;
 use crate::ssh_config::model::ConfigElement;
 
-mod actions;
+pub(crate) mod actions;
 
 fn serialize_host_block(elements: &[ConfigElement], alias: &str, crlf: bool) -> Option<String> {
     let line_ending = if crlf { "\r\n" } else { "\n" };
@@ -78,12 +78,12 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
             super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::Tab => {
-            app.top_page = app.top_page.next();
+            app.cycle_top_page_next();
             app.search.query = None;
             super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::BackTab => {
-            app.top_page = app.top_page.prev();
+            app.cycle_top_page_prev();
             app.search.query = None;
             super::ping::refresh_selected_if_stale(app, events_tx);
         }

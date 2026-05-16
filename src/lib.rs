@@ -6,6 +6,8 @@ pub mod demo_flag;
 pub mod event;
 pub mod file_browser;
 pub mod fs_util;
+pub mod key_activity;
+pub mod key_push;
 pub mod mcp;
 pub mod messages;
 pub mod providers;

@@ -16,6 +16,8 @@ mod fs_util;
 mod handler;
 mod history;
 mod import;
+mod key_activity;
+mod key_push;
 mod logging;
 mod mcp;
 mod messages;
@@ -383,6 +385,7 @@ fn run_direct_connect(alias: String, config: &mut SshConfigFile, config_path: &P
     let code = result.status.code().unwrap_or(1);
     if code != 255 {
         history::ConnectionHistory::load().record(&alias);
+        key_activity::KeyActivityLog::record_oneshot(&alias, key_activity::now_secs());
     }
     askpass::cleanup_marker(&alias);
     std::process::exit(code);
@@ -432,6 +435,7 @@ fn run_positional_alias(
         let code = result.status.code().unwrap_or(1);
         if code != 255 {
             history::ConnectionHistory::load().record(&alias);
+            key_activity::KeyActivityLog::record_oneshot(&alias, key_activity::now_secs());
         }
         askpass::cleanup_marker(&alias);
         std::process::exit(code);

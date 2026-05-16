@@ -34,6 +34,18 @@ pub fn disable() {
     DEMO_MODE.store(false, Ordering::Relaxed);
 }
 
+/// Cross-crate test mutex serialising any test that mutates global
+/// process state: the demo flag, `set_var`, the working directory, etc.
+/// Lives in the library so both the binary's `preferences::tests` and the
+/// library's `key_activity::tests` can acquire the same lock and never run
+/// concurrently. `preferences::GLOBAL_TEST_IO_LOCK` is a `pub use` alias
+/// for back-compat with existing call sites.
+///
+/// `dead_code` allow: only `#[cfg(test)]` paths read this static, and the
+/// release binary's lint pass does not see those paths.
+#[allow(dead_code)]
+pub static GLOBAL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Frozen reference timestamp for demo mode. Initialised lazily on first
 /// call from real wall-clock time, then cached for the rest of the process.
 /// Demo data builders and `format_time_ago` both call this when demo mode is

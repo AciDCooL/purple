@@ -28,6 +28,27 @@ impl App {
         self.screen = screen;
     }
 
+    /// Cycle to the next top page. Logs the transition so Tab-cycle
+    /// confusion ("I keep landing on the wrong page after Tab") leaves a
+    /// breadcrumb in `~/.purple/purple.log`. Callers should prefer this
+    /// over direct `app.top_page = app.top_page.next()` assignment.
+    pub fn cycle_top_page_next(&mut self) {
+        let old = self.top_page;
+        self.top_page = self.top_page.next();
+        log::debug!("[purple] top_page: {:?} → {:?} (Tab)", old, self.top_page);
+    }
+
+    /// Cycle to the previous top page. See `cycle_top_page_next`.
+    pub fn cycle_top_page_prev(&mut self) {
+        let old = self.top_page;
+        self.top_page = self.top_page.prev();
+        log::debug!(
+            "[purple] top_page: {:?} → {:?} (Shift+Tab)",
+            old,
+            self.top_page
+        );
+    }
+
     /// Get the host index from the currently selected display list item.
     pub fn selected_host_index(&self) -> Option<usize> {
         if self.search.query.is_some() {
@@ -220,31 +241,34 @@ impl App {
     pub fn scan_keys(&mut self) {
         if let Some(home) = dirs::home_dir() {
             let ssh_dir = home.join(".ssh");
-            self.keys = ssh_keys::discover_keys(Path::new(&ssh_dir), &self.hosts_state.list);
-            if !self.keys.is_empty() && self.ui.key_list_state.selected().is_none() {
-                self.ui.key_list_state.select(Some(0));
+            self.keys.list = ssh_keys::discover_keys(Path::new(&ssh_dir), &self.hosts_state.list);
+            if !self.keys.list.is_empty() && self.keys.list_state.selected().is_none() {
+                self.keys.list_state.select(Some(0));
             }
+            self.reload.keys_dir_mtime = crate::app::reload_state::get_mtime(&ssh_dir);
+            self.reload.key_file_mtimes =
+                crate::app::reload_state::snapshot_key_mtimes(&ssh_dir, &self.keys.list);
         }
     }
 
     /// Move key list selection up.
     pub fn select_prev_key(&mut self) {
-        super::cycle_selection(&mut self.ui.key_list_state, self.keys.len(), false);
+        super::cycle_selection(&mut self.keys.list_state, self.keys.list.len(), false);
     }
 
     /// Move key list selection down.
     pub fn select_next_key(&mut self) {
-        super::cycle_selection(&mut self.ui.key_list_state, self.keys.len(), true);
+        super::cycle_selection(&mut self.keys.list_state, self.keys.list.len(), true);
     }
 
     /// Move key picker selection up.
     pub fn select_prev_picker_key(&mut self) {
-        super::cycle_selection(&mut self.ui.key_picker.list, self.keys.len(), false);
+        super::cycle_selection(&mut self.ui.key_picker.list, self.keys.list.len(), false);
     }
 
     /// Move key picker selection down.
     pub fn select_next_picker_key(&mut self) {
-        super::cycle_selection(&mut self.ui.key_picker.list, self.keys.len(), true);
+        super::cycle_selection(&mut self.ui.key_picker.list, self.keys.list.len(), true);
     }
 
     /// Move password picker selection up.

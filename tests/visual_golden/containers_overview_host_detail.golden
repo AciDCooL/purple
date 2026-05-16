@@ -1,11 +1,11 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                                                                                                                     │
+│  purple       hosts      tunnels      containers      keys                                                                                                                                           │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 29 ──────────────────────────────────────────────────────────────────────────────────────────────────╮╭─ STATUS ─────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                IMAGE                                                                UPTIME  ││ Ping          ● 92ms                                                                         │
 │ ──────────────────────────────────────────────────────────────────────────────────────────────────── ││ Sync age      16m ago                                                                        │
 │ ▌── aws-api-staging ───────────────────────────────────────────────────────────────────────────────  ││ Runtime       Docker 25.0.3                                                                  │
-│   ● api                 myteam/api:v4.1.0-rc2                                                    2d  ││ Last SSH      6h ago                                                                         │
+│   ● api                 myteam/api:v4.1.0-rc2                                                    2d  ││ Last SSH      11h ago                                                                        │
 │   ● datadog-agent       datadog/agent:7                                                          2d  │╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 │   ● nginx               nginx:1.25-alpine                                                        2d  │╭─ FLEET ──────────────────────────────────────────────────────────────────────────────────────╮
 │   ● redis               redis:7-alpine                                                           2d  ││ State         ● 4 running  ○ 0 exited                                                        │
@@ -22,7 +22,7 @@
 │   ● pg-exporter         prometheuscommunity/postgres-exporter:0.15                              30d  │╰──────────────────────────────────────────────────────────────────────────────────────────────╯
 │   ● pgbouncer           pgbouncer:1.21                                                          30d  │╭─ HOST ───────────────────────────────────────────────────────────────────────────────────────╮
 │   ● postgres-primary    postgres:16-alpine                                                      30d  ││ Address       52.47.100.24                                                                   │
-│  ── do-web-ams ────────────────────────────────────────────────────────────────────────────────────  ││ User          ec2-user                                                                       │
+│  ── do-work-web-ams ───────────────────────────────────────────────────────────────────────────────  ││ User          ec2-user                                                                       │
 │   ● app                 myapp:3.2.1                                                              8d  ││ Provider      AWS EC2 · us-east-1                                                            │
 │   ● nginx               nginx:1.25                                                               8d  ││ Tags          staging, api                                                                   │
 │   ● redis               redis:7-alpine                                                           8d  ││                                                                                              │
@@ -290,6 +290,10 @@
 (47,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (48,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
 (49,1) fg=Reset bg=Reset mod=BOLD|UNDERLINED
+(56,1) fg=Reset bg=Reset mod=DIM
+(57,1) fg=Reset bg=Reset mod=DIM
+(58,1) fg=Reset bg=Reset mod=DIM
+(59,1) fg=Reset bg=Reset mod=DIM
 (199,1) fg=Reset bg=Reset mod=DIM
 (0,2) fg=Reset bg=Reset mod=DIM
 (1,2) fg=Reset bg=Reset mod=DIM
@@ -1178,6 +1182,7 @@
 (123,7) fg=Reset bg=Reset mod=BOLD
 (124,7) fg=Reset bg=Reset mod=BOLD
 (125,7) fg=Reset bg=Reset mod=BOLD
+(126,7) fg=Reset bg=Reset mod=BOLD
 (199,7) fg=Reset bg=Reset mod=DIM
 (0,8) fg=Reset bg=Reset mod=DIM
 (4,8) fg=Green bg=Reset mod=-
@@ -3767,11 +3772,11 @@
 (14,24) fg=Reset bg=Reset mod=BOLD
 (15,24) fg=Reset bg=Reset mod=BOLD
 (16,24) fg=Reset bg=Reset mod=BOLD
-(17,24) fg=Reset bg=Reset mod=DIM
-(18,24) fg=Reset bg=Reset mod=DIM
-(19,24) fg=Reset bg=Reset mod=DIM
-(20,24) fg=Reset bg=Reset mod=DIM
-(21,24) fg=Reset bg=Reset mod=DIM
+(17,24) fg=Reset bg=Reset mod=BOLD
+(18,24) fg=Reset bg=Reset mod=BOLD
+(19,24) fg=Reset bg=Reset mod=BOLD
+(20,24) fg=Reset bg=Reset mod=BOLD
+(21,24) fg=Reset bg=Reset mod=BOLD
 (22,24) fg=Reset bg=Reset mod=DIM
 (23,24) fg=Reset bg=Reset mod=DIM
 (24,24) fg=Reset bg=Reset mod=DIM

@@ -1,33 +1,33 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                 │
+│  purple       hosts      tunnels      containers      keys                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ 26 ── ●17 ✖2 ○7 ─────────────────────────────────────────────────────────────────────────────────╮
-│     NAME                   ADDRESS                         TAGS                            LAST▾ │
-│───────────╭ Jump ───────────────────────────────────────────────────────────────────╮────────────│
-│▌  ● bastio│                                                                         │       <1m  │
-│   ● db-pri│  ╭───────────────────────────────────────────────────────────────────╮  │        1h  │
-│   ● monito│  │ █ Find anything                                                   │  │        2h  │
-│   ● gatewa│  ╰───────────────────────────────────────────────────────────────────╯  │        3h  │
-│   ● podman│                                                                         │        4h  │
-│   ● aws-ap│   Recent   2                                                            │        5h  │
-│   ● aws-ap│   bastion-ams                                     bastion.ams.example   │        6h  │
-│   ● aws-wo│   Help: What's new                                                  n   │        7h  │
-│   ● aws-ba│                                                                         │        8h  │
-│   ● aws-ml│   Actions   6 of 31                                                     │        9h  │
-│   ● pve-we│   Hosts: Add host                                                   a   │       15h  │
-│   ● pve-we│   Tunnels: Manage tunnels                                           T   │       16h  │
-│   ● pve-db│   Containers: List containers                                       C   │       17h  │
-│   ● pve-db│   Files: Browse remote files                                        F   │       18h  │
-│   ● pve-re│   Vault: Sign certificate                                           V   │       19h  │
-│   ● pve-ma│   Keys: Manage SSH keys                                             K   │       20h  │
-│   ● pve-mo│                                                                         │x      21h  │
-│   ○ db-pro╰─────────────────────────────────────────────────────────────────────────╯         -  │
-│   ○ do-wor Enter  select    ↑↓  select    Tab  next    Esc  close                    n        -  │
-│   ○ do-work-staging-ams    104.248.38.92 ⇄                 staging web digitalocean           -  │
-│   ○ do-work-worker-ams     104.248.38.93                   worker digitalocean                -  │
-│   ○ do-work-ci-runner      104.248.38.94 ↗                 ci digitalocean                    -  │
-╰──────────────────────────────────────────────────────────────────────────────────── getpurple.sh ╯
- Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
+╭ 31 ── ●27 ✖3 ○1 ─────────────────────────────────────────╮╭─ bastion-ams ────────────────────────╮
+│     NAME                             TAGS          LAST▾ ││ ops@140.82.121.3:22                  │
+│───────────╭ Jump ───────────────────────────────────────────────────────────────────╮ust now     │
+│▌  ● bastio│                                                                         │────────────╯
+│   ● db-pri│  ╭───────────────────────────────────────────────────────────────────╮  │────────────╮
+│   ● monito│  │ █ Find anything                                                   │  │3           │
+│   ● gatewa│  ╰───────────────────────────────────────────────────────────────────╯  │            │
+│   ● podman│                                                                         │            │
+│   ● prod-e│   Recent   2                                                            │            │
+│   ● prod-e│   bastion-ams                                     bastion.ams.example   │            │
+│   ● custom│   Help: What's new                                                  n   │────────────╯
+│   ● custom│                                                                         │────────────╮
+│   ✖ legacy│   Actions   6 of 34                                                     │            │
+│   ● aws-ap│   Hosts: Add host                                                   a   │            │
+│   ● aws-ap│   Tunnels: Manage tunnels                                           T   │            │
+│   ● aws-wo│   Containers: List containers                                       C   │▄▃▃  ▄ ▁    │
+│   ● aws-ba│   Files: Browse remote files                                        F   │███▇██▆█▇▄▂ │
+│   ● aws-ml│   Vault: Sign certificate                                           V   │        now │
+│   ● do-wor│   Keys: Manage SSH keys                                             K   │────────────╯
+│   ● do-wor│                                                                         │────────────╮
+│   ● do-wor╰─────────────────────────────────────────────────────────────────────────╯            │
+│   ● do-wor Enter  select    ↑↓  select    Tab  next    Esc  close                    ────────────╯
+│   ● do-personal-blog                 personal       20h  │╭─ TUNNELS ────────────────────────────╮
+│   ● do-personal-mail                 personal       21h  ││ D 1080                               │
+│   ● pve-web-01                       web            22h  ││ L 8443 → internal.corp:443           │
+╰──────────────────────────────────────────── getpurple.sh ╯╰──────────────────────────────────────╯
+ Enter  connect    /  search    #  tag    v  compact    :  jump                              ?  more
 ---STYLES---
 (0,0) fg=DarkGray bg=Reset mod=DIM
 (1,0) fg=DarkGray bg=Reset mod=DIM
@@ -392,17 +392,17 @@
 (60,3) fg=DarkGray bg=Reset mod=DIM
 (61,3) fg=DarkGray bg=Reset mod=DIM
 (62,3) fg=DarkGray bg=Reset mod=DIM
-(63,3) fg=DarkGray bg=Reset mod=DIM
-(64,3) fg=DarkGray bg=Reset mod=DIM
-(65,3) fg=DarkGray bg=Reset mod=DIM
-(66,3) fg=DarkGray bg=Reset mod=DIM
-(67,3) fg=DarkGray bg=Reset mod=DIM
-(68,3) fg=DarkGray bg=Reset mod=DIM
-(69,3) fg=DarkGray bg=Reset mod=DIM
-(70,3) fg=DarkGray bg=Reset mod=DIM
-(71,3) fg=DarkGray bg=Reset mod=DIM
-(72,3) fg=DarkGray bg=Reset mod=DIM
-(73,3) fg=DarkGray bg=Reset mod=DIM
+(63,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(64,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(65,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(66,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(67,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(68,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(69,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(70,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(71,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(72,3) fg=DarkGray bg=Reset mod=BOLD|DIM
+(73,3) fg=DarkGray bg=Reset mod=BOLD|DIM
 (74,3) fg=DarkGray bg=Reset mod=DIM
 (75,3) fg=DarkGray bg=Reset mod=DIM
 (76,3) fg=DarkGray bg=Reset mod=DIM
@@ -458,16 +458,16 @@
 (26,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (27,4) fg=DarkGray bg=Reset mod=DIM
 (28,4) fg=DarkGray bg=Reset mod=DIM
-(29,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(30,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(31,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(32,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(33,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(34,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(35,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(36,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(37,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(38,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(29,4) fg=DarkGray bg=Reset mod=DIM
+(30,4) fg=DarkGray bg=Reset mod=DIM
+(31,4) fg=DarkGray bg=Reset mod=DIM
+(32,4) fg=DarkGray bg=Reset mod=DIM
+(33,4) fg=DarkGray bg=Reset mod=DIM
+(34,4) fg=DarkGray bg=Reset mod=DIM
+(35,4) fg=DarkGray bg=Reset mod=DIM
+(36,4) fg=DarkGray bg=Reset mod=DIM
+(37,4) fg=DarkGray bg=Reset mod=DIM
+(38,4) fg=DarkGray bg=Reset mod=DIM
 (39,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (40,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (41,4) fg=DarkGray bg=Reset mod=BOLD|DIM
@@ -476,57 +476,57 @@
 (44,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (45,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (46,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(47,4) fg=DarkGray bg=Reset mod=DIM
-(48,4) fg=DarkGray bg=Reset mod=DIM
-(49,4) fg=DarkGray bg=Reset mod=DIM
-(50,4) fg=DarkGray bg=Reset mod=DIM
+(47,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(48,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(49,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(50,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (51,4) fg=DarkGray bg=Reset mod=DIM
 (52,4) fg=DarkGray bg=Reset mod=DIM
-(53,4) fg=DarkGray bg=Reset mod=DIM
-(54,4) fg=DarkGray bg=Reset mod=DIM
-(55,4) fg=DarkGray bg=Reset mod=DIM
-(56,4) fg=DarkGray bg=Reset mod=DIM
-(57,4) fg=DarkGray bg=Reset mod=DIM
+(53,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(54,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(55,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(56,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(57,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (58,4) fg=DarkGray bg=Reset mod=DIM
 (59,4) fg=DarkGray bg=Reset mod=DIM
 (60,4) fg=DarkGray bg=Reset mod=DIM
-(61,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(62,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(63,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(64,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(65,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(66,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(67,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(68,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(69,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(70,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(71,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(72,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(73,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(74,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(75,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(76,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(77,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(78,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(79,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(80,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(81,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(82,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(83,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(84,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(85,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(86,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(87,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(88,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(89,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(90,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(61,4) fg=DarkGray bg=Reset mod=DIM
+(62,4) fg=DarkGray bg=Reset mod=DIM
+(63,4) fg=DarkGray bg=Reset mod=DIM
+(64,4) fg=DarkGray bg=Reset mod=DIM
+(65,4) fg=DarkGray bg=Reset mod=DIM
+(66,4) fg=DarkGray bg=Reset mod=DIM
+(67,4) fg=DarkGray bg=Reset mod=DIM
+(68,4) fg=DarkGray bg=Reset mod=DIM
+(69,4) fg=DarkGray bg=Reset mod=DIM
+(70,4) fg=DarkGray bg=Reset mod=DIM
+(71,4) fg=DarkGray bg=Reset mod=DIM
+(72,4) fg=DarkGray bg=Reset mod=DIM
+(73,4) fg=DarkGray bg=Reset mod=DIM
+(74,4) fg=DarkGray bg=Reset mod=DIM
+(75,4) fg=DarkGray bg=Reset mod=DIM
+(76,4) fg=DarkGray bg=Reset mod=DIM
+(77,4) fg=DarkGray bg=Reset mod=DIM
+(78,4) fg=DarkGray bg=Reset mod=DIM
+(79,4) fg=DarkGray bg=Reset mod=DIM
+(80,4) fg=DarkGray bg=Reset mod=DIM
+(81,4) fg=DarkGray bg=Reset mod=DIM
+(82,4) fg=DarkGray bg=Reset mod=DIM
+(83,4) fg=DarkGray bg=Reset mod=DIM
+(84,4) fg=DarkGray bg=Reset mod=DIM
+(85,4) fg=DarkGray bg=Reset mod=DIM
+(86,4) fg=DarkGray bg=Reset mod=DIM
+(87,4) fg=DarkGray bg=Reset mod=DIM
+(88,4) fg=DarkGray bg=Reset mod=DIM
+(89,4) fg=DarkGray bg=Reset mod=DIM
+(90,4) fg=DarkGray bg=Reset mod=DIM
 (91,4) fg=DarkGray bg=Reset mod=DIM
 (92,4) fg=DarkGray bg=Reset mod=DIM
-(93,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(94,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(95,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(96,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(97,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(93,4) fg=DarkGray bg=Reset mod=DIM
+(94,4) fg=DarkGray bg=Reset mod=DIM
+(95,4) fg=DarkGray bg=Reset mod=DIM
+(96,4) fg=DarkGray bg=Reset mod=DIM
+(97,4) fg=DarkGray bg=Reset mod=DIM
 (98,4) fg=DarkGray bg=Reset mod=DIM
 (99,4) fg=DarkGray bg=Reset mod=DIM
 (0,5) fg=DarkGray bg=Reset mod=DIM
@@ -643,18 +643,18 @@
 (11,6) fg=White bg=Magenta mod=BOLD|DIM
 (12,6) fg=Reset bg=Reset mod=DIM
 (86,6) fg=Reset bg=Reset mod=DIM
-(87,6) fg=White bg=Magenta mod=BOLD|DIM
-(88,6) fg=White bg=Magenta mod=BOLD|DIM
-(89,6) fg=White bg=Magenta mod=BOLD|DIM
-(90,6) fg=White bg=Magenta mod=BOLD|DIM
-(91,6) fg=White bg=Magenta mod=BOLD|DIM
-(92,6) fg=White bg=Magenta mod=BOLD|DIM
-(93,6) fg=White bg=Magenta mod=BOLD|DIM
-(94,6) fg=White bg=Magenta mod=BOLD|DIM
-(95,6) fg=White bg=Magenta mod=BOLD|DIM
-(96,6) fg=White bg=Magenta mod=BOLD|DIM
-(97,6) fg=White bg=Magenta mod=BOLD|DIM
-(98,6) fg=White bg=Magenta mod=BOLD|DIM
+(87,6) fg=DarkGray bg=Reset mod=DIM
+(88,6) fg=DarkGray bg=Reset mod=DIM
+(89,6) fg=DarkGray bg=Reset mod=DIM
+(90,6) fg=DarkGray bg=Reset mod=DIM
+(91,6) fg=DarkGray bg=Reset mod=DIM
+(92,6) fg=DarkGray bg=Reset mod=DIM
+(93,6) fg=DarkGray bg=Reset mod=DIM
+(94,6) fg=DarkGray bg=Reset mod=DIM
+(95,6) fg=DarkGray bg=Reset mod=DIM
+(96,6) fg=DarkGray bg=Reset mod=DIM
+(97,6) fg=DarkGray bg=Reset mod=DIM
+(98,6) fg=DarkGray bg=Reset mod=DIM
 (99,6) fg=DarkGray bg=Reset mod=DIM
 (0,7) fg=DarkGray bg=Reset mod=DIM
 (1,7) fg=DarkGray bg=Reset mod=DIM
@@ -782,7 +782,7 @@
 (31,8) fg=Reset bg=Reset mod=DIM
 (83,8) fg=Magenta bg=Reset mod=-
 (86,8) fg=Reset bg=Reset mod=DIM
-(87,8) fg=DarkGray bg=Reset mod=DIM
+(87,8) fg=DarkGray bg=Reset mod=BOLD|DIM
 (88,8) fg=DarkGray bg=Reset mod=DIM
 (89,8) fg=DarkGray bg=Reset mod=DIM
 (90,8) fg=DarkGray bg=Reset mod=DIM
@@ -1084,8 +1084,8 @@
 (1,15) fg=DarkGray bg=Reset mod=DIM
 (2,15) fg=DarkGray bg=Reset mod=BOLD|DIM
 (3,15) fg=DarkGray bg=Reset mod=BOLD|DIM
-(4,15) fg=DarkGray bg=Reset mod=DIM
-(5,15) fg=DarkGray bg=Reset mod=DIM
+(4,15) fg=DarkGray bg=Reset mod=BOLD|DIM
+(5,15) fg=DarkGray bg=Reset mod=BOLD|DIM
 (6,15) fg=DarkGray bg=Reset mod=BOLD|DIM
 (7,15) fg=DarkGray bg=Reset mod=BOLD|DIM
 (8,15) fg=DarkGray bg=Reset mod=BOLD|DIM
@@ -1257,17 +1257,17 @@
 (42,18) fg=Reset bg=Reset mod=BOLD
 (82,18) fg=Magenta bg=Reset mod=BOLD
 (86,18) fg=Reset bg=Reset mod=DIM
-(87,18) fg=DarkGray bg=Reset mod=DIM
-(88,18) fg=DarkGray bg=Reset mod=DIM
-(89,18) fg=DarkGray bg=Reset mod=DIM
-(90,18) fg=DarkGray bg=Reset mod=DIM
-(91,18) fg=DarkGray bg=Reset mod=DIM
-(92,18) fg=DarkGray bg=Reset mod=DIM
-(93,18) fg=DarkGray bg=Reset mod=DIM
-(94,18) fg=DarkGray bg=Reset mod=DIM
-(95,18) fg=DarkGray bg=Reset mod=DIM
-(96,18) fg=DarkGray bg=Reset mod=DIM
-(97,18) fg=DarkGray bg=Reset mod=DIM
+(87,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(88,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(89,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(90,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(91,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(92,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(93,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(94,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(95,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(96,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(97,18) fg=DarkGray bg=Reset mod=BOLD|DIM
 (98,18) fg=DarkGray bg=Reset mod=DIM
 (99,18) fg=DarkGray bg=Reset mod=DIM
 (0,19) fg=DarkGray bg=Reset mod=DIM
@@ -1311,17 +1311,17 @@
 (41,19) fg=Reset bg=Reset mod=BOLD
 (82,19) fg=Magenta bg=Reset mod=BOLD
 (86,19) fg=Reset bg=Reset mod=DIM
-(87,19) fg=DarkGray bg=Reset mod=DIM
-(88,19) fg=DarkGray bg=Reset mod=DIM
-(89,19) fg=DarkGray bg=Reset mod=DIM
-(90,19) fg=DarkGray bg=Reset mod=DIM
-(91,19) fg=DarkGray bg=Reset mod=DIM
-(92,19) fg=DarkGray bg=Reset mod=DIM
-(93,19) fg=DarkGray bg=Reset mod=DIM
-(94,19) fg=DarkGray bg=Reset mod=DIM
-(95,19) fg=DarkGray bg=Reset mod=DIM
-(96,19) fg=DarkGray bg=Reset mod=DIM
-(97,19) fg=DarkGray bg=Reset mod=DIM
+(87,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(88,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(89,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(90,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(91,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(92,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(93,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(94,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(95,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(96,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(97,19) fg=DarkGray bg=Reset mod=BOLD|DIM
 (98,19) fg=DarkGray bg=Reset mod=DIM
 (99,19) fg=DarkGray bg=Reset mod=DIM
 (0,20) fg=DarkGray bg=Reset mod=DIM
@@ -1647,11 +1647,11 @@
 (19,25) fg=DarkGray bg=Reset mod=BOLD|DIM
 (20,25) fg=DarkGray bg=Reset mod=BOLD|DIM
 (21,25) fg=DarkGray bg=Reset mod=BOLD|DIM
-(22,25) fg=DarkGray bg=Reset mod=BOLD|DIM
-(23,25) fg=DarkGray bg=Reset mod=BOLD|DIM
-(24,25) fg=DarkGray bg=Reset mod=BOLD|DIM
-(25,25) fg=DarkGray bg=Reset mod=BOLD|DIM
-(26,25) fg=DarkGray bg=Reset mod=BOLD|DIM
+(22,25) fg=DarkGray bg=Reset mod=DIM
+(23,25) fg=DarkGray bg=Reset mod=DIM
+(24,25) fg=DarkGray bg=Reset mod=DIM
+(25,25) fg=DarkGray bg=Reset mod=DIM
+(26,25) fg=DarkGray bg=Reset mod=DIM
 (27,25) fg=DarkGray bg=Reset mod=DIM
 (28,25) fg=DarkGray bg=Reset mod=DIM
 (29,25) fg=DarkGray bg=Reset mod=DIM
@@ -1688,13 +1688,13 @@
 (60,25) fg=DarkGray bg=Reset mod=DIM
 (61,25) fg=DarkGray bg=Reset mod=DIM
 (62,25) fg=DarkGray bg=Reset mod=DIM
-(63,25) fg=DarkGray bg=Reset mod=DIM
-(64,25) fg=DarkGray bg=Reset mod=DIM
-(65,25) fg=DarkGray bg=Reset mod=DIM
-(66,25) fg=DarkGray bg=Reset mod=DIM
-(67,25) fg=DarkGray bg=Reset mod=DIM
-(68,25) fg=DarkGray bg=Reset mod=DIM
-(69,25) fg=DarkGray bg=Reset mod=DIM
+(63,25) fg=DarkGray bg=Reset mod=BOLD|DIM
+(64,25) fg=DarkGray bg=Reset mod=BOLD|DIM
+(65,25) fg=DarkGray bg=Reset mod=BOLD|DIM
+(66,25) fg=DarkGray bg=Reset mod=BOLD|DIM
+(67,25) fg=DarkGray bg=Reset mod=BOLD|DIM
+(68,25) fg=DarkGray bg=Reset mod=BOLD|DIM
+(69,25) fg=DarkGray bg=Reset mod=BOLD|DIM
 (70,25) fg=DarkGray bg=Reset mod=DIM
 (71,25) fg=DarkGray bg=Reset mod=DIM
 (72,25) fg=DarkGray bg=Reset mod=DIM
@@ -1747,11 +1747,11 @@
 (19,26) fg=DarkGray bg=Reset mod=BOLD|DIM
 (20,26) fg=DarkGray bg=Reset mod=BOLD|DIM
 (21,26) fg=DarkGray bg=Reset mod=BOLD|DIM
-(22,26) fg=DarkGray bg=Reset mod=BOLD|DIM
-(23,26) fg=DarkGray bg=Reset mod=BOLD|DIM
-(24,26) fg=DarkGray bg=Reset mod=BOLD|DIM
-(25,26) fg=DarkGray bg=Reset mod=BOLD|DIM
-(26,26) fg=DarkGray bg=Reset mod=BOLD|DIM
+(22,26) fg=DarkGray bg=Reset mod=DIM
+(23,26) fg=DarkGray bg=Reset mod=DIM
+(24,26) fg=DarkGray bg=Reset mod=DIM
+(25,26) fg=DarkGray bg=Reset mod=DIM
+(26,26) fg=DarkGray bg=Reset mod=DIM
 (27,26) fg=DarkGray bg=Reset mod=DIM
 (28,26) fg=DarkGray bg=Reset mod=DIM
 (29,26) fg=DarkGray bg=Reset mod=DIM
@@ -1841,17 +1841,17 @@
 (13,27) fg=DarkGray bg=Reset mod=BOLD|DIM
 (14,27) fg=DarkGray bg=Reset mod=BOLD|DIM
 (15,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(16,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(17,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(18,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(19,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(20,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(21,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(22,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(23,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(24,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(25,27) fg=DarkGray bg=Reset mod=BOLD|DIM
-(26,27) fg=DarkGray bg=Reset mod=BOLD|DIM
+(16,27) fg=DarkGray bg=Reset mod=DIM
+(17,27) fg=DarkGray bg=Reset mod=DIM
+(18,27) fg=DarkGray bg=Reset mod=DIM
+(19,27) fg=DarkGray bg=Reset mod=DIM
+(20,27) fg=DarkGray bg=Reset mod=DIM
+(21,27) fg=DarkGray bg=Reset mod=DIM
+(22,27) fg=DarkGray bg=Reset mod=DIM
+(23,27) fg=DarkGray bg=Reset mod=DIM
+(24,27) fg=DarkGray bg=Reset mod=DIM
+(25,27) fg=DarkGray bg=Reset mod=DIM
+(26,27) fg=DarkGray bg=Reset mod=DIM
 (27,27) fg=DarkGray bg=Reset mod=DIM
 (28,27) fg=DarkGray bg=Reset mod=DIM
 (29,27) fg=DarkGray bg=Reset mod=DIM
@@ -2079,10 +2079,10 @@
 (51,29) fg=DarkGray bg=Reset mod=DIM
 (52,29) fg=DarkGray bg=Reset mod=DIM
 (53,29) fg=DarkGray bg=Reset mod=DIM
-(54,29) fg=White bg=DarkGray mod=DIM
+(54,29) fg=DarkGray bg=Reset mod=DIM
 (55,29) fg=White bg=DarkGray mod=DIM
 (56,29) fg=White bg=DarkGray mod=DIM
-(57,29) fg=DarkGray bg=Reset mod=DIM
+(57,29) fg=White bg=DarkGray mod=DIM
 (58,29) fg=DarkGray bg=Reset mod=DIM
 (59,29) fg=DarkGray bg=Reset mod=DIM
 (60,29) fg=DarkGray bg=Reset mod=DIM

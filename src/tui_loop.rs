@@ -14,7 +14,7 @@ use crate::ssh_config::model::SshConfigFile;
 use crate::{
     animation, askpass, connection, ensure_bw_session, ensure_keychain_password,
     ensure_proton_login, ensure_vault_ssh_chain_if_needed, first_launch_init, handler, import,
-    ping, preferences, snippet, tui, update, vault_ssh,
+    key_activity, ping, preferences, snippet, tui, update, vault_ssh,
 };
 
 pub(crate) fn run_tui(mut app: App) -> Result<()> {
@@ -158,6 +158,39 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
     }
 
     update::spawn_version_check(events_tx.clone());
+
+    // Kick off a one-shot cert check for every vault-managed host so the
+    // Keys-tab strip populates on startup without the user having to
+    // navigate through each host first (or hit R). The actual validation
+    // is `ssh-keygen -L`, cheap, runs off-thread, and reuses the same
+    // `CertCheckResult` event path as the lazy selection-driven check.
+    let vault_aliases: Vec<(String, String)> = app
+        .hosts_state
+        .list
+        .iter()
+        .filter(|h| vault_ssh::has_purple_vault_context(h))
+        .filter(|h| !app.vault.cert_checks_in_flight.contains(&h.alias))
+        .filter(|h| !app.vault.cert_cache.contains_key(&h.alias))
+        .map(|h| (h.alias.clone(), h.certificate_file.clone()))
+        .collect();
+    for (alias, cert_file) in vault_aliases {
+        app.vault.cert_checks_in_flight.insert(alias.clone());
+        let tx = events_tx.clone();
+        std::thread::spawn(move || {
+            let check_path = match vault_ssh::resolve_cert_path(&alias, &cert_file) {
+                Ok(p) => p,
+                Err(e) => {
+                    let _ = tx.send(event::AppEvent::CertCheckError {
+                        alias,
+                        message: e.to_string(),
+                    });
+                    return;
+                }
+            };
+            let status = vault_ssh::check_cert_validity(&check_path);
+            let _ = tx.send(event::AppEvent::CertCheckResult { alias, status });
+        });
+    }
 }
 
 /// Dispatch a single tick's event. Returns `Break` when the outer loop
@@ -249,6 +282,9 @@ fn dispatch_event(
         }
         Some(AppEvent::SnippetAllDone { run_id }) => {
             handler::event_loop::handle_snippet_all_done(app, run_id);
+        }
+        Some(AppEvent::KeyPushResult { run_id, result }) => {
+            handler::event_loop::handle_key_push_result(app, run_id, result);
         }
         Some(AppEvent::ContainerListing { alias, result }) => {
             handler::event_loop::handle_container_listing(app, alias, result, events_tx);
@@ -362,14 +398,19 @@ fn dispatch_event(
 /// missing, stale or has been touched externally, spawn a background check.
 fn lazy_cert_check(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>) {
     if let Some(selected) = app.selected_host() {
-        if vault_ssh::resolve_vault_role(
+        let has_vault_role = vault_ssh::resolve_vault_role(
             selected.vault_ssh.as_deref(),
             selected.provider.as_deref(),
             selected.provider_label.as_deref(),
             &app.providers.config,
         )
-        .is_some()
-        {
+        .is_some();
+        // Also trigger a check when the host wires in a purple-managed cert
+        // via `CertificateFile` without setting the role marker (the user
+        // signed with the `vault` CLI directly). Without this branch the
+        // TTL gauge would stay empty for CLI-signed certs.
+        let has_purple_cert_file = vault_ssh::cert_file_in_purple_dir(&selected.certificate_file);
+        if has_vault_role || has_purple_cert_file {
             // Stat the cert file once per iteration to detect external writes
             // (CLI sign, another purple instance) within one frame. Compared
             // against the mtime recorded when the cache entry was populated;
@@ -467,6 +508,7 @@ fn handle_pending_connect(
 
         match connection::connect_tmux_window(&alias, &app.reload.config_path, has_active_tunnel) {
             Ok(()) => {
+                app.record_key_use(&alias, key_activity::now_secs());
                 if let Some((ref msg, is_error)) = vault_msg {
                     if is_error {
                         app.notify_error(msg.clone());
@@ -527,6 +569,7 @@ fn handle_pending_connect(
             let code = cr.status.code().unwrap_or(1);
             if code != 255 {
                 app.history.record(&alias);
+                app.record_key_use(&alias, key_activity::now_secs());
                 app.hosts_state.render_cache.invalidate();
             }
             if code != 0 {
@@ -565,6 +608,7 @@ fn handle_pending_connect(
             }
         }
         Err(e) => {
+            log::error!("[external] ssh connect failed: alias={alias}: {e}");
             eprintln!("{}", crate::messages::connection_spawn_failed(&e));
             app.notify_error(crate::messages::connection_failed(&alias));
         }
@@ -642,6 +686,7 @@ fn handle_pending_container_exec(
             &label,
         ) {
             Ok(()) => {
+                app.record_key_use(&req.alias, key_activity::now_secs());
                 app.notify(crate::messages::container_exec_opened_in_tmux(
                     &req.container_name,
                     &req.alias,
@@ -676,6 +721,7 @@ fn handle_pending_container_exec(
             // mid-shell crash still counts as a successful login.
             if code != 255 {
                 app.history.record(&req.alias);
+                app.record_key_use(&req.alias, key_activity::now_secs());
                 app.hosts_state.render_cache.invalidate();
             }
             if code == 0 {
@@ -856,6 +902,7 @@ fn handle_pending_snippet(
             Ok(r) => {
                 if r.status.success() {
                     app.history.record(alias);
+                    app.record_key_use(alias, key_activity::now_secs());
                     app.hosts_state.render_cache.invalidate();
                 } else if multi {
                     eprintln!(

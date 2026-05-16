@@ -330,6 +330,13 @@ fn retrieve_from_keychain(alias: &str) -> Result<String> {
             .output()
             .context("Failed to run security command")?;
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!(
+                "[external] askpass keychain lookup failed: alias={} exit={} stderr={}",
+                alias,
+                output.status.code().unwrap_or(-1),
+                stderr.trim().lines().next().unwrap_or("<empty>"),
+            );
             anyhow::bail!("Keychain lookup failed");
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -341,6 +348,13 @@ fn retrieve_from_keychain(alias: &str) -> Result<String> {
             .output()
             .context("Failed to run secret-tool")?;
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!(
+                "[external] askpass secret-tool lookup failed: alias={} exit={} stderr={}",
+                alias,
+                output.status.code().unwrap_or(-1),
+                stderr.trim().lines().next().unwrap_or("<empty>"),
+            );
             anyhow::bail!("Secret-tool lookup failed");
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -445,6 +459,13 @@ fn retrieve_from_1password(uri: &str) -> Result<String> {
         other => other.context("Failed to run 1Password CLI (op)")?,
     };
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::warn!(
+            "[external] askpass 1Password lookup failed: uri={} exit={} stderr={}",
+            uri,
+            output.status.code().unwrap_or(-1),
+            stderr.trim().lines().next().unwrap_or("<empty>"),
+        );
         anyhow::bail!("1Password lookup failed");
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
@@ -461,6 +482,13 @@ fn retrieve_from_pass(entry: &str) -> Result<String> {
         other => other.context("Failed to run pass")?,
     };
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::warn!(
+            "[external] askpass pass lookup failed: entry={} exit={} stderr={}",
+            entry,
+            output.status.code().unwrap_or(-1),
+            stderr.trim().lines().next().unwrap_or("<empty>"),
+        );
         anyhow::bail!("pass lookup failed");
     }
     let full = String::from_utf8_lossy(&output.stdout);
@@ -481,6 +509,13 @@ fn retrieve_from_bitwarden(item_id: &str) -> Result<String> {
         other => other.context("Failed to run Bitwarden CLI (bw)")?,
     };
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::warn!(
+            "[external] askpass Bitwarden lookup failed: item={} exit={} stderr={}",
+            item_id,
+            output.status.code().unwrap_or(-1),
+            stderr.trim().lines().next().unwrap_or("<empty>"),
+        );
         anyhow::bail!("Bitwarden lookup failed");
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -506,6 +541,14 @@ fn retrieve_from_vault(spec: &str) -> Result<String> {
         other => other.context("Failed to run vault CLI")?,
     };
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::warn!(
+            "[external] askpass Vault KV lookup failed: path={} field={} exit={} stderr={}",
+            path,
+            field,
+            output.status.code().unwrap_or(-1),
+            stderr.trim().lines().next().unwrap_or("<empty>"),
+        );
         anyhow::bail!("Vault lookup failed");
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -522,6 +565,13 @@ fn retrieve_from_command(cmd: &str, alias: &str, hostname: &str) -> Result<Strin
         .output()
         .context("Failed to run custom askpass command")?;
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::warn!(
+            "[external] askpass custom command failed: alias={} exit={} stderr={}",
+            alias,
+            output.status.code().unwrap_or(-1),
+            stderr.trim().lines().next().unwrap_or("<empty>"),
+        );
         anyhow::bail!("Custom askpass command failed");
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())

@@ -1,3 +1,4 @@
+pub(crate) mod activity_chart;
 mod bulk_tag_editor;
 pub(crate) mod confirm_dialog;
 pub(crate) mod container_action_confirm;
@@ -16,6 +17,9 @@ mod host_list;
 mod jump;
 mod key_detail;
 mod key_list;
+pub(crate) mod key_push_picker;
+pub(crate) mod keys_overview;
+mod picker_helpers;
 mod provider_list;
 mod snippet_form;
 mod snippet_output;
@@ -78,6 +82,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         TopPage::Containers => {
             containers_overview::render(frame, app, anim.spinner_tick, detail_progress)
         }
+        TopPage::Keys => keys_overview::render(frame, app, anim.spinner_tick),
     }
     if let Some(s) = status {
         app.status_center.status = Some(s);
@@ -106,6 +111,19 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
             render_overlay(frame, app, anim, |frame, app| {
                 key_list::render(frame, app);
                 key_detail::render(frame, app, index);
+            });
+        }
+        Screen::KeyPushPicker { key_index } => {
+            let key_index = *key_index;
+            render_overlay(frame, app, anim, move |frame, app| {
+                key_push_picker::render(frame, app, key_index)
+            });
+        }
+        Screen::ConfirmKeyPush { key_index } => {
+            let key_index = *key_index;
+            render_overlay(frame, app, anim, move |frame, app| {
+                let aliases = app.keys.push.committed.clone();
+                confirm_dialog::render_key_push(frame, app, key_index, &aliases)
             });
         }
         Screen::HostDetail { index } => {

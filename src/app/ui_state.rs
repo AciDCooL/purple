@@ -48,7 +48,6 @@ pub struct RegionPickerState {
 #[derive(Debug, Default)]
 pub struct UiSelection {
     pub list_state: ListState,
-    pub key_list_state: ListState,
     pub key_picker: PickerState,
     pub password_picker: PickerState,
     pub proxyjump_picker: PickerState,

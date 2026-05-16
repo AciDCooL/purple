@@ -1,33 +1,33 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                 │
+│  purple       hosts      tunnels      containers      keys                                       │
 ╰────╭ Ran 'uptime' on 1 host ────────────────────────────────────────────────────────────────╮────╯
-╭ 26 │  ── bastion-ams  ✓ ────────────────────────────────────────────────────────────────────│────╮
-│    │  load average: 0.12 0.18 0.21                                                          │ST▾ │
-│────│                                                                                        │────│
-│▌  ●│                                                                                        │1m  │
-│   ●│                                                                                        │1h  │
-│   ●│                                                                                        │2h  │
-│   ●│                                                                                        │3h  │
-│   ●│                                                                                        │4h  │
-│   ●│                                                                                        │5h  │
-│   ●│                                                                                        │6h  │
-│   ●│                                                                                        │7h  │
-│   ●│                                                                                        │8h  │
-│   ●│                                                                                        │9h  │
-│   ●│                                                                                        │5h  │
-│   ●│                                                                                        │6h  │
-│   ●│                                                                                        │7h  │
-│   ●│                                                                                        │8h  │
-│   ●│                                                                                        │9h  │
-│   ●│                                                                                        │0h  │
-│   ●│                                                                                        │1h  │
-│   ○│                                                                                        │ -  │
-│   ○│                                                                                        │ -  │
-│   ○│                                                                                        │ -  │
-│   ○│                                                                                        │ -  │
-│   ○╰────────────────────────────────────────────────────────────────────────────────────────╯ -  │
-╰──── c  copy    j/k  scroll    n/N  next/prev host    g/G  top/bottom   Esc  close            .sh ╯
- Enter  connect    /  search    #  tag    v  detail    :  jump                               ?  more
+╭ 31 │  ── bastion-ams  ✓ ────────────────────────────────────────────────────────────────────│────╮
+│    │  load average: 0.12 0.18 0.21                                                          │    │
+│────│                                                                                        │    │
+│▌  ●│                                                                                        │────╯
+│   ●│                                                                                        │────╮
+│   ●│                                                                                        │    │
+│   ●│                                                                                        │    │
+│   ●│                                                                                        │    │
+│   ●│                                                                                        │    │
+│   ●│                                                                                        │    │
+│   ●│                                                                                        │────╯
+│   ●│                                                                                        │────╮
+│   ✖│                                                                                        │    │
+│   ●│                                                                                        │    │
+│   ●│                                                                                        │    │
+│   ●│                                                                                        │    │
+│   ●│                                                                                        │▇▄▂ │
+│   ●│                                                                                        │now │
+│   ●│                                                                                        │────╯
+│   ●│                                                                                        │────╮
+│   ●│                                                                                        │    │
+│   ●│                                                                                        │────╯
+│   ●│                                                                                        │────╮
+│   ●│                                                                                        │    │
+│   ●╰────────────────────────────────────────────────────────────────────────────────────────╯    │
+╰──── c  copy    j/k  scroll    n/N  next/prev host    g/G  top/bottom   Esc  close            ────╯
+ Enter  connect    /  search    #  tag    v  compact    :  jump                              ?  more
 ---STYLES---
 (0,0) fg=DarkGray bg=Reset mod=DIM
 (1,0) fg=DarkGray bg=Reset mod=DIM
@@ -436,9 +436,9 @@
 (4,4) fg=DarkGray bg=Reset mod=BOLD|DIM
 (5,4) fg=Reset bg=Reset mod=DIM
 (94,4) fg=Reset bg=Reset mod=DIM
-(95,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(96,4) fg=DarkGray bg=Reset mod=BOLD|DIM
-(97,4) fg=DarkGray bg=Reset mod=BOLD|DIM
+(95,4) fg=DarkGray bg=Reset mod=DIM
+(96,4) fg=DarkGray bg=Reset mod=DIM
+(97,4) fg=DarkGray bg=Reset mod=DIM
 (98,4) fg=DarkGray bg=Reset mod=DIM
 (99,4) fg=DarkGray bg=Reset mod=DIM
 (0,5) fg=DarkGray bg=Reset mod=DIM
@@ -460,10 +460,10 @@
 (4,6) fg=White bg=Magenta mod=BOLD|DIM
 (5,6) fg=Reset bg=Reset mod=DIM
 (94,6) fg=Reset bg=Reset mod=DIM
-(95,6) fg=White bg=Magenta mod=BOLD|DIM
-(96,6) fg=White bg=Magenta mod=BOLD|DIM
-(97,6) fg=White bg=Magenta mod=BOLD|DIM
-(98,6) fg=White bg=Magenta mod=BOLD|DIM
+(95,6) fg=DarkGray bg=Reset mod=DIM
+(96,6) fg=DarkGray bg=Reset mod=DIM
+(97,6) fg=DarkGray bg=Reset mod=DIM
+(98,6) fg=DarkGray bg=Reset mod=DIM
 (99,6) fg=DarkGray bg=Reset mod=DIM
 (0,7) fg=DarkGray bg=Reset mod=DIM
 (1,7) fg=DarkGray bg=Reset mod=DIM
@@ -565,7 +565,7 @@
 (1,15) fg=DarkGray bg=Reset mod=DIM
 (2,15) fg=DarkGray bg=Reset mod=BOLD|DIM
 (3,15) fg=DarkGray bg=Reset mod=BOLD|DIM
-(4,15) fg=DarkGray bg=Reset mod=DIM
+(4,15) fg=DarkGray bg=Reset mod=BOLD|DIM
 (5,15) fg=Reset bg=Reset mod=DIM
 (94,15) fg=Reset bg=Reset mod=DIM
 (95,15) fg=DarkGray bg=Reset mod=DIM
@@ -604,9 +604,9 @@
 (4,18) fg=DarkGray bg=Reset mod=DIM
 (5,18) fg=Reset bg=Reset mod=DIM
 (94,18) fg=Reset bg=Reset mod=DIM
-(95,18) fg=DarkGray bg=Reset mod=DIM
-(96,18) fg=DarkGray bg=Reset mod=DIM
-(97,18) fg=DarkGray bg=Reset mod=DIM
+(95,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(96,18) fg=DarkGray bg=Reset mod=BOLD|DIM
+(97,18) fg=DarkGray bg=Reset mod=BOLD|DIM
 (98,18) fg=DarkGray bg=Reset mod=DIM
 (99,18) fg=DarkGray bg=Reset mod=DIM
 (0,19) fg=DarkGray bg=Reset mod=DIM
@@ -616,9 +616,9 @@
 (4,19) fg=DarkGray bg=Reset mod=DIM
 (5,19) fg=Reset bg=Reset mod=DIM
 (94,19) fg=Reset bg=Reset mod=DIM
-(95,19) fg=DarkGray bg=Reset mod=DIM
-(96,19) fg=DarkGray bg=Reset mod=DIM
-(97,19) fg=DarkGray bg=Reset mod=DIM
+(95,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(96,19) fg=DarkGray bg=Reset mod=BOLD|DIM
+(97,19) fg=DarkGray bg=Reset mod=BOLD|DIM
 (98,19) fg=DarkGray bg=Reset mod=DIM
 (99,19) fg=DarkGray bg=Reset mod=DIM
 (0,20) fg=DarkGray bg=Reset mod=DIM
@@ -939,10 +939,10 @@
 (51,29) fg=DarkGray bg=Reset mod=DIM
 (52,29) fg=DarkGray bg=Reset mod=DIM
 (53,29) fg=DarkGray bg=Reset mod=DIM
-(54,29) fg=White bg=DarkGray mod=DIM
+(54,29) fg=DarkGray bg=Reset mod=DIM
 (55,29) fg=White bg=DarkGray mod=DIM
 (56,29) fg=White bg=DarkGray mod=DIM
-(57,29) fg=DarkGray bg=Reset mod=DIM
+(57,29) fg=White bg=DarkGray mod=DIM
 (58,29) fg=DarkGray bg=Reset mod=DIM
 (59,29) fg=DarkGray bg=Reset mod=DIM
 (60,29) fg=DarkGray bg=Reset mod=DIM

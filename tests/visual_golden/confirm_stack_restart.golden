@@ -1,5 +1,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
-│  purple       hosts      tunnels      containers                                                 │
+│  purple       hosts      tunnels      containers      keys                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ 29 ──────────────────────────────────────────────────────────────────────────────────────────────╮
 │     NAME                IMAGE                                                            UPTIME  │
@@ -22,7 +22,7 @@
 │   ● pg-exporter  y  restart    n/Esc  keep                                                  30d  │
 │   ● pgbouncer           pgbouncer:1.21                                                      30d  │
 │   ● postgres-primary    postgres:16-alpine                                                  30d  │
-│  ── do-web-ams ────────────────────────────────────────────────────────────────────────────────  │
+│  ── do-work-web-ams ───────────────────────────────────────────────────────────────────────────  │
 │   ● app                 myapp:3.2.1                                                          8d  │
 │   ● nginx               nginx:1.25                                                           8d  │
 │   ● redis               redis:7-alpine                                                       8d  │
@@ -1902,11 +1902,11 @@
 (14,24) fg=DarkGray bg=Reset mod=BOLD|DIM
 (15,24) fg=DarkGray bg=Reset mod=BOLD|DIM
 (16,24) fg=DarkGray bg=Reset mod=BOLD|DIM
-(17,24) fg=DarkGray bg=Reset mod=DIM
-(18,24) fg=DarkGray bg=Reset mod=DIM
-(19,24) fg=DarkGray bg=Reset mod=DIM
-(20,24) fg=DarkGray bg=Reset mod=DIM
-(21,24) fg=DarkGray bg=Reset mod=DIM
+(17,24) fg=DarkGray bg=Reset mod=BOLD|DIM
+(18,24) fg=DarkGray bg=Reset mod=BOLD|DIM
+(19,24) fg=DarkGray bg=Reset mod=BOLD|DIM
+(20,24) fg=DarkGray bg=Reset mod=BOLD|DIM
+(21,24) fg=DarkGray bg=Reset mod=BOLD|DIM
 (22,24) fg=DarkGray bg=Reset mod=DIM
 (23,24) fg=DarkGray bg=Reset mod=DIM
 (24,24) fg=DarkGray bg=Reset mod=DIM
