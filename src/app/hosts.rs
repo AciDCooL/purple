@@ -33,7 +33,16 @@ impl App {
             self.hosts_state.ssh_config.set_host_askpass(&alias, source);
         }
         if let Some(ref role) = entry.vault_ssh {
-            self.hosts_state.ssh_config.set_host_vault_ssh(&alias, role);
+            // `set_host_vault_ssh` is `#[must_use]` since the multi-alias
+            // refuse-guard was added. The alias was upserted in `add_host`
+            // immediately above, so it MUST exist as a single-alias block
+            // here. Debug-assert the invariant to catch regressions early.
+            let role_wired = self.hosts_state.ssh_config.set_host_vault_ssh(&alias, role);
+            debug_assert!(
+                role_wired,
+                "add_host_from_form: alias '{}' missing immediately after upsert (set_host_vault_ssh)",
+                alias
+            );
             // Persist the optional Vault address next to the role. `set_host_vault_addr`
             // is `#[must_use]` but the alias was just upserted above so we only
             // debug-assert the return value here (matches the CertificateFile pattern).
@@ -143,15 +152,21 @@ impl App {
         self.hosts_state
             .ssh_config
             .set_host_askpass(&entry.alias, entry.askpass.as_deref().unwrap_or(""));
-        self.hosts_state
-            .ssh_config
-            .set_host_vault_ssh(&entry.alias, entry.vault_ssh.as_deref().unwrap_or(""));
-        // Persist vault address comment. `set_host_vault_addr` refuses
-        // wildcard aliases (mirroring the CertificateFile invariant), so we
-        // skip it entirely for Host pattern entries — patterns never carry a
-        // vault address. For concrete hosts the alias was just upserted so
+        // `set_host_vault_ssh` refuses patterns and multi-alias blocks
+        // (same invariant as set_host_vault_addr / set_host_certificate_file)
+        // so we only call it for concrete host edits. Patterns never carry a
+        // vault role. For concrete hosts the alias was just updated above so
         // the #[must_use] return is asserted in debug builds.
         if !self.forms.host.is_pattern {
+            let role_wired = self
+                .hosts_state
+                .ssh_config
+                .set_host_vault_ssh(&entry.alias, entry.vault_ssh.as_deref().unwrap_or(""));
+            debug_assert!(
+                role_wired,
+                "edit_host_from_form: alias '{}' missing immediately after update_host (set_host_vault_ssh)",
+                entry.alias
+            );
             let addr_wired = self
                 .hosts_state
                 .ssh_config
@@ -212,11 +227,11 @@ impl App {
             self.hosts_state
                 .ssh_config
                 .set_host_askpass(&old_entry.alias, old_entry.askpass.as_deref().unwrap_or(""));
-            self.hosts_state.ssh_config.set_host_vault_ssh(
-                &old_entry.alias,
-                old_entry.vault_ssh.as_deref().unwrap_or(""),
-            );
             if !self.forms.host.is_pattern {
+                let _ = self.hosts_state.ssh_config.set_host_vault_ssh(
+                    &old_entry.alias,
+                    old_entry.vault_ssh.as_deref().unwrap_or(""),
+                );
                 let _ = self.hosts_state.ssh_config.set_host_vault_addr(
                     &old_entry.alias,
                     old_entry.vault_addr.as_deref().unwrap_or(""),

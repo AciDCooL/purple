@@ -955,3 +955,130 @@ Host bastion
         staging.tags
     );
 }
+
+// ---------------------------------------------------------------------------
+// Multi-alias Host block mutation invariants (T-002 audit gap)
+// ---------------------------------------------------------------------------
+//
+// Until 2026-05 the proptest strategies generated only single-alias blocks
+// (`Host alpha`), leaving `Host alpha beta gamma` mutation paths covered
+// only by hand-written deterministic tests. The strategy below produces
+// real multi-alias blocks so update / delete / set_host_* invariants are
+// fuzzed against shared-token blocks too.
+
+/// Strategy: a Host block whose pattern is two or three whitespace-separated
+/// alias tokens. Each token is a safe `[a-z][a-z0-9-]{1,15}` identifier.
+fn multi_alias_host_block_strategy() -> impl Strategy<Value = (Vec<String>, String)> {
+    (
+        prop::collection::vec("[a-z][a-z0-9-]{0,15}", 2..=3),
+        "(10|192)\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}",
+    )
+        .prop_filter("aliases must be unique", |(aliases, _)| {
+            let mut seen = std::collections::HashSet::new();
+            aliases.iter().all(|a| seen.insert(a.clone()))
+        })
+        .prop_map(|(aliases, hostname)| {
+            let block = format!(
+                "Host {}\n  HostName {}\n  User deploy\n",
+                aliases.join(" "),
+                hostname
+            );
+            (aliases, block)
+        })
+}
+
+fn parse_str_local(s: &str) -> SshConfigFile {
+    SshConfigFile::from_content(s, PathBuf::from("/tmp/test"))
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 200,
+        max_shrink_iters: 1000,
+        ..Default::default()
+    })]
+
+    /// Deleting one alias from a multi-alias block must keep every sibling
+    /// alias addressable (parse → has_host). Token-strip must not collapse
+    /// the block silently. Property pinned after the 3.x regression where
+    /// `delete_host("web-01.prod")` on `Host web-01 web-01.prod` wiped both.
+    #[test]
+    fn multi_alias_delete_preserves_siblings(
+        (aliases, content) in multi_alias_host_block_strategy()
+    ) {
+        let mut config = parse_str_local(&content);
+        let target = aliases[0].clone();
+        config.delete_host(&target);
+
+        let serialized = config.serialize();
+        let reparsed = parse_str_local(&serialized);
+        for sibling in &aliases[1..] {
+            prop_assert!(
+                reparsed.has_host(sibling),
+                "sibling alias {} was wiped after delete_host({}): {}",
+                sibling,
+                target,
+                serialized
+            );
+        }
+    }
+
+    /// Renaming one alias on a multi-alias block must NOT rename the others.
+    /// Token-replace must replace only the matching token in the Host line.
+    #[test]
+    fn multi_alias_rename_preserves_other_tokens(
+        (aliases, content) in multi_alias_host_block_strategy()
+    ) {
+        let mut config = parse_str_local(&content);
+        let old_name = aliases[0].clone();
+        let new_name = format!("renamed-{}", old_name);
+
+        let entry = HostEntry {
+            alias: new_name.clone(),
+            hostname: "10.0.0.42".to_string(),
+            ..Default::default()
+        };
+        config.update_host(&old_name, &entry);
+
+        let serialized = config.serialize();
+        let reparsed = parse_str_local(&serialized);
+        prop_assert!(
+            reparsed.has_host(&new_name),
+            "renamed alias not found: {}",
+            serialized
+        );
+        for sibling in &aliases[1..] {
+            prop_assert!(
+                reparsed.has_host(sibling),
+                "sibling alias {} disappeared after rename of {}: {}",
+                sibling,
+                old_name,
+                serialized
+            );
+        }
+    }
+
+    /// set_host_vault_ssh must REFUSE multi-alias blocks (policy guard
+    /// added 2026-05). Verify the refuse path returns false and leaves the
+    /// config byte-identical so no sibling alias is silently affected.
+    /// (T-001 / T-008)
+    #[test]
+    fn set_host_vault_ssh_refuses_multi_alias_block_prop(
+        (aliases, content) in multi_alias_host_block_strategy()
+    ) {
+        let mut config = parse_str_local(&content);
+        let before = config.serialize();
+        for alias in &aliases {
+            let mutated = config.set_host_vault_ssh(alias, "ssh/sign/role");
+            prop_assert!(
+                !mutated,
+                "set_host_vault_ssh on multi-alias block must return false"
+            );
+        }
+        let after = config.serialize();
+        prop_assert_eq!(
+            before, after,
+            "refused mutation must leave config byte-identical"
+        );
+    }
+}

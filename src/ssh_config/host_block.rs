@@ -212,6 +212,10 @@ impl HostBlock {
         id: &crate::providers::config::ProviderConfigId,
         server_id: &str,
     ) {
+        // Sanitise the server_id before interpolation — a provider API
+        // returning `123\n  ProxyJump attacker` would otherwise inject a
+        // ProxyJump directive into the user's config.
+        let server_id = Self::sanitize_raw_line_value(server_id);
         let indent = self.detect_indent();
         self.directives.retain(|d| {
             !(d.is_non_directive && d.raw_line.trim().starts_with("# purple:provider "))
@@ -262,6 +266,7 @@ impl HostBlock {
 
     /// Set vault-ssh role. Replaces existing comment or adds one. Empty string removes.
     pub fn set_vault_ssh(&mut self, role: &str) {
+        let role = Self::sanitize_raw_line_value(role);
         let indent = self.detect_indent();
         self.directives.retain(|d| {
             !(d.is_non_directive && {
@@ -307,6 +312,7 @@ impl HostBlock {
     /// string removes. Caller is expected to have validated the URL upstream
     /// (e.g. via `is_valid_vault_addr`) — this function does not re-validate.
     pub fn set_vault_addr(&mut self, url: &str) {
+        let url = Self::sanitize_raw_line_value(url);
         let indent = self.detect_indent();
         self.directives.retain(|d| {
             !(d.is_non_directive && {
@@ -331,6 +337,7 @@ impl HostBlock {
     /// Set askpass source on a host block. Replaces existing purple:askpass comment or adds one.
     /// Pass an empty string to remove the comment.
     pub fn set_askpass(&mut self, source: &str) {
+        let source = Self::sanitize_raw_line_value(source);
         let indent = self.detect_indent();
         self.directives.retain(|d| {
             !(d.is_non_directive && {
@@ -465,6 +472,27 @@ impl HostBlock {
             })
             .take(128)
             .collect()
+    }
+
+    /// Strip line-breaking characters from any value that gets interpolated
+    /// into a `raw_line`. A `\n`, `\r` or `\0` in a provider-supplied
+    /// `server_id`, a user-typed askpass URI, or a Vault role would otherwise
+    /// split one line into multiple SSH config directives (directive
+    /// injection). All setters that format user-controlled bytes into
+    /// `raw_line` must route the value through this helper first.
+    ///
+    /// Returns the input unchanged when no offending byte is present so the
+    /// common case incurs no allocation. Logs a warning when a substitution
+    /// happens. The substitution is silent for the user-facing flow but
+    /// surfaces in the log file for forensics.
+    pub(super) fn sanitize_raw_line_value(s: &str) -> std::borrow::Cow<'_, str> {
+        if !s.contains(['\n', '\r', '\0']) {
+            return std::borrow::Cow::Borrowed(s);
+        }
+        log::warn!(
+            "[purple] sanitized line-breaking characters from value before writing to ssh_config"
+        );
+        std::borrow::Cow::Owned(s.replace(['\n', '\r', '\0'], " "))
     }
 
     /// Set user tags on a host block. Replaces existing purple:tags comment or adds one.

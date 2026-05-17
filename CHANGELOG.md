@@ -1,3 +1,13 @@
+## 3.14.1 - 2026-05-17
+
+- feat: Tighter safety on every ~/.ssh/config write.
+- feat: Multi-key hosts keep every IdentityFile line when you edit one of them.
+- feat: Vault SSH signing leaves your user-set CertificateFile lines exactly where they are.
+- feat: Vault roles stay on the single host you targeted, even on shared `Host A B` lines.
+- feat: Provider sync can never smuggle extra directives into your config through a crafted server name.
+- feat: Self-including or mutually-including SSH config files terminate cleanly instead of hanging the parser.
+- feat: Your most recent save survives a sudden power loss thanks to a durable rename on the underlying write.
+
 ## 3.14.0 - 2026-05-16
 
 - feat: Browse, push and inspect every SSH key from one tab.

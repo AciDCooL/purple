@@ -165,7 +165,9 @@ fuzz_target!(|data: &[u8]| {
     //    smoke test plus round-trip idempotency.
     if let Some(entry) = entries.first() {
         let mut c = config.clone();
-        c.set_host_vault_ssh(&entry.alias, "ssh-client-signer/sign/fuzz-role");
+        // set_host_vault_ssh is #[must_use] -> bool; swallow the return like
+        // the set_host_vault_addr / set_host_certificate_file calls below.
+        let _ = c.set_host_vault_ssh(&entry.alias, "ssh-client-signer/sign/fuzz-role");
         // set_host_vault_addr is #[must_use] -> bool; swallow the return like
         // the set_host_certificate_file calls above.
         let _ = c.set_host_vault_addr(&entry.alias, "http://127.0.0.1:8200");

@@ -3118,7 +3118,7 @@ fn vault_ssh_round_trip_preserved() {
 #[test]
 fn set_vault_ssh_adds_comment() {
     let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
-    config.set_host_vault_ssh("myserver", "ssh/sign/engineer");
+    assert!(config.set_host_vault_ssh("myserver", "ssh/sign/engineer"));
     assert_eq!(
         first_block(&config).vault_ssh(),
         Some("ssh/sign/engineer".to_string())
@@ -3129,7 +3129,7 @@ fn set_vault_ssh_adds_comment() {
 fn set_vault_ssh_replaces_existing() {
     let mut config =
         parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:vault-ssh ssh/sign/old\n");
-    config.set_host_vault_ssh("myserver", "ssh/sign/new");
+    assert!(config.set_host_vault_ssh("myserver", "ssh/sign/new"));
     assert_eq!(
         first_block(&config).vault_ssh(),
         Some("ssh/sign/new".to_string())
@@ -3145,7 +3145,7 @@ fn set_vault_ssh_replaces_existing() {
 fn set_vault_ssh_empty_removes() {
     let mut config =
         parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:vault-ssh ssh/sign/old\n");
-    config.set_host_vault_ssh("myserver", "");
+    assert!(config.set_host_vault_ssh("myserver", ""));
     assert!(first_block(&config).vault_ssh().is_none());
     assert!(!config.serialize().contains("vault-ssh"));
 }
@@ -3155,7 +3155,7 @@ fn set_vault_ssh_preserves_other_comments() {
     let mut config = parse_str(
         "Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n  # purple:tags prod\n",
     );
-    config.set_host_vault_ssh("myserver", "ssh/sign/engineer");
+    assert!(config.set_host_vault_ssh("myserver", "ssh/sign/engineer"));
     let entry = first_block(&config).to_host_entry();
     assert_eq!(entry.askpass, Some("keychain".to_string()));
     assert!(entry.tags.contains(&"prod".to_string()));
@@ -3165,7 +3165,7 @@ fn set_vault_ssh_preserves_other_comments() {
 #[test]
 fn set_vault_ssh_preserves_indent() {
     let mut config = parse_str("Host myserver\n    HostName 10.0.0.1\n");
-    config.set_host_vault_ssh("myserver", "ssh/sign/engineer");
+    assert!(config.set_host_vault_ssh("myserver", "ssh/sign/engineer"));
     let raw = first_block(&config)
         .directives
         .iter()
@@ -3228,6 +3228,11 @@ fn set_host_certificate_file_ignores_match_blocks() {
     // Match blocks are stored as GlobalLines; a `CertificateFile` directive
     // inside a Match block is never the target of set_host_certificate_file,
     // even if the pattern would "match" the alias.
+    //
+    // Uses a real purple-managed path (`~/.purple/certs/...`) so the gate
+    // in `set_host_certificate_file` allows the insert. A non-purple path
+    // with no existing purple line is a no-op by design (see
+    // `set_host_certificate_file_non_purple_path_is_noop_when_no_purple_line`).
     let input = "\
 Host alpha
   HostName 10.0.0.1
@@ -3236,10 +3241,12 @@ Match host alpha
   CertificateFile /user/set/match-cert.pub
 ";
     let mut config = parse_str(input);
-    assert!(config.set_host_certificate_file("alpha", "/purple/managed.pub"));
+    assert!(config.set_host_certificate_file("alpha", "~/.purple/certs/alpha-cert.pub"));
     let out = config.serialize();
     // Top-level alpha block got the directive
-    assert!(out.contains("Host alpha\n  HostName 10.0.0.1\n  CertificateFile /purple/managed.pub"));
+    assert!(out.contains(
+        "Host alpha\n  HostName 10.0.0.1\n  CertificateFile ~/.purple/certs/alpha-cert.pub"
+    ));
     // Match block's own CertificateFile is untouched
     assert!(out.contains("Match host alpha\n  CertificateFile /user/set/match-cert.pub"));
 }
@@ -3247,8 +3254,8 @@ Match host alpha
 #[test]
 fn set_vault_ssh_twice_replaces_not_appends() {
     let mut config = parse_str("Host myserver\n  HostName 10.0.0.1\n");
-    config.set_host_vault_ssh("myserver", "ssh/sign/one");
-    config.set_host_vault_ssh("myserver", "ssh/sign/two");
+    assert!(config.set_host_vault_ssh("myserver", "ssh/sign/one"));
+    assert!(config.set_host_vault_ssh("myserver", "ssh/sign/two"));
     let serialized = config.serialize();
     assert_eq!(
         serialized.matches("purple:vault-ssh").count(),
@@ -3263,7 +3270,7 @@ fn set_vault_ssh_twice_replaces_not_appends() {
 fn vault_ssh_indentation_preserved_with_other_purple_comments() {
     let input = "Host myserver\n    HostName 10.0.0.1\n    # purple:tags prod,web\n";
     let mut config = parse_str(input);
-    config.set_host_vault_ssh("myserver", "ssh/sign/engineer");
+    assert!(config.set_host_vault_ssh("myserver", "ssh/sign/engineer"));
     let serialized = config.serialize();
     assert!(
         serialized.contains("    # purple:vault-ssh ssh/sign/engineer"),
@@ -3277,7 +3284,7 @@ fn vault_ssh_indentation_preserved_with_other_purple_comments() {
 fn clear_vault_ssh_removes_comment_line() {
     let mut config =
         parse_str("Host myserver\n  HostName 10.0.0.1\n  # purple:vault-ssh ssh/sign/old\n");
-    config.set_host_vault_ssh("myserver", "");
+    assert!(config.set_host_vault_ssh("myserver", ""));
     let serialized = config.serialize();
     assert!(
         !serialized.contains("vault-ssh"),
@@ -3292,7 +3299,7 @@ fn set_vault_ssh_removes_duplicate_comments() {
     let mut config = parse_str(
         "Host myserver\n  HostName 10.0.0.1\n  # purple:vault-ssh ssh/sign/old1\n  # purple:vault-ssh ssh/sign/old2\n",
     );
-    config.set_host_vault_ssh("myserver", "ssh/sign/new");
+    assert!(config.set_host_vault_ssh("myserver", "ssh/sign/new"));
     assert_eq!(
         config.serialize().matches("purple:vault-ssh").count(),
         1,
@@ -4411,4 +4418,453 @@ fn find_hosts_by_id_does_not_match_other_label_in_include() {
         "label scoping must hold across Include boundary: {:?}",
         hosts
     );
+}
+
+// ── Critical audit regression tests ────────────────────────────────
+// Each block below pins a specific audit finding from the multi-agent
+// 2026-05-16 SSH config audit. Removing or weakening any of these tests
+// re-opens the corresponding data-loss or injection vulnerability.
+
+// Helper: every line of `serialized` must NOT, after re-parsing, become an
+// active SSH directive for `key`. Comments containing the keyword in their
+// text are fine; what we forbid is the parser seeing the injected line as
+// a real directive (which it would, the moment a `\n` lands inside the
+// purple-managed comment).
+fn assert_no_directive_injection(serialized: &str, key: &str) {
+    let reparsed = parse_str(serialized);
+    for el in &reparsed.elements {
+        if let ConfigElement::HostBlock(b) = el {
+            for d in &b.directives {
+                assert!(
+                    d.is_non_directive || !d.key.eq_ignore_ascii_case(key),
+                    "directive injection: {} became a real {} directive in serialized output:\n{}",
+                    key,
+                    key,
+                    serialized
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn set_provider_id_strips_newline_injection_from_server_id() {
+    use crate::providers::config::ProviderConfigId;
+    let mut config = parse_str("Host victim\n  HostName 10.0.0.1\n");
+    let id = ProviderConfigId::bare("evilcloud");
+    // Malicious server_id attempts to inject a ProxyCommand directive into
+    // the user's config. The sanitiser must rewrite the line-breaking
+    // characters before the value is interpolated into raw_line.
+    config.set_host_provider_id("victim", &id, "1\n  ProxyCommand nc evil 22");
+    let serialized = config.serialize();
+    assert_no_directive_injection(&serialized, "ProxyCommand");
+    // The marker stays on a single physical line.
+    let marker_count = serialized.matches("# purple:provider").count();
+    assert_eq!(marker_count, 1, "expected exactly one marker line");
+}
+
+#[test]
+fn set_host_vault_ssh_strips_newline_injection_from_role() {
+    let mut config = parse_str("Host victim\n  HostName 10.0.0.1\n");
+    assert!(config.set_host_vault_ssh("victim", "ssh/sign/role\n  ProxyJump attacker"));
+    let serialized = config.serialize();
+    assert_no_directive_injection(&serialized, "ProxyJump");
+}
+
+#[test]
+fn set_host_vault_addr_strips_newline_injection_from_url() {
+    let mut config = parse_str("Host victim\n  HostName 10.0.0.1\n");
+    assert!(config.set_host_vault_addr("victim", "http://v:8200\n  ProxyCommand evil"));
+    let serialized = config.serialize();
+    assert_no_directive_injection(&serialized, "ProxyCommand");
+}
+
+#[test]
+fn set_host_askpass_strips_newline_injection_from_source() {
+    let mut config = parse_str("Host victim\n  HostName 10.0.0.1\n");
+    config.set_host_askpass("victim", "vault:secret#pass\n  ProxyJump evil");
+    let serialized = config.serialize();
+    assert_no_directive_injection(&serialized, "ProxyJump");
+}
+
+#[test]
+fn entry_to_block_sanitizes_newlines_in_all_fields() {
+    let entry = HostEntry {
+        alias: "victim".to_string(),
+        hostname: "10.0.0.1\n  ProxyJump attacker".to_string(),
+        user: "deploy\n  ProxyCommand evil".to_string(),
+        port: 22,
+        identity_file: "~/.ssh/id\n  RemoteForward 22:bad:22".to_string(),
+        proxy_jump: "host\n  ForwardAgent yes".to_string(),
+        ..Default::default()
+    };
+    let block = SshConfigFile::entry_to_block(&entry);
+    for d in &block.directives {
+        assert!(
+            !d.raw_line.contains('\n') && !d.raw_line.contains('\r'),
+            "raw_line still contains line-breaking bytes: {:?}",
+            d.raw_line
+        );
+    }
+    assert!(!block.raw_host_line.contains('\n'));
+}
+
+#[test]
+fn upsert_directive_empty_value_removes_only_first_identityfile() {
+    // OpenSSH IdentityFile is cumulative: a host with three identities is
+    // intentionally multi-key. Wiping all matching directives on an empty
+    // form field is the C-001 data-loss bug.
+    let input = "\
+Host alpha
+  HostName 10.0.0.1
+  IdentityFile ~/.ssh/id_rsa
+  IdentityFile ~/.ssh/id_ed25519
+  IdentityFile ~/.ssh/id_ecdsa
+";
+    let mut config = parse_str(input);
+    let mut entry = first_block(&config).to_host_entry();
+    // Form returns empty identity_file (user cleared the field).
+    entry.identity_file = String::new();
+    config.update_host("alpha", &entry);
+    let serialized = config.serialize();
+    // The first IdentityFile is gone; the other two survive.
+    assert!(
+        !serialized.contains("id_rsa"),
+        "first IdentityFile should be removed: {}",
+        serialized
+    );
+    assert!(
+        serialized.contains("IdentityFile ~/.ssh/id_ed25519"),
+        "second IdentityFile must survive empty-field clear: {}",
+        serialized
+    );
+    assert!(
+        serialized.contains("IdentityFile ~/.ssh/id_ecdsa"),
+        "third IdentityFile must survive empty-field clear: {}",
+        serialized
+    );
+}
+
+#[test]
+fn set_host_certificate_file_preserves_user_set_corporate_cert() {
+    // C-003 / C-004: vault sign must not overwrite a user-managed
+    // CertificateFile. Purple-managed paths live under .purple/certs/.
+    let input = "\
+Host alpha
+  HostName 10.0.0.1
+  CertificateFile ~/.ssh/corporate-cert.pub
+";
+    let mut config = parse_str(input);
+    assert!(config.set_host_certificate_file("alpha", "~/.purple/certs/alpha-cert.pub"));
+    let serialized = config.serialize();
+    assert!(
+        serialized.contains("CertificateFile ~/.ssh/corporate-cert.pub"),
+        "user-set corporate cert must survive vault sign: {}",
+        serialized
+    );
+    assert!(
+        serialized.contains("CertificateFile ~/.purple/certs/alpha-cert.pub"),
+        "purple-managed cert must be added: {}",
+        serialized
+    );
+}
+
+#[test]
+fn set_host_certificate_file_clear_preserves_user_cert() {
+    // C-003 / C-004: clearing the vault role must remove only the
+    // purple-managed cert line, never the user's own.
+    let input = "\
+Host alpha
+  HostName 10.0.0.1
+  CertificateFile ~/.ssh/corporate-cert.pub
+  CertificateFile ~/.purple/certs/alpha-cert.pub
+";
+    let mut config = parse_str(input);
+    assert!(config.set_host_certificate_file("alpha", ""));
+    let serialized = config.serialize();
+    assert!(
+        serialized.contains("CertificateFile ~/.ssh/corporate-cert.pub"),
+        "user cert must survive empty-path clear: {}",
+        serialized
+    );
+    assert!(
+        !serialized.contains(".purple/certs/"),
+        "purple-managed cert must be removed: {}",
+        serialized
+    );
+}
+
+#[test]
+fn set_host_certificate_file_replaces_existing_purple_managed() {
+    let input = "\
+Host alpha
+  HostName 10.0.0.1
+  CertificateFile ~/.ssh/corp.pub
+  CertificateFile ~/.purple/certs/alpha-cert.pub
+";
+    let mut config = parse_str(input);
+    assert!(config.set_host_certificate_file("alpha", "~/.purple/certs/alpha-cert-v2.pub"));
+    let serialized = config.serialize();
+    assert!(serialized.contains("CertificateFile ~/.ssh/corp.pub"));
+    assert!(serialized.contains("CertificateFile ~/.purple/certs/alpha-cert-v2.pub"));
+    assert!(!serialized.contains("alpha-cert.pub\n") && !serialized.ends_with("alpha-cert.pub"));
+}
+
+#[test]
+fn set_host_vault_ssh_refuses_pattern_alias() {
+    let mut config = parse_str("Host *.prod\n  HostName placeholder\n");
+    assert!(!config.set_host_vault_ssh("*.prod", "ssh/sign/role"));
+    let serialized = config.serialize();
+    assert!(
+        !serialized.contains("vault-ssh"),
+        "pattern alias must not get a vault-ssh marker: {}",
+        serialized
+    );
+}
+
+#[test]
+fn set_host_vault_ssh_refuses_multi_alias_block() {
+    let input = "\
+Host web-01 web-01.prod
+  HostName 10.0.0.1
+";
+    let mut config = parse_str(input);
+    // Even though the alias token exists, the matched block is multi-alias.
+    // Applying the role would silently affect sibling aliases.
+    assert!(!config.set_host_vault_ssh("web-01", "ssh/sign/role"));
+    let serialized = config.serialize();
+    assert!(
+        !serialized.contains("vault-ssh"),
+        "multi-alias block must not get a vault-ssh marker: {}",
+        serialized
+    );
+}
+
+#[test]
+fn set_host_vault_ssh_returns_false_for_missing_alias() {
+    let mut config = parse_str("Host alpha\n  HostName 10.0.0.1\n");
+    assert!(!config.set_host_vault_ssh("ghost", "ssh/sign/role"));
+    assert_eq!(config.serialize(), "Host alpha\n  HostName 10.0.0.1\n");
+}
+
+#[test]
+fn parse_include_cycle_terminates_without_duplicate_hosts() {
+    // C-004 / P-005: A→B→A must not produce 17 duplicate hosts via
+    // MAX_INCLUDE_DEPTH explosion. The cycle detector skips files whose
+    // canonical path is already up the include chain.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let main_path = dir.path().join("config");
+    let other_path = dir.path().join("other");
+    std::fs::write(
+        &main_path,
+        format!(
+            "Include {}\nHost from-main\n  HostName 1.1.1.1\n",
+            other_path.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &other_path,
+        format!(
+            "Include {}\nHost from-other\n  HostName 2.2.2.2\n",
+            main_path.display()
+        ),
+    )
+    .unwrap();
+
+    let config = SshConfigFile::parse(&main_path).expect("parse must terminate");
+    let entries = config.host_entries();
+    let from_main = entries.iter().filter(|e| e.alias == "from-main").count();
+    let from_other = entries.iter().filter(|e| e.alias == "from-other").count();
+    assert_eq!(from_main, 1, "from-main duplicated: {:?}", entries);
+    assert_eq!(
+        from_other, 1,
+        "from-other missing or duplicated: {:?}",
+        entries
+    );
+}
+
+#[test]
+fn set_host_certificate_file_non_purple_path_is_noop_when_no_purple_line() {
+    // C-004 rollback edge case: when `set_host_certificate_file` is called
+    // with a user-managed path (NOT under .purple/certs/) on a block that
+    // has no existing purple-managed entry, the function must NOT insert
+    // a new CertificateFile line. The rollback flow in `app/hosts.rs`
+    // passes `old_entry.certificate_file` which could be the user's own
+    // path; inserting it would duplicate or fabricate a directive the
+    // user never authored.
+    let input = "Host alpha\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(input);
+    assert!(config.set_host_certificate_file("alpha", "~/.ssh/personal-cert.pub"));
+    let serialized = config.serialize();
+    assert!(
+        !serialized.contains("CertificateFile"),
+        "non-purple path with no purple-managed line should be a no-op: {}",
+        serialized
+    );
+
+    // But: a non-purple path WHEN a purple-managed line already exists
+    // should still update the purple line (caller intent unclear; treat as
+    // overwrite of the purple slot). Actually no — the lookup is by
+    // is_purple_managed_cert_value on the EXISTING line, not the path
+    // argument. So we'd overwrite the purple line's value with the
+    // user-set path, marking it as non-purple. That's a separate edge
+    // case we accept (caller responsibility).
+}
+
+#[test]
+fn parse_self_include_cycle_terminates() {
+    // Self-include: the top-level config includes itself. The cycle
+    // detector inserts the top-level canonical path into `visited` in
+    // `parse_with_depth` before recursing, so the Include should be
+    // skipped on the first lookup.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let self_path = dir.path().join("config");
+    std::fs::write(
+        &self_path,
+        format!(
+            "Include {}\nHost only-once\n  HostName 1.1.1.1\n",
+            self_path.display()
+        ),
+    )
+    .unwrap();
+
+    let config = SshConfigFile::parse(&self_path).expect("self-include must terminate");
+    let entries = config.host_entries();
+    let count = entries.iter().filter(|e| e.alias == "only-once").count();
+    assert_eq!(
+        count, 1,
+        "self-include must not duplicate hosts: {:?}",
+        entries
+    );
+}
+
+#[test]
+fn is_purple_managed_cert_value_matches_expected_paths() {
+    use super::is_purple_managed_cert_value;
+    assert!(is_purple_managed_cert_value("~/.purple/certs/foo-cert.pub"));
+    assert!(is_purple_managed_cert_value(
+        "/home/user/.purple/certs/foo.pub"
+    ));
+    assert!(is_purple_managed_cert_value("\"~/.purple/certs/foo.pub\""));
+    assert!(!is_purple_managed_cert_value("~/.ssh/corp.pub"));
+    assert!(!is_purple_managed_cert_value("/etc/ssh/cert.pub"));
+    assert!(!is_purple_managed_cert_value(""));
+}
+
+#[test]
+fn update_host_sanitizes_newline_injection_in_hostname() {
+    // Security regression: the provider-sync update path passes
+    // `remote.ip` straight into `update_host`, which routes the value
+    // through `upsert_directive` -> raw_line interpolation. Without the
+    // sanitiser inside upsert_directive a malicious provider API could
+    // inject a real ProxyCommand by setting remote.ip = "1.2.3.4\n
+    // ProxyCommand evil". This test ensures the symmetric edit path is
+    // closed (mirror of `set_provider_id_strips_newline_injection_*`).
+    let mut config = parse_str("Host victim\n  HostName 10.0.0.1\n");
+    let mut entry = first_block(&config).to_host_entry();
+    entry.hostname = "1.2.3.4\n  ProxyCommand nc evil 22".to_string();
+    config.update_host("victim", &entry);
+    let serialized = config.serialize();
+    assert_no_directive_injection(&serialized, "ProxyCommand");
+}
+
+#[test]
+fn update_host_sanitizes_newline_injection_in_alias() {
+    // Rename path: the new alias flows into raw_host_line via
+    // `format!("Host {}", new_pattern)`. A malicious alias containing
+    // `\n` would inject an extra Host block. Sanitiser applied in
+    // update_host before constructing raw_host_line.
+    let mut config = parse_str("Host victim\n  HostName 10.0.0.1\n");
+    let mut entry = first_block(&config).to_host_entry();
+    entry.alias = "renamed\nHost evil".to_string();
+    config.update_host("victim", &entry);
+    let serialized = config.serialize();
+    // Re-parse: there must be exactly one HostBlock with a sanitised
+    // pattern, no second "Host evil" block created via injection.
+    let reparsed = parse_str(&serialized);
+    let host_block_count = reparsed
+        .elements
+        .iter()
+        .filter(|e| matches!(e, ConfigElement::HostBlock(_)))
+        .count();
+    assert_eq!(
+        host_block_count, 1,
+        "newline in alias must not produce extra blocks: {}",
+        serialized
+    );
+}
+
+#[test]
+fn upsert_directive_non_empty_value_replaces_only_first_identityfile() {
+    // Symmetric companion to
+    // `upsert_directive_empty_value_removes_only_first_identityfile`.
+    // The form edits the value and saves; only the first IdentityFile
+    // line must change. Subsequent cumulative entries survive.
+    let input = "\
+Host alpha
+  HostName 10.0.0.1
+  IdentityFile ~/.ssh/id_rsa
+  IdentityFile ~/.ssh/id_ed25519
+  IdentityFile ~/.ssh/id_ecdsa
+";
+    let mut config = parse_str(input);
+    let mut entry = first_block(&config).to_host_entry();
+    entry.identity_file = "~/.ssh/id_rotated".to_string();
+    config.update_host("alpha", &entry);
+    let serialized = config.serialize();
+    assert!(serialized.contains("IdentityFile ~/.ssh/id_rotated"));
+    assert!(!serialized.contains("id_rsa"));
+    assert!(
+        serialized.contains("IdentityFile ~/.ssh/id_ed25519"),
+        "second IdentityFile must survive edit: {}",
+        serialized
+    );
+    assert!(
+        serialized.contains("IdentityFile ~/.ssh/id_ecdsa"),
+        "third IdentityFile must survive edit: {}",
+        serialized
+    );
+}
+
+#[test]
+fn parse_three_node_include_cycle_terminates() {
+    // C-005: 3-node cycle (A includes B includes C includes A) exercises
+    // the visited set across two recursive frames, not just one. The
+    // 2-node test catches direct mutual recursion; this catches the
+    // case where the cycle closes through an intermediary.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let a = dir.path().join("a");
+    let b = dir.path().join("b");
+    let c = dir.path().join("c");
+    std::fs::write(
+        &a,
+        format!("Include {}\nHost from-a\n  HostName 1.1.1.1\n", b.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        &b,
+        format!("Include {}\nHost from-b\n  HostName 2.2.2.2\n", c.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        &c,
+        format!("Include {}\nHost from-c\n  HostName 3.3.3.3\n", a.display()),
+    )
+    .unwrap();
+
+    let config = SshConfigFile::parse(&a).expect("3-node cycle must terminate");
+    let entries = config.host_entries();
+    // Each unique host appears at most once. Before the fix, the
+    // MAX_INCLUDE_DEPTH=16 explosion would produce dozens of copies.
+    for alias in ["from-a", "from-b", "from-c"] {
+        let count = entries.iter().filter(|e| e.alias == alias).count();
+        assert!(
+            count <= 1,
+            "host {} appears {} times in {:?}",
+            alias,
+            count,
+            entries.iter().map(|e| &e.alias).collect::<Vec<_>>()
+        );
+    }
 }

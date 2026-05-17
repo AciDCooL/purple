@@ -3348,9 +3348,15 @@ Host beta
     assert_eq_visible(input, &config.serialize());
 }
 
-/// Clearing IdentityFile removes all IdentityFile directives.
+/// Clearing IdentityFile removes ONLY the first IdentityFile directive.
+///
+/// Pre-2026-05 the empty-form-field path called `retain` and wiped EVERY
+/// cumulative IdentityFile line — silently losing the user's other keys
+/// (corporate + personal + hardware). The fix routes through
+/// `upsert_directive` first-only semantics so the form field's invariant
+/// "what the user sees is what the field controls" is preserved.
 #[test]
-fn update_host_clear_identity_file_removes_all() {
+fn update_host_clear_identity_file_removes_only_first() {
     let input = "\
 Host myserver
   HostName 10.0.0.1
@@ -3370,8 +3376,14 @@ Host myserver
     );
     let output = config.serialize();
     assert!(
-        !output.contains("IdentityFile"),
-        "All IdentityFile directives should be removed when cleared"
+        !output.contains("id_ed25519"),
+        "first IdentityFile should be removed when cleared: {}",
+        output
+    );
+    assert!(
+        output.contains("IdentityFile ~/.ssh/id_rsa"),
+        "second IdentityFile must survive empty-field clear: {}",
+        output
     );
 }
 

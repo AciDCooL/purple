@@ -378,24 +378,28 @@ Host alpha
 
 #[test]
 fn set_host_certificate_file_returns_true_on_success_false_on_missing() {
+    // Paths must live under ~/.purple/certs/ to satisfy the C-004 gate
+    // (set_host_certificate_file refuses to insert non-purple-managed
+    // paths so user-set CertificateFile entries are never overwritten
+    // during rollback or accidental misuse).
     let mut config = parse_str("Host alpha\n  HostName 10.0.0.1\n");
     assert!(
-        config.set_host_certificate_file("alpha", "/tmp/alpha-cert.pub"),
+        config.set_host_certificate_file("alpha", "~/.purple/certs/alpha-cert.pub"),
         "present alias must return true"
     );
     assert!(
-        !config.set_host_certificate_file("does_not_exist", "/tmp/ghost.pub"),
+        !config.set_host_certificate_file("does_not_exist", "~/.purple/certs/ghost-cert.pub"),
         "missing alias must return false"
     );
     // Second call for a present alias (update of existing directive) is also true.
     assert!(
-        config.set_host_certificate_file("alpha", "/tmp/alpha-cert-rotated.pub"),
+        config.set_host_certificate_file("alpha", "~/.purple/certs/alpha-cert-rotated.pub"),
         "existing alias update must return true"
     );
 
     let out = config.serialize();
-    assert!(out.contains("CertificateFile /tmp/alpha-cert-rotated.pub"));
-    assert!(!out.contains("ghost.pub"));
+    assert!(out.contains("CertificateFile ~/.purple/certs/alpha-cert-rotated.pub"));
+    assert!(!out.contains("ghost-cert"));
 }
 
 // ============================================================================
@@ -418,6 +422,9 @@ Host alpha
     let mut config = parse_str(input);
 
     // Even though a literal `Host *` block exists, we refuse to target it.
+    // All these calls are rejected at the alias-shape check, so the path
+    // argument never reaches the purple-managed gate; arbitrary values are
+    // fine here for proving the alias guard.
     assert!(!config.set_host_certificate_file("*", "/tmp/should-never-land.pub"));
     assert!(!config.set_host_certificate_file("?", "/tmp/nope.pub"));
     assert!(!config.set_host_certificate_file("alpha*", "/tmp/nope.pub"));
@@ -431,12 +438,14 @@ Host alpha
     // Input is byte-identical after all those rejected calls.
     assert_eq!(input, config.serialize());
 
-    // The concrete alias still works.
-    assert!(config.set_host_certificate_file("alpha", "/tmp/alpha-cert.pub"));
+    // The concrete alias still works — purple-managed path required by
+    // the C-004 gate so user-set custom CertificateFile entries are never
+    // overwritten during rollback flows.
+    assert!(config.set_host_certificate_file("alpha", "~/.purple/certs/alpha-cert.pub"));
     assert!(
         config
             .serialize()
-            .contains("CertificateFile /tmp/alpha-cert.pub")
+            .contains("CertificateFile ~/.purple/certs/alpha-cert.pub")
     );
 }
 
@@ -727,6 +736,95 @@ proptest! {
 
         let mut config = parse_str(&input);
         prop_assert!(!config.set_host_vault_addr(&ghost_alias, "http://vault.example:8200"));
+        let after = config.serialize();
+
+        prop_assert_eq!(before, after);
+    }
+
+    // ========================================================================
+    // vault_ssh write path — mirror the CertificateFile / vault_addr invariants.
+    // Added 2026-05 alongside the multi-alias refuse-guard on
+    // set_host_vault_ssh. Previously this method had only deterministic
+    // single-host tests; a regression in token-strip or block-search logic
+    // would have shipped silently.
+    // ========================================================================
+
+    /// For any generated multi-host config, writing `vault-ssh` to one
+    /// target host must leave every OTHER host's block bytes unchanged.
+    #[test]
+    fn proptest_vault_ssh_write_leaves_siblings_byte_identical(
+        hosts in prop::collection::vec(arb_host(), 2..8),
+        target_idx in 0usize..8,
+    ) {
+        let mut seen = std::collections::HashSet::new();
+        let unique: Vec<_> = hosts
+            .into_iter()
+            .filter(|h| seen.insert(h.alias.clone()))
+            .collect();
+        prop_assume!(unique.len() >= 2);
+
+        let target_idx = target_idx % unique.len();
+        let target_alias = unique[target_idx].alias.clone();
+
+        let input = render_config(&unique);
+        let before_config = parse_str(&input);
+        let before_slices = host_block_slices(&before_config.serialize());
+
+        let mut after_config = parse_str(&input);
+        let role = "ssh-client-signer/sign/engineer";
+        prop_assert!(after_config.set_host_vault_ssh(&target_alias, role));
+        let after_slices = host_block_slices(&after_config.serialize());
+
+        prop_assert_eq!(
+            before_slices.keys().collect::<Vec<_>>(),
+            after_slices.keys().collect::<Vec<_>>(),
+            "host block set changed during vault-ssh write"
+        );
+
+        for (alias, before_body) in &before_slices {
+            let after_body = after_slices.get(alias).unwrap();
+            if alias == &target_alias {
+                prop_assert!(
+                    after_body.contains(&format!("# purple:vault-ssh {}", role)),
+                    "target block missing the new vault-ssh comment"
+                );
+                for line in before_body.lines() {
+                    prop_assert!(
+                        after_body.contains(line),
+                        "target block lost an original line: {:?}",
+                        line
+                    );
+                }
+            } else {
+                prop_assert_eq!(
+                    before_body,
+                    after_body,
+                    "sibling block '{}' was mutated by vault-ssh write",
+                    alias
+                );
+            }
+        }
+    }
+
+    /// Writing vault-ssh to a missing alias must leave the entire
+    /// serialized config byte-identical.
+    #[test]
+    fn proptest_vault_ssh_write_missing_alias_is_total_noop(
+        hosts in prop::collection::vec(arb_host(), 1..6),
+        ghost_alias in arb_alias(),
+    ) {
+        let mut seen = std::collections::HashSet::new();
+        let unique: Vec<_> = hosts
+            .into_iter()
+            .filter(|h| seen.insert(h.alias.clone()))
+            .collect();
+        prop_assume!(!unique.iter().any(|h| h.alias == ghost_alias));
+
+        let input = render_config(&unique);
+        let before = parse_str(&input).serialize();
+
+        let mut config = parse_str(&input);
+        prop_assert!(!config.set_host_vault_ssh(&ghost_alias, "ssh/sign/role"));
         let after = config.serialize();
 
         prop_assert_eq!(before, after);

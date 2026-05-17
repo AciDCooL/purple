@@ -17,6 +17,25 @@ impl SshConfigFile {
     }
 
     fn parse_with_depth(path: &Path, depth: usize) -> Result<Self> {
+        // Track every config file we've already opened along the include chain.
+        // OpenSSH's `readconf.c` aborts with "Too many recursive configuration
+        // includes" the moment it detects a cycle; without this set, purple
+        // would silently re-read the same file up to MAX_INCLUDE_DEPTH times,
+        // producing N copies of every host (verified: A→B→A produces 17 host
+        // duplicates). Insert the canonical top-level path before recursing
+        // so Include directives that loop back to the main config are caught.
+        let mut visited = std::collections::HashSet::new();
+        if let Ok(canonical) = std::fs::canonicalize(path) {
+            visited.insert(canonical);
+        }
+        Self::parse_with_depth_visited(path, depth, &mut visited)
+    }
+
+    fn parse_with_depth_visited(
+        path: &Path,
+        depth: usize,
+        visited: &mut std::collections::HashSet<PathBuf>,
+    ) -> Result<Self> {
         let content = if path.exists() {
             std::fs::read_to_string(path)
                 .with_context(|| format!("Failed to read SSH config at {}", path.display()))?
@@ -32,8 +51,13 @@ impl SshConfigFile {
 
         let crlf = content.contains("\r\n");
         let config_dir = path.parent().map(|p| p.to_path_buf());
-        let elements =
-            Self::parse_content_with_includes(content, config_dir.as_deref(), depth, Some(path));
+        let elements = Self::parse_content_with_includes(
+            content,
+            config_dir.as_deref(),
+            depth,
+            Some(path),
+            Some(visited),
+        );
 
         let host_count = elements
             .iter()
@@ -56,7 +80,8 @@ impl SshConfigFile {
     /// Create an SshConfigFile from raw content string (for demo/test use).
     /// Uses a synthetic path; the file is never read from or written to disk.
     pub fn from_content(content: &str, synthetic_path: PathBuf) -> Self {
-        let elements = Self::parse_content_with_includes(content, None, MAX_INCLUDE_DEPTH, None);
+        let elements =
+            Self::parse_content_with_includes(content, None, MAX_INCLUDE_DEPTH, None, None);
         SshConfigFile {
             elements,
             path: synthetic_path,
@@ -69,15 +94,20 @@ impl SshConfigFile {
     /// Used by tests to create SshConfigFile from inline strings.
     #[allow(dead_code)]
     pub fn parse_content(content: &str) -> Vec<ConfigElement> {
-        Self::parse_content_with_includes(content, None, MAX_INCLUDE_DEPTH, None)
+        Self::parse_content_with_includes(content, None, MAX_INCLUDE_DEPTH, None, None)
     }
 
     /// Parse SSH config content, optionally resolving Include directives.
+    /// `visited` carries the canonical paths of files already opened so an
+    /// Include cycle aborts cleanly. `None` disables cycle tracking and is
+    /// used by the demo/test entry points that pass `depth = MAX_INCLUDE_DEPTH`
+    /// (which gates Include resolution off anyway).
     fn parse_content_with_includes(
         content: &str,
         config_dir: Option<&Path>,
         depth: usize,
         config_path: Option<&Path>,
+        mut visited: Option<&mut std::collections::HashSet<PathBuf>>,
     ) -> Vec<ConfigElement> {
         let mut elements = Vec::new();
         let mut current_block: Option<HostBlock> = None;
@@ -103,7 +133,7 @@ impl SshConfigFile {
                         elements.push(ConfigElement::HostBlock(block));
                     }
                     let resolved = if depth < MAX_INCLUDE_DEPTH {
-                        Self::resolve_include(pattern, config_dir, depth)
+                        Self::resolve_include(pattern, config_dir, depth, visited.as_deref_mut())
                     } else {
                         Vec::new()
                     };
@@ -260,10 +290,17 @@ impl SshConfigFile {
     /// Resolve an Include pattern to a list of included files.
     /// Supports multiple space-separated patterns on one line (SSH spec).
     /// Handles quoted paths for paths containing spaces.
+    ///
+    /// `visited` carries the canonical path of every file already opened up
+    /// the include chain. When a candidate file's canonical path is already
+    /// present, the file is skipped with a warning and its branch is pruned.
+    /// This breaks cycles (A→B→A, A→B→C→A) cleanly instead of letting them
+    /// fan out exponentially until MAX_INCLUDE_DEPTH bottoms out.
     fn resolve_include(
         pattern: &str,
         config_dir: Option<&Path>,
         depth: usize,
+        mut visited: Option<&mut std::collections::HashSet<PathBuf>>,
     ) -> Vec<IncludedFile> {
         let mut files = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -285,6 +322,21 @@ impl SshConfigFile {
                 matched.sort();
                 for path in matched {
                     if path.is_file() && seen.insert(path.clone()) {
+                        // Cycle detection: compare canonical paths so a
+                        // symlink and its target are treated as the same
+                        // file. Falls back to the lexical path when
+                        // canonicalize fails (e.g. permission denied).
+                        let canonical =
+                            std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+                        if let Some(ref mut v) = visited {
+                            if !v.insert(canonical) {
+                                log::warn!(
+                                    "[config] Include cycle detected, skipping {} (already visited up the chain)",
+                                    path.display()
+                                );
+                                continue;
+                            }
+                        }
                         match std::fs::read_to_string(&path) {
                             Ok(content) => {
                                 // Strip UTF-8 BOM if present (same as main config)
@@ -294,6 +346,7 @@ impl SshConfigFile {
                                     path.parent(),
                                     depth + 1,
                                     Some(&path),
+                                    visited.as_deref_mut(),
                                 );
                                 files.push(IncludedFile {
                                     path: path.clone(),

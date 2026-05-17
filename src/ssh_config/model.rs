@@ -185,6 +185,23 @@ use super::pattern::apply_first_match_fields;
 pub use super::pattern::{
     host_pattern_matches, is_host_pattern, proxy_jump_contains_self, ssh_pattern_match,
 };
+
+/// True if a `CertificateFile` directive value points at purple's managed
+/// certificate directory. Recognises both tilde-prefixed and absolute paths
+/// (`~/.purple/certs/...`, `/home/user/.purple/certs/...`,
+/// `$HOME/.purple/certs/...`). Used by `set_host_certificate_file` so
+/// user-set custom CertificateFile entries are preserved across vault
+/// sign / unsign cycles.
+pub(super) fn is_purple_managed_cert_value(value: &str) -> bool {
+    let trimmed = value.trim();
+    // Strip surrounding double quotes; OpenSSH treats `"~/.purple/..."` and
+    // `~/.purple/...` as equivalent.
+    let unquoted = trimmed
+        .strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(trimmed);
+    unquoted.contains(".purple/certs/")
+}
 // Re-exported so the test file mounted below keeps working.
 #[allow(unused_imports)]
 pub(super) use super::repair::provider_group_display_name;
@@ -687,6 +704,12 @@ impl SshConfigFile {
         };
 
         if entry.alias != old_alias {
+            // Sanitise the new alias before it flows into `raw_host_line`.
+            // A malicious provider response with `\n` in the alias would
+            // otherwise inject extra Host blocks into the user's config.
+            // entry_to_block already sanitises the add-host path; this
+            // mirrors it for the rename path.
+            let safe_alias = HostBlock::sanitize_raw_line_value(&entry.alias);
             // Full-pattern match (pattern browser rename) replaces the whole
             // `host_pattern` verbatim. Token match (host list rename on a
             // multi-alias block) replaces only the selected token so
@@ -694,14 +717,14 @@ impl SshConfigFile {
             // token path because `tokens == [old_alias]`.
             let is_full_pattern_match = block.host_pattern == old_alias;
             let new_pattern: String = if is_full_pattern_match {
-                entry.alias.clone()
+                safe_alias.to_string()
             } else {
                 block
                     .host_pattern
                     .split_whitespace()
                     .map(|t| {
                         if t == old_alias {
-                            entry.alias.as_str()
+                            safe_alias.as_ref()
                         } else {
                             t
                         }
@@ -719,21 +742,46 @@ impl SshConfigFile {
         if entry.port != 22 {
             Self::upsert_directive(block, "Port", &entry.port.to_string());
         } else {
-            // Remove explicit Port 22 (it's the default)
-            block
-                .directives
-                .retain(|d| d.is_non_directive || !d.key.eq_ignore_ascii_case("port"));
+            // Port 22 is the SSH default: drop the explicit directive so
+            // the rendered block stays minimal. Route through
+            // `upsert_directive` with an empty value so the first-only
+            // semantics match every other key here; a separate `retain`
+            // would diverge from the cumulative-directive invariant.
+            Self::upsert_directive(block, "Port", "");
         }
         Self::upsert_directive(block, "IdentityFile", &entry.identity_file);
         Self::upsert_directive(block, "ProxyJump", &entry.proxy_jump);
     }
 
     /// Update a directive in-place, add it if missing, or remove it if value is empty.
+    ///
+    /// When `value` is empty only the FIRST matching directive is removed.
+    /// OpenSSH treats some directives (`IdentityFile`, `CertificateFile`,
+    /// `LocalForward`, etc.) as cumulative: a host with three `IdentityFile`
+    /// lines is intentionally multi-key. Wiping all matching directives on
+    /// an empty form field would silently delete the user's other keys.
+    /// The form only edits the first occurrence (see `to_host_entry` which
+    /// reads `if entry.identity_file.is_empty()`), so the symmetric remove
+    /// only-first behaviour keeps the per-form-field invariant intact:
+    /// "what the user sees in the field is what the field controls".
     fn upsert_directive(block: &mut HostBlock, key: &str, value: &str) {
+        // Defence in depth: sanitise the value before interpolation. The
+        // provider-sync update path passes `remote.ip` directly to
+        // `update_host` -&gt; `upsert_directive`, so a self-hosted provider
+        // with TLS verification disabled (Proxmox, OCI) could supply a
+        // hostname containing `\n  ProxyCommand evil` and inject a real
+        // directive. `entry_to_block` (the add-host path) sanitises at
+        // construction; mirroring it here closes the symmetric edit path.
+        let value_owned = HostBlock::sanitize_raw_line_value(value);
+        let value = value_owned.as_ref();
         if value.is_empty() {
-            block
+            if let Some(pos) = block
                 .directives
-                .retain(|d| d.is_non_directive || !d.key.eq_ignore_ascii_case(key));
+                .iter()
+                .position(|d| !d.is_non_directive && d.key.eq_ignore_ascii_case(key))
+            {
+                block.directives.remove(pos);
+            }
             return;
         }
         let indent = block.detect_indent();
@@ -1100,11 +1148,33 @@ impl SshConfigFile {
         }
     }
 
-    /// Set vault-ssh role on a host block by alias.
-    pub fn set_host_vault_ssh(&mut self, alias: &str, role: &str) {
-        if let Some(block) = self.find_host_block_mut(alias) {
-            block.set_vault_ssh(role);
+    /// Set or remove the Vault SSH role comment on a host block by alias.
+    /// Empty `role` removes the comment.
+    ///
+    /// Mirrors the safety invariants of `set_host_certificate_file` and
+    /// `set_host_vault_addr`: wildcard aliases are refused so a `Host *.prod`
+    /// pattern can never have a Vault role silently assigned to every host
+    /// it resolves, and multi-alias blocks (`Host web-01 web-01.prod`) are
+    /// refused so the role is never applied to sibling aliases the user did
+    /// not authorise. Returns `true` on a successful mutation, `false` when
+    /// the alias is invalid, missing, or lives in an Include file.
+    ///
+    /// Callers that run asynchronously (form submit handlers, sync workers)
+    /// MUST check the return value so a silent config mutation failure is
+    /// surfaced instead of pretending the role was wired up.
+    #[must_use = "check the return value to detect silently-skipped mutations (renamed, deleted or shared-block hosts)"]
+    pub fn set_host_vault_ssh(&mut self, alias: &str, role: &str) -> bool {
+        if alias.is_empty() || is_host_pattern(alias) {
+            return false;
         }
+        let Some(block) = self.find_host_block_mut(alias) else {
+            return false;
+        };
+        if is_host_pattern(&block.host_pattern) {
+            return false;
+        }
+        block.set_vault_ssh(role);
+        true
     }
 
     /// Set or remove the Vault SSH endpoint comment on a host block by alias.
@@ -1151,6 +1221,15 @@ impl SshConfigFile {
     /// updated, `false` if no top-level `HostBlock` matched (alias was
     /// renamed, deleted or lives only inside an `Include`d file).
     ///
+    /// Only touches `CertificateFile` directives that are purple-managed
+    /// (path contains `.purple/certs/`). User-set custom `CertificateFile`
+    /// entries (e.g. a corporate or personal cert at `~/.ssh/corp-cert.pub`)
+    /// are never modified or removed: empty-path clears only the purple
+    /// managed line; non-empty path updates the purple-managed line in
+    /// place or inserts a new one if absent. A host with both a corporate
+    /// cert and a Vault-signed cert ends up with both lines present, in
+    /// OpenSSH's documented cumulative semantics.
+    ///
     /// Callers that run asynchronously (e.g. the Vault SSH bulk-sign worker)
     /// MUST check the return value so a silent config mutation failure is
     /// surfaced to the user instead of pretending the cert was wired up.
@@ -1177,7 +1256,60 @@ impl SshConfigFile {
         if is_host_pattern(&block.host_pattern) {
             return false;
         }
-        Self::upsert_directive(block, "CertificateFile", path);
+
+        // Find the existing purple-managed CertificateFile entry, if any.
+        let purple_pos = block.directives.iter().position(|d| {
+            !d.is_non_directive
+                && d.key.eq_ignore_ascii_case("CertificateFile")
+                && is_purple_managed_cert_value(&d.value)
+        });
+
+        if path.is_empty() {
+            if let Some(pos) = purple_pos {
+                block.directives.remove(pos);
+            }
+            return true;
+        }
+
+        let sanitized = HostBlock::sanitize_raw_line_value(path);
+        let indent = block.detect_indent();
+        if let Some(pos) = purple_pos {
+            let d = &mut block.directives[pos];
+            if d.value != sanitized.as_ref() {
+                d.value = sanitized.to_string();
+                // Preserve separator style + inline comment in the same way
+                // upsert_directive does for the single-line case.
+                let trimmed = d.raw_line.trim_start();
+                let after_key = &trimmed[d.key.len()..];
+                let sep = if after_key.trim_start().starts_with('=') {
+                    let eq_pos = after_key.find('=').unwrap();
+                    let after_eq = &after_key[eq_pos + 1..];
+                    let trailing_ws = after_eq.len() - after_eq.trim_start().len();
+                    after_key[..eq_pos + 1 + trailing_ws].to_string()
+                } else {
+                    " ".to_string()
+                };
+                let comment_suffix = Self::extract_inline_comment(&d.raw_line, &d.key);
+                d.raw_line = format!("{}{}{}{}{}", indent, d.key, sep, sanitized, comment_suffix);
+            }
+        } else if is_purple_managed_cert_value(sanitized.as_ref()) {
+            // Defensive gate: only insert a NEW CertificateFile line when
+            // the caller's path is itself purple-managed. The rollback flow
+            // in `app/hosts.rs` may pass `old_entry.certificate_file` which
+            // could be a user-set custom path; inserting it here would
+            // duplicate a user-managed entry. A non-purple-managed path
+            // with no existing purple-managed line is a no-op.
+            let pos = block.content_end();
+            block.directives.insert(
+                pos,
+                Directive {
+                    key: "CertificateFile".to_string(),
+                    value: sanitized.to_string(),
+                    raw_line: format!("{}CertificateFile {}", indent, sanitized),
+                    is_non_directive: false,
+                },
+            );
+        }
         true
     }
 
@@ -1417,37 +1549,37 @@ impl SshConfigFile {
     }
 
     /// Convert a HostEntry into a new HostBlock with clean formatting.
+    ///
+    /// Every value that ends up inside a `raw_line` is routed through
+    /// `HostBlock::sanitize_raw_line_value`. A `\n` or `\r` in `alias`,
+    /// `hostname`, `user`, `identity_file` or `proxy_jump` would otherwise
+    /// split the rendered line and inject extra SSH config directives — for
+    /// example a provider API returning `name = "evil\n  ProxyJump bad"`
+    /// would land as a real ProxyJump directive in the user's config. The
+    /// previous `debug_assert!` guards were stripped from release builds,
+    /// so the sanitiser is the only release-mode defence.
     pub(crate) fn entry_to_block(entry: &HostEntry) -> HostBlock {
-        // Defense-in-depth: callers must validate before reaching here.
-        // Newlines in values would inject extra SSH config directives.
-        debug_assert!(
-            !entry.alias.contains('\n') && !entry.alias.contains('\r'),
-            "entry_to_block: alias contains newline"
-        );
-        debug_assert!(
-            !entry.hostname.contains('\n') && !entry.hostname.contains('\r'),
-            "entry_to_block: hostname contains newline"
-        );
-        debug_assert!(
-            !entry.user.contains('\n') && !entry.user.contains('\r'),
-            "entry_to_block: user contains newline"
-        );
+        let alias = HostBlock::sanitize_raw_line_value(&entry.alias);
+        let hostname = HostBlock::sanitize_raw_line_value(&entry.hostname);
+        let user = HostBlock::sanitize_raw_line_value(&entry.user);
+        let identity_file = HostBlock::sanitize_raw_line_value(&entry.identity_file);
+        let proxy_jump = HostBlock::sanitize_raw_line_value(&entry.proxy_jump);
 
         let mut directives = Vec::new();
 
-        if !entry.hostname.is_empty() {
+        if !hostname.is_empty() {
             directives.push(Directive {
                 key: "HostName".to_string(),
-                value: entry.hostname.clone(),
-                raw_line: format!("  HostName {}", entry.hostname),
+                value: hostname.to_string(),
+                raw_line: format!("  HostName {}", hostname),
                 is_non_directive: false,
             });
         }
-        if !entry.user.is_empty() {
+        if !user.is_empty() {
             directives.push(Directive {
                 key: "User".to_string(),
-                value: entry.user.clone(),
-                raw_line: format!("  User {}", entry.user),
+                value: user.to_string(),
+                raw_line: format!("  User {}", user),
                 is_non_directive: false,
             });
         }
@@ -1459,26 +1591,26 @@ impl SshConfigFile {
                 is_non_directive: false,
             });
         }
-        if !entry.identity_file.is_empty() {
+        if !identity_file.is_empty() {
             directives.push(Directive {
                 key: "IdentityFile".to_string(),
-                value: entry.identity_file.clone(),
-                raw_line: format!("  IdentityFile {}", entry.identity_file),
+                value: identity_file.to_string(),
+                raw_line: format!("  IdentityFile {}", identity_file),
                 is_non_directive: false,
             });
         }
-        if !entry.proxy_jump.is_empty() {
+        if !proxy_jump.is_empty() {
             directives.push(Directive {
                 key: "ProxyJump".to_string(),
-                value: entry.proxy_jump.clone(),
-                raw_line: format!("  ProxyJump {}", entry.proxy_jump),
+                value: proxy_jump.to_string(),
+                raw_line: format!("  ProxyJump {}", proxy_jump),
                 is_non_directive: false,
             });
         }
 
         HostBlock {
-            host_pattern: entry.alias.clone(),
-            raw_host_line: format!("Host {}", entry.alias),
+            host_pattern: alias.to_string(),
+            raw_host_line: format!("Host {}", alias),
             directives,
         }
     }

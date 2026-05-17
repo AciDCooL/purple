@@ -52,3 +52,8 @@ docs/
 # Nix
 result
 result-*
+
+# purple FileLock sentinels (left on disk by design to close the
+# flock-after-unlink race; users with ~/.ssh/config in dotfiles repos
+# would otherwise see ~/.ssh/config.purple_lock as untracked).
+*.purple_lock
