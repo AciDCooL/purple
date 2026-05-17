@@ -467,7 +467,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
             if let Some(snapshot) = app.forms.bulk_tag_undo.take() {
                 let config_backup = app.hosts_state.ssh_config.clone();
                 for (alias, tags) in &snapshot {
-                    app.hosts_state.ssh_config.set_host_tags(alias, tags);
+                    let _ = app.hosts_state.ssh_config.set_host_tags(alias, tags);
                 }
                 if let Err(e) = app.hosts_state.ssh_config.write() {
                     app.hosts_state.ssh_config = config_backup;

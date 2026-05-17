@@ -16,7 +16,7 @@ fn parse_str(content: &str) -> SshConfigFile {
     SshConfigFile {
         elements: SshConfigFile::parse_content(content),
         path: PathBuf::from("/tmp/test_config"),
-        crlf: content.contains("\r\n"),
+        crlf: purple_ssh::ssh_config::parser::detect_crlf_majority(content),
         bom: false,
     }
 }
@@ -698,9 +698,13 @@ Host beta
 }
 
 #[test]
-fn delete_host_with_preceding_group_comment() {
+fn delete_host_preserves_section_header_between_blocks() {
     // "# Production" is a GlobalLine before the first host.
-    // The blank line + "# Staging" are INSIDE prod's directives.
+    // The parser absorbs the blank line + "# Staging" into prod's directives
+    // (no syntactic notion of "blank line ends a block"), but section
+    // headers between two blocks describe what FOLLOWS, not what precedes.
+    // After deleting prod, the salvage step re-emits "# Staging" as a
+    // GlobalLine so it stays attached to the staging block.
     let input = "\
 # Production
 Host prod
@@ -721,10 +725,12 @@ Host staging
         "GlobalLine comment should remain after host deletion. Got:\n{}",
         visible(&output)
     );
-    // "# Staging" was inside prod's directives, so it was DELETED with prod
+    // "# Staging" was absorbed inside prod's block but is a section header
+    // for what follows. The salvage step re-emits it so a section header
+    // does not silently vanish when an unrelated host above it is deleted.
     assert!(
-        !output.contains("# Staging"),
-        "Comment inside deleted host's block should be removed. Got:\n{}",
+        output.contains("# Staging"),
+        "Section-header comment should survive deletion of the preceding host. Got:\n{}",
         visible(&output)
     );
 }
@@ -1126,7 +1132,7 @@ Host myserver
   User admin
 ";
     let mut config = parse_str(input);
-    config.set_host_tags("myserver", &["prod".to_string(), "web".to_string()]);
+    let _ = config.set_host_tags("myserver", &["prod".to_string(), "web".to_string()]);
     let output = config.serialize();
     assert!(
         output.contains("# purple:tags prod,web"),
@@ -1144,7 +1150,7 @@ Host myserver
   # purple:tags old,tags
 ";
     let mut config = parse_str(input);
-    config.set_host_tags("myserver", &["new".to_string(), "tags".to_string()]);
+    let _ = config.set_host_tags("myserver", &["new".to_string(), "tags".to_string()]);
     let output = config.serialize();
     assert!(output.contains("# purple:tags new,tags"));
     assert!(!output.contains("# purple:tags old,tags"));
@@ -1159,7 +1165,7 @@ Host myserver
   # purple:tags prod,web
 ";
     let mut config = parse_str(input);
-    config.set_host_tags("myserver", &[]);
+    let _ = config.set_host_tags("myserver", &[]);
     let output = config.serialize();
     assert!(
         !output.contains("purple:tags"),
@@ -1210,7 +1216,7 @@ Host beta
   HostName b.com
 ";
     let mut config = parse_str(input);
-    config.set_host_tags("alpha", &["prod".to_string()]);
+    let _ = config.set_host_tags("alpha", &["prod".to_string()]);
     let output = config.serialize();
 
     let lines: Vec<&str> = output.lines().collect();
@@ -1312,7 +1318,7 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "keychain");
+    let _ = config.set_host_askpass("myserver", "keychain");
     let output = config.serialize();
     assert!(
         output.contains("# purple:askpass keychain"),
@@ -1331,7 +1337,7 @@ Host myserver
   # purple:askpass keychain
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "op://Vault/Item/pw");
+    let _ = config.set_host_askpass("myserver", "op://Vault/Item/pw");
     let output = config.serialize();
     assert!(!output.contains("keychain"), "old source should be removed");
     assert!(output.contains("# purple:askpass op://Vault/Item/pw"));
@@ -1345,7 +1351,7 @@ Host myserver
   # purple:askpass keychain
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "");
+    let _ = config.set_host_askpass("myserver", "");
     let output = config.serialize();
     assert!(
         !output.contains("purple:askpass"),
@@ -1365,7 +1371,7 @@ Host beta
   HostName b.com
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("alpha", "keychain");
+    let _ = config.set_host_askpass("alpha", "keychain");
     let output = config.serialize();
 
     let lines: Vec<&str> = output.lines().collect();
@@ -1421,7 +1427,7 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "vault:secret/ssh/prod#api_key");
+    let _ = config.set_host_askpass("myserver", "vault:secret/ssh/prod#api_key");
     let output = config.serialize();
     assert!(
         output.contains("# purple:askpass vault:secret/ssh/prod#api_key"),
@@ -1443,7 +1449,7 @@ Host myserver
   # purple:askpass vault:secret/data/myapp
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "keychain");
+    let _ = config.set_host_askpass("myserver", "keychain");
     let output = config.serialize();
     assert!(
         !output.contains("vault:"),
@@ -1460,7 +1466,7 @@ Host myserver
   # purple:askpass keychain
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "vault:kv/ssh/server#pass");
+    let _ = config.set_host_askpass("myserver", "vault:kv/ssh/server#pass");
     let output = config.serialize();
     assert!(!output.contains("keychain"), "old source should be removed");
     assert!(output.contains("# purple:askpass vault:kv/ssh/server#pass"));
@@ -1473,7 +1479,7 @@ Host myserver
     HostName 10.0.0.1
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "keychain");
+    let _ = config.set_host_askpass("myserver", "keychain");
     let output = config.serialize();
     // Should use 4-space indent to match existing directives
     assert!(
@@ -1490,7 +1496,7 @@ Host myserver
 \tHostName 10.0.0.1
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "pass:ssh/prod");
+    let _ = config.set_host_askpass("myserver", "pass:ssh/prod");
     let output = config.serialize();
     assert!(
         output.contains("\t# purple:askpass pass:ssh/prod"),
@@ -1508,7 +1514,7 @@ Host myserver
   # purple:provider digitalocean:12345
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "op://Vault/SSH/password");
+    let _ = config.set_host_askpass("myserver", "op://Vault/SSH/password");
     let output = config.serialize();
     assert!(
         output.contains("# purple:tags prod,us-east"),
@@ -1537,7 +1543,7 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "get-pass %a %h");
+    let _ = config.set_host_askpass("myserver", "get-pass %a %h");
     let output = config.serialize();
     assert!(output.contains("# purple:askpass get-pass %a %h"));
     let entries = config.host_entries();
@@ -1552,16 +1558,16 @@ Host myserver
 ";
     let mut config = parse_str(input);
     // Set
-    config.set_host_askpass("myserver", "keychain");
+    let _ = config.set_host_askpass("myserver", "keychain");
     assert_eq!(
         config.host_entries()[0].askpass,
         Some("keychain".to_string())
     );
     // Clear
-    config.set_host_askpass("myserver", "");
+    let _ = config.set_host_askpass("myserver", "");
     assert_eq!(config.host_entries()[0].askpass, None);
     // Set again with different source
-    config.set_host_askpass("myserver", "vault:secret/ssh#pass");
+    let _ = config.set_host_askpass("myserver", "vault:secret/ssh#pass");
     assert_eq!(
         config.host_entries()[0].askpass,
         Some("vault:secret/ssh#pass".to_string())
@@ -1581,8 +1587,8 @@ Host beta
   HostName b.com
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("alpha", "keychain");
-    config.set_host_askpass("beta", "vault:secret/ssh#pw");
+    let _ = config.set_host_askpass("alpha", "keychain");
+    let _ = config.set_host_askpass("beta", "vault:secret/ssh#pw");
     let entries = config.host_entries();
     assert_eq!(entries[0].askpass, Some("keychain".to_string()));
     assert_eq!(entries[1].askpass, Some("vault:secret/ssh#pw".to_string()));
@@ -1599,7 +1605,7 @@ Host beta
   HostName b.com
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("alpha", "");
+    let _ = config.set_host_askpass("alpha", "");
     let entries = config.host_entries();
     assert_eq!(entries[0].askpass, None);
     assert_eq!(entries[1].askpass, None); // Beta still has no askpass
@@ -1623,7 +1629,7 @@ Host myserver
   HostName 10.0.0.1
 ";
         let mut config = parse_str(input);
-        config.set_host_askpass("myserver", source);
+        let _ = config.set_host_askpass("myserver", source);
         let entries = config.host_entries();
         assert_eq!(
             entries[0].askpass.as_deref(),
@@ -1748,7 +1754,7 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("nonexistent", "keychain");
+    let _ = config.set_host_askpass("nonexistent", "keychain");
     let output = config.serialize();
     assert!(
         !output.contains("purple:askpass"),
@@ -1799,7 +1805,7 @@ fn askpass_crlf_roundtrip() {
 fn askpass_crlf_set_and_read() {
     let input = "Host myserver\r\n  HostName 10.0.0.1\r\n";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "vault:secret/ssh#pw");
+    let _ = config.set_host_askpass("myserver", "vault:secret/ssh#pw");
     let entries = config.host_entries();
     assert_eq!(entries[0].askpass, Some("vault:secret/ssh#pw".to_string()));
 }
@@ -1815,7 +1821,7 @@ fn askpass_survives_add_host_then_update() {
         ..Default::default()
     };
     config.add_host(&entry);
-    config.set_host_askpass("newhost", "bw:my-item");
+    let _ = config.set_host_askpass("newhost", "bw:my-item");
     assert_eq!(
         config.host_entries()[0].askpass,
         Some("bw:my-item".to_string())
@@ -1847,7 +1853,7 @@ Host do-myserver
     let mut entry = config.host_entries()[0].clone();
     entry.hostname = "10.0.0.2".to_string();
     config.update_host("do-myserver", &entry);
-    config.set_host_tags("do-myserver", &["web".to_string(), "prod".to_string()]);
+    let _ = config.set_host_tags("do-myserver", &["web".to_string(), "prod".to_string()]);
     // Askpass should be preserved (not touched by sync)
     let updated = config.host_entries()[0].clone();
     assert_eq!(updated.askpass, Some("keychain".to_string()));
@@ -1884,7 +1890,7 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(input);
-    config.set_host_askpass("myserver", "get-p\u{00E4}ss %h");
+    let _ = config.set_host_askpass("myserver", "get-p\u{00E4}ss %h");
     assert_eq!(
         config.host_entries()[0].askpass,
         Some("get-p\u{00E4}ss %h".to_string())
@@ -2156,14 +2162,12 @@ Host myserver
 }
 
 #[test]
-fn delete_host_between_group_comments() {
-    // "# Group A" -> GlobalLine
-    // "Host ahost" -> HostBlock start
-    // "  HostName a.com" -> directive
-    // "" -> blank non-directive (inside ahost)
-    // "# Group B" -> comment non-directive (inside ahost)
-    // "Host bhost" -> new HostBlock (flushes ahost)
-    // So "# Group B" lives inside ahost's block
+fn delete_host_between_group_comments_preserves_following_header() {
+    // "# Group A" lands as a GlobalLine before any block, "# Group B" gets
+    // absorbed into ahost's directives by the parser (no "blank line ends
+    // block" rule). The delete-salvage logic re-emits trailing non-purple
+    // comments as GlobalLines so a section header for the next group stays
+    // visible after the preceding host is removed.
     let input = "\
 # Group A
 Host ahost
@@ -2177,12 +2181,14 @@ Host bhost
     config.delete_host("ahost");
     let output = config.serialize();
     assert!(output.contains("Host bhost"));
-    // "# Group B" was inside ahost's block directives, so it's gone
+    // "# Group B" was absorbed inside ahost's block but the salvage step
+    // recognises it as a free-form user comment (not a `# purple:*` marker)
+    // and re-emits it as a GlobalLine above the next remaining block.
     assert!(
-        !output.contains("# Group B"),
-        "Comment inside deleted block should be removed"
+        output.contains("# Group B"),
+        "Section-header comment should survive deletion of preceding host"
     );
-    // "# Group A" was a GlobalLine, so it survives
+    // "# Group A" was a GlobalLine, so it survives unconditionally.
     assert!(output.contains("# Group A"));
 }
 
@@ -2621,7 +2627,7 @@ Host cache
     config.delete_host("cache");
 
     // 4. Add tags to web
-    config.set_host_tags("web", &["prod".to_string(), "frontend".to_string()]);
+    let _ = config.set_host_tags("web", &["prod".to_string(), "frontend".to_string()]);
 
     let output = config.serialize();
 
@@ -2837,7 +2843,7 @@ Host myserver
   User admin
 ";
     let mut config = parse_str(input);
-    config.set_host_tags("myserver", &["prod".to_string()]);
+    let _ = config.set_host_tags("myserver", &["prod".to_string()]);
     config.update_host(
         "myserver",
         &HostEntry {
@@ -2872,7 +2878,7 @@ Host myserver
             ..Default::default()
         },
     );
-    config.set_host_tags("myserver", &["staging".to_string()]);
+    let _ = config.set_host_tags("myserver", &["staging".to_string()]);
     let output = config.serialize();
     assert!(output.contains("HostName 10.0.0.2"));
     assert!(output.contains("# purple:tags staging"));
@@ -3616,7 +3622,7 @@ fn update_host_nonexistent_is_noop() {
 fn set_tags_nonexistent_alias_is_noop() {
     let input = "Host alpha\n  HostName a.com\n";
     let mut config = parse_str(input);
-    config.set_host_tags("nonexistent", &["prod".to_string()]);
+    let _ = config.set_host_tags("nonexistent", &["prod".to_string()]);
     assert_eq!(config.serialize(), input);
 }
 
@@ -3624,7 +3630,7 @@ fn set_tags_nonexistent_alias_is_noop() {
 fn set_provider_nonexistent_alias_is_noop() {
     let input = "Host alpha\n  HostName a.com\n";
     let mut config = parse_str(input);
-    config.set_host_provider_id(
+    let _ = config.set_host_provider_id(
         "nonexistent",
         &ProviderConfigId::bare("digitalocean"),
         "123",
@@ -7887,7 +7893,7 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(content);
-    config.set_host_tags("myserver", &["prod".to_string(), "us-east".to_string()]);
+    let _ = config.set_host_tags("myserver", &["prod".to_string(), "us-east".to_string()]);
     let output = config.serialize();
     assert!(
         output.contains("purple:tags prod,us-east"),
@@ -7970,7 +7976,7 @@ Host myserver
   # purple:tags old-tag
 ";
     let mut config = parse_str(content);
-    config.set_host_tags("myserver", &Vec::<String>::new());
+    let _ = config.set_host_tags("myserver", &Vec::<String>::new());
     let output = config.serialize();
     assert!(
         !output.contains("purple:tags"),
@@ -8062,7 +8068,7 @@ Host myserver
   HostName 10.0.0.1
 ";
     let mut config = parse_str(content);
-    config.set_host_meta(
+    let _ = config.set_host_meta(
         "myserver",
         &[
             ("key,with,commas".to_string(), "value1".to_string()),
@@ -8269,7 +8275,7 @@ Host myserver
   # purple:tags old2
 ";
     let mut config = parse_str(content);
-    config.set_host_tags("myserver", &["new".to_string()]);
+    let _ = config.set_host_tags("myserver", &["new".to_string()]);
     let output = config.serialize();
     let tag_count = output.lines().filter(|l| l.contains("purple:tags")).count();
     assert_eq!(
@@ -8293,7 +8299,7 @@ Host myserver
   # purple:meta region=eu-west-1
 ";
     let mut config = parse_str(content);
-    config.set_host_meta(
+    let _ = config.set_host_meta(
         "myserver",
         &[("region".to_string(), "ap-south-1".to_string())],
     );
@@ -8312,19 +8318,26 @@ Host myserver
 }
 
 #[test]
-fn mixed_crlf_and_lf_detected_as_crlf() {
-    // If a config has ANY \r\n, the crlf flag is set to true
-    // and ALL line endings become \r\n on serialize
-    let content = "Host alpha\r\n  HostName 10.0.0.1\nHost beta\r\n  HostName 10.0.0.2\n";
-    let config = parse_str(content);
-    assert!(config.crlf, "Mixed CRLF/LF should be detected as CRLF");
+fn mixed_crlf_and_lf_serialises_with_majority_line_ending() {
+    // Per CRLF detection: majority wins. A 50/50 mix prefers LF (more
+    // common starting state); a clear majority of CRLF lines flips to CRLF.
+    // This avoids the old "single stray CRLF flips the whole file" pitfall
+    // that produced wholesale diffs against version control on unrelated edits.
+    let half_and_half = "Host alpha\r\n  HostName 10.0.0.1\nHost beta\r\n  HostName 10.0.0.2\n";
+    let config = parse_str(half_and_half);
+    assert!(!config.crlf, "50/50 mix should not flip to CRLF");
     let output = config.serialize();
-    // All line endings should be \r\n
     assert!(
-        !output.contains("\n\n") || output.contains("\r\n\r\n"),
-        "All newlines should be CRLF in output: {}",
+        !output.contains("\r\n"),
+        "Output should be all-LF: {}",
         visible(&output)
     );
+
+    let mostly_crlf = "Host alpha\r\n  HostName 10.0.0.1\r\n  User\r\n  Port 22\r\n  Forward yes\n";
+    let config2 = parse_str(mostly_crlf);
+    assert!(config2.crlf, "Majority CRLF should be detected");
+    let output2 = config2.serialize();
+    assert!(output2.contains("\r\n"));
 }
 
 #[test]
@@ -8496,7 +8509,7 @@ fn set_tags_on_host_with_no_directives() {
 Host emptyhost
 ";
     let mut config = parse_str(content);
-    config.set_host_tags("emptyhost", &["prod".to_string()]);
+    let _ = config.set_host_tags("emptyhost", &["prod".to_string()]);
     let output = config.serialize();
     assert!(
         output.contains("purple:tags prod"),
@@ -8516,7 +8529,7 @@ fn set_meta_on_host_with_no_directives() {
 Host emptyhost
 ";
     let mut config = parse_str(content);
-    config.set_host_meta(
+    let _ = config.set_host_meta(
         "emptyhost",
         &[("region".to_string(), "us-east-1".to_string())],
     );
@@ -8534,7 +8547,7 @@ fn set_provider_on_host_with_no_directives() {
 Host emptyhost
 ";
     let mut config = parse_str(content);
-    config.set_host_provider_id("emptyhost", &ProviderConfigId::bare("aws"), "i-12345");
+    let _ = config.set_host_provider_id("emptyhost", &ProviderConfigId::bare("aws"), "i-12345");
     let output = config.serialize();
     assert!(
         output.contains("purple:provider aws:i-12345"),
@@ -8549,7 +8562,7 @@ fn set_askpass_on_host_with_no_directives() {
 Host emptyhost
 ";
     let mut config = parse_str(content);
-    config.set_host_askpass("emptyhost", "keychain");
+    let _ = config.set_host_askpass("emptyhost", "keychain");
     let output = config.serialize();
     assert!(
         output.contains("purple:askpass keychain"),
@@ -8792,7 +8805,7 @@ Host existing
     assert!(after_update.contains("Port 2222"));
 
     // Set tags
-    config.set_host_tags("lifecycle", &["prod".to_string()]);
+    let _ = config.set_host_tags("lifecycle", &["prod".to_string()]);
     assert!(config.serialize().contains("purple:tags prod"));
 
     // Delete (undoable)
@@ -10549,7 +10562,7 @@ fn batch_operations_without_intermediate_serialize() {
 
     // Set tags on all
     for i in 0..5 {
-        config.set_host_tags(&format!("host-{}", i), &[format!("group-{}", i % 2)]);
+        let _ = config.set_host_tags(&format!("host-{}", i), &[format!("group-{}", i % 2)]);
     }
 
     // Update host-2
@@ -10732,7 +10745,7 @@ fn delete_undoable_on_empty_config_returns_none() {
 #[test]
 fn set_tags_on_empty_config_is_noop() {
     let mut config = parse_str("");
-    config.set_host_tags("nonexistent", &["tag".to_string()]);
+    let _ = config.set_host_tags("nonexistent", &["tag".to_string()]);
     assert_eq!(config.serialize(), "\n");
 }
 
@@ -10896,7 +10909,7 @@ fn sync_stale_roundtrip() {
     assert_eq!(config.host_entries().len(), 1);
 
     // 2. Mark stale (simulates host disappearing from provider)
-    config.set_host_stale("do-stale-test", 1700000000);
+    let _ = config.set_host_stale("do-stale-test", 1700000000);
     let entries = config.host_entries();
     assert_eq!(entries[0].stale, Some(1700000000));
 
@@ -10932,7 +10945,7 @@ fn sync_stale_roundtrip() {
 
     // 5. Clear stale, verify it disappears on round-trip
     let mut config3 = config2;
-    config3.clear_host_stale("do-stale-test");
+    let _ = config3.clear_host_stale("do-stale-test");
     let output3 = config3.serialize();
     assert!(
         !output3.contains("purple:stale"),
@@ -11763,8 +11776,8 @@ fn interleaved_add_update_delete_swap_with_tags_and_provider() {
     assert_eq!(config.host_entries().len(), 5);
 
     // Add tags to host2 and host4
-    config.set_host_tags("host2", &["prod".to_string(), "us-east".to_string()]);
-    config.set_host_tags("host4", &["staging".to_string()]);
+    let _ = config.set_host_tags("host2", &["prod".to_string(), "us-east".to_string()]);
+    let _ = config.set_host_tags("host4", &["staging".to_string()]);
 
     // Update host3's hostname
     config.update_host(
@@ -11865,7 +11878,7 @@ fn rapid_tag_changes_no_duplicate_tag_lines() {
     // Set tags multiple times rapidly
     for i in 0..20 {
         let tags: Vec<String> = (0..=i).map(|j| format!("tag{}", j)).collect();
-        config.set_host_tags("myserver", &tags);
+        let _ = config.set_host_tags("myserver", &tags);
     }
 
     let output = config.serialize();
@@ -11898,7 +11911,7 @@ fn rapid_askpass_changes_no_duplicate_askpass_lines() {
         "vault:secret/ssh",
     ];
     for source in &sources {
-        config.set_host_askpass("myserver", source);
+        let _ = config.set_host_askpass("myserver", source);
     }
 
     let output = config.serialize();
@@ -11921,13 +11934,13 @@ fn set_tags_then_set_provider_then_set_meta_then_set_askpass_all_coexist() {
     let content = "Host myserver\n  HostName 10.0.0.1\n  User admin\n";
     let mut config = parse_str(content);
 
-    config.set_host_tags("myserver", &["prod".to_string(), "us-east".to_string()]);
-    config.set_host_provider_id("myserver", &ProviderConfigId::bare("aws"), "i-123abc");
-    config.set_host_meta(
+    let _ = config.set_host_tags("myserver", &["prod".to_string(), "us-east".to_string()]);
+    let _ = config.set_host_provider_id("myserver", &ProviderConfigId::bare("aws"), "i-123abc");
+    let _ = config.set_host_meta(
         "myserver",
         &[("region".to_string(), "us-east-1".to_string())],
     );
-    config.set_host_askpass("myserver", "keychain");
+    let _ = config.set_host_askpass("myserver", "keychain");
 
     let output = config.serialize();
     assert!(output.contains("# purple:tags prod,us-east"));
@@ -11958,14 +11971,14 @@ fn update_host_rename_preserves_all_annotations() {
     let mut config = parse_str(content);
 
     // Add all annotation types
-    config.set_host_tags("myserver", &["prod".to_string()]);
-    config.set_host_provider_id("myserver", &ProviderConfigId::bare("aws"), "i-123");
-    config.set_host_meta(
+    let _ = config.set_host_tags("myserver", &["prod".to_string()]);
+    let _ = config.set_host_provider_id("myserver", &ProviderConfigId::bare("aws"), "i-123");
+    let _ = config.set_host_meta(
         "myserver",
         &[("region".to_string(), "us-east-1".to_string())],
     );
-    config.set_host_askpass("myserver", "keychain");
-    config.set_host_stale("myserver", 1700000000);
+    let _ = config.set_host_askpass("myserver", "keychain");
+    let _ = config.set_host_stale("myserver", 1700000000);
 
     // Rename the host
     config.update_host(
@@ -12167,7 +12180,7 @@ fn stale_host_edit_clears_stale_then_reannotate() {
     let mut config = parse_str(content);
 
     // Mark stale
-    config.set_host_stale("myserver", 1700000000);
+    let _ = config.set_host_stale("myserver", 1700000000);
     assert_eq!(config.host_entries()[0].stale, Some(1700000000));
 
     // Edit (update) should clear stale
@@ -12181,11 +12194,11 @@ fn stale_host_edit_clears_stale_then_reannotate() {
     );
     // Stale comment is preserved through update (clearing is done by app.rs)
     // So let's manually clear it
-    config.clear_host_stale("myserver");
+    let _ = config.clear_host_stale("myserver");
     assert_eq!(config.host_entries()[0].stale, None);
 
     // Re-mark stale
-    config.set_host_stale("myserver", 1700001000);
+    let _ = config.set_host_stale("myserver", 1700001000);
     assert_eq!(config.host_entries()[0].stale, Some(1700001000));
 
     let output = config.serialize();
@@ -12557,7 +12570,7 @@ fn rewrite_legacy_markers_round_trips() {
 fn set_provider_id_round_trips_after_swap_to_labeled() {
     let content = "Host vm\n  HostName 1.2.3.4\n  # purple:provider aws:i-old\n";
     let mut config = parse_str(content);
-    config.set_host_provider_id("vm", &ProviderConfigId::labeled("aws", "work"), "i-new");
+    let _ = config.set_host_provider_id("vm", &ProviderConfigId::labeled("aws", "work"), "i-new");
     let serialized = config.serialize();
     assert!(serialized.contains("# purple:provider aws:work:i-new"));
     assert!(!serialized.contains("aws:i-old"));
@@ -12581,6 +12594,179 @@ fn labeled_marker_with_other_purple_comments_round_trips() {
     assert_eq!(
         entries[0].vault_addr.as_deref(),
         Some("http://127.0.0.1:8200")
+    );
+}
+
+// =========================================================================
+// First-match-wins semantics (matches OpenSSH ssh_config(5) opening paragraph:
+// "for each parameter, the first obtained value will be used"). Duplicate
+// HostName/User/Port/ProxyJump entries within one block keep the FIRST value.
+// =========================================================================
+
+#[test]
+fn duplicate_hostname_first_wins() {
+    let input = "\
+Host myserver
+  HostName first.example.com
+  HostName second.example.com
+";
+    let config = parse_str(input);
+    let entries = config.host_entries();
+    assert_eq!(entries[0].hostname, "first.example.com");
+}
+
+#[test]
+fn duplicate_user_first_wins() {
+    let input = "\
+Host myserver
+  HostName 10.0.0.1
+  User alice
+  User bob
+";
+    let config = parse_str(input);
+    let entries = config.host_entries();
+    assert_eq!(entries[0].user, "alice");
+}
+
+#[test]
+fn duplicate_port_first_wins() {
+    let input = "\
+Host myserver
+  HostName 10.0.0.1
+  Port 22
+  Port 2222
+";
+    let config = parse_str(input);
+    let entries = config.host_entries();
+    assert_eq!(entries[0].port, 22);
+}
+
+#[test]
+fn duplicate_proxyjump_first_wins() {
+    let input = "\
+Host myserver
+  HostName 10.0.0.1
+  ProxyJump bastion-eu
+  ProxyJump bastion-us
+";
+    let config = parse_str(input);
+    let entries = config.host_entries();
+    assert_eq!(entries[0].proxy_jump, "bastion-eu");
+}
+
+// =========================================================================
+// delete_host: full-match block AND token-only sibling both cleared so that
+// `ssh <alias>` does not silently re-route to a different IP after a delete.
+// =========================================================================
+
+#[test]
+fn delete_host_full_match_also_strips_token_only_sibling() {
+    // Setup: two blocks both addressing `web-01` — one as a full-match
+    // single-alias block, one as a token of a multi-alias block.
+    let input = "\
+Host web-01
+  HostName 10.0.0.1
+
+Host web-01 staging
+  HostName 10.0.0.2
+";
+    let mut config = parse_str(input);
+    config.delete_host("web-01");
+    let output = config.serialize();
+    // The full-match block is gone.
+    assert!(!output.contains("Host web-01\n"));
+    // The shared block has had its `web-01` token stripped, leaving `Host staging`.
+    assert!(output.contains("Host staging"));
+    // `web-01` no longer appears anywhere — `ssh web-01` would now fail to
+    // resolve, not silently re-route to 10.0.0.2.
+    let entries = config.host_entries();
+    assert!(
+        entries.iter().all(|e| e.alias != "web-01"),
+        "web-01 must not resolve after delete; entries: {:?}",
+        entries.iter().map(|e| &e.alias).collect::<Vec<_>>()
+    );
+}
+
+// =========================================================================
+// rebuild_host_line: preserve inline comment, tab separator and `Host=`
+// keyword form across a token-strip on a multi-alias block.
+// =========================================================================
+
+#[test]
+fn delete_token_preserves_host_line_inline_comment() {
+    let input = "Host web-01 web-01.prod # primary cluster\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(input);
+    config.delete_host("web-01");
+    let output = config.serialize();
+    assert!(
+        output.contains("# primary cluster"),
+        "inline comment lost: {}",
+        output
+    );
+    assert!(output.contains("web-01.prod"));
+    assert!(!output.contains("Host web-01 web-01.prod"));
+}
+
+#[test]
+fn delete_token_preserves_tab_separator() {
+    let input = "Host\tweb-01 web-01.prod\n  HostName 10.0.0.1\n";
+    let mut config = parse_str(input);
+    config.delete_host("web-01");
+    let output = config.serialize();
+    assert!(
+        output.contains("Host\tweb-01.prod"),
+        "tab separator lost: {:?}",
+        output
+    );
+}
+
+// =========================================================================
+// CRLF detection is majority-based: a single CRLF line in an otherwise LF
+// file no longer flips the whole file to CRLF on save.
+// =========================================================================
+
+#[test]
+fn single_crlf_line_does_not_flip_majority_lf_file_to_crlf() {
+    let input = "Host alpha\n  HostName 10.0.0.1\r\n  User deploy\n";
+    let config = parse_str(input);
+    let output = config.serialize();
+    // The single stray CRLF in the middle did not flip the entire output to
+    // CRLF. The serializer keeps LF (the majority) which avoids a wholesale
+    // diff against version control for an unrelated edit.
+    let crlf_count = output.matches("\r\n").count();
+    assert_eq!(
+        crlf_count, 0,
+        "majority-LF input must serialise as LF: {:?}",
+        output
+    );
+}
+
+#[test]
+fn majority_crlf_file_serialises_as_crlf() {
+    let input = "Host alpha\r\n  HostName 10.0.0.1\r\n  User deploy\r\n";
+    let config = parse_str(input);
+    let output = config.serialize();
+    assert!(output.contains("\r\n"));
+    // No lone LFs (every newline has a preceding \r).
+    let lone_lf = output
+        .bytes()
+        .enumerate()
+        .filter(|(i, b)| *b == b'\n' && (*i == 0 || output.as_bytes()[i - 1] != b'\r'))
+        .count();
+    assert_eq!(lone_lf, 0);
+}
+
+// =========================================================================
+// Quoted Host patterns reachable from mutation API.
+// =========================================================================
+
+#[test]
+fn quoted_single_token_host_pattern_reachable_by_unquoted_alias() {
+    let input = "Host \"alpha\"\n  HostName 10.0.0.99\n";
+    let config = parse_str(input);
+    assert!(
+        config.has_host("alpha"),
+        "Host \"alpha\" must be reachable as `alpha`"
     );
 }
 

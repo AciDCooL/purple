@@ -1272,6 +1272,14 @@ pub fn vault_config_write_after_sign(e: &impl std::fmt::Display) -> String {
     format!("Failed to update config after vault signing: {}", e)
 }
 
+pub fn vault_config_skipped_external_change() -> &'static str {
+    "Config changed on disk since signing started. Cert files are saved; re-run vault sign to wire them up."
+}
+
+pub fn sync_skipped_external_change() -> &'static str {
+    "Config changed on disk during sync. Re-run sync after reviewing your edits."
+}
+
 // ── File browser ────────────────────────────────────────────────────
 
 // ── Confirm / host key ──────────────────────────────────────────────

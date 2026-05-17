@@ -37,11 +37,16 @@ impl SshConfigFile {
             })
             .context("Failed to acquire config lock")?;
 
-        // Create backup if the file exists, keep only last 5
-        if self.path.exists() {
-            self.create_backup()
+        // Create backup if the file exists, keep only last 5.
+        // Use the canonical `target_path` so backups land next to the real
+        // file rather than next to a symlink. Without this, a user with
+        // `~/.ssh/config -> /Volumes/dotfiles/ssh_config` would see backups
+        // accumulate in `~/.ssh/` even though the actual file lives on the
+        // dotfiles volume — recovery becomes confusing.
+        if target_path.exists() {
+            self.create_backup(&target_path)
                 .context("Failed to create backup of SSH config")?;
-            self.prune_backups(5).ok();
+            self.prune_backups(&target_path, 5).ok();
         }
 
         let content = self.serialize();
@@ -120,21 +125,24 @@ impl SshConfigFile {
 
     /// Create a timestamped backup of the current config file.
     /// Backup files are created with chmod 600 to match the source file's sensitivity.
-    fn create_backup(&self) -> Result<()> {
+    fn create_backup(&self, target_path: &std::path::Path) -> Result<()> {
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis();
         let backup_name = format!(
             "{}.bak.{}",
-            self.path.file_name().unwrap_or_default().to_string_lossy(),
+            target_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
             timestamp
         );
-        let backup_path = self.path.with_file_name(backup_name);
-        fs::copy(&self.path, &backup_path).with_context(|| {
+        let backup_path = target_path.with_file_name(backup_name);
+        fs::copy(target_path, &backup_path).with_context(|| {
             format!(
                 "Failed to copy {} to {}",
-                self.path.display(),
+                target_path.display(),
                 backup_path.display()
             )
         })?;
@@ -155,17 +163,27 @@ impl SshConfigFile {
     }
 
     /// Remove old backups, keeping only the most recent `keep` files.
-    fn prune_backups(&self, keep: usize) -> Result<()> {
-        let parent = self.path.parent().context("No parent directory")?;
+    fn prune_backups(&self, target_path: &std::path::Path, keep: usize) -> Result<()> {
+        let parent = target_path.parent().context("No parent directory")?;
         let prefix = format!(
             "{}.bak.",
-            self.path.file_name().unwrap_or_default().to_string_lossy()
+            target_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
         );
         let mut backups: Vec<_> = fs::read_dir(parent)?
             .filter_map(|e| e.ok())
             .filter(|e| e.file_name().to_string_lossy().starts_with(&prefix))
             .collect();
-        backups.sort_by_key(|e| e.file_name());
+        // Sort by mtime so prune is robust against future timestamp-digit-width
+        // changes. Filename sort would silently break if the millisecond
+        // suffix length ever grew.
+        backups.sort_by_key(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(SystemTime::UNIX_EPOCH)
+        });
         if backups.len() > keep {
             for old in &backups[..backups.len() - keep] {
                 if let Err(e) = fs::remove_file(old.path()) {
@@ -192,7 +210,7 @@ mod tests {
                 .expect("tempdir")
                 .keep()
                 .join("test_config"),
-            crlf: content.contains("\r\n"),
+            crlf: crate::ssh_config::parser::detect_crlf_majority(content),
             bom: false,
         }
     }

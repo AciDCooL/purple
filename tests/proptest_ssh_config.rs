@@ -18,7 +18,7 @@ fn parse_str(content: &str) -> SshConfigFile {
     SshConfigFile {
         elements: SshConfigFile::parse_content(content),
         path: PathBuf::from("/tmp/proptest_config"),
-        crlf: content.contains("\r\n"),
+        crlf: purple_ssh::ssh_config::parser::detect_crlf_majority(content),
         bom: content.starts_with('\u{FEFF}'),
     }
 }
@@ -735,13 +735,17 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(200))]
 
     #[test]
-    fn crlf_detected_correctly(content in ssh_config_strategy()) {
+    fn crlf_detected_by_majority(content in ssh_config_strategy()) {
+        // Per-line CRLF preservation (M8): a single stray CRLF in an
+        // otherwise LF file must not flip the entire output to CRLF.
+        // The detector picks majority — only when more lines end with
+        // \r\n than with bare \n does the file count as CRLF.
         let config = parse_str(&content);
-        let has_crlf = content.contains("\r\n");
+        let expected = purple_ssh::ssh_config::parser::detect_crlf_majority(&content);
         prop_assert_eq!(
             config.crlf,
-            has_crlf,
-            "CRLF detection mismatch",
+            expected,
+            "CRLF detection should follow majority rule",
         );
     }
 }

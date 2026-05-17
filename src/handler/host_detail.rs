@@ -14,10 +14,10 @@ pub(super) fn handle_tag_input(app: &mut App, key: KeyEvent) {
                 if let Some(host) = app.selected_host() {
                     let alias = host.alias.clone();
                     let old_tags = host.tags.clone();
-                    app.hosts_state.ssh_config.set_host_tags(&alias, &tags);
+                    let _ = app.hosts_state.ssh_config.set_host_tags(&alias, &tags);
                     if let Err(e) = app.hosts_state.ssh_config.write() {
                         // Restore old tags on write failure
-                        app.hosts_state.ssh_config.set_host_tags(&alias, &old_tags);
+                        let _ = app.hosts_state.ssh_config.set_host_tags(&alias, &old_tags);
                         app.notify_error(crate::messages::failed_to_save(&e));
                     } else {
                         app.update_last_modified();

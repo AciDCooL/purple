@@ -1,3 +1,13 @@
+## 3.14.2 - 2026-05-17
+
+- feat: More ssh_config edge cases covered by round-trip safety.
+- feat: Duplicate `HostName` / `User` / `Port` / `ProxyJump` lines resolve first-match-wins, exactly the way `ssh -G` does.
+- feat: `Match`, `Include` and `Host` keywords start a new section even when indented, with `=` as a separator everywhere OpenSSH accepts it.
+- feat: Deleting a host preserves every section header above the next block and leaves no silent re-route through a token-only sibling.
+- feat: Tags, askpass, vault roles, provider metadata and stale flags refuse shared `Host A B` lines, so a sibling alias never inherits a credential or ownership it was not granted.
+- feat: Background sync and deferred vault writes step aside when the config changed under them on disk, so edits made in another editor survive.
+- feat: Backups land next to the canonical file even through a symlinked `~/.ssh/config`, with mode preserved on every save.
+
 ## 3.14.1 - 2026-05-17
 
 - feat: Tighter safety on every ~/.ssh/config write.

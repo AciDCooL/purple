@@ -18,7 +18,7 @@ fn parse_str(content: &str) -> SshConfigFile {
     SshConfigFile {
         elements: SshConfigFile::parse_content(content),
         path: PathBuf::from("/tmp/proptest_mutations"),
-        crlf: content.contains("\r\n"),
+        crlf: purple_ssh::ssh_config::parser::detect_crlf_majority(content),
         bom: content.starts_with('\u{FEFF}'),
     }
 }
@@ -333,22 +333,23 @@ fn apply_action(config: &mut SshConfigFile, action: &Action) {
         }
         Action::SetTags { tags } => {
             if let Some(alias) = &first_alias {
-                config.set_host_tags(alias, tags);
+                let _ = config.set_host_tags(alias, tags);
             }
         }
         Action::SetAskpass { source } => {
             if let Some(alias) = &first_alias {
-                config.set_host_askpass(alias, source);
+                let _ = config.set_host_askpass(alias, source);
             }
         }
         Action::SetProvider { name, id } => {
             if let Some(alias) = &first_alias {
-                config.set_host_provider_id(alias, &ProviderConfigId::bare(name), id);
+                let _ = config.set_host_provider_id(alias, &ProviderConfigId::bare(name), id);
             }
         }
         Action::SetProviderLabeled { name, label, id } => {
             if let Some(alias) = &first_alias {
-                config.set_host_provider_id(alias, &ProviderConfigId::labeled(name, label), id);
+                let _ =
+                    config.set_host_provider_id(alias, &ProviderConfigId::labeled(name, label), id);
             }
         }
         Action::RewriteLegacyToLabel { name, label } => {
@@ -357,7 +358,7 @@ fn apply_action(config: &mut SshConfigFile, action: &Action) {
         }
         Action::SetMeta { meta } => {
             if let Some(alias) = &first_alias {
-                config.set_host_meta(alias, meta);
+                let _ = config.set_host_meta(alias, meta);
             }
         }
         Action::AddForward { key, value } => {
@@ -372,12 +373,12 @@ fn apply_action(config: &mut SshConfigFile, action: &Action) {
         }
         Action::SetStale { timestamp } => {
             if let Some(alias) = &first_alias {
-                config.set_host_stale(alias, *timestamp);
+                let _ = config.set_host_stale(alias, *timestamp);
             }
         }
         Action::ClearStale => {
             if let Some(alias) = &first_alias {
-                config.clear_host_stale(alias);
+                let _ = config.clear_host_stale(alias);
             }
         }
         Action::RepairGroupComments => {
@@ -489,34 +490,34 @@ proptest! {
         prop_assert!(config.has_host(&alias));
 
         // 2. Set tags
-        config.set_host_tags(&alias, &tags);
+        let _ = config.set_host_tags(&alias, &tags);
         assert_idempotent(&config);
         let entry = config.host_entries().into_iter().find(|e| e.alias == alias).unwrap();
         prop_assert_eq!(&entry.tags, &tags);
 
         // 3. Set provider
-        config.set_host_provider_id(&alias, &ProviderConfigId::bare( "aws"),  "i-test123");
+        let _ = config.set_host_provider_id(&alias, &ProviderConfigId::bare( "aws"),  "i-test123");
         assert_idempotent(&config);
         let entry = config.host_entries().into_iter().find(|e| e.alias == alias).unwrap();
         prop_assert_eq!(entry.provider.as_deref(), Some("aws"));
 
         // 4. Set meta
-        config.set_host_meta(&alias, &meta);
+        let _ = config.set_host_meta(&alias, &meta);
         assert_idempotent(&config);
 
         // 4b. Set stale, verify, clear, verify
-        config.set_host_stale(&alias, 1700000000);
+        let _ = config.set_host_stale(&alias, 1700000000);
         assert_idempotent(&config);
         let entry = config.host_entries().into_iter().find(|e| e.alias == alias).unwrap();
         prop_assert!(entry.stale.is_some(), "stale should be Some after set");
 
-        config.clear_host_stale(&alias);
+        let _ = config.clear_host_stale(&alias);
         assert_idempotent(&config);
         let entry = config.host_entries().into_iter().find(|e| e.alias == alias).unwrap();
         prop_assert!(entry.stale.is_none(), "stale should be None after clear");
 
         // 5. Set askpass
-        config.set_host_askpass(&alias, &askpass);
+        let _ = config.set_host_askpass(&alias, &askpass);
         assert_idempotent(&config);
 
         // 6. Add forward
@@ -601,9 +602,9 @@ proptest! {
                 continue;
             }
             config.add_host(&host_entry(&alias, ip, "ec2-user"));
-            config.set_host_provider_id(&alias, &ProviderConfigId::bare( "aws"),  &format!("i-{name}"));
-            config.set_host_tags(&alias, &["aws".to_string(), "cloud".to_string()]);
-            config.set_host_meta(
+            let _ = config.set_host_provider_id(&alias, &ProviderConfigId::bare( "aws"),  &format!("i-{name}"));
+            let _ = config.set_host_tags(&alias, &["aws".to_string(), "cloud".to_string()]);
+            let _ = config.set_host_meta(
                 &alias,
                 &[
                     ("region".to_string(), "us-east-1".to_string()),
@@ -621,8 +622,8 @@ proptest! {
                 continue;
             }
             config.add_host(&host_entry(&alias, ip, "root"));
-            config.set_host_provider_id(&alias, &ProviderConfigId::bare( "digitalocean"),  &format!("droplet-{name}"));
-            config.set_host_tags(&alias, &["do".to_string()]);
+            let _ = config.set_host_provider_id(&alias, &ProviderConfigId::bare( "digitalocean"),  &format!("droplet-{name}"));
+            let _ = config.set_host_tags(&alias, &["do".to_string()]);
         }
 
         assert_idempotent(&config);
@@ -691,7 +692,7 @@ proptest! {
         for i in 0..cycles {
             let alias = format!("temp-{i}");
             config.add_host(&host_entry(&alias, "2.2.2.2", "test"));
-            config.set_host_tags(&alias, &["temp".to_string()]);
+            let _ = config.set_host_tags(&alias, &["temp".to_string()]);
             config.delete_host(&alias);
         }
 
@@ -738,15 +739,15 @@ Host target
         let max_rounds = tag_sets.len().min(askpass_values.len()).min(meta_sets.len());
 
         for i in 0..max_rounds {
-            config.set_host_tags("target", &tag_sets[i]);
-            config.set_host_askpass("target", &askpass_values[i]);
-            config.set_host_meta("target", &meta_sets[i]);
-            config.set_host_stale("target", i as u64);
+            let _ = config.set_host_tags("target", &tag_sets[i]);
+            let _ = config.set_host_askpass("target", &askpass_values[i]);
+            let _ = config.set_host_meta("target", &meta_sets[i]);
+            let _ = config.set_host_stale("target", i as u64);
             assert_idempotent(&config);
         }
 
         // Clear stale after the loop
-        config.clear_host_stale("target");
+        let _ = config.clear_host_stale("target");
         assert_idempotent(&config);
 
         // Verify final state
@@ -784,7 +785,7 @@ proptest! {
         for i in 0..host_count {
             let alias = format!("host-{i}");
             config.add_host(&host_entry(&alias, &format!("10.0.0.{}", i + 1), "user"));
-            config.set_host_tags(&alias, &[format!("group-{}", i % 3)]);
+            let _ = config.set_host_tags(&alias, &[format!("group-{}", i % 3)]);
         }
 
         assert_idempotent(&config);

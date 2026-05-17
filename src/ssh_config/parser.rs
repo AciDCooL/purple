@@ -49,7 +49,11 @@ impl SshConfigFile {
             None => (false, content.as_str()),
         };
 
-        let crlf = content.contains("\r\n");
+        let crlf = detect_crlf_majority(content);
+        // Relative Include paths resolve against this directory for the
+        // entire include tree, matching OpenSSH's readconf.c which fixes the
+        // base to the user's ~/.ssh (or /etc/ssh for the system file) once
+        // at entry and reuses it for every nested Include.
         let config_dir = path.parent().map(|p| p.to_path_buf());
         let elements = Self::parse_content_with_includes(
             content,
@@ -123,32 +127,32 @@ impl SshConfigFile {
             let line = raw_line.trim_end_matches('\r');
             let trimmed = line.trim();
 
-            // Check for Include directive.
-            // An indented Include inside a Host block is preserved as a directive
-            // (not a top-level Include). A non-indented Include flushes the block.
-            let is_indented = line.starts_with(' ') || line.starts_with('\t');
-            if !(current_block.is_some() && is_indented) {
-                if let Some(pattern) = Self::parse_include_line(trimmed) {
-                    if let Some(block) = current_block.take() {
-                        elements.push(ConfigElement::HostBlock(block));
-                    }
-                    let resolved = if depth < MAX_INCLUDE_DEPTH {
-                        Self::resolve_include(pattern, config_dir, depth, visited.as_deref_mut())
-                    } else {
-                        Vec::new()
-                    };
-                    elements.push(ConfigElement::Include(IncludeDirective {
-                        raw_line: line.to_string(),
-                        pattern: pattern.to_string(),
-                        resolved_files: resolved,
-                    }));
-                    continue;
+            // OpenSSH's readconf.c treats keywords as significant regardless
+            // of leading whitespace; indentation is purely cosmetic. We follow
+            // the same rule: Include and Match always start a new section, even
+            // when indented inside a previous Host block.
+            if let Some(pattern) = Self::parse_include_line(trimmed) {
+                if let Some(block) = current_block.take() {
+                    elements.push(ConfigElement::HostBlock(block));
                 }
+                let resolved = if depth < MAX_INCLUDE_DEPTH {
+                    Self::resolve_include(pattern, config_dir, depth, visited.as_deref_mut())
+                } else {
+                    Vec::new()
+                };
+                elements.push(ConfigElement::Include(IncludeDirective {
+                    raw_line: line.to_string(),
+                    pattern: pattern.to_string(),
+                    resolved_files: resolved,
+                }));
+                continue;
             }
 
-            // Non-indented Match line = block boundary (flush current Host block).
+            // Match line = block boundary (flush current Host block).
             // Match blocks are stored as GlobalLines (inert, never edited/deleted).
-            if !is_indented && Self::is_match_line(trimmed) {
+            // Recognizes `Match foo`, `Match=foo`, `Match = foo`, with optional
+            // leading whitespace.
+            if Self::is_match_line(trimmed) {
                 if let Some(block) = current_block.take() {
                     elements.push(ConfigElement::HostBlock(block));
                 }
@@ -158,6 +162,7 @@ impl SshConfigFile {
 
             // Non-indented purple:group comment = block boundary (visual separator
             // between provider groups, written as GlobalLine by the sync engine).
+            let is_indented = line.starts_with(' ') || line.starts_with('\t');
             if !is_indented && trimmed.starts_with("# purple:group ") {
                 if let Some(block) = current_block.take() {
                     elements.push(ConfigElement::HostBlock(block));
@@ -341,9 +346,14 @@ impl SshConfigFile {
                             Ok(content) => {
                                 // Strip UTF-8 BOM if present (same as main config)
                                 let content = content.strip_prefix('\u{FEFF}').unwrap_or(&content);
+                                // Pass `config_dir` (the user-config base for
+                                // the entire include tree) through to nested
+                                // parses, NOT `path.parent()`. OpenSSH resolves
+                                // every relative Include against the original
+                                // base, not against the includer's directory.
                                 let elements = Self::parse_content_with_includes(
                                     content,
-                                    path.parent(),
+                                    config_dir,
                                     depth + 1,
                                     Some(&path),
                                     visited.as_deref_mut(),
@@ -441,11 +451,19 @@ impl SshConfigFile {
         None
     }
 
-    /// Check if a line is a "Match ..." line (block boundary).
+    /// Check if a line is a `Match ...` line (block boundary).
+    /// Recognizes `Match foo`, `Match=foo` and `Match = foo` per OpenSSH's
+    /// strdelim() rule that any keyword can use `=` as separator.
     fn is_match_line(trimmed: &str) -> bool {
-        let mut parts = trimmed.splitn(2, [' ', '\t']);
-        let keyword = parts.next().unwrap_or("");
-        keyword.eq_ignore_ascii_case("match")
+        let bytes = trimmed.as_bytes();
+        // "match" is 5 ASCII bytes; byte 5 must be whitespace or '=' (or absent
+        // for the bare `Match` keyword, which OpenSSH itself doesn't accept,
+        // so we require at least the separator).
+        if bytes.len() > 5 && bytes[..5].eq_ignore_ascii_case(b"match") {
+            let sep = bytes[5];
+            return sep.is_ascii_whitespace() || sep == b'=';
+        }
+        false
     }
 
     /// Parse a "Key Value" directive line.
@@ -471,6 +489,23 @@ impl SshConfigFile {
 
         Some((key.to_string(), value.to_string()))
     }
+}
+
+/// Detect CRLF only when the MAJORITY of lines use `\r\n`. A single
+/// Windows-edited line in an otherwise LF file must not flip the entire
+/// output to CRLF on the next save; that would produce a wholesale diff
+/// against version control for an unrelated edit.
+pub fn detect_crlf_majority(content: &str) -> bool {
+    let mut crlf_lines = 0usize;
+    let mut lf_lines = 0usize;
+    for line in content.split('\n') {
+        if line.ends_with('\r') {
+            crlf_lines += 1;
+        } else if !line.is_empty() {
+            lf_lines += 1;
+        }
+    }
+    crlf_lines > lf_lines
 }
 
 /// Strip an inline comment (`# ...` preceded by whitespace) from a parsed value,
@@ -505,7 +540,7 @@ mod tests {
                 .expect("tempdir")
                 .keep()
                 .join("test_config"),
-            crlf: content.contains("\r\n"),
+            crlf: crate::ssh_config::parser::detect_crlf_majority(content),
             bom: false,
         }
     }

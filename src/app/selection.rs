@@ -685,7 +685,7 @@ impl App {
                 }
             }
             if host_changed {
-                self.hosts_state.ssh_config.set_host_tags(alias, &new_tags);
+                let _ = self.hosts_state.ssh_config.set_host_tags(alias, &new_tags);
                 changed_hosts.insert(alias.clone());
                 undo_snapshot.push((alias.clone(), original_tags));
             }

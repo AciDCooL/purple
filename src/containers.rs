@@ -693,7 +693,11 @@ pub struct MountInfo {
 }
 
 /// Build the SSH command string for inspecting a single container.
-pub fn container_inspect_command(runtime: ContainerRuntime, container_id: &str) -> String {
+///
+/// Callers MUST validate `container_id` with `validate_container_id` before
+/// reaching this builder. Restricted to crate visibility so a future caller
+/// outside this crate cannot accidentally skip the guard.
+pub(crate) fn container_inspect_command(runtime: ContainerRuntime, container_id: &str) -> String {
     format!("{} inspect {}", runtime.as_str(), container_id)
 }
 
@@ -1041,7 +1045,7 @@ pub fn spawn_container_inspect_listing<F>(
 /// Build the `<runtime> logs --tail <n> <id>` command. The
 /// `--tail` cap is enforced server-side so the SSH stream stays
 /// bounded even on a noisy container.
-pub fn container_logs_command(
+pub(crate) fn container_logs_command(
     runtime: ContainerRuntime,
     container_id: &str,
     tail: usize,

@@ -1534,7 +1534,7 @@ fn test_host_form_proton_askpass_writes_comment() {
     std::fs::write(&config_path, "Host srv\n    HostName srv.example.com\n").unwrap();
 
     let mut config = SshConfigFile::parse(&config_path).expect("parse");
-    config.set_host_askpass("srv", "proton:Personal/srv/p");
+    let _ = config.set_host_askpass("srv", "proton:Personal/srv/p");
     config.write().expect("write");
 
     let on_disk = std::fs::read_to_string(&config_path).expect("read");

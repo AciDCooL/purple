@@ -132,6 +132,18 @@ fn match_char_class(pat: &[char], start: usize, ch: char) -> Option<(bool, usize
     Some((result, i + 1))
 }
 
+/// Strip a single pair of surrounding double quotes from a Host pattern
+/// token. OpenSSH accepts `Host "alpha"` as equivalent to `Host alpha`; without
+/// this strip purple's stored pattern would contain literal quote characters
+/// and never match the user-typed alias.
+fn unquote_pattern_token(token: &str) -> &str {
+    if token.len() >= 2 && token.starts_with('"') && token.ends_with('"') {
+        &token[1..token.len() - 1]
+    } else {
+        token
+    }
+}
+
 /// Check whether a `Host` pattern matches a given alias.
 /// OpenSSH `Host` keyword matches only against the target alias typed on the
 /// command line, never against the resolved HostName.
@@ -143,6 +155,7 @@ pub fn host_pattern_matches(host_pattern: &str, alias: &str) -> bool {
 
     let mut any_positive_match = false;
     for pat in &patterns {
+        let pat = unquote_pattern_token(pat);
         if let Some(neg) = pat.strip_prefix('!') {
             if match_glob(neg, alias) {
                 return false;

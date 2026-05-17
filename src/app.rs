@@ -333,15 +333,32 @@ impl App {
         // so on-disk state matches in-memory state (no TOCTOU with auto-reload).
         // Skip when a form is open (flush handler would bail anyway) and do not
         // call flush_pending_vault_write() itself to avoid recursion.
+        //
+        // Before flushing, check whether the on-disk config changed since the
+        // in-memory model was loaded. If so, the deferred write would overwrite
+        // those external edits silently. Surface a notification and skip the
+        // flush; the user can re-trigger vault sign after reviewing their
+        // changes. The cert files themselves were already written by the bulk
+        // sign worker — only the config-side `CertificateFile` directives are
+        // skipped, which the user can wire up via a fresh sign.
         let mut flushed_vault_write = false;
         if self.pending_vault_config_write && !self.is_form_open() {
-            match self.hosts_state.ssh_config.write() {
-                Ok(()) => flushed_vault_write = true,
-                Err(e) => self.notify_error(crate::messages::vault_config_write_after_sign(&e)),
+            if self.external_config_changed() {
+                self.notify_error(
+                    crate::messages::vault_config_skipped_external_change().to_string(),
+                );
+                log::warn!(
+                    "[config] reload_hosts: skipping deferred vault write — external config changed"
+                );
+            } else {
+                match self.hosts_state.ssh_config.write() {
+                    Ok(()) => flushed_vault_write = true,
+                    Err(e) => self.notify_error(crate::messages::vault_config_write_after_sign(&e)),
+                }
             }
         }
-        // Always clear the flag: either we flushed, or the form-submit path
-        // has already written the full config.
+        // Always clear the flag: either we flushed, we surfaced a conflict, or
+        // the form-submit path has already written the full config.
         self.pending_vault_config_write = false;
         log::debug!(
             "[config] reload_hosts: pending_vault_write={had_pending_vault_write} flushed={flushed_vault_write}"

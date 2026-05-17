@@ -478,7 +478,7 @@ impl SshConfigFile {
         for e in elements {
             match e {
                 ConfigElement::HostBlock(block) => {
-                    if block.host_pattern.split_whitespace().any(|p| p == alias) {
+                    if pattern_contains_token(&block.host_pattern, alias) {
                         return true;
                     }
                 }
@@ -561,8 +561,7 @@ impl SshConfigFile {
         }
         self.elements.iter_mut().find_map(|el| match el {
             ConfigElement::HostBlock(b)
-                if b.host_pattern == alias
-                    || b.host_pattern.split_whitespace().any(|t| t == alias) =>
+                if b.host_pattern == alias || pattern_contains_token(&b.host_pattern, alias) =>
             {
                 Some(b)
             }
@@ -587,7 +586,7 @@ impl SshConfigFile {
         for e in &self.elements {
             match e {
                 ConfigElement::HostBlock(block) => {
-                    if block.host_pattern.split_whitespace().any(|p| p == alias) {
+                    if pattern_contains_token(&block.host_pattern, alias) {
                         return false;
                     }
                 }
@@ -733,7 +732,7 @@ impl SshConfigFile {
                     .join(" ")
             };
             block.host_pattern = new_pattern.clone();
-            block.raw_host_line = format!("Host {}", new_pattern);
+            block.raw_host_line = rebuild_host_line(&block.raw_host_line, &new_pattern);
         }
 
         // Merge known directives (update existing, add missing, remove empty)
@@ -858,15 +857,28 @@ impl SshConfigFile {
 
     /// Set provider on a host block by alias using a full ProviderConfigId.
     /// Emits a 3-segment marker when the id has a label, 2-segment otherwise.
+    ///
+    /// Refuses pattern aliases and multi-alias blocks: claiming a sibling
+    /// alias as provider-owned cascades into stale-marking and bulk-purge,
+    /// which would silently delete the user's hand-curated entries.
+    #[must_use = "check the return value to detect silently-skipped mutations (renamed, deleted or shared-block hosts)"]
     pub fn set_host_provider_id(
         &mut self,
         alias: &str,
         id: &crate::providers::config::ProviderConfigId,
         server_id: &str,
-    ) {
-        if let Some(block) = self.find_host_block_mut(alias) {
-            block.set_provider_id(id, server_id);
+    ) -> bool {
+        if alias.is_empty() || is_host_pattern(alias) {
+            return false;
         }
+        let Some(block) = self.find_host_block_mut(alias) else {
+            return false;
+        };
+        if is_host_pattern(&block.host_pattern) {
+            return false;
+        }
+        block.set_provider_id(id, server_id);
+        true
     }
 
     /// Rewrite every 2-segment legacy marker for `provider_name` to a
@@ -1010,7 +1022,7 @@ impl SshConfigFile {
     pub fn add_forward(&mut self, alias: &str, directive_key: &str, value: &str) {
         for element in &mut self.elements {
             if let ConfigElement::HostBlock(block) = element {
-                if block.host_pattern.split_whitespace().any(|p| p == alias) {
+                if pattern_contains_token(&block.host_pattern, alias) {
                     let indent = block.detect_indent();
                     let pos = block.content_end();
                     block.directives.insert(
@@ -1035,7 +1047,7 @@ impl SshConfigFile {
     pub fn remove_forward(&mut self, alias: &str, directive_key: &str, value: &str) -> bool {
         for element in &mut self.elements {
             if let ConfigElement::HostBlock(block) = element {
-                if block.host_pattern.split_whitespace().any(|p| p == alias) {
+                if pattern_contains_token(&block.host_pattern, alias) {
                     if let Some(pos) = block.directives.iter().position(|d| {
                         !d.is_non_directive
                             && d.key.eq_ignore_ascii_case(directive_key)
@@ -1056,7 +1068,7 @@ impl SshConfigFile {
     pub fn has_forward(&self, alias: &str, directive_key: &str, value: &str) -> bool {
         for element in &self.elements {
             if let ConfigElement::HostBlock(block) = element {
-                if block.host_pattern.split_whitespace().any(|p| p == alias) {
+                if pattern_contains_token(&block.host_pattern, alias) {
                     return block.directives.iter().any(|d| {
                         !d.is_non_directive
                             && d.key.eq_ignore_ascii_case(directive_key)
@@ -1082,7 +1094,7 @@ impl SshConfigFile {
         for element in elements {
             match element {
                 ConfigElement::HostBlock(block) => {
-                    if block.host_pattern.split_whitespace().any(|p| p == alias) {
+                    if pattern_contains_token(&block.host_pattern, alias) {
                         return block.tunnel_directives();
                     }
                 }
@@ -1128,24 +1140,62 @@ impl SshConfigFile {
     }
 
     /// Set tags on a host block by alias.
-    pub fn set_host_tags(&mut self, alias: &str, tags: &[String]) {
-        if let Some(block) = self.find_host_block_mut(alias) {
-            block.set_tags(tags);
+    ///
+    /// Refuses pattern aliases and multi-alias blocks symmetric with the
+    /// vault/certificate setters: a tag on a shared block silently applies to
+    /// every sibling alias, which is rarely the user's intent.
+    #[must_use = "check the return value to detect silently-skipped mutations (renamed, deleted or shared-block hosts)"]
+    pub fn set_host_tags(&mut self, alias: &str, tags: &[String]) -> bool {
+        if alias.is_empty() || is_host_pattern(alias) {
+            return false;
         }
+        let Some(block) = self.find_host_block_mut(alias) else {
+            return false;
+        };
+        if is_host_pattern(&block.host_pattern) {
+            return false;
+        }
+        block.set_tags(tags);
+        true
     }
 
     /// Set provider-synced tags on a host block by alias.
-    pub fn set_host_provider_tags(&mut self, alias: &str, tags: &[String]) {
-        if let Some(block) = self.find_host_block_mut(alias) {
-            block.set_provider_tags(tags);
+    ///
+    /// Same multi-alias and pattern refusal as the other purple-marker
+    /// setters. Provider tags drive sync decisions, so a wrong-block mutation
+    /// can cascade into delete/stale.
+    #[must_use = "check the return value to detect silently-skipped mutations (renamed, deleted or shared-block hosts)"]
+    pub fn set_host_provider_tags(&mut self, alias: &str, tags: &[String]) -> bool {
+        if alias.is_empty() || is_host_pattern(alias) {
+            return false;
         }
+        let Some(block) = self.find_host_block_mut(alias) else {
+            return false;
+        };
+        if is_host_pattern(&block.host_pattern) {
+            return false;
+        }
+        block.set_provider_tags(tags);
+        true
     }
 
     /// Set askpass source on a host block by alias.
-    pub fn set_host_askpass(&mut self, alias: &str, source: &str) {
-        if let Some(block) = self.find_host_block_mut(alias) {
-            block.set_askpass(source);
+    ///
+    /// Askpass is an authentication credential source; applying it to a
+    /// sibling alias in a shared block would route the wrong credential.
+    #[must_use = "check the return value to detect silently-skipped mutations (renamed, deleted or shared-block hosts)"]
+    pub fn set_host_askpass(&mut self, alias: &str, source: &str) -> bool {
+        if alias.is_empty() || is_host_pattern(alias) {
+            return false;
         }
+        let Some(block) = self.find_host_block_mut(alias) else {
+            return false;
+        };
+        if is_host_pattern(&block.host_pattern) {
+            return false;
+        }
+        block.set_askpass(source);
+        true
     }
 
     /// Set or remove the Vault SSH role comment on a host block by alias.
@@ -1314,24 +1364,61 @@ impl SshConfigFile {
     }
 
     /// Set provider metadata on a host block by alias.
-    pub fn set_host_meta(&mut self, alias: &str, meta: &[(String, String)]) {
-        if let Some(block) = self.find_host_block_mut(alias) {
-            block.set_meta(meta);
+    ///
+    /// Refuses pattern aliases and multi-alias blocks; same rationale as the
+    /// other `# purple:*` setters.
+    #[must_use = "check the return value to detect silently-skipped mutations (renamed, deleted or shared-block hosts)"]
+    pub fn set_host_meta(&mut self, alias: &str, meta: &[(String, String)]) -> bool {
+        if alias.is_empty() || is_host_pattern(alias) {
+            return false;
         }
+        let Some(block) = self.find_host_block_mut(alias) else {
+            return false;
+        };
+        if is_host_pattern(&block.host_pattern) {
+            return false;
+        }
+        block.set_meta(meta);
+        true
     }
 
     /// Mark a host as stale by alias.
-    pub fn set_host_stale(&mut self, alias: &str, timestamp: u64) {
-        if let Some(block) = self.find_host_block_mut(alias) {
-            block.set_stale(timestamp);
+    ///
+    /// Stale markers drive the `X` purge flow which deletes the full block,
+    /// so a wrong-block mutation here cascades into data loss for a sibling
+    /// alias the user added by hand. Refuse pattern and multi-alias blocks.
+    #[must_use = "check the return value to detect silently-skipped mutations (renamed, deleted or shared-block hosts)"]
+    pub fn set_host_stale(&mut self, alias: &str, timestamp: u64) -> bool {
+        if alias.is_empty() || is_host_pattern(alias) {
+            return false;
         }
+        let Some(block) = self.find_host_block_mut(alias) else {
+            return false;
+        };
+        if is_host_pattern(&block.host_pattern) {
+            return false;
+        }
+        block.set_stale(timestamp);
+        true
     }
 
     /// Clear stale marking from a host by alias.
-    pub fn clear_host_stale(&mut self, alias: &str) {
-        if let Some(block) = self.find_host_block_mut(alias) {
-            block.clear_stale();
+    ///
+    /// Symmetric guard with `set_host_stale`. Clearing on a shared block is
+    /// benign but the asymmetry would be confusing; reject for consistency.
+    #[must_use = "check the return value to detect silently-skipped mutations (renamed, deleted or shared-block hosts)"]
+    pub fn clear_host_stale(&mut self, alias: &str) -> bool {
+        if alias.is_empty() || is_host_pattern(alias) {
+            return false;
         }
+        let Some(block) = self.find_host_block_mut(alias) else {
+            return false;
+        };
+        if is_host_pattern(&block.host_pattern) {
+            return false;
+        }
+        block.clear_stale();
+        true
     }
 
     /// Collect all stale hosts with their timestamps.
@@ -1379,8 +1466,7 @@ impl SshConfigFile {
         let provider_name = self.elements.iter().find_map(|e| match e {
             ConfigElement::HostBlock(b)
                 if (has_full_match && b.host_pattern == alias)
-                    || (!has_full_match
-                        && b.host_pattern.split_whitespace().any(|t| t == alias)) =>
+                    || (!has_full_match && pattern_contains_token(&b.host_pattern, alias)) =>
             {
                 b.provider().map(|(name, _)| name)
             }
@@ -1388,41 +1474,91 @@ impl SshConfigFile {
         });
 
         if has_full_match {
+            // Harvest trailing comments (column-0 `#` lines or section
+            // headers) from each block we're about to delete, so they
+            // survive the delete and re-attach to whatever follows.
+            // Skip `# purple:*` metadata — that's bookkeeping owned by the
+            // block being removed.
+            let mut salvaged_comments: Vec<String> = Vec::new();
+            for el in &mut self.elements {
+                if let ConfigElement::HostBlock(block) = el {
+                    if block.host_pattern == alias {
+                        let drain_from = {
+                            let mut idx = block.directives.len();
+                            while idx > 0 {
+                                let d = &block.directives[idx - 1];
+                                let is_user_comment = d.is_non_directive
+                                    && (d.raw_line.trim().is_empty()
+                                        || (d.raw_line.trim().starts_with('#')
+                                            && !d.raw_line.trim().starts_with("# purple:")));
+                                if !is_user_comment {
+                                    break;
+                                }
+                                idx -= 1;
+                            }
+                            idx
+                        };
+                        for d in block.directives.drain(drain_from..) {
+                            if !d.raw_line.trim().is_empty() {
+                                salvaged_comments.push(d.raw_line);
+                            }
+                        }
+                    }
+                }
+            }
             // Remove every block whose full host_pattern equals the input
             // (duplicate-block invariant preserved, matches pre-refactor).
             self.elements.retain(|e| match e {
                 ConfigElement::HostBlock(block) => block.host_pattern != alias,
                 _ => true,
             });
-        } else {
-            // Token-aware: strip the alias from multi-alias blocks first,
-            // then drop single-alias blocks whose sole token equals alias.
-            for el in &mut self.elements {
-                if let ConfigElement::HostBlock(block) = el {
-                    let tokens: Vec<&str> = block.host_pattern.split_whitespace().collect();
-                    if tokens.len() > 1 && tokens.contains(&alias) {
-                        let new_pattern = tokens
-                            .iter()
-                            .filter(|t| **t != alias)
-                            .copied()
-                            .collect::<Vec<_>>()
-                            .join(" ");
-                        block.host_pattern = new_pattern.clone();
-                        block.raw_host_line = format!("Host {}", new_pattern);
-                    }
+            // Re-emit salvaged comments as GlobalLines just before the next
+            // remaining HostBlock, so a section-header lands above what
+            // follows rather than vanishing with the preceding host.
+            if !salvaged_comments.is_empty() {
+                let next_host = self
+                    .elements
+                    .iter()
+                    .position(|e| matches!(e, ConfigElement::HostBlock(_)));
+                let insert_pos = next_host.unwrap_or(self.elements.len());
+                for (offset, raw) in salvaged_comments.into_iter().enumerate() {
+                    self.elements
+                        .insert(insert_pos + offset, ConfigElement::GlobalLine(raw));
                 }
             }
-            self.elements.retain(|e| match e {
-                ConfigElement::HostBlock(block) => {
-                    let mut tokens = block.host_pattern.split_whitespace();
-                    !matches!(
-                        (tokens.next(), tokens.next()),
-                        (Some(first), None) if first == alias
-                    )
-                }
-                _ => true,
-            });
         }
+        // Always run the token-strip pass too. A config can contain BOTH a
+        // full-pattern block (`Host web-01`) AND a sibling block that carries
+        // the same alias as one token of a multi-alias pattern (`Host web-01
+        // staging`). Without this second pass, `delete_host("web-01")` would
+        // remove the first block, leave the second untouched, and `ssh web-01`
+        // would silently re-route to staging's HostName. The strip is a no-op
+        // when no token-only sibling exists.
+        for el in &mut self.elements {
+            if let ConfigElement::HostBlock(block) = el {
+                let tokens: Vec<&str> = block.host_pattern.split_whitespace().collect();
+                if tokens.len() > 1 && tokens.contains(&alias) {
+                    let new_pattern = tokens
+                        .iter()
+                        .filter(|t| **t != alias)
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    block.host_pattern = new_pattern.clone();
+                    block.raw_host_line = rebuild_host_line(&block.raw_host_line, &new_pattern);
+                }
+            }
+        }
+        self.elements.retain(|e| match e {
+            ConfigElement::HostBlock(block) => {
+                let mut tokens = block.host_pattern.split_whitespace();
+                !matches!(
+                    (tokens.next(), tokens.next()),
+                    (Some(first), None) if first == alias
+                )
+            }
+            _ => true,
+        });
 
         if let Some(name) = provider_name {
             self.remove_orphaned_group_header(&name);
@@ -1463,9 +1599,7 @@ impl SshConfigFile {
             p
         } else {
             let token_pos = self.elements.iter().position(|e| match e {
-                ConfigElement::HostBlock(b) => {
-                    b.host_pattern.split_whitespace().any(|t| t == alias)
-                }
+                ConfigElement::HostBlock(b) => pattern_contains_token(&b.host_pattern, alias),
                 _ => false,
             })?;
             if let ConfigElement::HostBlock(b) = &self.elements[token_pos] {
@@ -1614,6 +1748,87 @@ impl SshConfigFile {
             directives,
         }
     }
+}
+
+/// Check whether `host_pattern` contains `alias` as one of its
+/// whitespace-separated tokens, with quote-stripping. OpenSSH accepts
+/// `Host "alpha"` as `Host alpha`; without quote-stripping the stored pattern
+/// `"alpha"` (with literal quote characters) would never match the typed
+/// alias `alpha`, leaving the block unreachable to the mutation API.
+pub(super) fn pattern_contains_token(host_pattern: &str, alias: &str) -> bool {
+    host_pattern.split_whitespace().any(|t| {
+        let unquoted = if t.len() >= 2 && t.starts_with('"') && t.ends_with('"') {
+            &t[1..t.len() - 1]
+        } else {
+            t
+        };
+        unquoted == alias
+    })
+}
+
+/// Rebuild a `Host` line with a new pattern, preserving the original line's
+/// keyword form (`Host` vs `HOST`, with or without `=`), separator (space vs
+/// tab) and trailing inline comment. Used by delete-token and rename paths
+/// so that an unrelated edit on a multi-alias block never silently drops the
+/// inline comment or tab style the user typed.
+///
+/// Falls back to `format!("Host {}", new_pattern)` when the original line
+/// is too short or malformed to deconstruct.
+pub(super) fn rebuild_host_line(original: &str, new_pattern: &str) -> String {
+    // Find the position of the inline comment (if any). Inline comments on
+    // SSH config lines start with a `#` preceded by whitespace, OUTSIDE any
+    // quoted string. This mirrors `strip_inline_comment` in parser.rs.
+    let (body, suffix) = {
+        let bytes = original.as_bytes();
+        let mut in_quote = false;
+        let mut comment_start: Option<usize> = None;
+        for i in 0..bytes.len() {
+            if bytes[i] == b'"' {
+                in_quote = !in_quote;
+            } else if !in_quote
+                && bytes[i] == b'#'
+                && i > 0
+                && (bytes[i - 1] == b' ' || bytes[i - 1] == b'\t')
+            {
+                comment_start = Some(i - 1); // include the leading whitespace
+                break;
+            }
+        }
+        match comment_start {
+            Some(idx) => (
+                original[..idx].trim_end_matches([' ', '\t']),
+                &original[idx..],
+            ),
+            None => (original.trim_end_matches([' ', '\t']), ""),
+        }
+    };
+
+    // Split body into keyword + separator + (existing pattern, which we drop).
+    // Accept tab or space and optional `=`, matching parse_host_line.
+    let bytes = body.as_bytes();
+    if bytes.len() < 5 || !bytes[..4].eq_ignore_ascii_case(b"host") {
+        return format!("Host {}", new_pattern);
+    }
+    let sep = bytes[4];
+    if !sep.is_ascii_whitespace() && sep != b'=' {
+        return format!("Host {}", new_pattern);
+    }
+
+    // Preserve the original keyword casing (`Host` vs `HOST` vs `host`).
+    let keyword = &body[..4];
+
+    // Capture the original separator span between keyword and pattern so a
+    // tab-separated `Host\tweb-01` stays tab-separated and `Host=foo` stays
+    // equals-separated.
+    let after_keyword = &body[4..];
+    let pattern_start = after_keyword
+        .char_indices()
+        .find(|(_, c)| !c.is_whitespace() && *c != '=')
+        .map(|(i, _)| i)
+        .unwrap_or(after_keyword.len());
+    let separator = &after_keyword[..pattern_start];
+
+    format!("{}{}{}{}", keyword, separator, new_pattern, suffix)
 }
 
 #[cfg(test)]

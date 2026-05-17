@@ -14,7 +14,7 @@ fn parse_str(content: &str) -> SshConfigFile {
     SshConfigFile {
         elements: SshConfigFile::parse_content(content),
         path: PathBuf::from("/tmp/test_config"),
-        crlf: content.contains("\r\n"),
+        crlf: purple_ssh::ssh_config::parser::detect_crlf_majority(content),
         bom: false,
     }
 }

@@ -86,11 +86,48 @@ impl Drop for FileLock {
 /// Atomic write: write content to a PID-suffixed temp file with chmod 600, then rename.
 /// Uses O_EXCL (create_new) to prevent symlink attacks on the temp file path.
 /// Cleans up the temp file on failure.
+///
+/// When the target file already exists, its mode is preserved across the
+/// rename — clamped to a minimum of 0o600 so a write never widens the
+/// permission set of an SSH config file. A target with mode 0o644 stays
+/// 0o644; a target with mode 0o400 is tightened from 0o600 (the temp file's
+/// initial mode) up to 0o600 — i.e. the more restrictive of the two wins
+/// only when it's still at least 0o600.
+///
+/// Logs a warning when the target is a hard link with more than one name:
+/// `rename(2)` substitutes the inode atomically, so any sibling hard link
+/// silently keeps the OLD content. Common dotfiles managers (chezmoi, stow)
+/// use symlinks rather than hard links so this is rare, but worth surfacing.
 pub fn atomic_write(path: &Path, content: &[u8]) -> io::Result<()> {
     debug!("Atomic write: {}", path.display());
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
+    }
+
+    // Capture the target's existing mode (if it exists) so the rename does
+    // not silently flip e.g. 0o644 to 0o600. `symlink_metadata` here would
+    // miss the case where the target is a symlink we just resolved; use
+    // `metadata` which follows.
+    #[cfg(unix)]
+    let target_mode: Option<u32> = {
+        use std::os::unix::fs::MetadataExt;
+        fs::metadata(path).ok().map(|m| m.mode() & 0o777)
+    };
+
+    // Detect hard-linked targets and emit a one-time warning so a user with
+    // a dotfiles repo hard-linked into ~/.ssh sees why their other name
+    // diverges after a save.
+    #[cfg(unix)]
+    if let Ok(meta) = fs::symlink_metadata(path) {
+        use std::os::unix::fs::MetadataExt;
+        if meta.nlink() > 1 {
+            log::warn!(
+                "[purple] {} has {} hard links; atomic write will keep this name's content but leave siblings pointing at the previous inode",
+                path.display(),
+                meta.nlink()
+            );
+        }
     }
 
     let mut tmp_name = path.file_name().unwrap_or_default().to_os_string();
@@ -137,6 +174,22 @@ pub fn atomic_write(path: &Path, content: &[u8]) -> io::Result<()> {
             drop(file);
             let _ = fs::remove_file(&tmp_path);
             return Err(e);
+        }
+        // Preserve the target's mode if it existed. Clamp to a minimum of
+        // 0o600 so an SSH config file is never silently widened by this
+        // write; 0o400 or 0o600 stays as-is, 0o644 stays 0o644, anything
+        // wider keeps its original perms. Best-effort: a chmod failure
+        // shouldn't abort the write (the temp file is already at 0o600).
+        if let Some(mode) = target_mode {
+            use std::os::unix::fs::PermissionsExt;
+            let preserved = if mode < 0o600 { 0o600 } else { mode };
+            if let Err(e) = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(preserved)) {
+                debug!(
+                    "[purple] could not preserve target mode {:o} on {}: {e}",
+                    preserved,
+                    tmp_path.display()
+                );
+            }
         }
     }
 

@@ -103,7 +103,7 @@ fn roundtrip(content: &str) -> String {
     let config = SshConfigFile {
         elements,
         path: PathBuf::from("/tmp/test"),
-        crlf: content.contains("\r\n"),
+        crlf: purple_ssh::ssh_config::parser::detect_crlf_majority(content),
         bom: content.starts_with('\u{FEFF}'),
     };
     config.serialize()

@@ -556,28 +556,42 @@ impl HostBlock {
     }
 
     /// Extract a convenience HostEntry view from this block.
+    ///
+    /// Matches OpenSSH `ssh_config(5)`: "Unless noted otherwise, for each
+    /// parameter, the first obtained value will be used." Duplicate
+    /// HostName/User/Port/ProxyJump entries keep the FIRST value seen.
     pub fn to_host_entry(&self) -> HostEntry {
         let mut entry = HostEntry {
             alias: self.host_pattern.clone(),
             port: 22,
             ..Default::default()
         };
+        let mut port_seen = false;
         for d in &self.directives {
             if d.is_non_directive {
                 continue;
             }
             if d.key.eq_ignore_ascii_case("hostname") {
-                entry.hostname = d.value.clone();
+                if entry.hostname.is_empty() {
+                    entry.hostname = d.value.clone();
+                }
             } else if d.key.eq_ignore_ascii_case("user") {
-                entry.user = d.value.clone();
+                if entry.user.is_empty() {
+                    entry.user = d.value.clone();
+                }
             } else if d.key.eq_ignore_ascii_case("port") {
-                entry.port = d.value.parse().unwrap_or(22);
+                if !port_seen {
+                    entry.port = d.value.parse().unwrap_or(22);
+                    port_seen = true;
+                }
             } else if d.key.eq_ignore_ascii_case("identityfile") {
                 if entry.identity_file.is_empty() {
                     entry.identity_file = d.value.clone();
                 }
             } else if d.key.eq_ignore_ascii_case("proxyjump") {
-                entry.proxy_jump = d.value.clone();
+                if entry.proxy_jump.is_empty() {
+                    entry.proxy_jump = d.value.clone();
+                }
             } else if d.key.eq_ignore_ascii_case("certificatefile")
                 && entry.certificate_file.is_empty()
             {
@@ -614,18 +628,22 @@ impl HostBlock {
             source_file: None,
             directives: Vec::new(),
         };
+        let mut port_seen = false;
         for d in &self.directives {
             if d.is_non_directive {
                 continue;
             }
             match d.key.to_ascii_lowercase().as_str() {
-                "hostname" => entry.hostname = d.value.clone(),
-                "user" => entry.user = d.value.clone(),
-                "port" => entry.port = d.value.parse().unwrap_or(22),
+                "hostname" if entry.hostname.is_empty() => entry.hostname = d.value.clone(),
+                "user" if entry.user.is_empty() => entry.user = d.value.clone(),
+                "port" if !port_seen => {
+                    entry.port = d.value.parse().unwrap_or(22);
+                    port_seen = true;
+                }
                 "identityfile" if entry.identity_file.is_empty() => {
                     entry.identity_file = d.value.clone();
                 }
-                "proxyjump" => entry.proxy_jump = d.value.clone(),
+                "proxyjump" if entry.proxy_jump.is_empty() => entry.proxy_jump = d.value.clone(),
                 _ => {}
             }
             entry.directives.push((d.key.clone(), d.value.clone()));

@@ -1150,7 +1150,7 @@ fn test_sync_preserves_user_tags() {
     assert_eq!(config.host_entries()[0].provider_tags, vec!["nyc1"]);
 
     // User manually adds a tag via the TUI (including duplicate "nyc1")
-    config.set_host_tags("do-web-1", &["nyc1".to_string(), "prod".to_string()]);
+    let _ = config.set_host_tags("do-web-1", &["nyc1".to_string(), "prod".to_string()]);
     assert_eq!(config.host_entries()[0].tags, vec!["nyc1", "prod"]);
 
     // Second sync: provider tags unchanged but overlap detected, "nyc1" migrated out
@@ -1192,7 +1192,7 @@ fn test_sync_merges_new_provider_tag_with_user_tags() {
     );
 
     // User manually adds a tag
-    config.set_host_tags("do-web-1", &["nyc1".to_string(), "critical".to_string()]);
+    let _ = config.set_host_tags("do-web-1", &["nyc1".to_string(), "critical".to_string()]);
 
     // Second sync: provider adds a new tag — user tag must be preserved
     let remote = vec![ProviderHost::new(
@@ -1244,7 +1244,7 @@ fn test_sync_migration_cleans_overlapping_user_tags() {
     );
 
     // User manually adds a tag
-    config.set_host_tags("do-web-1", &["nyc1".to_string(), "prod".to_string()]);
+    let _ = config.set_host_tags("do-web-1", &["nyc1".to_string(), "prod".to_string()]);
     assert_eq!(config.host_entries()[0].tags, vec!["nyc1", "prod"]);
 
     // Provider_tags match remote but user tags overlap — migration cleanup runs
@@ -1328,7 +1328,7 @@ fn test_sync_provider_tags_cleared_user_tags_survive() {
     );
 
     // User adds their own tag
-    config.set_host_tags("do-web-1", &["my-custom".to_string()]);
+    let _ = config.set_host_tags("do-web-1", &["my-custom".to_string()]);
 
     // Provider removes all tags
     let remote = vec![ProviderHost::new(
@@ -2077,7 +2077,7 @@ fn test_sync_tag_merge_preserves_local_tags() {
     );
 
     // Manually add a local tag
-    config.set_host_tags("do-web", &["prod".to_string(), "my-custom".to_string()]);
+    let _ = config.set_host_tags("do-web", &["prod".to_string(), "my-custom".to_string()]);
 
     // Sync again: "prod" overlap cleaned from user tags, "my-custom" preserved
     let result = sync_provider(
@@ -2117,7 +2117,7 @@ fn test_sync_provider_tags_replaces_with_migration() {
     );
 
     // Add local-only tag
-    config.set_host_tags("do-web", &["prod".to_string(), "my-custom".to_string()]);
+    let _ = config.set_host_tags("do-web", &["prod".to_string(), "my-custom".to_string()]);
 
     // Sync: provider_tags replaced, user tags migrated
     let remote2 = vec![ProviderHost::new(
@@ -3149,7 +3149,7 @@ fn test_sync_provider_tags_with_rename() {
         false,
         false,
     );
-    config.set_host_tags(
+    let _ = config.set_host_tags(
         "do-old-name",
         &["staging".to_string(), "custom".to_string()],
     );
@@ -3593,7 +3593,7 @@ fn test_set_host_tags_empty_clears_tags() {
         bom: false,
     };
 
-    config.set_host_tags("do-web", &[]);
+    let _ = config.set_host_tags("do-web", &[]);
     let entries = config.host_entries();
     assert!(entries[0].tags.is_empty());
 }
@@ -3608,7 +3608,7 @@ fn test_set_host_provider_updates_existing() {
         bom: false,
     };
 
-    config.set_host_provider_id(
+    let _ = config.set_host_provider_id(
         "do-web",
         &crate::providers::config::ProviderConfigId::bare("digitalocean"),
         "new-id",
@@ -4545,7 +4545,7 @@ fn test_sync_duplicate_user_provider_tag() {
     assert_eq!(config.host_entries()[0].provider_tags, vec!["prod"]);
 
     // User manually adds "prod" to user tags (simulating TUI tag edit)
-    config.set_host_tags("do-web-1", &["prod".to_string(), "custom".to_string()]);
+    let _ = config.set_host_tags("do-web-1", &["prod".to_string(), "custom".to_string()]);
     assert_eq!(config.host_entries()[0].tags, vec!["prod", "custom"]);
 
     // Second sync: same provider tags (unchanged)
@@ -4590,7 +4590,7 @@ Host do-web-1
     };
 
     // Clear provider tags via the model
-    config.set_host_provider_tags("do-web-1", &[]);
+    let _ = config.set_host_provider_tags("do-web-1", &[]);
 
     let serialized = config.serialize();
     assert!(
@@ -4625,7 +4625,7 @@ Host do-web-1
     };
 
     // Update provider marker (e.g. server_id changed)
-    config.set_host_provider_id(
+    let _ = config.set_host_provider_id(
         "do-web-1",
         &crate::providers::config::ProviderConfigId::bare("digitalocean"),
         "456",

@@ -127,7 +127,7 @@ pub fn sync_provider(
                 if let Some(entry) = entries_map.get(alias.as_str()) {
                     if entry.stale.is_some() {
                         if !dry_run {
-                            config.clear_host_stale(alias);
+                            let _ = config.clear_host_stale(alias);
                         }
                         result.updated += 1;
                         continue;
@@ -150,7 +150,7 @@ pub fn sync_provider(
                 // Host reappeared: clear stale marking
                 let was_stale = entry.stale.is_some();
                 if was_stale && !dry_run {
-                    config.clear_host_stale(existing_alias);
+                    let _ = config.clear_host_stale(existing_alias);
                 }
 
                 // Check if alias prefix changed (e.g. "do" → "ocean")
@@ -249,7 +249,7 @@ pub fn sync_provider(
                                 existing_alias
                             };
                             if tags_changed || first_migration {
-                                config.set_host_provider_tags(tags_alias, &trimmed_remote);
+                                let _ = config.set_host_provider_tags(tags_alias, &trimmed_remote);
                             }
                             // Migration cleanup
                             if first_migration {
@@ -267,7 +267,7 @@ pub fn sync_provider(
                                     })
                                     .cloned()
                                     .collect();
-                                config.set_host_tags(tags_alias, &user_only);
+                                let _ = config.set_host_tags(tags_alias, &user_only);
                             } else if tags_changed || user_tags_overlap {
                                 // Ongoing: remove user tags that overlap with provider tags
                                 let cleaned: Vec<String> = entry
@@ -281,14 +281,14 @@ pub fn sync_provider(
                                     .cloned()
                                     .collect();
                                 if cleaned.len() != entry.tags.len() {
-                                    config.set_host_tags(tags_alias, &cleaned);
+                                    let _ = config.set_host_tags(tags_alias, &cleaned);
                                 }
                             }
                             // Update provider marker with new alias.
                             // Use the section's full id so labeled configs
                             // emit 3-segment markers.
                             if alias_changed {
-                                config.set_host_provider_id(
+                                let _ = config.set_host_provider_id(
                                     &new_alias,
                                     &section.id,
                                     &remote.server_id,
@@ -299,7 +299,7 @@ pub fn sync_provider(
                             }
                             // Update metadata
                             if meta_changed {
-                                config.set_host_meta(tags_alias, &remote.metadata);
+                                let _ = config.set_host_meta(tags_alias, &remote.metadata);
                             }
                             result.updated += 1;
                         } else {
@@ -385,12 +385,12 @@ pub fn sync_provider(
                     config.elements.push(ConfigElement::HostBlock(block));
                 }
 
-                config.set_host_provider_id(&alias, &section.id, &remote.server_id);
+                let _ = config.set_host_provider_id(&alias, &section.id, &remote.server_id);
                 if !remote.tags.is_empty() {
-                    config.set_host_provider_tags(&alias, &remote.tags);
+                    let _ = config.set_host_provider_tags(&alias, &remote.tags);
                 }
                 if !remote.metadata.is_empty() {
-                    config.set_host_meta(&alias, &remote.metadata);
+                    let _ = config.set_host_meta(&alias, &remote.metadata);
                 }
             }
 
@@ -460,7 +460,7 @@ pub fn sync_provider(
                     .get(alias.as_str())
                     .is_none_or(|e| e.stale.is_none())
                 {
-                    config.set_host_stale(alias, now);
+                    let _ = config.set_host_stale(alias, now);
                 }
             }
         }

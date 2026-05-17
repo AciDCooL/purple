@@ -2555,7 +2555,8 @@ fn test_add_host_config_mutation_with_askpass() {
         ..Default::default()
     };
     app.hosts_state.ssh_config.add_host(&entry);
-    app.hosts_state
+    let _ = app
+        .hosts_state
         .ssh_config
         .set_host_askpass("newhost", "keychain");
     let serialized = app.hosts_state.ssh_config.serialize();
@@ -2575,7 +2576,8 @@ fn test_add_host_config_mutation_with_vault() {
         ..Default::default()
     };
     app.hosts_state.ssh_config.add_host(&entry);
-    app.hosts_state
+    let _ = app
+        .hosts_state
         .ssh_config
         .set_host_askpass("vaulthost", "vault:secret/ssh#pass");
     let serialized = app.hosts_state.ssh_config.serialize();
@@ -2753,7 +2755,8 @@ fn test_add_host_from_form_sets_vault_ssh_and_certificate_file() {
 #[test]
 fn test_config_set_host_askpass_adds() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n");
-    app.hosts_state
+    let _ = app
+        .hosts_state
         .ssh_config
         .set_host_askpass("myserver", "bw:my-item");
     let serialized = app.hosts_state.ssh_config.serialize();
@@ -2765,7 +2768,8 @@ fn test_config_set_host_askpass_adds() {
 #[test]
 fn test_config_set_host_askpass_changes() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
-    app.hosts_state
+    let _ = app
+        .hosts_state
         .ssh_config
         .set_host_askpass("myserver", "pass:ssh/myserver");
     let serialized = app.hosts_state.ssh_config.serialize();
@@ -2776,7 +2780,7 @@ fn test_config_set_host_askpass_changes() {
 #[test]
 fn test_config_set_host_askpass_removes() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
-    app.hosts_state.ssh_config.set_host_askpass("myserver", "");
+    let _ = app.hosts_state.ssh_config.set_host_askpass("myserver", "");
     let serialized = app.hosts_state.ssh_config.serialize();
     assert!(!serialized.contains("purple:askpass"));
     let entries = app.hosts_state.ssh_config.host_entries();
@@ -2796,7 +2800,8 @@ fn test_edit_host_from_form_sets_askpass_in_config() {
         ..Default::default()
     };
     app.hosts_state.ssh_config.update_host("myserver", &entry);
-    app.hosts_state
+    let _ = app
+        .hosts_state
         .ssh_config
         .set_host_askpass("myserver", entry.askpass.as_deref().unwrap_or(""));
     let serialized = app.hosts_state.ssh_config.serialize();
@@ -3063,7 +3068,8 @@ fn test_edit_askpass_rollback_restores_old_source() {
     assert_eq!(old_entry.askpass, Some("keychain".to_string()));
 
     // Apply new askpass
-    app.hosts_state
+    let _ = app
+        .hosts_state
         .ssh_config
         .set_host_askpass("myserver", "vault:secret/ssh#pw");
     assert_eq!(
@@ -3072,7 +3078,8 @@ fn test_edit_askpass_rollback_restores_old_source() {
     );
 
     // Simulate rollback (write failed)
-    app.hosts_state
+    let _ = app
+        .hosts_state
         .ssh_config
         .set_host_askpass(&old_entry.alias, old_entry.askpass.as_deref().unwrap_or(""));
     assert_eq!(
@@ -3158,7 +3165,8 @@ fn test_edit_askpass_rollback_restores_none() {
     assert_eq!(old_entry.askpass, None);
 
     // Apply new askpass
-    app.hosts_state
+    let _ = app
+        .hosts_state
         .ssh_config
         .set_host_askpass("myserver", "bw:my-item");
     assert_eq!(
@@ -3167,7 +3175,8 @@ fn test_edit_askpass_rollback_restores_none() {
     );
 
     // Simulate rollback (write failed)
-    app.hosts_state
+    let _ = app
+        .hosts_state
         .ssh_config
         .set_host_askpass(&old_entry.alias, old_entry.askpass.as_deref().unwrap_or(""));
     assert_eq!(app.hosts_state.ssh_config.host_entries()[0].askpass, None);
@@ -8070,7 +8079,7 @@ fn bulk_double_undo_falls_through_to_delete_stack() {
     // First undo: restores tags. Simulate the undo handler inline.
     let snapshot = app.forms.bulk_tag_undo.take().unwrap();
     for (alias, tags) in &snapshot {
-        app.hosts_state.ssh_config.set_host_tags(alias, tags);
+        let _ = app.hosts_state.ssh_config.set_host_tags(alias, tags);
     }
     let _ = app.hosts_state.ssh_config.write(); // may fail in test env, that's ok
     // Second undo attempt: no bulk_tag_undo, no undo_stack → nothing.

@@ -364,9 +364,9 @@ pub(super) fn submit_form(app: &mut App) {
     // every alias-keyed cache and persistent state in one step, so
     // submit_form no longer needs a separate migration call here.
     if let Screen::EditHost { ref alias } = app.screen {
-        app.hosts_state.ssh_config.clear_host_stale(alias);
+        let _ = app.hosts_state.ssh_config.clear_host_stale(alias);
         if *alias != target_alias {
-            app.hosts_state.ssh_config.clear_host_stale(&target_alias);
+            let _ = app.hosts_state.ssh_config.clear_host_stale(&target_alias);
         }
     }
     app.clear_form_mtime();

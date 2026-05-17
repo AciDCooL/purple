@@ -25,12 +25,23 @@ impl App {
         let len_before = self.hosts_state.ssh_config.elements.len();
         self.hosts_state.ssh_config.add_host(&entry);
         if !entry.tags.is_empty() {
-            self.hosts_state
+            let tags_wired = self
+                .hosts_state
                 .ssh_config
                 .set_host_tags(&alias, &entry.tags);
+            debug_assert!(
+                tags_wired,
+                "add_host_from_form: alias '{}' missing immediately after add_host (set_host_tags)",
+                alias
+            );
         }
         if let Some(ref source) = entry.askpass {
-            self.hosts_state.ssh_config.set_host_askpass(&alias, source);
+            let askpass_wired = self.hosts_state.ssh_config.set_host_askpass(&alias, source);
+            debug_assert!(
+                askpass_wired,
+                "add_host_from_form: alias '{}' missing immediately after add_host (set_host_askpass)",
+                alias
+            );
         }
         if let Some(ref role) = entry.vault_ssh {
             // `set_host_vault_ssh` is `#[must_use]` since the multi-alias
@@ -146,12 +157,40 @@ impl App {
                 .unwrap_or_default()
         };
         self.hosts_state.ssh_config.update_host(old_alias, &entry);
-        self.hosts_state
-            .ssh_config
-            .set_host_tags(&entry.alias, &entry.tags);
-        self.hosts_state
-            .ssh_config
-            .set_host_askpass(&entry.alias, entry.askpass.as_deref().unwrap_or(""));
+        // Patterns and concrete hosts both flow through here; tags/askpass
+        // setters refuse pattern blocks (per the symmetric multi-alias guard),
+        // so the boolean return is asserted only for non-pattern edits.
+        if !self.forms.host.is_pattern {
+            let tags_wired = self
+                .hosts_state
+                .ssh_config
+                .set_host_tags(&entry.alias, &entry.tags);
+            debug_assert!(
+                tags_wired,
+                "edit_host_from_form: alias '{}' missing immediately after update_host (set_host_tags)",
+                entry.alias
+            );
+            let askpass_wired = self
+                .hosts_state
+                .ssh_config
+                .set_host_askpass(&entry.alias, entry.askpass.as_deref().unwrap_or(""));
+            debug_assert!(
+                askpass_wired,
+                "edit_host_from_form: alias '{}' missing immediately after update_host (set_host_askpass)",
+                entry.alias
+            );
+        } else {
+            // Pattern blocks refuse purple metadata; this is the documented
+            // ExactAliasOnly policy. Drop the result explicitly.
+            let _ = self
+                .hosts_state
+                .ssh_config
+                .set_host_tags(&entry.alias, &entry.tags);
+            let _ = self
+                .hosts_state
+                .ssh_config
+                .set_host_askpass(&entry.alias, entry.askpass.as_deref().unwrap_or(""));
+        }
         // `set_host_vault_ssh` refuses patterns and multi-alias blocks
         // (same invariant as set_host_vault_addr / set_host_certificate_file)
         // so we only call it for concrete host edits. Patterns never carry a
@@ -221,10 +260,12 @@ impl App {
             self.hosts_state
                 .ssh_config
                 .update_host(&entry.alias, &old_entry);
-            self.hosts_state
+            let _ = self
+                .hosts_state
                 .ssh_config
                 .set_host_tags(&old_entry.alias, &old_entry.tags);
-            self.hosts_state
+            let _ = self
+                .hosts_state
                 .ssh_config
                 .set_host_askpass(&old_entry.alias, old_entry.askpass.as_deref().unwrap_or(""));
             if !self.forms.host.is_pattern {
@@ -515,6 +556,24 @@ impl App {
         );
         let total = result.added + result.updated + result.unchanged;
         if result.added > 0 || result.updated > 0 || result.stale > 0 {
+            // External-change guard: provider sync runs in the background
+            // (10-30s of network latency) and can race against a user editing
+            // ~/.ssh/config in another process. If the on-disk file changed
+            // since the in-memory model was loaded, refuse the write so we
+            // don't silently overwrite those edits. Roll back the in-memory
+            // sync mutations and surface the conflict; the user can re-run
+            // sync after reviewing their edits.
+            if self.external_config_changed() {
+                self.hosts_state.ssh_config = config_backup;
+                return (
+                    crate::messages::sync_skipped_external_change().to_string(),
+                    true,
+                    total,
+                    0,
+                    0,
+                    0,
+                );
+            }
             if let Err(e) = self.hosts_state.ssh_config.write() {
                 self.hosts_state.ssh_config = config_backup;
                 return (format!("Sync failed to save: {}", e), true, total, 0, 0, 0);

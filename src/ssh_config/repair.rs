@@ -69,7 +69,42 @@ impl SshConfigFile {
     /// Repair configs where `# purple:group` comments were absorbed into the
     /// preceding host block's directives instead of being stored as
     /// GlobalLines. Returns the number of blocks that were repaired.
+    ///
+    /// Only relocates lines whose suffix matches a known provider's display
+    /// name. A user-authored comment like `# purple:group canary notes` is
+    /// left in place: the suffix `canary notes` is not a provider name, so
+    /// the comment is treated as free-form prose rather than a misparsed
+    /// group header. This protects hand-written comments from being silently
+    /// scrubbed by the next-startup `remove_all_orphaned_group_headers` pass.
     pub fn repair_absorbed_group_comments(&mut self) -> usize {
+        // Build the set of known provider display names once. The list is
+        // closed under purple's supported providers and tiny, so allocation
+        // cost is negligible.
+        let known_providers: std::collections::HashSet<&str> = [
+            "DigitalOcean",
+            "Vultr",
+            "Linode",
+            "Hetzner",
+            "UpCloud",
+            "Proxmox VE",
+            "AWS EC2",
+            "Scaleway",
+            "GCP",
+            "Azure",
+            "Tailscale",
+            "Oracle Cloud",
+        ]
+        .iter()
+        .copied()
+        .collect();
+
+        let is_known_group = |raw: &str| -> bool {
+            raw.trim()
+                .strip_prefix("# purple:group ")
+                .map(|suffix| known_providers.contains(suffix.trim()))
+                .unwrap_or(false)
+        };
+
         let mut repaired = 0;
         let mut idx = 0;
         while idx < self.elements.len() {
@@ -77,7 +112,7 @@ impl SshConfigFile {
                 block
                     .directives
                     .iter()
-                    .any(|d| d.is_non_directive && d.raw_line.trim().starts_with("# purple:group "))
+                    .any(|d| d.is_non_directive && is_known_group(&d.raw_line))
             } else {
                 false
             };
@@ -96,9 +131,7 @@ impl SshConfigFile {
             let group_idx = block
                 .directives
                 .iter()
-                .position(|d| {
-                    d.is_non_directive && d.raw_line.trim().starts_with("# purple:group ")
-                })
+                .position(|d| d.is_non_directive && is_known_group(&d.raw_line))
                 .unwrap();
 
             let mut keep_end = group_idx;
