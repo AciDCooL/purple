@@ -823,7 +823,7 @@ pub fn render_picker_overlay<'a>(
             picker_title_text(title, title_hint, width),
             theme::brand(),
         ))
-        .border_style(theme::accent());
+        .border_style(theme::border_dim());
 
     let list = List::new(items)
         .block(block)
@@ -851,7 +851,7 @@ pub fn render_picker_empty_overlay(frame: &mut Frame, title: &str, message: &str
             picker_title_text(title, None, width),
             theme::brand(),
         ))
-        .border_style(theme::accent());
+        .border_style(theme::border_dim());
     let msg = Paragraph::new(Line::from(Span::styled(
         format!("  {}", message),
         theme::muted(),

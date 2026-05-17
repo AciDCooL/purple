@@ -40,8 +40,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let text = vec![Line::from(""), identity_line, Line::from(""), prompt_line];
 
-    let paragraph = Paragraph::new(text).block(block);
-    frame.render_widget(paragraph, area);
+    design::render_body(frame, area, block, text);
 
     let footer_area = design::render_overlay_footer(frame, area);
     let footer = design::Footer::new()

@@ -1222,14 +1222,40 @@ impl ThemeDef {
             }
         }
         let name = values.get("name")?.to_string();
+        let theme_name = name.clone();
         let fallback = Self::purple();
         let resolve_slot = |key: &str, fb: &ColorSlot| -> ColorSlot {
-            let truecolor = values.get(key).and_then(|v| parse_hex(v)).or(fb.truecolor);
-            let ansi16 = values
-                .get(&format!("{key}_ansi"))
-                .and_then(|v| parse_ansi_name(v))
-                .or_else(|| truecolor.and_then(auto_ansi16))
-                .or(fb.ansi16);
+            let truecolor = match values.get(key) {
+                Some(v) => match parse_hex(v) {
+                    Some(c) => Some(c),
+                    None => {
+                        log::warn!(
+                            "[config] theme '{}' field '{}' has invalid hex value '{}'; falling back",
+                            theme_name,
+                            key,
+                            v
+                        );
+                        fb.truecolor
+                    }
+                },
+                None => fb.truecolor,
+            };
+            let ansi_key = format!("{key}_ansi");
+            let ansi16 = match values.get(&ansi_key) {
+                Some(v) => match parse_ansi_name(v) {
+                    Some(c) => Some(c),
+                    None => {
+                        log::warn!(
+                            "[config] theme '{}' field '{}' has invalid colour name '{}'; falling back",
+                            theme_name,
+                            ansi_key,
+                            v
+                        );
+                        truecolor.and_then(auto_ansi16).or(fb.ansi16)
+                    }
+                },
+                None => truecolor.and_then(auto_ansi16).or(fb.ansi16),
+            };
             ColorSlot {
                 truecolor,
                 ansi16,
@@ -1538,12 +1564,31 @@ pub fn nav_active() -> Style {
     style
 }
 
-/// Structural elements (overlay borders, tags).
-pub fn accent() -> Style {
+/// Structural border style for overlay frames and dividers. Reads the
+/// `border` colour slot, which carries the DIM modifier on most themes so
+/// overlay frames recede behind their content. Use for borders, dividers
+/// and any other "dim chrome" that should not steal attention.
+///
+/// Distinct from `accent()` and `accent_bold()`: those paint with the brand
+/// accent colour (purple by default), while this helper paints the dim
+/// border tone. Earlier releases conflated the two under the `accent` name
+/// and rendered focus cursors invisibly on the default theme; the rename to
+/// `border_dim()` plus a new accent-slot-backed `accent()` fixes that.
+pub fn border_dim() -> Style {
     active_theme().border.to_style(mode())
 }
 
-/// Keybinding keys in footer/help.
+/// Brand-coloured emphasis without BOLD. Reads the `accent` colour slot so
+/// it renders in the active theme's brand colour (purple on the default
+/// theme). Use for in-content cursor indicators, focused tag spans and
+/// any non-bold accent emphasis. Pair with `accent_bold()` when the same
+/// content should also bold (overlay titles, focused selection, reference
+/// keys in help text).
+pub fn accent() -> Style {
+    active_theme().accent.to_style(mode())
+}
+
+/// Keybinding keys in footer/help. Brand accent slot with BOLD.
 pub fn accent_bold() -> Style {
     let mut style = active_theme().accent.to_style(mode());
     style = style.add_modifier(Modifier::BOLD);
@@ -1609,6 +1654,34 @@ pub fn success() -> Style {
 /// NO_COLOR = normal (no modifier), ANSI 16 = Green + DIM, truecolor = muted green + DIM.
 pub fn online_dot() -> Style {
     active_theme().success_dim.to_style(mode())
+}
+
+/// Style for stable healthy attributes that are neither "live now"
+/// (`online_dot`) nor a positive action outcome (`success`). Use for
+/// "passphrase encrypted", "agent loaded", "TTL > threshold" and other
+/// settled-good states that the user does not need to act on.
+///
+/// Currently shares the `success_dim` colour slot with `online_dot()` so
+/// the visual tone is identical; the distinction lives in intent, not in
+/// pixels. Centralising the use through this helper lets a future theme
+/// or NO_COLOR fallback adjust the two tiers independently without a
+/// codebase-wide sweep.
+pub fn healthy() -> Style {
+    active_theme().success_dim.to_style(mode())
+}
+
+/// Style for the active-tunnel indicator on host-list rows. Brand accent
+/// colour without BOLD. Named so the call sites read as intent ("this row
+/// has an active tunnel"), not as pixel choice.
+pub fn tunnel_active() -> Style {
+    active_theme().accent.to_style(mode())
+}
+
+/// Style for user-defined tag spans rendered in the host list and detail
+/// panel. Brand accent colour without BOLD. Named so the call sites read
+/// as intent ("this token is a user tag") rather than as styling choice.
+pub fn tag_user() -> Style {
+    active_theme().accent.to_style(mode())
 }
 
 /// Breathing variant of `online_dot()` for per-host indicators on the host

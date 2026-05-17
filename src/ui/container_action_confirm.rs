@@ -6,7 +6,7 @@
 
 use ratatui::Frame;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Paragraph};
 
 use super::design;
 use super::theme;
@@ -137,7 +137,9 @@ fn render_bulk_dialog(
     for m in members {
         let uptime = m.uptime.clone().unwrap_or_else(|| "-".to_string());
         text.push(Line::from(vec![
-            Span::raw("   \u{25CF} "),
+            Span::raw("   "),
+            Span::raw(design::ICON_ONLINE),
+            Span::raw(" "),
             Span::styled(m.container_name.clone(), theme::bold()),
             Span::raw("   "),
             Span::styled(uptime, theme::muted()),
@@ -149,8 +151,7 @@ fn render_bulk_dialog(
         Span::styled(body.to_string(), theme::muted()),
     ]));
 
-    let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, area);
+    design::render_body_wrapped(frame, area, block, text);
 
     let footer_area = design::render_overlay_footer(frame, area);
     let footer = design::confirm_footer_destructive(verbs.0, verbs.1).to_line();
@@ -233,8 +234,7 @@ fn render_dialog(
         body_line,
     ];
 
-    let paragraph = Paragraph::new(text).block(block).wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, area);
+    design::render_body_wrapped(frame, area, block, text);
 
     // Stakes test: destructive action, action verbs both sides.
     let footer_area = design::render_overlay_footer(frame, area);

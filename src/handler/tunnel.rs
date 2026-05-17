@@ -24,10 +24,13 @@ pub(super) fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
         _ => return,
     };
 
-    // Handle pending tunnel delete confirmation first
+    // Handle pending tunnel delete confirmation first via the central
+    // confirm-key router so the y/n/Esc contract is uniform across all
+    // confirm dialogs. Stray keys (including `_ => {}`) must not silently
+    // cancel destructive operations; route_confirm_key narrows to y/Y/n/N/Esc.
     if app.tunnels.pending_delete.is_some() && key.code != KeyCode::Char('?') {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
                 let Some(sel) = app.tunnels.pending_delete.take() else {
                     return;
                 };
@@ -61,10 +64,10 @@ pub(super) fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
                     }
                 }
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            super::ConfirmAction::No => {
                 app.tunnels.pending_delete = None;
             }
-            _ => {}
+            super::ConfirmAction::Ignored => {}
         }
         return;
     }
@@ -211,20 +214,20 @@ pub(super) fn handle_tunnel_form(app: &mut App, key: KeyEvent) {
         _ => return,
     };
 
-    // Handle discard confirmation dialog
+    // Handle discard confirmation dialog via the shared confirm router.
     if app.forms.pending_discard_confirm {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
                 app.forms.pending_discard_confirm = false;
                 app.clear_form_mtime();
                 app.tunnels.form_baseline = None;
                 let return_to = tunnel_form_return_screen(app, &alias);
                 app.set_screen(return_to);
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            super::ConfirmAction::No => {
                 app.forms.pending_discard_confirm = false;
             }
-            _ => {}
+            super::ConfirmAction::Ignored => {}
         }
         return;
     }
@@ -279,6 +282,9 @@ pub(super) fn handle_tunnel_form(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             submit_tunnel_form(app, &alias, editing);
         }
+        // SPACE GUARD MUST PRECEDE the generic Char(c) arm below so that
+        // Space on a Type field cycles tunnel kind instead of being
+        // captured as a literal space character.
         KeyCode::Char(' ')
             if app.tunnels.form.focused_field == crate::app::TunnelFormField::Type =>
         {

@@ -343,9 +343,15 @@ fn render_empty_state(frame: &mut Frame, hero_area: Rect, hosts_area: Rect) {
         hero_area.height + hosts_area.height,
     );
     let block = design::main_block_line(Line::default());
-    let inner = block.inner(combined);
     frame.render_widget(block, combined);
-    design::render_empty(frame, inner, crate::messages::KEYS_EMPTY_HINT);
+    let hints = [("$", crate::messages::TAB_EMPTY_KEYS_HINT_KEYGEN)];
+    let empty = design::TabEmpty {
+        card_title: "Keys",
+        headline: crate::messages::TAB_EMPTY_KEYS_HEADLINE,
+        explainer: crate::messages::TAB_EMPTY_KEYS_EXPLAINER,
+        hints: &hints,
+    };
+    design::render_tab_empty(frame, combined, &empty);
 }
 
 fn footer_spans(vault_active: bool) -> Vec<Span<'static>> {

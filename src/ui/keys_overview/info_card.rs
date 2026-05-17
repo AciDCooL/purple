@@ -67,12 +67,12 @@ fn render_info_content(
     // ── Security block ────────────────────────────────────────────
     let strength_text = format!("{} / 100", key.strength_score);
     let (passphrase_text, passphrase_style) = if key.encrypted {
-        ("encrypted", theme::online_dot())
+        ("encrypted", theme::healthy())
     } else {
         ("none", theme::error())
     };
     let (agent_text, agent_style) = if key.agent_loaded {
-        ("loaded", theme::online_dot())
+        ("loaded", theme::healthy())
     } else {
         ("not loaded", theme::muted())
     };
@@ -241,7 +241,7 @@ fn kv(label_w: usize, label: &str, value: &str, value_style: Style) -> Line<'sta
 
 pub(super) fn strength_color(score: u8) -> Style {
     if score >= 70 {
-        theme::online_dot()
+        theme::healthy()
     } else if score >= 40 {
         theme::warning()
     } else {
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn strength_color_ramp() {
-        assert_eq!(strength_color(95), theme::online_dot());
+        assert_eq!(strength_color(95), theme::healthy());
         assert_eq!(strength_color(55), theme::warning());
         assert_eq!(strength_color(10), theme::error());
     }

@@ -156,11 +156,11 @@ fn render_host_row(
 ) -> Line<'static> {
     use ratatui::style::Modifier;
     let (glyph, glyph_style) = match &row.status {
-        Some(PingStatus::Reachable { .. }) => ("\u{25CF}", theme::online_dot()),
-        Some(PingStatus::Slow { .. }) => ("\u{25B2}", theme::warning()),
-        Some(PingStatus::Unreachable) => ("\u{2716}", theme::error()),
-        Some(PingStatus::Checking) => ("\u{00B7}", theme::muted()),
-        Some(PingStatus::Skipped) | None => ("\u{00B7}", theme::muted()),
+        Some(PingStatus::Reachable { .. }) => (design::ICON_ONLINE, theme::online_dot()),
+        Some(PingStatus::Slow { .. }) => (design::ICON_SLOW, theme::warning()),
+        Some(PingStatus::Unreachable) => (design::ICON_ERROR, theme::error()),
+        Some(PingStatus::Checking) => (design::ICON_PENDING, theme::muted()),
+        Some(PingStatus::Skipped) | None => (design::ICON_PENDING, theme::muted()),
     };
 
     let alias_style = if never_connected {

@@ -146,13 +146,13 @@ if [ -n "$HITS" ]; then
 fi
 
 # 5. Em-dashes in user-facing message strings.
-# Scope is intentionally narrow: only the literal contents of strings in
-# src/messages.rs and src/messages/cli.rs. Em-dashes in doc comments
-# (`/// foo — bar`) and code comments (`// baz — qux`) are tolerated as
-# legacy; the writing-style rule targets text the user actually sees.
-# We grep for em-dash inside a quoted string, then drop comment lines so
-# a doc comment introducing a function isn't flagged.
-HITS=$(grep -n '"[^"]*—[^"]*"' src/messages.rs src/messages/cli.rs 2>/dev/null \
+# Scope: every Rust file under src/messages/, plus the legacy src/messages.rs.
+# Earlier release scoped this check to two files only; em-dashes silently
+# accumulated in src/messages/footer.rs and src/messages/whats_new*.rs.
+# Em-dashes in doc comments (`/// foo — bar`) and code comments
+# (`// baz — qux`) are tolerated as legacy; the writing-style rule
+# targets text the user actually sees.
+HITS=$(grep -rn '"[^"]*—[^"]*"' src/messages.rs src/messages/ 2>/dev/null \
     | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)
 if [ -n "$HITS" ]; then
     echo "ERROR: em-dash in user-facing message string."

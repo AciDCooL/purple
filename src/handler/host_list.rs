@@ -589,6 +589,9 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
             }
         }
         KeyCode::Char('V') => actions::initiate_bulk_vault_sign(app),
+        // SPACE GUARD MUST PRECEDE the generic Char(c) arm below. Plain
+        // Space and Ctrl+Space both toggle the multi-select set; without
+        // this ordering the char arm would capture Space first.
         KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if app.is_pattern_selected() {
                 return;

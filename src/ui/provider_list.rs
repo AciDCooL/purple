@@ -66,20 +66,28 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         let display = crate::providers::provider_display_name(name);
         // When removing one labeled config of a multi-config provider,
         // surface the label so the user can't mistake it for "remove all".
-        let title = match app
+        let question = match app
             .providers
             .pending_delete_id
             .as_ref()
             .and_then(|id| id.label.as_deref())
         {
-            Some(label) => crate::messages::confirm_remove_labeled_config(display, label),
-            None => crate::messages::confirm_remove_provider(display),
+            Some(label) => {
+                crate::messages::confirm_provider_remove_labeled_question(display, label)
+            }
+            None => crate::messages::confirm_provider_remove_question(display),
         };
-        let mut spans = vec![Span::styled(title, theme::bold())];
-        // Stakes test: removing the provider config is destructive
-        // (synced hosts stay but the integration is gone). Action verbs.
-        spans.extend(design::confirm_footer_destructive("remove", "keep").into_spans());
-        super::render_footer_with_status(frame, footer_area, spans, app);
+        // Destructive confirm: centred popup, action verbs both sides.
+        design::render_destructive_popup(
+            frame,
+            crate::messages::CONFIRM_PROVIDER_REMOVE_TITLE,
+            &question,
+            crate::messages::CONFIRM_PROVIDER_REMOVE_DETAIL,
+            "remove",
+            "keep",
+            app,
+        );
+        super::render_footer_with_status(frame, footer_area, Vec::new(), app);
     } else {
         // Count stale hosts for the currently selected row.
         let selected_row = app
@@ -381,7 +389,14 @@ pub fn render_label_migration(frame: &mut Frame, app: &mut App, provider_name: &
         } else {
             theme::muted()
         };
-        super::render_divider(frame, area, divider_y, label, label_style, theme::accent());
+        super::render_divider(
+            frame,
+            area,
+            divider_y,
+            label,
+            label_style,
+            theme::border_dim(),
+        );
 
         let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
         let content = if value.is_empty() {
@@ -488,7 +503,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
             divider_y,
             &label,
             label_style,
-            theme::accent(),
+            theme::border_dim(),
         );
 
         let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);

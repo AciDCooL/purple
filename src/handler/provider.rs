@@ -104,6 +104,9 @@ pub(super) fn handle_provider_list(
         KeyCode::PageUp => {
             crate::app::page_up(&mut app.ui.provider_list_state, row_count, 10);
         }
+        // SPACE GUARD MUST PRECEDE any generic Char(c) arm in this handler
+        // so Space toggles expand/collapse on a multi-config header instead
+        // of being consumed as a literal space.
         KeyCode::Char(' ') => {
             // Space toggles expand/collapse on a multi-config provider header.
             if let Some(idx) = app.ui.provider_list_state.selected() {
@@ -635,20 +638,20 @@ pub(super) fn handle_provider_form(
     let is_toggle = |f: crate::app::ProviderFormField| f.is_toggle();
     let is_picker = |f: crate::app::ProviderFormField| f.is_picker(&provider_name);
 
-    // Handle discard confirmation dialog
+    // Handle discard confirmation dialog via the shared confirm router.
     if app.forms.pending_discard_confirm {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
                 app.forms.pending_discard_confirm = false;
                 app.clear_form_mtime();
                 app.providers.form_baseline = None;
                 app.set_screen(Screen::Providers);
                 app.flush_pending_vault_write();
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            super::ConfirmAction::No => {
                 app.forms.pending_discard_confirm = false;
             }
-            _ => {}
+            super::ConfirmAction::Ignored => {}
         }
         return;
     }

@@ -28,20 +28,20 @@ pub(super) fn handle_form(app: &mut App, key: KeyEvent) {
         return;
     }
 
-    // Handle discard confirmation dialog
+    // Handle discard confirmation dialog via the shared confirm router.
     if app.forms.pending_discard_confirm {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
                 app.forms.pending_discard_confirm = false;
                 app.clear_form_mtime();
                 app.forms.host_baseline = None;
                 app.set_screen(Screen::HostList);
                 app.flush_pending_vault_write();
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            super::ConfirmAction::No => {
                 app.forms.pending_discard_confirm = false;
             }
-            _ => {}
+            super::ConfirmAction::Ignored => {}
         }
         return;
     }

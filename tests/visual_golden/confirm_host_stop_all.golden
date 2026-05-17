@@ -9,14 +9,14 @@
 │   ● datadog-agent       datadog/agent:7                                                      2d  │
 │   ● nginx       ╭  Stop all containers on host?  ──────────────────────────────╮             2d  │
 │   ● redis       │                                                              │             2d  │
-│  ── aws-batch-us│aws-api-staging  · 2 running                                  │───────────────  │
+│  ── aws-batch-us│  aws-api-staging  · 2 running                                │───────────────  │
 │  ── bastion-ams │                                                              │───────────────  │
-│   ● app-backend │● api   2d                                                    │            12d  │
-│   ○ certbot     │● datadog-agent   2d                                          │              -  │
+│   ● app-backend │   ● api   2d                                                 │            12d  │
+│   ○ certbot     │   ● datadog-agent   2d                                       │              -  │
 │   ● grafana     │                                                              │             5d  │
-│   ● nginx-proxy │Stops every running container on the host one by one. Exited  │            12d  │
-│   ● postgres    │containers are not touched. Restart policies may reschedule   │            12d  │
-│   ● prometheus  │them.                                                         │             5d  │
+│   ● nginx-proxy │  Stops every running container on the host one by one.       │            12d  │
+│   ● postgres    │Exited containers are not touched. Restart policies may       │            12d  │
+│   ● prometheus  │reschedule them.                                              │             5d  │
 │   ● redis       │                                                              │            12d  │
 │  ── db-primary ─╰──────────────────────────────────────────────────────────────╯───────────────  │
 │   ● pg-exporter  y  stop    n/Esc  keep                                                     30d  │
@@ -1086,8 +1086,6 @@
 (16,11) fg=DarkGray bg=Reset mod=BOLD|DIM
 (17,11) fg=DarkGray bg=Reset mod=BOLD|DIM
 (18,11) fg=Red bg=Reset mod=BOLD
-(19,11) fg=Reset bg=Reset mod=BOLD
-(20,11) fg=Reset bg=Reset mod=BOLD
 (21,11) fg=Reset bg=Reset mod=BOLD
 (22,11) fg=Reset bg=Reset mod=BOLD
 (23,11) fg=Reset bg=Reset mod=BOLD
@@ -1101,8 +1099,8 @@
 (31,11) fg=Reset bg=Reset mod=BOLD
 (32,11) fg=Reset bg=Reset mod=BOLD
 (33,11) fg=Reset bg=Reset mod=BOLD
-(36,11) fg=Reset bg=Reset mod=DIM
-(37,11) fg=Reset bg=Reset mod=DIM
+(34,11) fg=Reset bg=Reset mod=BOLD
+(35,11) fg=Reset bg=Reset mod=BOLD
 (38,11) fg=Reset bg=Reset mod=DIM
 (39,11) fg=Reset bg=Reset mod=DIM
 (40,11) fg=Reset bg=Reset mod=DIM
@@ -1112,6 +1110,8 @@
 (44,11) fg=Reset bg=Reset mod=DIM
 (45,11) fg=Reset bg=Reset mod=DIM
 (46,11) fg=Reset bg=Reset mod=DIM
+(47,11) fg=Reset bg=Reset mod=DIM
+(48,11) fg=Reset bg=Reset mod=DIM
 (81,11) fg=Red bg=Reset mod=BOLD
 (82,11) fg=DarkGray bg=Reset mod=DIM
 (83,11) fg=DarkGray bg=Reset mod=DIM
@@ -1188,11 +1188,11 @@
 (16,13) fg=DarkGray bg=Reset mod=BOLD|DIM
 (17,13) fg=DarkGray bg=Reset mod=BOLD|DIM
 (18,13) fg=Red bg=Reset mod=BOLD
-(21,13) fg=Reset bg=Reset mod=BOLD
-(22,13) fg=Reset bg=Reset mod=BOLD
-(23,13) fg=Reset bg=Reset mod=BOLD
-(27,13) fg=Reset bg=Reset mod=DIM
-(28,13) fg=Reset bg=Reset mod=DIM
+(24,13) fg=Reset bg=Reset mod=BOLD
+(25,13) fg=Reset bg=Reset mod=BOLD
+(26,13) fg=Reset bg=Reset mod=BOLD
+(30,13) fg=Reset bg=Reset mod=DIM
+(31,13) fg=Reset bg=Reset mod=DIM
 (81,13) fg=Red bg=Reset mod=BOLD
 (82,13) fg=DarkGray bg=Reset mod=DIM
 (83,13) fg=DarkGray bg=Reset mod=DIM
@@ -1231,9 +1231,6 @@
 (16,14) fg=DarkGray bg=Reset mod=BOLD|DIM
 (17,14) fg=DarkGray bg=Reset mod=BOLD|DIM
 (18,14) fg=Red bg=Reset mod=BOLD
-(21,14) fg=Reset bg=Reset mod=BOLD
-(22,14) fg=Reset bg=Reset mod=BOLD
-(23,14) fg=Reset bg=Reset mod=BOLD
 (24,14) fg=Reset bg=Reset mod=BOLD
 (25,14) fg=Reset bg=Reset mod=BOLD
 (26,14) fg=Reset bg=Reset mod=BOLD
@@ -1244,8 +1241,11 @@
 (31,14) fg=Reset bg=Reset mod=BOLD
 (32,14) fg=Reset bg=Reset mod=BOLD
 (33,14) fg=Reset bg=Reset mod=BOLD
-(37,14) fg=Reset bg=Reset mod=DIM
-(38,14) fg=Reset bg=Reset mod=DIM
+(34,14) fg=Reset bg=Reset mod=BOLD
+(35,14) fg=Reset bg=Reset mod=BOLD
+(36,14) fg=Reset bg=Reset mod=BOLD
+(40,14) fg=Reset bg=Reset mod=DIM
+(41,14) fg=Reset bg=Reset mod=DIM
 (81,14) fg=Red bg=Reset mod=BOLD
 (82,14) fg=DarkGray bg=Reset mod=DIM
 (83,14) fg=DarkGray bg=Reset mod=DIM
@@ -1322,8 +1322,6 @@
 (16,16) fg=DarkGray bg=Reset mod=BOLD|DIM
 (17,16) fg=DarkGray bg=Reset mod=BOLD|DIM
 (18,16) fg=Red bg=Reset mod=BOLD
-(19,16) fg=Reset bg=Reset mod=DIM
-(20,16) fg=Reset bg=Reset mod=DIM
 (21,16) fg=Reset bg=Reset mod=DIM
 (22,16) fg=Reset bg=Reset mod=DIM
 (23,16) fg=Reset bg=Reset mod=DIM
@@ -1377,11 +1375,6 @@
 (71,16) fg=Reset bg=Reset mod=DIM
 (72,16) fg=Reset bg=Reset mod=DIM
 (73,16) fg=Reset bg=Reset mod=DIM
-(74,16) fg=Reset bg=Reset mod=DIM
-(75,16) fg=Reset bg=Reset mod=DIM
-(76,16) fg=Reset bg=Reset mod=DIM
-(77,16) fg=Reset bg=Reset mod=DIM
-(78,16) fg=Reset bg=Reset mod=DIM
 (81,16) fg=Red bg=Reset mod=BOLD
 (82,16) fg=DarkGray bg=Reset mod=DIM
 (83,16) fg=DarkGray bg=Reset mod=DIM
@@ -1475,10 +1468,6 @@
 (71,17) fg=Reset bg=Reset mod=DIM
 (72,17) fg=Reset bg=Reset mod=DIM
 (73,17) fg=Reset bg=Reset mod=DIM
-(74,17) fg=Reset bg=Reset mod=DIM
-(75,17) fg=Reset bg=Reset mod=DIM
-(76,17) fg=Reset bg=Reset mod=DIM
-(77,17) fg=Reset bg=Reset mod=DIM
 (81,17) fg=Red bg=Reset mod=BOLD
 (82,17) fg=DarkGray bg=Reset mod=DIM
 (83,17) fg=DarkGray bg=Reset mod=DIM
@@ -1522,6 +1511,17 @@
 (21,18) fg=Reset bg=Reset mod=DIM
 (22,18) fg=Reset bg=Reset mod=DIM
 (23,18) fg=Reset bg=Reset mod=DIM
+(24,18) fg=Reset bg=Reset mod=DIM
+(25,18) fg=Reset bg=Reset mod=DIM
+(26,18) fg=Reset bg=Reset mod=DIM
+(27,18) fg=Reset bg=Reset mod=DIM
+(28,18) fg=Reset bg=Reset mod=DIM
+(29,18) fg=Reset bg=Reset mod=DIM
+(30,18) fg=Reset bg=Reset mod=DIM
+(31,18) fg=Reset bg=Reset mod=DIM
+(32,18) fg=Reset bg=Reset mod=DIM
+(33,18) fg=Reset bg=Reset mod=DIM
+(34,18) fg=Reset bg=Reset mod=DIM
 (81,18) fg=Red bg=Reset mod=BOLD
 (82,18) fg=DarkGray bg=Reset mod=DIM
 (83,18) fg=DarkGray bg=Reset mod=DIM

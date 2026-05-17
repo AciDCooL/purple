@@ -155,14 +155,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .map(|c| {
                 let name_str = truncate_str(&c.names, name_w);
                 let image_str = truncate_str(&c.image, image_w);
-                // "running" is a live-state indicator (same tier as a
-                // reachable host). `success()` is reserved for action
-                // outcomes; live state takes `online_dot()`.
-                let state_style = match c.state.as_str() {
-                    "running" => theme::online_dot(),
-                    "exited" | "dead" => theme::muted(),
-                    _ => theme::bold(),
-                };
+                // Shared {state -> style} mapping so this overlay agrees
+                // with the per-host detail panel and the containers
+                // overview about what dead, paused and exited look like.
+                let (_, state_style) =
+                    design::container_state_style(&c.state, None, &c.status, None, 0);
                 let line = Line::from(vec![
                     Span::styled(format!(" {:<name_w$}", name_str), theme::bold()),
                     Span::raw(gap_str),
@@ -219,8 +216,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                     theme::bold(),
                 )),
             ];
-            let paragraph = Paragraph::new(text).block(block);
-            frame.render_widget(paragraph, dialog_area);
+            design::render_body_wrapped(frame, dialog_area, block, text);
 
             // Stakes test: stop/restart take effect on the remote
             // immediately, so use destructive action verbs (stop/restart

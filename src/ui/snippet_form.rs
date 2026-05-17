@@ -53,7 +53,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             divider_y,
             &label,
             label_style,
-            theme::accent(),
+            theme::border_dim(),
         );
 
         let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);

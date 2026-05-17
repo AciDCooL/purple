@@ -231,7 +231,7 @@ fn render_screen(app: &mut App) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Tests (29 total). Each test pins ANSI-16 colors, builds a fresh demo app,
+// Tests. Each test pins ANSI-16 colors, builds a fresh demo app,
 // switches to the target screen, renders it and compares against a golden.
 // ---------------------------------------------------------------------------
 
@@ -384,6 +384,20 @@ fn visual_tunnel_host_picker_filtered() {
     app.ui.tunnel_host_picker_state.select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("tunnel_host_picker_filtered", &actual);
+}
+
+#[test]
+fn visual_container_host_picker() {
+    // Picker shown after pressing `a` on the Containers tab. Mirrors the
+    // tunnel-host-picker geometry but draws over the containers base
+    // page instead of the tunnels base page.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.screen = Screen::ContainerHostPicker;
+    app.ui.container_host_picker_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("container_host_picker", &actual);
 }
 
 /// Keys tab default layout: master list + Vault SSH TTL strip on top.
@@ -618,6 +632,54 @@ fn visual_keys_overview_empty() {
     app.keys.list_state.select(None);
     let actual = render_screen(&mut app);
     assert_golden("keys_overview_empty", &actual);
+}
+
+#[test]
+fn visual_host_list_empty() {
+    // Fresh install: no hosts in ~/.ssh/config. The Hosts tab must
+    // render ONE centred TabEmpty card naming `a add` and `S sync`
+    // as the next actions; the detail panel stays a quiet bordered
+    // placeholder (no "Select a host to see details." floating top-right).
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.hosts_state.list.clear();
+    app.hosts_state.patterns.clear();
+    app.hosts_state.display_list.clear();
+    app.hosts_state.ssh_config.elements = Vec::new();
+    app.tunnels.active.clear();
+    app.tunnels.demo_live_snapshots.clear();
+    let actual = render_screen(&mut app);
+    assert_golden("host_list_empty", &actual);
+}
+
+#[test]
+fn visual_containers_overview_empty() {
+    // Fresh-install state: no container_cache entries. The Containers
+    // tab must render ONE centred TabEmpty card (no duplicate "No
+    // containers cached yet." in the detail panel).
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    app.container_cache.clear();
+    let actual = render_screen(&mut app);
+    assert_golden("containers_overview_empty", &actual);
+}
+
+#[test]
+fn visual_tunnels_overview_empty() {
+    // No tunnel rules configured anywhere. The Tunnels tab must render
+    // one centred TabEmpty card explaining how to add one. Easiest way
+    // to force "no rules" without restructuring the demo SSH config is
+    // to swap in a config that has no Host blocks at all.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Tunnels;
+    app.hosts_state.ssh_config.elements = Vec::new();
+    app.hosts_state.list.clear();
+    app.tunnels.active.clear();
+    app.tunnels.demo_live_snapshots.clear();
+    let actual = render_screen(&mut app);
+    assert_golden("tunnels_overview_empty", &actual);
 }
 
 #[test]

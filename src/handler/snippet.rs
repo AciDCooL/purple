@@ -46,10 +46,10 @@ pub(super) fn handle_snippet_picker(
         return;
     }
 
-    // Handle pending snippet delete confirmation
+    // Handle pending snippet delete confirmation via the shared confirm router.
     if app.snippets.pending_delete.is_some() && key.code != KeyCode::Char('?') {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
                 let Some(sel) = app.snippets.pending_delete.take() else {
                     return;
                 };
@@ -70,10 +70,10 @@ pub(super) fn handle_snippet_picker(
                     }
                 }
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            super::ConfirmAction::No => {
                 app.snippets.pending_delete = None;
             }
-            _ => {}
+            super::ConfirmAction::Ignored => {}
         }
         return;
     }

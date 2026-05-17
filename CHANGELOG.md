@@ -1,3 +1,17 @@
+## 3.14.3 - 2026-05-17
+
+- change: Tighter design system across the binary and the docs.
+- feat: Every container reads the same on every screen, so a paused or dead one never reads as a live one again.
+- feat: The brand-purple cursor inside every form is visible on the default theme again.
+- feat: Snippet output and Keys tab help list every shortcut your fingers already know, including Ctrl+C and Enter/c.
+- feat: Custom theme TOML files surface a clear warning per malformed hex value instead of silently falling back to the default.
+- feat: Dialogs, help screens and tunnel detail rows now keep a clean margin against the right border, with wrap or shorter labels chosen per surface so nothing clips and nothing touches the edge.
+- feat: The Hosts, Containers, Tunnels and Keys tabs greet a fresh install with one centred card naming what is missing and the one key that fills it, instead of repeating "nothing here" twice at different heights.
+- feat: Tunnel, snippet and provider deletes now ask for confirmation in the same centred popup style as host delete and Vault SSH sign, instead of a tiny footer prompt under the parent overlay.
+- fix: Pressing `a` on Containers or `p` on Keys without any hosts configured now surfaces a "No hosts yet. Add a host first." toast instead of opening an empty picker.
+- change: Stable healthy attributes (encrypted, agent loaded, TTL good) now read as their own visual tier, separate from live-now indicators.
+- change: Pre-commit gates catch a wider class of design slip-ups before they ship, so future releases land tighter by default.
+
 ## 3.14.2 - 2026-05-17
 
 - feat: More ssh_config edge cases covered by round-trip safety.

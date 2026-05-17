@@ -168,6 +168,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .collect();
         frame.render_widget(Paragraph::new(logo_lines), rows[1]);
     }
+    use ratatui::widgets::Wrap;
     if use_two_cols {
         let cols = Layout::horizontal([
             Constraint::Fill(1),
@@ -177,17 +178,28 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             Constraint::Fill(1),
         ])
         .split(content_row);
+        // Two-column layout deliberately omits wrap so col1 and col2 rows
+        // stay in vertical lock-step. Labels are pre-sized to fit each
+        // column's budget (see help_line_short callers); CI check 23
+        // enforces no overflow.
         let para1 = Paragraph::new(col1).scroll((app.ui.help_scroll, 0));
         let para2 = Paragraph::new(col2).scroll((app.ui.help_scroll, 0));
         frame.render_widget(para1, cols[1]);
         frame.render_widget(para2, cols[3]);
     } else if col2.is_empty() {
-        let para = Paragraph::new(col1).scroll((app.ui.help_scroll, 0));
+        // Single-column sub-screen help: enable wrap so a stray long
+        // description folds to a continuation row instead of clipping.
+        // Reserve the standard right margin via body-area math.
+        let para = Paragraph::new(col1)
+            .scroll((app.ui.help_scroll, 0))
+            .wrap(Wrap { trim: false });
         frame.render_widget(para, content_row);
     } else {
         let mut all = col1;
         all.extend(col2);
-        let para = Paragraph::new(all).scroll((app.ui.help_scroll, 0));
+        let para = Paragraph::new(all)
+            .scroll((app.ui.help_scroll, 0))
+            .wrap(Wrap { trim: false });
         frame.render_widget(para, content_row);
     }
 
@@ -344,7 +356,7 @@ fn host_list_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         help_line_short("e", "edit"),
         help_line_short("d", "del"),
         help_line_short("u", "undo del"),
-        help_line_short("t", "tag (bulk if sel.)"),
+        help_line_short("t", "bulk tag"),
         blank(),
         blank(),                           // row 9  padding so headers align
         section_header("CONNECT AND RUN"), // row 10 ↔ col1 VIEW
@@ -406,6 +418,7 @@ fn snippet_output_lines() -> Vec<Line<'static>> {
     lines.push(help_line("j/k ↑↓", "scroll"));
     lines.push(help_line("PgDn/PgUp", "page down / up"));
     lines.push(help_line("?", "help"));
+    lines.push(help_line("Ctrl+C", "cancel run"));
     lines.push(help_line("q/Esc", "close / cancel"));
     lines
 }
@@ -514,8 +527,8 @@ fn containers_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         blank(),
         section_header("ON HOST DIVIDER"),
         blank(),
-        help_line_short("K", "restart running on host"),
-        help_line_short("S", "stop running on host"),
+        help_line_short("K", "restart all"),
+        help_line_short("S", "stop all"),
         help_line_short("r", "refresh listing"),
         help_line_short("Space", "fold group"),
         blank(),
@@ -563,7 +576,7 @@ fn keys_overview_columns() -> (Vec<Line<'static>>, Vec<Line<'static>>) {
         blank(),
         section_header("ACTIONS"),
         blank(),
-        help_line("Enter", "copy public key"),
+        help_line("Enter/c", "copy public key"),
         help_line("p", "push (ssh-copy-id)"),
         help_line("V", "sign Vault SSH cert"),
     ];

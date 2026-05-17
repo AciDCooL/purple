@@ -299,6 +299,14 @@ fn open_push_picker(app: &mut App) {
     if app.keys.list.get(key_index).is_none() {
         return;
     }
+    // Guard: pushing to zero hosts surfaces an empty picker, which
+    // reads as a bug. Notify and short-circuit so the picker only
+    // opens when it has something to pick from. Matches the
+    // tunnels-tab / containers-tab guard pattern.
+    if app.hosts_state.list.is_empty() {
+        app.notify_warning(crate::messages::PICKER_NO_HOSTS);
+        return;
+    }
     // Fresh picker: drop any leftover selection from a prior run.
     app.keys.push.reset_picker();
     app.set_screen(Screen::KeyPushPicker { key_index });
@@ -377,9 +385,22 @@ mod tests {
         KeyEvent::new(c, KeyModifiers::NONE)
     }
 
+    /// Seed a single host so `open_push_picker` clears its empty-hosts
+    /// guard. Tests that exercise filtered-index translation /
+    /// picker-state reset do not care about the host count itself.
+    fn seed_one_host(app: &mut App) {
+        app.hosts_state
+            .list
+            .push(crate::ssh_config::model::HostEntry {
+                alias: "h1".into(),
+                ..Default::default()
+            });
+    }
+
     #[test]
     fn open_push_picker_under_search_translates_filtered_index() {
         let mut app = make_app();
+        seed_one_host(&mut app);
         app.keys.list = vec![key("id_ed25519"), key("yubikey_work"), key("customer-x")];
         app.search.query = Some("yubi".to_string());
         // After applying the filter, position 0 in the visible list is
@@ -400,6 +421,7 @@ mod tests {
     #[test]
     fn open_push_picker_resets_picker_state() {
         let mut app = make_app();
+        seed_one_host(&mut app);
         app.keys.list = vec![key("id_ed25519")];
         app.keys.list_state.select(Some(0));
         // Pre-existing stale selection from a previous picker run.

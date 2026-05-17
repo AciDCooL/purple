@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{Clear, List, ListItem, ListState, Paragraph};
 
 use super::design;
 use super::theme;
@@ -118,10 +118,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         input_outer.width.saturating_sub(inset * 2),
         input_outer.height,
     );
-    let input_block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(BorderType::Rounded)
-        .border_style(theme::border_search());
+    let input_block = design::search_overlay_block_line(Line::from(""));
     let input_inner = input_block.inner(input_box_area);
     frame.render_widget(input_block, input_box_area);
 

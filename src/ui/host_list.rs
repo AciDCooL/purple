@@ -541,13 +541,24 @@ fn render_display_list(
         if let Some(update) = update_title {
             block = block.title_top(update.right_aligned());
         }
-        let msg = if matches!(app.screen, app::Screen::Welcome { .. }) {
-            ""
-        } else {
-            "It's quiet in here... Press 'a' to add a host or 'S' for cloud sync."
+        // Welcome overlay paints its own first-run experience on top of
+        // this block, so leave the block frame bare in that case.
+        if matches!(app.screen, app::Screen::Welcome { .. }) {
+            frame.render_widget(block, area);
+            return;
+        }
+        frame.render_widget(block, area);
+        let hints = [
+            ("a", crate::messages::TAB_EMPTY_HOSTS_HINT_ADD),
+            ("S", crate::messages::TAB_EMPTY_HOSTS_HINT_SYNC),
+        ];
+        let empty = design::TabEmpty {
+            card_title: "Hosts",
+            headline: crate::messages::TAB_EMPTY_HOSTS_HEADLINE,
+            explainer: crate::messages::TAB_EMPTY_HOSTS_EXPLAINER,
+            hints: &hints,
         };
-        let empty_msg = Paragraph::new(design::empty_line(msg)).block(block);
-        frame.render_widget(empty_msg, area);
+        design::render_tab_empty(frame, area, &empty);
         return;
     }
 
@@ -957,7 +968,7 @@ fn render_header(
             style,
         ));
         if last_sort {
-            spans.push(Span::styled("\u{25BE}", style));
+            spans.push(Span::styled(design::SORT_DESC, style));
         }
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
@@ -1173,7 +1184,7 @@ fn push_proxy_tunnel_indicators<'a>(
     }
     if has_tunnels {
         let tunnel_style = if tunnel_active {
-            theme::version() // purple accent when active
+            theme::tunnel_active()
         } else {
             theme::muted() // dim when configured but not running
         };
@@ -1212,7 +1223,7 @@ fn build_pattern_item<'a>(
     // This matches host item layout: marker(2) + status(2) + alias(cols.alias).
     let pattern_trunc = super::truncate(&pattern.pattern, cols.alias);
     spans.push(Span::styled("  ", theme::muted())); // marker area (2 chars)
-    spans.push(Span::styled("* ", theme::accent())); // status area reused for * prefix (2 chars)
+    spans.push(Span::styled("* ", theme::accent_bold())); // brand-accent prefix for pattern rows
     spans.push(Span::styled(
         format!("{:<width$}", pattern_trunc, width = cols.alias),
         theme::muted(),
@@ -1335,7 +1346,7 @@ fn build_tag_column(
         let style = if tag_matches && app::contains_ci(&tag.name, query) {
             theme::highlight_bold()
         } else if tag.is_user {
-            theme::version()
+            theme::tag_user()
         } else {
             theme::muted()
         };

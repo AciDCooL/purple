@@ -79,14 +79,22 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
         frame.render_stateful_widget(list, inner, &mut app.ui.tunnel_list_state);
     }
 
-    // Footer below the block
+    // Footer below the block — but only when there is no pending
+    // confirm. Destructive confirms render as centred popups (the
+    // design-system pattern shared with host delete, vault sign and
+    // container actions) instead of inline footer prompts under the
+    // parent overlay.
     let footer_area = design::render_overlay_footer(frame, area);
     if app.tunnels.pending_delete.is_some() {
-        let mut spans = vec![Span::styled(" Remove tunnel? ", theme::bold())];
-        // Stakes test: deleting a tunnel rule rewrites the SSH config
-        // (destructive). Action verbs.
-        spans.extend(design::confirm_footer_destructive("delete", "keep").into_spans());
-        super::render_footer_with_status(frame, footer_area, spans, app);
+        design::render_destructive_popup(
+            frame,
+            crate::messages::CONFIRM_TUNNEL_DELETE_TITLE,
+            crate::messages::CONFIRM_TUNNEL_DELETE_QUESTION,
+            crate::messages::CONFIRM_TUNNEL_DELETE_DETAIL,
+            "delete",
+            "keep",
+            app,
+        );
     } else {
         use crate::messages::footer as fl;
         let mut f = design::Footer::new();

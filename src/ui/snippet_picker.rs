@@ -191,13 +191,19 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .and_then(|i| app.snippets.store.snippets.get(i))
             .map(|s| s.name.as_str())
             .unwrap_or("");
-        let mut spans = vec![Span::styled(
-            format!(" Remove '{}'? ", super::truncate(name, 20)),
-            theme::bold(),
-        )];
-        // Stakes test: snippet deletion rewrites the snippet store.
-        spans.extend(design::confirm_footer_destructive("delete", "keep").into_spans());
-        super::render_footer_with_status(frame, footer_area, spans, app);
+        // Destructive confirm renders as centred popup so the
+        // affordance matches host delete and the other danger
+        // dialogs rather than a footer prompt under the picker.
+        design::render_destructive_popup(
+            frame,
+            crate::messages::CONFIRM_SNIPPET_DELETE_TITLE,
+            &crate::messages::confirm_snippet_delete_question(&super::truncate(name, 32)),
+            crate::messages::CONFIRM_SNIPPET_DELETE_DETAIL,
+            "delete",
+            "keep",
+            app,
+        );
+        super::render_footer_with_status(frame, footer_area, Vec::new(), app);
     } else {
         let mut f = design::Footer::new();
         if !app.snippets.store.snippets.is_empty() {

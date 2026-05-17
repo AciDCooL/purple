@@ -289,8 +289,11 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect, spinner_tick: u64) {
 
     let title = build_title(&row, live.as_ref(), &lanes, &roster, spinner_tick);
     let block = design::main_block_line(title);
-    let inner = block.inner(area);
     frame.render_widget(block, area);
+    // Render into the body-area sub-rect so the sparkline and BPS column
+    // never paint flush against the right border. design::body_area
+    // applies the BODY_RIGHT_PAD breathing room every other surface uses.
+    let inner = design::body_area(area);
 
     if inner.height == 0 {
         return;
@@ -492,16 +495,26 @@ fn build_title(
     // right now" — `success()` is reserved for positive action
     // outcomes per the design-system rule.
     let (dot_glyph, dot_style, state_word, state_style): (&str, Style, &str, Style) = if failed {
-        ("\u{25CF}", theme::error(), "broken", theme::error())
+        (
+            design::ICON_ONLINE,
+            theme::error(),
+            "broken",
+            theme::error(),
+        )
     } else if active {
         (
-            "\u{25CF}",
+            design::ICON_ONLINE,
             theme::online_dot_pulsing(spinner_tick),
             "active",
             theme::online_dot_pulsing(spinner_tick),
         )
     } else {
-        ("\u{25CB}", theme::muted(), "stopped", theme::muted())
+        (
+            design::ICON_STOPPED,
+            theme::muted(),
+            "stopped",
+            theme::muted(),
+        )
     };
 
     // Channel and client counts dropped from the title — they
@@ -798,7 +811,7 @@ fn roster_line(
         (
             sparkline_for(&row.viz_history, spark_w, phase),
             if combined_bps > 0 {
-                theme::accent()
+                theme::bold()
             } else {
                 theme::muted()
             },

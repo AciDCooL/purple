@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # TUI smoke test: launches purple --demo in tmux, navigates through all
 # major screens via keystrokes, and verifies no crash at each step.
 #

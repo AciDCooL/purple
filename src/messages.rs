@@ -288,6 +288,12 @@ pub const TUNNEL_DUPLICATE: &str = "Duplicate tunnel already configured.";
 pub const TUNNEL_NO_EDITABLE_HOSTS: &str = "No editable hosts. Add a host first.";
 pub const TUNNEL_HOST_PICKER_NO_MATCH: &str = "No matches.";
 
+/// Shown when the user opens a picker that needs hosts (containers `a`,
+/// keys `p` push, etc.) but no hosts exist in ~/.ssh/config yet.
+/// Identical "Add a host first" closing across surfaces so the user
+/// reads the same prerequisite regardless of which picker they tried.
+pub const PICKER_NO_HOSTS: &str = "No hosts yet. Add a host first.";
+
 pub fn tunnel_stopped(alias: &str) -> String {
     format!("Tunnel for {} stopped.", alias)
 }
@@ -331,14 +337,6 @@ pub const LABEL_MUST_DIFFER: &str = "The two names must be different.";
 
 pub const LABEL_MIGRATION_FIELD_CURRENT: &str = " Name for your current config ";
 pub const LABEL_MIGRATION_FIELD_NEW: &str = " Name for the new config ";
-
-pub fn confirm_remove_provider(display: &str) -> String {
-    format!(" Remove {}? ", display)
-}
-
-pub fn confirm_remove_labeled_config(display: &str, label: &str) -> String {
-    format!(" Remove {} ({})? ", display, label)
-}
 
 pub const EXPAND_TO_REMOVE_CONFIG: &str =
     "Expand the provider and pick a specific config to remove.";
@@ -768,9 +766,55 @@ pub fn keys_copy_read_failed(name: &str) -> String {
     format!("Could not read {}.pub from disk.", name)
 }
 
-/// Empty-state message for the keys tab when ~/.ssh/ has no public keys.
-/// Kept short so it fits the narrow master pane on responsive collapse.
-pub const KEYS_EMPTY_HINT: &str = "No SSH keys in ~/.ssh/. Run ssh-keygen.";
+// ── Tab empty-state cards (design::TabEmpty) ────────────────────────────
+// One bundle per top-level tab. Each renders inside the existing outer
+// block as a centred card via `design::render_tab_empty`. Headlines
+// state the missing thing; explainers name the cause; hints surface the
+// one or two keys that populate the tab.
+
+pub const TAB_EMPTY_HOSTS_HEADLINE: &str = "It's quiet in here.";
+pub const TAB_EMPTY_HOSTS_EXPLAINER: &str = "purple reads hosts from ~/.ssh/config and from the cloud providers you connect. Add one by hand or sync a provider and the list fills up.";
+pub const TAB_EMPTY_HOSTS_HINT_ADD: &str = "add a host";
+pub const TAB_EMPTY_HOSTS_HINT_SYNC: &str = "open providers to sync from the cloud";
+
+pub const TAB_EMPTY_CONTAINERS_HEADLINE: &str = "No containers cached yet.";
+pub const TAB_EMPTY_CONTAINERS_EXPLAINER: &str = "purple snapshots docker or podman output per host and caches it locally. Pick a host below and its containers show up here.";
+pub const TAB_EMPTY_CONTAINERS_HINT_ADD: &str = "pick a host to scan";
+
+pub const TAB_EMPTY_TUNNELS_HEADLINE: &str = "No tunnels yet.";
+pub const TAB_EMPTY_TUNNELS_EXPLAINER: &str = "Tunnels are SSH port forwards stored per host in ~/.ssh/config. This tab aggregates Local, Remote and Dynamic forwards across every alias.";
+pub const TAB_EMPTY_TUNNELS_HINT_ADD: &str = "add a tunnel";
+
+pub const TAB_EMPTY_KEYS_HEADLINE: &str = "No SSH keys in ~/.ssh/ yet.";
+pub const TAB_EMPTY_KEYS_EXPLAINER: &str = "purple reads every public-key file in ~/.ssh/ along with its activity history. Generate one and the new key shows up here on next refresh.";
+pub const TAB_EMPTY_KEYS_HINT_KEYGEN: &str = "ssh-keygen -t ed25519 -C \"$(whoami)@$(hostname)\"";
+
+// ── Destructive confirm popups (design::render_destructive_popup) ──────
+// Every popup is rendered as a centred danger_block over the parent
+// overlay, never as a footer prompt. Each surface owns a title, a
+// question and an optional detail line; keep them centralised here so
+// rewording requires one diff per surface, not per call site.
+
+pub const CONFIRM_TUNNEL_DELETE_TITLE: &str = " Remove tunnel? ";
+pub const CONFIRM_TUNNEL_DELETE_QUESTION: &str = "Remove the selected tunnel rule from this host?";
+pub const CONFIRM_TUNNEL_DELETE_DETAIL: &str =
+    "Rewrites ~/.ssh/config. The rule is gone after save.";
+
+pub const CONFIRM_SNIPPET_DELETE_TITLE: &str = " Remove snippet? ";
+pub const CONFIRM_SNIPPET_DELETE_DETAIL: &str = "The snippet file is rewritten on disk.";
+pub fn confirm_snippet_delete_question(name: &str) -> String {
+    format!("Remove \"{}\" from the snippet store?", name)
+}
+
+pub const CONFIRM_PROVIDER_REMOVE_TITLE: &str = " Remove provider? ";
+pub const CONFIRM_PROVIDER_REMOVE_DETAIL: &str =
+    "Synced hosts stay in ~/.ssh/config. The integration is gone after save.";
+pub fn confirm_provider_remove_question(display: &str) -> String {
+    format!("Remove the \"{}\" provider config?", display)
+}
+pub fn confirm_provider_remove_labeled_question(display: &str, label: &str) -> String {
+    format!("Remove the \"{}\" config labelled \"{}\"?", display, label)
+}
 
 /// Empty-state message for the key-push picker when ~/.ssh/config has
 /// no host entries to target.

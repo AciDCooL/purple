@@ -865,6 +865,14 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender
                 app.notify_warning(crate::messages::DEMO_CONTAINER_REFRESH_DISABLED);
                 return;
             }
+            // Guard: opening a host picker with zero hosts surfaces an
+            // empty list, which reads as a bug. Mirror the tunnels-tab
+            // guard pattern: notify the user and short-circuit so the
+            // picker only opens when it has something to pick from.
+            if app.hosts_state.list.is_empty() {
+                app.notify_warning(crate::messages::PICKER_NO_HOSTS);
+                return;
+            }
             app.ui.container_host_picker_state.select(Some(0));
             app.ui.container_host_picker_query.clear();
             app.set_screen(Screen::ContainerHostPicker);
@@ -886,6 +894,9 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender
                 log::warn!("[config] Failed to persist containers view mode: {e}");
             }
         }
+        // SPACE GUARD MUST PRECEDE the generic Char(c) arm below. Without
+        // it, fuzz-style char input would shadow the host-row collapse
+        // toggle on Space.
         KeyCode::Char(' ') => {
             toggle_collapse_for_selected_host(app);
         }

@@ -197,7 +197,16 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
     let host = match app.selected_host() {
         Some(h) => h,
         None => {
-            design::render_empty(frame, area, "Select a host to see details.");
+            // When the host list itself is empty, the TabEmpty card on
+            // the left panel already explains the state. Showing
+            // "Select a host to see details." in the right panel on top
+            // of that re-introduces the double-message bug the design
+            // system is meant to prevent — keep the detail panel quiet.
+            if app.hosts_state.list.is_empty() {
+                design::render_tab_empty_detail(frame, area);
+            } else {
+                design::render_empty(frame, area, "Select a host to see details.");
+            }
             return;
         }
     };
@@ -498,7 +507,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 section_line(
                     &mut lines,
                     vec![
-                        Span::styled("  \u{25CB} ", theme::muted()),
+                        Span::styled(format!("  {} ", design::ICON_STOPPED), theme::muted()),
                         Span::styled("you", theme::muted()),
                     ],
                     box_width,
@@ -506,7 +515,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 for (name, hostname, in_config) in chain.iter().rev() {
                     section_line(
                         &mut lines,
-                        vec![Span::styled("  \u{250A}", theme::muted())],
+                        vec![Span::styled(
+                            format!("  {}", design::ROUTE_BRANCH),
+                            theme::muted(),
+                        )],
                         box_width,
                     );
                     let name_style = if *in_config {
@@ -536,7 +548,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 }
                 section_line(
                     &mut lines,
-                    vec![Span::styled("  \u{250A}", theme::muted())],
+                    vec![Span::styled(
+                        format!("  {}", design::ROUTE_BRANCH),
+                        theme::muted(),
+                    )],
                     box_width,
                 );
                 let alias_trunc = super::truncate(&host.alias, hop_width);
@@ -549,14 +564,13 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 } else {
                     String::new()
                 };
-                // Target host uses the fisheye glyph (●  with a ring,
-                // U+25C9) so the destination is distinguishable from
-                // intermediate hops (plain ●) on terminals that don't
-                // honour our accent colour (NO_COLOR, dim displays).
+                // Target host uses the fisheye glyph so the destination
+                // stands apart from intermediate hops even on terminals
+                // that don't honour the accent colour.
                 section_line(
                     &mut lines,
                     vec![
-                        Span::styled("  \u{25C9} ", theme::accent()),
+                        Span::styled(format!("  {} ", design::ICON_TARGET), theme::accent_bold()),
                         Span::styled(alias_trunc, theme::bold()),
                         Span::styled(target_ip, theme::muted()),
                     ],
@@ -588,7 +602,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 if i > 0 {
                     spans.push(Span::styled(", ".to_string(), theme::muted()));
                 }
-                spans.push(Span::styled(tag.to_string(), theme::accent()));
+                spans.push(Span::styled(tag.to_string(), theme::tag_user()));
             }
             section_line(&mut lines, spans, box_width);
         }
@@ -791,15 +805,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
             box_width,
         );
         for container in &cache_entry.containers {
-            // `running` is live-state, not an action outcome — use
-            // `online_dot()` so the green shade matches the rest of
-            // the live-state indicators across the app.
-            let (icon, icon_style) = match container.state.as_str() {
-                "running" => (design::ICON_SUCCESS, theme::online_dot()),
-                "dead" => ("\u{2717}", theme::error()),
-                "exited" => ("\u{2717}", theme::warning()),
-                _ => (design::ICON_ONLINE, theme::bold()),
-            };
+            // Single source of truth for the {state -> (icon, style)}
+            // mapping. Keeps this surface in lockstep with the containers
+            // overview and per-host overlay so a paused or dead container
+            // looks the same regardless of which screen the user is on.
+            let (icon, icon_style) =
+                design::container_state_style(&container.state, None, "", None, 0);
             let name = crate::containers::truncate_str(
                 &container.names,
                 max_value_width.saturating_sub(2),
@@ -941,7 +952,7 @@ fn render_pattern_detail(
                 if i > 0 {
                     spans.push(Span::styled(", ".to_string(), theme::muted()));
                 }
-                spans.push(Span::styled(tag.to_string(), theme::accent()));
+                spans.push(Span::styled(tag.to_string(), theme::tag_user()));
             }
             section_line(&mut lines, spans, box_width);
         }

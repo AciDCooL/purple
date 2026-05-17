@@ -56,6 +56,9 @@ pub(super) fn handle_bulk_tag_editor_screen(app: &mut App, key: KeyEvent) {
         KeyCode::Char('k') | KeyCode::Up => {
             app.bulk_tag_editor_prev();
         }
+        // SPACE GUARD MUST PRECEDE any generic Char(c) arm in this handler
+        // so Space cycles the focused tag's tri-state rather than typing a
+        // literal space into the new-tag input.
         KeyCode::Char(' ') => {
             app.bulk_tag_editor_cycle_current();
         }

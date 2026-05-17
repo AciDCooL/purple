@@ -95,7 +95,7 @@ fn build_strip_line(
 
 fn ttl_bar_style(remaining_secs: i64) -> Style {
     if remaining_secs >= 300 {
-        theme::online_dot()
+        theme::healthy()
     } else if remaining_secs >= 120 {
         theme::warning()
     } else {

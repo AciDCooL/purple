@@ -494,3 +494,73 @@ fn detects_colored_underline_defaults_true_for_unknown_or_modern() {
     assert!(detects_colored_underline(Some("WezTerm")));
     assert!(detects_colored_underline(Some("vscode")));
 }
+
+// ---------------------------------------------------------------------------
+// accent / border_dim split
+// ---------------------------------------------------------------------------
+
+#[test]
+fn accent_reads_from_accent_slot_not_border() {
+    let _lock = TEST_MUTEX.lock().unwrap();
+    init_with_mode(2);
+    set_theme(ThemeDef::purple());
+    let purple = accent();
+    let dim = border_dim();
+    assert_eq!(
+        purple.fg,
+        Some(Color::Rgb(147, 51, 234)),
+        "accent() should read the accent slot (brand purple)"
+    );
+    assert_eq!(
+        dim.fg, None,
+        "border_dim() should read the border slot (no fg on default Purple theme)"
+    );
+    assert!(
+        dim.add_modifier.contains(Modifier::DIM),
+        "border_dim() should carry the DIM modifier"
+    );
+    COLOR_MODE.store(1, Ordering::Release);
+}
+
+#[test]
+fn accent_bold_matches_accent_with_bold_modifier() {
+    let _lock = TEST_MUTEX.lock().unwrap();
+    init_with_mode(2);
+    set_theme(ThemeDef::purple());
+    let plain = accent();
+    let bold = accent_bold();
+    assert_eq!(plain.fg, bold.fg);
+    assert!(bold.add_modifier.contains(Modifier::BOLD));
+    assert!(!plain.add_modifier.contains(Modifier::BOLD));
+    COLOR_MODE.store(1, Ordering::Release);
+}
+
+#[test]
+fn tunnel_active_and_tag_user_match_accent() {
+    let _lock = TEST_MUTEX.lock().unwrap();
+    init_with_mode(2);
+    set_theme(ThemeDef::purple());
+    let a = accent();
+    assert_eq!(tunnel_active().fg, a.fg);
+    assert_eq!(tag_user().fg, a.fg);
+    COLOR_MODE.store(1, Ordering::Release);
+}
+
+#[test]
+fn healthy_matches_online_dot() {
+    let _lock = TEST_MUTEX.lock().unwrap();
+    init_with_mode(2);
+    set_theme(ThemeDef::purple());
+    // healthy() and online_dot() share the success_dim slot today.
+    assert_eq!(healthy().fg, online_dot().fg);
+    COLOR_MODE.store(1, Ordering::Release);
+}
+
+#[test]
+fn parse_toml_falls_back_on_malformed_hex() {
+    // Caller doesn't need to capture the log; just assert the parser
+    // accepts the file and falls back to the Purple default.
+    let content = "name = \"BadHex\"\naccent = \"not-a-color\"\n";
+    let theme = ThemeDef::parse_toml(content).expect("parse_toml should succeed with fallback");
+    assert_eq!(theme.accent.truecolor, Some(Color::Rgb(147, 51, 234)));
+}

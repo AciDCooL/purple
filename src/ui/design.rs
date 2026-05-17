@@ -141,6 +141,95 @@ pub const ICON_PAUSED: &str = "\u{25D0}";
 /// Stopped / inactive container glyph (U+25CB, empty circle). Used for
 /// "exited cleanly" and for unknown / not-yet-seen states.
 pub const ICON_STOPPED: &str = "\u{25CB}";
+/// Slow ping glyph (U+25B2, up-pointing triangle). Used in the Linked
+/// Hosts list to mark hosts that responded but exceeded the slow-ping
+/// threshold.
+pub const ICON_SLOW: &str = "\u{25B2}";
+/// Pending / unknown status glyph (U+00B7, middle dot). Used for
+/// "checking now" and "not yet probed" rows where neither online nor
+/// offline applies yet.
+pub const ICON_PENDING: &str = "\u{00B7}";
+/// Target / destination glyph (U+25C9, fisheye). Marks the final hop in a
+/// ProxyJump ladder and the container/host that is currently selected as
+/// the navigation target in a tree view.
+pub const ICON_TARGET: &str = "\u{25C9}";
+
+// ---------------------------------------------------------------------------
+// Route / tree glyphs
+// ---------------------------------------------------------------------------
+
+/// Dotted vertical glyph (U+250A) for the connecting line between hops in a
+/// ProxyJump ladder rendered in detail panels.
+pub const ROUTE_BRANCH: &str = "\u{250A}";
+
+// ---------------------------------------------------------------------------
+// Container state mapping (single source of truth)
+// ---------------------------------------------------------------------------
+
+/// True when the container `state` field reports a running container.
+/// Single source of truth shared by detail panels, overlays and the
+/// containers overview so all surfaces classify the same state identically.
+pub fn is_container_running(state: &str) -> bool {
+    state.eq_ignore_ascii_case("running")
+}
+
+/// Extract the integer in `Exited (N)` from a docker `Status` string.
+/// Returns `None` when the prefix is absent or the captured slice does not
+/// parse as an integer. Podman emits an empty status; callers should fall
+/// back to inspect-cache exit code in that case.
+pub fn parse_container_exit_code(status: &str) -> Option<i32> {
+    let prefix = "Exited (";
+    let start = status.find(prefix)?;
+    let after = &status[start + prefix.len()..];
+    let end = after.find(')')?;
+    after[..end].parse().ok()
+}
+
+/// Canonical mapping from container state to (icon, style).
+///
+/// Every consumer of container state (host detail panel, per-host overlay,
+/// containers overview tab) must route through this helper so a single
+/// container shows the same glyph and colour everywhere. Pre-rules audit
+/// found 3 distinct ad-hoc mappings producing divergent visuals across the
+/// same container; this helper closes that gap.
+///
+/// Arguments:
+/// - `state`: docker/podman `state` field (`running`, `exited`, `dead`, etc.)
+/// - `health`: docker health (`healthy`, `unhealthy`, `starting`) when known
+/// - `status`: docker `Status` string (e.g. `Exited (137) 2 minutes ago`)
+/// - `inspect_exit_code`: fallback exit code from inspect cache (podman path)
+/// - `spinner_tick`: spinner counter for the pulsing running-dot
+///
+/// Pass `None`/empty/0 for fields the caller does not have; the helper
+/// degrades gracefully (e.g. running container without spinner_tick still
+/// renders, just without pulsing animation contribution).
+pub fn container_state_style(
+    state: &str,
+    health: Option<&str>,
+    status: &str,
+    inspect_exit_code: Option<i32>,
+    spinner_tick: u64,
+) -> (&'static str, ratatui::style::Style) {
+    if is_container_running(state) {
+        return match health {
+            Some("unhealthy") => (ICON_ONLINE, theme::error()),
+            Some("starting") => (ICON_ONLINE, theme::warning()),
+            _ => (ICON_ONLINE, theme::online_dot_pulsing(spinner_tick)),
+        };
+    }
+    match state {
+        "dead" => (ICON_ERROR, theme::error()),
+        "exited" | "stopped" => {
+            let exit_code = parse_container_exit_code(status).or(inspect_exit_code);
+            match exit_code {
+                Some(code) if code != 0 => (ICON_ERROR, theme::warning()),
+                _ => (ICON_STOPPED, theme::muted()),
+            }
+        }
+        "paused" | "restarting" => (ICON_PAUSED, theme::warning()),
+        _ => (ICON_STOPPED, theme::muted()),
+    }
+}
 
 // ---------------------------------------------------------------------------
 // List rendering tokens
@@ -184,7 +273,7 @@ pub fn overlay_block_line(title: Line<'static>) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(theme::accent())
+        .border_style(theme::border_dim())
         .title(title)
 }
 
@@ -200,14 +289,14 @@ pub fn search_overlay_block_line(title: Line<'static>) -> Block<'static> {
         .title(title)
 }
 
-/// Plain overlay block: rounded border, accent border, NO title. Use for
+/// Plain overlay block: rounded border, dim border, NO title. Use for
 /// unique dialogs (e.g. welcome screen) where the block carries no title
 /// and the content itself supplies visual hierarchy.
 pub fn plain_overlay_block() -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(theme::accent())
+        .border_style(theme::border_dim())
 }
 
 /// Danger overlay block: rounded border, danger title, danger border.
@@ -488,6 +577,340 @@ pub fn body_text_area(inner: Rect, y: u16, height: u16) -> Rect {
     )
 }
 
+// ---------------------------------------------------------------------------
+// Body breathing room (prevents text from touching the inner-right border)
+// ---------------------------------------------------------------------------
+
+/// Right-side breathing room inside any block that hosts text content.
+/// Without this margin `ratatui` writes the last glyph flush against
+/// the right `│`, which reads as a layout bug even when the text fits.
+/// Left-side padding is provided by the existing per-line convention
+/// (lines start with `Span::raw("  ")` or `format!("  ...")`); this
+/// helper only fixes the asymmetric right edge.
+pub const BODY_RIGHT_PAD: u16 = 2;
+
+/// Safe content area inside an overlay block. Insets `block_area` by the
+/// 1-char block border on every side plus `BODY_RIGHT_PAD` on the right
+/// only, so wrapped paragraphs and ASCII art rendered into the returned
+/// `Rect` never touch the inner-right border.
+///
+/// Use whenever you would otherwise pass `Block::inner(area)` to
+/// `frame.render_widget(Paragraph::new(...), inner)`. The
+/// [`render_body`] and [`render_body_wrapped`] helpers do this for you;
+/// reach for `body_area` directly only when the caller needs the rect
+/// for custom rendering (e.g. List + Paragraph in the same block).
+pub fn body_area(block_area: Rect) -> Rect {
+    let inner_x = block_area.x.saturating_add(1);
+    let inner_y = block_area.y.saturating_add(1);
+    let inner_w = block_area.width.saturating_sub(2);
+    let inner_h = block_area.height.saturating_sub(2);
+    let pad_x = BODY_RIGHT_PAD.min(inner_w);
+    Rect::new(inner_x, inner_y, inner_w.saturating_sub(pad_x), inner_h)
+}
+
+/// Render the block, then render `lines` into [`body_area`] of that
+/// block. Lines render verbatim (no wrap) so long text is hard-truncated
+/// by ratatui. Use for dialogs whose content is composed of pre-formatted
+/// single-line rows (key-value lists, identity rows, glyph rows).
+///
+/// Caller is responsible for keeping individual lines within
+/// `body_area(block_area).width`; reach for [`render_body_wrapped`] when
+/// long prose may overflow and should wrap, or [`ellipsize`] when a
+/// single value (alias, image, path) must clip with `…`.
+#[allow(dead_code)]
+pub fn render_body<'a>(
+    frame: &mut Frame,
+    block_area: Rect,
+    block: Block<'a>,
+    lines: Vec<Line<'a>>,
+) {
+    frame.render_widget(block, block_area);
+    frame.render_widget(Paragraph::new(lines), body_area(block_area));
+}
+
+/// Render the block, then render `lines` into [`body_area`] of that
+/// block with word-wrapping enabled. Long prose wraps to additional
+/// rows; `trim: false` preserves leading indentation on continuation
+/// lines so multi-paragraph bodies keep their "  " prefix.
+///
+/// Use for confirm dialogs, help body text, and any block whose content
+/// includes full sentences. The 2-char right margin guarantees wrapped
+/// continuation lines never touch the inner border.
+pub fn render_body_wrapped<'a>(
+    frame: &mut Frame,
+    block_area: Rect,
+    block: Block<'a>,
+    lines: Vec<Line<'a>>,
+) {
+    use ratatui::widgets::Wrap;
+    frame.render_widget(block, block_area);
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        body_area(block_area),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Tab-level empty state (one card, no duplicate messages across panels)
+// ---------------------------------------------------------------------------
+
+/// Copy bundle for a tab's empty state. Each tab (Containers, Tunnels,
+/// Keys, and any future Hosts/empty surface) constructs one of these
+/// and hands it to [`render_tab_empty`], which composes the bordered
+/// card inside the existing outer block.
+///
+/// - `card_title` appears in the inner card's top border (e.g. "Containers").
+/// - `headline` is the one-line bold statement of what is missing.
+/// - `explainer` is a one or two sentence muted paragraph that names
+///   the cause (cache not yet populated, no key files, etc.). Wrap is
+///   handled internally; pass the unwrapped text.
+/// - `hints` is a list of `(key, action)` pairs rendered as keycap rows
+///   below the explainer. Empty slice renders no hints.
+pub struct TabEmpty<'a> {
+    pub card_title: &'a str,
+    pub headline: &'a str,
+    pub explainer: &'a str,
+    pub hints: &'a [(&'a str, &'a str)],
+}
+
+/// Render an inner empty-state card centred horizontally inside `area`.
+/// Caller is responsible for the outer block (e.g. the existing
+/// `main_block_line` with the row-count title) — that outer frame is
+/// preserved so the empty state reads as a state OF the tab, not as a
+/// replacement screen.
+///
+/// Width: clamped to `[40, 78]` columns so the card never hugs the
+/// outer border on a 200-col terminal and never overflows on a narrow
+/// one. When `area.width` is below 44 the card collapses to a single
+/// 2-space-indented line via [`render_empty_with_hint`] using the first
+/// hint as the affordance — graceful degradation without a new code
+/// path on the caller side.
+pub fn render_tab_empty(frame: &mut Frame, area: Rect, e: &TabEmpty) {
+    use unicode_width::UnicodeWidthStr;
+
+    // Graceful degradation on narrow terminals: drop the card chrome,
+    // render the headline as a single muted-with-hint line.
+    if area.width < 44 || area.height < 8 {
+        if let Some((key, action)) = e.hints.first() {
+            render_empty_with_hint(frame, area, e.headline, key, action);
+        } else {
+            render_empty(frame, area, e.headline);
+        }
+        return;
+    }
+
+    let body = body_area(area);
+    let card_w_max = 78u16.min(body.width.saturating_sub(2));
+    let card_w_min = 40u16;
+    let card_w = card_w_max.max(card_w_min).min(body.width);
+    let card_x = body.x + (body.width.saturating_sub(card_w)) / 2;
+
+    // Compose the card contents: blank, headline, blank, explainer
+    // (wrapped), blank, hints. Compute the row count so the card
+    // height matches the content exactly — no trailing whitespace.
+    let inner_card_w = card_w as usize;
+    let prose_w = inner_card_w.saturating_sub(4); // border (2) + 2-col padding
+    let mut card_lines: Vec<Line<'static>> = Vec::new();
+    section_open(&mut card_lines, e.card_title, inner_card_w);
+
+    // Open the body of the card with a blank inner row so the headline
+    // does not crowd the top border.
+    section_line(&mut card_lines, vec![Span::raw("")], inner_card_w);
+    section_line(
+        &mut card_lines,
+        vec![
+            Span::raw("  "),
+            Span::styled(e.headline.to_string(), theme::bold()),
+        ],
+        inner_card_w,
+    );
+
+    // Explainer: wrap with 2-space indent on every continuation row.
+    if !e.explainer.is_empty() {
+        section_line(&mut card_lines, vec![Span::raw("")], inner_card_w);
+        for row in wrap_indented(e.explainer, "  ", prose_w) {
+            section_line(
+                &mut card_lines,
+                vec![Span::styled(row, theme::muted())],
+                inner_card_w,
+            );
+        }
+    }
+
+    if !e.hints.is_empty() {
+        section_line(&mut card_lines, vec![Span::raw("")], inner_card_w);
+        // Right-align the keycap glyphs in a small column so every hint
+        // line reads as a single visual list, regardless of key length.
+        let key_w = e.hints.iter().map(|(k, _)| k.width()).max().unwrap_or(1);
+        for (key, action) in e.hints {
+            let key_pad = format!("  {:>width$}  ", key, width = key_w);
+            section_line(
+                &mut card_lines,
+                vec![
+                    Span::styled(key_pad, theme::accent_bold()),
+                    Span::styled(action.to_string(), theme::muted()),
+                ],
+                inner_card_w,
+            );
+        }
+    }
+
+    // Close the card with a blank inner row + the bottom border.
+    section_line(&mut card_lines, vec![Span::raw("")], inner_card_w);
+    section_close(&mut card_lines, inner_card_w);
+
+    // Centre vertically: leave equal blank rows above and below within
+    // the body area (≥ 0).
+    let card_h = card_lines.len() as u16;
+    let top_pad = body.height.saturating_sub(card_h) / 2;
+    let card_y = body.y + top_pad;
+    let card_rect = Rect::new(card_x, card_y, card_w, card_h.min(body.height));
+    frame.render_widget(Paragraph::new(card_lines), card_rect);
+}
+
+/// Render a bordered placeholder for the detail panel that sits next to
+/// an empty tab. Draws only the block frame — no text — so the caller
+/// can keep both panels visible without re-introducing the
+/// double-message bug. Use when the layout reserves a detail panel
+/// area but there are no rows to populate it.
+pub fn render_tab_empty_detail(frame: &mut Frame, detail_area: Rect) {
+    frame.render_widget(main_block_line(Line::default()), detail_area);
+}
+
+/// Word-wrap `text` to lines whose display width is at most
+/// `max_width`, prepending `indent` to **every** output line — the
+/// first and every continuation. Ratatui's `Wrap { trim: false }`
+/// preserves leading whitespace on the source line but emits
+/// continuation rows flush-left, which breaks the visual indent of a
+/// multi-line body paragraph (e.g. a long host-list preview wraps to a
+/// second row with no indent and no longer reads as a single block).
+///
+/// Words longer than `max_width - indent.width()` are hard-broken at
+/// the column boundary so the wrapper never loops. Empty input returns
+/// an empty vec; zero `max_width` returns an empty vec rather than
+/// looping. The breakable character is the ASCII space; tabs and
+/// non-breaking spaces are treated as part of a word.
+pub fn wrap_indented(text: &str, indent: &str, max_width: usize) -> Vec<String> {
+    use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+    if text.is_empty() || max_width == 0 {
+        return Vec::new();
+    }
+    let indent_w = indent.width();
+    if indent_w >= max_width {
+        // Indent eats the entire width — fall back to no indent so the
+        // caller still gets readable output rather than infinite recursion.
+        return wrap_indented(text, "", max_width);
+    }
+    let content_max = max_width - indent_w;
+    let mut out: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_w = 0usize;
+    let push_current = |out: &mut Vec<String>, current: &mut String, current_w: &mut usize| {
+        if !current.is_empty() {
+            out.push(format!("{}{}", indent, current));
+            current.clear();
+            *current_w = 0;
+        }
+    };
+    for word in text.split(' ') {
+        let word_w = word.width();
+        if word_w == 0 {
+            // empty word from a double space — emit a single space if room
+            if current_w < content_max {
+                current.push(' ');
+                current_w += 1;
+            }
+            continue;
+        }
+        // Word doesn't fit on the current line.
+        if current_w > 0 && current_w + 1 + word_w > content_max {
+            push_current(&mut out, &mut current, &mut current_w);
+        }
+        // Word longer than the available content width: hard-break.
+        if word_w > content_max {
+            push_current(&mut out, &mut current, &mut current_w);
+            let mut chunk = String::new();
+            let mut chunk_w = 0usize;
+            for ch in word.chars() {
+                let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+                if chunk_w + cw > content_max {
+                    out.push(format!("{}{}", indent, chunk));
+                    chunk.clear();
+                    chunk_w = 0;
+                }
+                chunk.push(ch);
+                chunk_w += cw;
+            }
+            if !chunk.is_empty() {
+                current = chunk;
+                current_w = chunk_w;
+            }
+            continue;
+        }
+        if current_w > 0 {
+            current.push(' ');
+            current_w += 1;
+        }
+        current.push_str(word);
+        current_w += word_w;
+    }
+    push_current(&mut out, &mut current, &mut current_w);
+    out
+}
+
+/// Build a `Vec<Line>` from `text` wrapped to `max_width` with `indent`
+/// applied to every continuation row. Each line carries `style`. Use
+/// instead of building a single long `Line::from(Span::styled(text,
+/// style))` and relying on `Wrap { trim: false }`, which only indents
+/// the first row.
+pub fn wrap_body_lines(
+    text: &str,
+    indent: &str,
+    max_width: usize,
+    style: ratatui::style::Style,
+) -> Vec<Line<'static>> {
+    wrap_indented(text, indent, max_width)
+        .into_iter()
+        .map(|s| Line::from(Span::styled(s, style)))
+        .collect()
+}
+
+/// Truncate `text` to at most `max_width` display columns. If the text
+/// is longer, the last column is replaced with `…` so the reader can
+/// tell that data was cut. `max_width` must be ≥ 1; the helper is a
+/// no-op when `text` already fits.
+///
+/// Use for single-line cells where wrapping is not an option (host
+/// alias columns, image names, path fragments). The single-character
+/// ellipsis `…` matches the convention used by `ssh -G` output and
+/// most modern terminal lists; do not introduce ASCII `...` for the
+/// same purpose — it consumes 3 display columns where `…` consumes 1.
+#[allow(dead_code)]
+pub fn ellipsize(text: &str, max_width: usize) -> String {
+    use unicode_width::UnicodeWidthStr;
+    if max_width == 0 {
+        return String::new();
+    }
+    if text.width() <= max_width {
+        return text.to_string();
+    }
+    if max_width == 1 {
+        return "…".to_string();
+    }
+    let mut out = String::new();
+    let mut width = 0usize;
+    for ch in text.chars() {
+        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + cw + 1 > max_width {
+            break;
+        }
+        width += cw;
+        out.push(ch);
+    }
+    out.push('…');
+    out
+}
+
 /// Right-arrow glyph for picker fields.
 pub const PICKER_ARROW: &str = "\u{25B8}";
 
@@ -496,6 +919,11 @@ pub const TOGGLE_HINT: &str = "\u{2423}";
 
 /// Down-pointing triangle for an expanded tree node (multi-config provider).
 pub const TREE_EXPANDED: &str = "\u{25BE}";
+
+/// Down-pointing triangle reused as a column-header descending-sort
+/// indicator (e.g. "LAST ▾"). Same glyph as `TREE_EXPANDED` but exposed
+/// under a sort-specific name so column headers don't grep as tree code.
+pub const SORT_DESC: &str = "\u{25BE}";
 
 /// Right-pointing triangle for a collapsed tree node (multi-config provider).
 pub const TREE_COLLAPSED: &str = "\u{25B8}";
@@ -615,6 +1043,56 @@ pub fn confirm_footer_destructive(yes_verb: &str, no_verb: &str) -> Footer {
 /// because the noun-verb pairing is more informative than a bare affirmative.
 pub fn discard_footer() -> Footer {
     confirm_footer_destructive("discard", "keep")
+}
+
+/// Render a centred destructive-confirm popup over whatever is on
+/// screen. Use for inline `pending_delete`-style confirms (deleting a
+/// tunnel rule from the tunnels overlay, removing a snippet from the
+/// picker, dropping a provider config) so the affordance reads as a
+/// modal popup with the rest of the design-system confirms (host
+/// delete, vault sign, container restart) instead of a footer-line
+/// prompt under the parent overlay. Footer renders the action-verb
+/// pair below the popup's bottom border.
+///
+/// `title` appears in the danger block's top border.
+/// `body_question` is the single-line question rendered with `theme::bold()`.
+/// `body_detail` is an optional muted second-row sentence; pass `""` to
+/// skip and let the popup collapse to a 5-row dialog.
+pub fn render_destructive_popup(
+    frame: &mut Frame,
+    title: &str,
+    body_question: &str,
+    body_detail: &str,
+    yes_verb: &str,
+    no_verb: &str,
+    app: &App,
+) {
+    let has_detail = !body_detail.is_empty();
+    // 52-col wide matches confirm_dialog (single-alias host delete).
+    // Height: border (2) + blank + question + (blank + detail) + blank = 6 or 8.
+    let height: u16 = if has_detail { 7 } else { 5 };
+    let area = super::centered_rect_fixed(56, height, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = danger_block(title);
+    let mut text: Vec<Line<'static>> = vec![
+        Line::from(""),
+        Line::from(Span::styled(format!("  {}", body_question), theme::bold())),
+    ];
+    if has_detail {
+        text.push(Line::from(""));
+        text.push(Line::from(Span::styled(
+            format!("  {}", body_detail),
+            theme::muted(),
+        )));
+    }
+    render_body_wrapped(frame, area, block, text);
+
+    let footer_area = render_overlay_footer(frame, area);
+    let footer = confirm_footer_destructive(yes_verb, no_verb).to_line();
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    spans.extend(footer.spans);
+    super::render_footer_with_status(frame, footer_area, spans, app);
 }
 
 /// Render the standard "Discard changes?" footer with prompt prefix.
@@ -1186,5 +1664,198 @@ mod tests {
         let text = footer_text(discard_footer());
         assert!(text.contains("discard"));
         assert!(text.contains("keep"));
+    }
+
+    #[test]
+    fn is_container_running_is_case_insensitive() {
+        assert!(is_container_running("running"));
+        assert!(is_container_running("Running"));
+        assert!(is_container_running("RUNNING"));
+        assert!(!is_container_running("exited"));
+        assert!(!is_container_running("paused"));
+        assert!(!is_container_running(""));
+    }
+
+    #[test]
+    fn parse_container_exit_code_extracts_docker_format() {
+        assert_eq!(
+            parse_container_exit_code("Exited (0) 2 minutes ago"),
+            Some(0)
+        );
+        assert_eq!(
+            parse_container_exit_code("Exited (137) just now"),
+            Some(137)
+        );
+        assert_eq!(parse_container_exit_code("Up 5 minutes"), None);
+        assert_eq!(parse_container_exit_code(""), None);
+        assert_eq!(parse_container_exit_code("Exited (abc) bad"), None);
+    }
+
+    #[test]
+    fn container_state_style_running_uses_online_icon() {
+        let (icon, _) = container_state_style("running", None, "", None, 0);
+        assert_eq!(icon, ICON_ONLINE);
+    }
+
+    #[test]
+    fn container_state_style_dead_uses_error_icon() {
+        let (icon, _) = container_state_style("dead", None, "", None, 0);
+        assert_eq!(icon, ICON_ERROR);
+    }
+
+    #[test]
+    fn container_state_style_paused_uses_paused_icon() {
+        let (icon, _) = container_state_style("paused", None, "", None, 0);
+        assert_eq!(icon, ICON_PAUSED);
+        let (icon, _) = container_state_style("restarting", None, "", None, 0);
+        assert_eq!(icon, ICON_PAUSED);
+    }
+
+    #[test]
+    fn container_state_style_clean_exit_uses_stopped_icon() {
+        let (icon, _) = container_state_style("exited", None, "Exited (0) ago", None, 0);
+        assert_eq!(icon, ICON_STOPPED);
+        // No exit code at all also reads as clean.
+        let (icon, _) = container_state_style("exited", None, "", None, 0);
+        assert_eq!(icon, ICON_STOPPED);
+    }
+
+    #[test]
+    fn container_state_style_nonzero_exit_uses_error_icon() {
+        let (icon, _) = container_state_style("exited", None, "Exited (137) ago", None, 0);
+        assert_eq!(icon, ICON_ERROR);
+        // Podman fallback path via inspect cache.
+        let (icon, _) = container_state_style("stopped", None, "", Some(1), 0);
+        assert_eq!(icon, ICON_ERROR);
+    }
+
+    #[test]
+    fn container_state_style_unknown_state_falls_back_to_stopped() {
+        let (icon, _) = container_state_style("created", None, "", None, 0);
+        assert_eq!(icon, ICON_STOPPED);
+        let (icon, _) = container_state_style("removing", None, "", None, 0);
+        assert_eq!(icon, ICON_STOPPED);
+    }
+
+    #[test]
+    fn container_state_style_running_with_unhealthy_uses_error_style() {
+        let (_, style) = container_state_style("running", Some("unhealthy"), "", None, 0);
+        // theme::error() in ANSI 16 mode is Red foreground.
+        assert!(style.fg.is_some());
+    }
+
+    #[test]
+    fn body_area_insets_block_border_plus_right_margin() {
+        let block_area = Rect::new(10, 5, 40, 12);
+        let body = body_area(block_area);
+        // Border (1) only on left, border (1) + BODY_RIGHT_PAD (2) on right.
+        assert_eq!(body.x, 11);
+        assert_eq!(body.width, 40 - 2 - BODY_RIGHT_PAD);
+        // Vertical: border only, no padding (block.inner equivalent).
+        assert_eq!(body.y, 6);
+        assert_eq!(body.height, 10);
+    }
+
+    #[test]
+    fn body_area_collapses_safely_in_tiny_blocks() {
+        // A 1x1 block has no room for margins; body_area must not panic
+        // and must return a zero-sized rect inside the bounds.
+        let body = body_area(Rect::new(0, 0, 1, 1));
+        assert_eq!(body.width, 0);
+        assert_eq!(body.height, 0);
+    }
+
+    #[test]
+    fn ellipsize_returns_text_unchanged_when_it_fits() {
+        assert_eq!(ellipsize("hello", 10), "hello");
+        assert_eq!(ellipsize("hello", 5), "hello");
+    }
+
+    #[test]
+    fn ellipsize_appends_single_glyph_when_text_overflows() {
+        assert_eq!(ellipsize("hello world", 8), "hello w…");
+    }
+
+    #[test]
+    fn ellipsize_handles_extreme_widths() {
+        assert_eq!(ellipsize("hello", 0), "");
+        assert_eq!(ellipsize("hello", 1), "…");
+        assert_eq!(ellipsize("", 5), "");
+    }
+
+    #[test]
+    fn wrap_indented_keeps_prefix_on_continuation_rows() {
+        let text = "alpha beta gamma delta epsilon zeta eta theta iota kappa";
+        let rows = wrap_indented(text, "  ", 18);
+        assert!(rows.len() > 1, "long text must wrap");
+        for row in &rows {
+            assert!(row.starts_with("  "), "every row keeps indent: {row:?}");
+            assert!(row.len() <= 18 + 2, "row exceeds budget: {row:?}");
+        }
+    }
+
+    #[test]
+    fn wrap_indented_hard_breaks_oversized_words() {
+        let text = "ohabsurdlylongwordthatdoesnotfit ok";
+        let rows = wrap_indented(text, "  ", 10);
+        assert!(rows.len() >= 2);
+        // Every row still carries the indent and stays within budget.
+        for row in &rows {
+            assert!(row.starts_with("  "));
+        }
+    }
+
+    #[test]
+    fn wrap_indented_returns_empty_for_zero_inputs() {
+        assert!(wrap_indented("", "  ", 10).is_empty());
+        assert!(wrap_indented("hi", "  ", 0).is_empty());
+    }
+
+    #[test]
+    fn tab_empty_falls_back_to_single_line_on_narrow_areas() {
+        // Below 44 cols wide, render_tab_empty should NOT panic — it
+        // should fall back to the single-line render_empty_with_hint
+        // path. Render to a tiny rect and assert no panic + content.
+        let backend = ratatui::backend::TestBackend::new(40, 6);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let e = TabEmpty {
+                    card_title: "X",
+                    headline: "Cache is empty.",
+                    explainer: "Nothing yet.",
+                    hints: &[("R", "refresh")],
+                };
+                render_tab_empty(frame, Rect::new(0, 0, 40, 6), &e);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn tab_empty_card_renders_on_wide_areas() {
+        let backend = ratatui::backend::TestBackend::new(100, 20);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let e = TabEmpty {
+                    card_title: "Containers",
+                    headline: "No containers cached yet.",
+                    explainer: "Containers are fetched per host on demand and cached locally.",
+                    hints: &[("Enter", "open a shell"), ("R", "refresh hosts")],
+                };
+                render_tab_empty(frame, Rect::new(0, 0, 100, 20), &e);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn ellipsize_respects_unicode_display_width() {
+        // CJK characters take 2 display columns each.
+        let s = "東京京都大阪";
+        // Six glyphs × 2 cols each = 12 cols. Budget 9 → fit 4 glyphs (8 cols) + ellipsis.
+        let out = ellipsize(s, 9);
+        assert!(out.ends_with('…'));
+        let inner = &out[..out.len() - '…'.len_utf8()];
+        assert!(unicode_width::UnicodeWidthStr::width(inner) <= 8);
     }
 }

@@ -72,9 +72,12 @@ fn clean_name(raw: &str) -> String {
 }
 
 /// True when the container is actively running (uses the `state` field
-/// docker/podman emit, not the human-readable `status` line).
+/// docker/podman emit, not the human-readable `status` line). Thin
+/// wrapper around the canonical `design::is_container_running` so this
+/// file's tests can keep their short call sites while the design layer
+/// owns the rule.
 fn is_running(state: &str) -> bool {
-    state.eq_ignore_ascii_case("running")
+    design::is_container_running(state)
 }
 
 /// Wall-clock seconds since Unix epoch. Demo mode uses the synthetic
@@ -600,25 +603,7 @@ fn state_glyph(
     inspect_exit_code: Option<i32>,
     spinner_tick: u64,
 ) -> (&'static str, ratatui::style::Style) {
-    if is_running(state) {
-        return match health {
-            Some("unhealthy") => (design::ICON_ONLINE, theme::error()),
-            Some("starting") => (design::ICON_ONLINE, theme::warning()),
-            _ => (design::ICON_ONLINE, theme::online_dot_pulsing(spinner_tick)),
-        };
-    }
-    match state {
-        "dead" => (design::ICON_ERROR, theme::error()),
-        "exited" | "stopped" => {
-            let exit_code = parse_exit_code_from_status(status).or(inspect_exit_code);
-            match exit_code {
-                Some(code) if code != 0 => (design::ICON_ERROR, theme::warning()),
-                _ => (design::ICON_STOPPED, theme::muted()),
-            }
-        }
-        "paused" | "restarting" => (design::ICON_PAUSED, theme::warning()),
-        _ => (design::ICON_STOPPED, theme::muted()),
-    }
+    design::container_state_style(state, health, status, inspect_exit_code, spinner_tick)
 }
 
 /// Detail panel width when the terminal is wide enough to render one.
@@ -734,22 +719,31 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
     // Sync freshness no longer surfaces in the list-block title; it
     // moves to the LIFECYCLE card on the detail panel where it is
     // tied to a specific container's last refresh.
-    let block_inner = block.inner(list_area);
-    frame.render_widget(block, list_area);
 
     if items.is_empty() {
-        design::render_empty(frame, block_inner, "No containers cached yet.");
+        // Empty state: render ONE centred TabEmpty card inside the list
+        // block (no second message in the detail area). The detail panel,
+        // when present, becomes a quiet bordered placeholder so the
+        // two-pane composition still reads as the Containers tab — just
+        // empty — instead of as a half-rendered screen.
+        frame.render_widget(block, list_area);
+        let hints = [("a", crate::messages::TAB_EMPTY_CONTAINERS_HINT_ADD)];
+        let empty = design::TabEmpty {
+            card_title: "Containers",
+            headline: crate::messages::TAB_EMPTY_CONTAINERS_HEADLINE,
+            explainer: crate::messages::TAB_EMPTY_CONTAINERS_EXPLAINER,
+            hints: &hints,
+        };
+        design::render_tab_empty(frame, list_area, &empty);
         if let Some(detail) = detail_area {
-            if detail.width >= DETAIL_RENDER_MIN {
-                render_detail_empty(frame, detail);
-            } else {
-                let block = design::main_block_line(Line::default());
-                frame.render_widget(block, detail);
-            }
+            design::render_tab_empty_detail(frame, detail);
         }
         render_footer(frame, footer_area, app);
         return;
     }
+
+    let block_inner = block.inner(list_area);
+    frame.render_widget(block, list_area);
 
     let inner = Rect {
         x: block_inner.x.saturating_add(1),
@@ -1567,11 +1561,7 @@ fn count_states(containers: &[crate::containers::ContainerInfo]) -> StateCounts 
 /// integer. Used by the FLEET / ATTENTION cards to flag non-zero exits
 /// without firing a per-container inspect.
 fn parse_exit_code_from_status(status: &str) -> Option<i32> {
-    let prefix = "Exited (";
-    let start = status.find(prefix)?;
-    let after = &status[start + prefix.len()..];
-    let end = after.find(')')?;
-    after[..end].parse().ok()
+    design::parse_container_exit_code(status)
 }
 
 /// True when the container exited with a non-zero code. First tries the
@@ -1637,11 +1627,6 @@ fn collect_inspect_signals(
         }
     }
     out
-}
-
-/// Detail-panel placeholder when there are no rows to select.
-fn render_detail_empty(frame: &mut Frame, area: Rect) {
-    design::render_empty(frame, area, "No containers cached yet.");
 }
 
 /// Compose the detail panel as a stack of section cards. Conditional cards
@@ -2233,7 +2218,7 @@ fn build_detail_lines(
             design::section_line(
                 &mut lines,
                 vec![
-                    Span::styled("  \u{25C9} ", theme::accent()),
+                    Span::styled(format!("  {} ", design::ICON_TARGET), theme::accent_bold()),
                     Span::styled(container_label, theme::bold()),
                 ],
                 box_width,

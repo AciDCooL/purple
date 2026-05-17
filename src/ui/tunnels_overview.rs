@@ -246,7 +246,7 @@ fn render_speed_cell(row: &TunnelRow) -> (String, ratatui::style::Style) {
     if row.current_bps > 0 {
         return (
             super::tunnels_format::format_bps(row.current_bps),
-            theme::accent_bold(),
+            theme::bold(),
         );
     }
     let label = if row.throughput_ready {
@@ -285,7 +285,7 @@ fn render_right_text(row: &TunnelRow, now: Instant) -> Vec<Span<'static>> {
     if row.current_bps > 0 {
         let bps = super::tunnels_format::format_bps(row.current_bps);
         vec![
-            Span::styled(bps, theme::accent_bold()),
+            Span::styled(bps, theme::bold()),
             Span::raw("   "),
             Span::styled(uptime, theme::muted()),
         ]
@@ -426,7 +426,7 @@ fn render_header(frame: &mut Frame, area: Rect, cols: &Columns, sort_mode: Tunne
         style,
     ));
     if recent_sort {
-        spans.push(Span::styled("\u{25BE}", style));
+        spans.push(Span::styled(design::SORT_DESC, style));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -442,9 +442,9 @@ fn render_row<'a>(
     // list uses for reachable hosts — `success()` is reserved for
     // positive action outcomes, not live-state indicators.
     let (status_glyph, status_style) = if row.is_active {
-        ("\u{25CF}", theme::online_dot_pulsing(spinner_tick))
+        (design::ICON_ONLINE, theme::online_dot_pulsing(spinner_tick))
     } else {
-        ("\u{25CB}", theme::muted())
+        (design::ICON_STOPPED, theme::muted())
     };
 
     let (speed_text, speed_style) = render_speed_cell(row);
@@ -589,7 +589,14 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
     frame.render_widget(block, list_block_area);
 
     if rows.is_empty() {
-        design::render_empty(frame, block_inner, "No tunnels.");
+        let hints = [("a", crate::messages::TAB_EMPTY_TUNNELS_HINT_ADD)];
+        let empty = design::TabEmpty {
+            card_title: "Tunnels",
+            headline: crate::messages::TAB_EMPTY_TUNNELS_HEADLINE,
+            explainer: crate::messages::TAB_EMPTY_TUNNELS_EXPLAINER,
+            hints: &hints,
+        };
+        design::render_tab_empty(frame, list_block_area, &empty);
         render_footer(frame, footer_area, app, &rows);
         return;
     }
@@ -776,9 +783,21 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: Rect, visible_count: us
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &mut App, rows: &[TunnelRow]) {
     if app.tunnels.pending_delete.is_some() {
-        let mut spans = vec![Span::styled(" Remove tunnel? ", theme::bold())];
-        spans.extend(design::confirm_footer_destructive("delete", "keep").into_spans());
-        super::render_footer_with_status(frame, area, spans, app);
+        // Destructive: render the centred popup so the affordance
+        // matches host delete and the other danger confirms instead of
+        // a footer prompt under the overview.
+        design::render_destructive_popup(
+            frame,
+            crate::messages::CONFIRM_TUNNEL_DELETE_TITLE,
+            crate::messages::CONFIRM_TUNNEL_DELETE_QUESTION,
+            crate::messages::CONFIRM_TUNNEL_DELETE_DETAIL,
+            "delete",
+            "keep",
+            app,
+        );
+        // Still render an empty footer so the row below the block does
+        // not bleed the parent screen's footer through the cleared row.
+        super::render_footer_with_status(frame, area, Vec::new(), app);
         return;
     }
 

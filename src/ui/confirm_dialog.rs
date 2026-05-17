@@ -52,8 +52,7 @@ pub fn render(frame: &mut Frame, app: &App, alias: &str) {
         )));
     }
 
-    let paragraph = Paragraph::new(text).block(block);
-    frame.render_widget(paragraph, area);
+    design::render_body_wrapped(frame, area, block, text);
 
     // Stakes test: deleting a host is destructive (config write, undo only
     // briefly via stack). Use action verbs both sides instead of generic
@@ -87,8 +86,7 @@ pub fn render_host_key_reset(frame: &mut Frame, _app: &App, hostname: &str) {
         )),
     ];
 
-    let paragraph = Paragraph::new(text).block(block);
-    frame.render_widget(paragraph, area);
+    design::render_body_wrapped(frame, area, block, text);
 
     // Stakes test: removing the host key invalidates trust. Use action verbs.
     let footer_area = design::render_overlay_footer(frame, area);
@@ -115,8 +113,7 @@ pub fn render_confirm_import(frame: &mut Frame, _app: &App, count: usize) {
         )),
     ];
 
-    let paragraph = Paragraph::new(text).block(block);
-    frame.render_widget(paragraph, area);
+    design::render_body_wrapped(frame, area, block, text);
 
     // Stakes test: importing is benign-but-material — adds hosts to config.
     // Action verbs make the choice clearer than generic yes/no.
@@ -186,8 +183,7 @@ pub fn render_confirm_purge_stale(
     ];
     text.extend(host_lines);
 
-    let paragraph = Paragraph::new(text).block(block);
-    frame.render_widget(paragraph, area);
+    design::render_body_wrapped(frame, area, block, text);
 
     // Stakes test: purge is destructive — removes stale hosts from config
     // (only undoable through the per-session undo stack). Action verbs.
@@ -252,8 +248,7 @@ pub fn render_key_push(frame: &mut Frame, app: &App, key_index: usize, aliases: 
     let mut text = vec![question, Line::from("")];
     text.extend(host_lines);
 
-    let paragraph = Paragraph::new(text).block(block);
-    frame.render_widget(paragraph, area);
+    design::render_body_wrapped(frame, area, block, text);
 
     let footer_area = design::render_overlay_footer(frame, area);
     let footer = design::confirm_footer_destructive("push", "keep").to_line();
@@ -270,23 +265,33 @@ pub fn render_confirm_vault_sign(frame: &mut Frame, _app: &App, signable: &[Stri
         .map(String::as_str)
         .collect();
     let preview_text = if count > preview_limit {
-        format!("  {} ... +{} more", shown.join(", "), count - preview_limit)
+        format!("{} ... +{} more", shown.join(", "), count - preview_limit)
     } else if count > 0 {
-        format!("  {}", shown.join(", "))
+        shown.join(", ")
     } else {
         String::new()
     };
 
-    // Height: border(2) + blank + question + blank + preview + blank + note = 9.
-    // Footer renders below the block.
-    let height = 9u16;
+    // Height grows with the wrapped preview row count so long host lists
+    // get their continuation rows visible inside the block. Fixed parts:
+    // top blank + question + blank + (preview rows) + blank + note = 5
+    // plus border (2) = 7 baseline; preview adds N-1 extra rows.
+    let area_base = super::centered_rect_fixed(72, 9, frame.area());
+    let preview_width = design::body_area(area_base).width as usize;
+    let preview_lines = if preview_text.is_empty() {
+        vec![Line::from("")]
+    } else {
+        design::wrap_body_lines(&preview_text, "  ", preview_width, theme::muted())
+    };
+    let extra_preview_rows = preview_lines.len().saturating_sub(1) as u16;
+    let height = 9u16 + extra_preview_rows;
     let area = super::centered_rect_fixed(72, height, frame.area());
 
     frame.render_widget(Clear, area);
 
     let block = design::overlay_block("Sign Vault SSH Certificates");
 
-    let text = vec![
+    let mut text = vec![
         Line::from(""),
         Line::from(Span::styled(
             format!(
@@ -297,16 +302,18 @@ pub fn render_confirm_vault_sign(frame: &mut Frame, _app: &App, signable: &[Stri
             theme::bold(),
         )),
         Line::from(""),
-        Line::from(Span::styled(preview_text, theme::muted())),
-        Line::from(""),
-        Line::from(Span::styled(
-            "  Hosts with a still-valid certificate are skipped.".to_string(),
-            theme::muted(),
-        )),
     ];
+    text.extend(preview_lines);
+    text.push(Line::from(""));
+    text.push(Line::from(Span::styled(
+        "  Hosts with a still-valid certificate are skipped.".to_string(),
+        theme::muted(),
+    )));
 
-    let paragraph = Paragraph::new(text).block(block);
-    frame.render_widget(paragraph, area);
+    // No wrap on the body — we pre-wrapped the preview row ourselves
+    // with consistent indent on every continuation row. Wrap-on would
+    // also work but would split the question line at the right edge.
+    design::render_body(frame, area, block, text);
 
     // Stakes test: bulk vault signing hits HashiCorp Vault, may take time
     // and is the canonical destructive/material confirm in purple. Use
@@ -537,8 +544,7 @@ pub fn render_welcome(
     text.push(Line::from(""));
     text.push(Line::from(""));
 
-    let paragraph = Paragraph::new(text).block(block);
-    frame.render_widget(paragraph, area);
+    design::render_body_wrapped(frame, area, block, text);
 }
 
 /// Compute the welcome dialog height and text line count for testing.

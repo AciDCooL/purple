@@ -85,7 +85,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             divider_y,
             &label,
             label_style,
-            theme::accent(),
+            theme::border_dim(),
         );
 
         let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
@@ -124,7 +124,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             preview_divider_y,
             " Preview ",
             theme::muted(),
-            theme::accent(),
+            theme::border_dim(),
         );
 
         let preview_y = preview_divider_y + 1;
