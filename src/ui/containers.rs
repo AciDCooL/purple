@@ -9,7 +9,7 @@ use crate::app::App;
 use crate::containers::truncate_str;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let state = match app.container_state.as_mut() {
+    let state = match app.container_session.as_mut() {
         Some(s) => s,
         None => return,
     };
@@ -202,7 +202,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .render_with_status(frame, footer_area, app);
 
     // Confirmation dialog for stop/restart
-    if let Some(ref confirm_state) = app.container_state {
+    if let Some(ref confirm_state) = app.container_session {
         if let Some((ref action, ref name, _)) = confirm_state.confirm_action {
             let verb = action.as_str();
             let display_name = truncate_str(name, 30);
@@ -236,7 +236,7 @@ mod tests {
 
     use super::design;
     use crate::SshConfigFile;
-    use crate::app::{App, ContainerState};
+    use crate::app::{App, ContainerSession};
 
     fn make_app() -> App {
         let config = SshConfigFile {
@@ -254,7 +254,7 @@ mod tests {
     #[test]
     fn render_noops_when_container_state_is_none() {
         let mut app = make_app();
-        assert!(app.container_state.is_none());
+        assert!(app.container_session.is_none());
         render_app(&mut app);
     }
 
@@ -262,8 +262,8 @@ mod tests {
         loading: bool,
         error: Option<String>,
         action_in_progress: Option<String>,
-    ) -> ContainerState {
-        ContainerState {
+    ) -> ContainerSession {
+        ContainerSession {
             alias: "test-host".to_string(),
             askpass: None,
             runtime: None,
@@ -285,21 +285,21 @@ mod tests {
     #[test]
     fn render_survives_empty_container_state() {
         let mut app = make_app();
-        app.container_state = Some(state_with(false, None, None));
+        app.container_session = Some(state_with(false, None, None));
         render_app(&mut app);
     }
 
     #[test]
     fn render_survives_loading_state() {
         let mut app = make_app();
-        app.container_state = Some(state_with(true, None, None));
+        app.container_session = Some(state_with(true, None, None));
         render_app(&mut app);
     }
 
     #[test]
     fn render_survives_error_state() {
         let mut app = make_app();
-        app.container_state = Some(state_with(
+        app.container_session = Some(state_with(
             false,
             Some("docker not running".to_string()),
             None,
@@ -310,7 +310,7 @@ mod tests {
     #[test]
     fn render_survives_action_in_progress_state() {
         let mut app = make_app();
-        app.container_state = Some(state_with(false, None, Some("stopping nginx".to_string())));
+        app.container_session = Some(state_with(false, None, Some("stopping nginx".to_string())));
         render_app(&mut app);
     }
 

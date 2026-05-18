@@ -433,11 +433,11 @@ mod tests {
     #[test]
     fn connect_fails_with_nonexistent_config() {
         // connect() should return an error when the config file doesn't exist and
-        // SSH cannot be spawned (or fails immediately). Hold PATH_LOCK so a
+        // SSH cannot be spawned (or fails immediately). Hold ENV_LOCK so a
         // sibling test that sets PATH to a non-existent directory cannot race
         // with the `Command::new("ssh")` spawn below and make it fail to find
         // the binary.
-        let _guard = crate::vault_ssh::tests::PATH_LOCK
+        let _guard = crate::vault_ssh::tests::ENV_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let result = connect(
@@ -456,8 +456,8 @@ mod tests {
     #[test]
     fn connect_with_tunnel_flag_does_not_panic() {
         // Verify has_active_tunnel=true adds the ClearAllForwardings arg without panic.
-        // PATH_LOCK guards the ssh spawn against PATH-mutating siblings.
-        let _guard = crate::vault_ssh::tests::PATH_LOCK
+        // ENV_LOCK guards the ssh spawn against PATH-mutating siblings.
+        let _guard = crate::vault_ssh::tests::ENV_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let result = connect(
@@ -473,9 +473,9 @@ mod tests {
 
     #[test]
     fn connect_captures_stderr() {
-        // SSH should produce some stderr output when failing. PATH_LOCK guards
+        // SSH should produce some stderr output when failing. ENV_LOCK guards
         // the ssh spawn against PATH-mutating siblings.
-        let _guard = crate::vault_ssh::tests::PATH_LOCK
+        let _guard = crate::vault_ssh::tests::ENV_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let result = connect(

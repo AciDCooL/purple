@@ -250,7 +250,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
             render_overlay(frame, app, anim, containers::render);
         }
         Screen::ConfirmVaultSign { signable } => {
-            let aliases: Vec<String> = signable.iter().map(|(a, _, _, _, _)| a.clone()).collect();
+            let aliases: Vec<String> = signable.iter().map(|t| t.alias.clone()).collect();
             render_overlay(frame, app, anim, move |frame, app| {
                 confirm_dialog::render_confirm_vault_sign(frame, app, &aliases)
             });

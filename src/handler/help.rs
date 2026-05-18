@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::{App, Screen};
 
-pub(super) fn handle_help(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
             app.ui.help_scroll = 0;
@@ -28,7 +28,7 @@ pub(super) fn handle_help(app: &mut App, key: KeyEvent) {
     }
 }
 
-pub(super) fn handle_key_list(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key_list_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('K') => {
             app.set_screen(Screen::HostList);
@@ -62,7 +62,7 @@ pub(super) fn handle_key_list(app: &mut App, key: KeyEvent) {
     }
 }
 
-pub(super) fn handle_key_detail(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key_detail_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.set_screen(Screen::KeyList);

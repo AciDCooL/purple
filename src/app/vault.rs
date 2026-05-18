@@ -24,6 +24,8 @@ pub struct VaultState {
     pub sign_thread: Option<std::thread::JoinHandle<()>>,
     /// Aliases currently being signed by the bulk V-key loop.
     pub sign_in_flight: Arc<Mutex<HashSet<String>>>,
+    /// Deferred config write from VaultSignAllDone (guarded while forms are open).
+    pub pending_config_write: bool,
 }
 
 impl Default for VaultState {
@@ -35,6 +37,7 @@ impl Default for VaultState {
             signing_cancel: None,
             sign_thread: None,
             sign_in_flight: Arc::new(Mutex::new(HashSet::new())),
+            pending_config_write: false,
         }
     }
 }

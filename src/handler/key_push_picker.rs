@@ -25,7 +25,7 @@ pub(crate) fn is_vault_host(host: &HostEntry) -> bool {
     crate::vault_ssh::has_purple_vault_context(host)
 }
 
-pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     let key_index = match app.screen {
         Screen::KeyPushPicker { key_index } => key_index,
         _ => return,
@@ -201,9 +201,9 @@ mod tests {
     #[test]
     fn space_toggles_selection_on_eligible_host() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
-        handle_keys(&mut app, k(KeyCode::Char(' ')));
+        handle_key(&mut app, k(KeyCode::Char(' ')));
         assert!(app.keys.push.selected.contains("h1"));
-        handle_keys(&mut app, k(KeyCode::Char(' ')));
+        handle_key(&mut app, k(KeyCode::Char(' ')));
         assert!(
             !app.keys.push.selected.contains("h1"),
             "second Space deselects"
@@ -217,7 +217,7 @@ mod tests {
         );
         // Cursor on h1 (vault).
         app.keys.push.list_state.select(Some(0));
-        handle_keys(&mut app, k(KeyCode::Char(' ')));
+        handle_key(&mut app, k(KeyCode::Char(' ')));
         assert!(!app.keys.push.selected.contains("h1"));
         assert!(app.status_center.toast.is_some(), "vault skip should toast");
     }
@@ -231,7 +231,7 @@ mod tests {
             "Host signed-prod\n  HostName 10.0.0.1\n  CertificateFile ~/.purple/certs/signed-prod-cert.pub\nHost plain\n  HostName 2.2.2.2\n",
         );
         app.keys.push.list_state.select(Some(0));
-        handle_keys(&mut app, k(KeyCode::Char(' ')));
+        handle_key(&mut app, k(KeyCode::Char(' ')));
         assert!(
             !app.keys.push.selected.contains("signed-prod"),
             "cert-file vault host must not be selectable"
@@ -244,7 +244,7 @@ mod tests {
         let mut app = make_app(
             "Host plain\n  HostName 1.1.1.1\nHost role-vault\n  HostName 2.2.2.2\n  # purple:vault-ssh ops/prod\nHost cert-vault\n  HostName 3.3.3.3\n  CertificateFile ~/.purple/certs/cert-vault-cert.pub\nHost plain2\n  HostName 4.4.4.4\n",
         );
-        handle_keys(&mut app, k(KeyCode::Char('a')));
+        handle_key(&mut app, k(KeyCode::Char('a')));
         assert!(app.keys.push.selected.contains("plain"));
         assert!(app.keys.push.selected.contains("plain2"));
         assert!(!app.keys.push.selected.contains("role-vault"));
@@ -256,7 +256,7 @@ mod tests {
         let mut app = make_app(
             "Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n  # purple:vault-ssh ops/prod\nHost h3\n  HostName 3.3.3.3\n",
         );
-        handle_keys(&mut app, k(KeyCode::Char('a')));
+        handle_key(&mut app, k(KeyCode::Char('a')));
         assert!(app.keys.push.selected.contains("h1"));
         assert!(
             !app.keys.push.selected.contains("h2"),
@@ -268,16 +268,16 @@ mod tests {
     #[test]
     fn a_again_clears_when_all_eligible_already_selected() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
-        handle_keys(&mut app, k(KeyCode::Char('a')));
+        handle_key(&mut app, k(KeyCode::Char('a')));
         assert_eq!(app.keys.push.selected.len(), 2);
-        handle_keys(&mut app, k(KeyCode::Char('a')));
+        handle_key(&mut app, k(KeyCode::Char('a')));
         assert!(app.keys.push.selected.is_empty());
     }
 
     #[test]
     fn enter_with_empty_selection_notifies_and_stays() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\n");
-        handle_keys(&mut app, k(KeyCode::Enter));
+        handle_key(&mut app, k(KeyCode::Enter));
         assert!(matches!(app.screen, Screen::KeyPushPicker { .. }));
         assert!(app.status_center.toast.is_some());
     }
@@ -287,7 +287,7 @@ mod tests {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
         app.keys.push.selected.insert("h1".to_string());
         app.keys.push.selected.insert("h2".to_string());
-        handle_keys(&mut app, k(KeyCode::Enter));
+        handle_key(&mut app, k(KeyCode::Enter));
         match app.screen {
             Screen::ConfirmKeyPush { .. } => {
                 assert_eq!(app.keys.push.committed.len(), 2);
@@ -306,7 +306,7 @@ mod tests {
         );
         app.keys.push.selected.insert("gamma".to_string());
         app.keys.push.selected.insert("alpha".to_string());
-        handle_keys(&mut app, k(KeyCode::Enter));
+        handle_key(&mut app, k(KeyCode::Enter));
         assert_eq!(app.keys.push.committed, vec!["alpha", "gamma"]);
     }
 
@@ -314,7 +314,7 @@ mod tests {
     fn esc_clears_selection_and_returns_to_host_list() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\n");
         app.keys.push.selected.insert("h1".to_string());
-        handle_keys(&mut app, k(KeyCode::Esc));
+        handle_key(&mut app, k(KeyCode::Esc));
         assert!(app.keys.push.selected.is_empty());
         assert!(matches!(app.screen, Screen::HostList));
     }
@@ -323,10 +323,10 @@ mod tests {
     fn down_moves_cursor_within_bounds() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
         app.keys.push.list_state.select(Some(0));
-        handle_keys(&mut app, k(KeyCode::Down));
+        handle_key(&mut app, k(KeyCode::Down));
         assert_eq!(app.keys.push.list_state.selected(), Some(1));
         // Down at end stays at end.
-        handle_keys(&mut app, k(KeyCode::Down));
+        handle_key(&mut app, k(KeyCode::Down));
         assert_eq!(app.keys.push.list_state.selected(), Some(1));
     }
 
@@ -334,9 +334,9 @@ mod tests {
     fn up_moves_cursor_clamped_to_zero() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
         app.keys.push.list_state.select(Some(1));
-        handle_keys(&mut app, k(KeyCode::Up));
+        handle_key(&mut app, k(KeyCode::Up));
         assert_eq!(app.keys.push.list_state.selected(), Some(0));
-        handle_keys(&mut app, k(KeyCode::Up));
+        handle_key(&mut app, k(KeyCode::Up));
         assert_eq!(app.keys.push.list_state.selected(), Some(0));
     }
 }

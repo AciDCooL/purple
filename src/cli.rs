@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 use crate::providers;
+use crate::providers::ProviderKind;
 use crate::snippet;
 use crate::ssh_config::model::{HostEntry, SshConfigFile};
 use crate::vault_ssh;
@@ -389,13 +390,15 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     std::process::exit(1);
                 }
             };
+            // provider is validated above, so from_str always returns Some here.
+            let kind = provider.parse::<ProviderKind>().ok();
 
             // --url, --no-verify-tls and --verify-tls are Proxmox-only; clear them for other providers
             let mut token = token;
             let mut url = url;
             let mut no_verify_tls = no_verify_tls;
             let mut verify_tls = verify_tls;
-            if provider != "proxmox" {
+            if kind != Some(ProviderKind::Proxmox) {
                 if url.is_some() {
                     eprintln!("{}", crate::messages::cli::WARN_URL_NOT_USED);
                     url = None;
@@ -410,23 +413,19 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 }
             }
             // --profile is AWS-only, --regions is AWS/Scaleway/GCP/Azure, --project is GCP-only
-            if provider != "aws" && profile.is_some() {
+            if kind != Some(ProviderKind::Aws) && profile.is_some() {
                 eprintln!("{}", crate::messages::cli::WARN_PROFILE_NOT_USED);
                 profile = None;
             }
-            if !matches!(
-                provider.as_str(),
-                "aws" | "scaleway" | "gcp" | "azure" | "oracle"
-            ) && regions.is_some()
-            {
+            if !kind.is_some_and(ProviderKind::accepts_cli_regions) && regions.is_some() {
                 eprintln!("{}", crate::messages::cli::WARN_REGIONS_NOT_USED);
                 regions = None;
             }
-            if provider != "gcp" && project.is_some() {
+            if kind != Some(ProviderKind::Gcp) && project.is_some() {
                 eprintln!("{}", crate::messages::cli::WARN_PROJECT_NOT_USED);
                 project = None;
             }
-            if provider != "oracle" && compartment.is_some() {
+            if kind != Some(ProviderKind::Oracle) && compartment.is_some() {
                 eprintln!("{}", crate::messages::cli::WARN_COMPARTMENT_NOT_USED);
                 compartment = None;
             }
@@ -438,7 +437,8 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
 
             if let Some(ref existing) = existing_section {
                 // URL fallback only applies to Proxmox (only provider that uses the url field)
-                if provider == "proxmox" && url.is_none() && !existing.url.is_empty() {
+                if kind == Some(ProviderKind::Proxmox) && url.is_none() && !existing.url.is_empty()
+                {
                     url = Some(existing.url.clone());
                 }
                 if token.is_none()
@@ -462,31 +462,37 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                     no_verify_tls = true;
                 }
                 // AWS: fall back to stored profile/regions
-                if provider == "aws" && profile.is_none() && !existing.profile.is_empty() {
+                if kind == Some(ProviderKind::Aws)
+                    && profile.is_none()
+                    && !existing.profile.is_empty()
+                {
                     profile = Some(existing.profile.clone());
                 }
-                // AWS/Scaleway/GCP/Azure: fall back to stored regions
-                if matches!(
-                    provider.as_str(),
-                    "aws" | "scaleway" | "gcp" | "azure" | "oracle"
-                ) && regions.is_none()
+                // Providers that accept --regions: fall back to stored regions
+                if kind.is_some_and(ProviderKind::accepts_cli_regions)
+                    && regions.is_none()
                     && !existing.regions.is_empty()
                 {
                     regions = Some(existing.regions.clone());
                 }
                 // GCP: fall back to stored project
-                if provider == "gcp" && project.is_none() && !existing.project.is_empty() {
+                if kind == Some(ProviderKind::Gcp)
+                    && project.is_none()
+                    && !existing.project.is_empty()
+                {
                     project = Some(existing.project.clone());
                 }
                 // Oracle: fall back to stored compartment
-                if provider == "oracle" && compartment.is_none() && !existing.compartment.is_empty()
+                if kind == Some(ProviderKind::Oracle)
+                    && compartment.is_none()
+                    && !existing.compartment.is_empty()
                 {
                     compartment = Some(existing.compartment.clone());
                 }
             }
 
             // Proxmox requires --url
-            if provider == "proxmox" {
+            if kind == Some(ProviderKind::Proxmox) {
                 if url.is_none() || url.as_deref().unwrap_or("").trim().is_empty() {
                     eprintln!("{}", crate::messages::cli::PROXMOX_URL_REQUIRED);
                     std::process::exit(1);
@@ -499,8 +505,8 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             }
 
             // AWS allows empty token when --profile is set
-            let aws_has_profile =
-                provider == "aws" && profile.as_deref().is_some_and(|p| !p.trim().is_empty());
+            let aws_has_profile = kind == Some(ProviderKind::Aws)
+                && profile.as_deref().is_some_and(|p| !p.trim().is_empty());
             let token = if aws_has_profile
                 && token.is_none()
                 && !token_stdin
@@ -517,10 +523,11 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 }
             };
 
-            if token.trim().is_empty() && !aws_has_profile && provider != "tailscale" {
-                if provider == "gcp" {
+            if token.trim().is_empty() && !aws_has_profile && kind != Some(ProviderKind::Tailscale)
+            {
+                if kind == Some(ProviderKind::Gcp) {
                     eprintln!("{}", crate::messages::cli::PROVIDER_TOKEN_REQUIRED_GCP);
-                } else if provider == "oracle" {
+                } else if kind == Some(ProviderKind::Oracle) {
                     eprintln!("{}", crate::messages::cli::PROVIDER_TOKEN_REQUIRED_ORACLE);
                 } else {
                     eprintln!(
@@ -577,7 +584,7 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             } else if let Some(ref existing) = existing_section {
                 existing.auto_sync
             } else {
-                !matches!(provider.as_str(), "proxmox")
+                kind != Some(ProviderKind::Proxmox)
             };
 
             let resolved_profile = profile.unwrap_or_default();
@@ -586,15 +593,15 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             let resolved_compartment = compartment.unwrap_or_default();
 
             // AWS/Scaleway/Azure requires at least one region/zone/subscription
-            if provider == "aws" && resolved_regions.trim().is_empty() {
+            if kind == Some(ProviderKind::Aws) && resolved_regions.trim().is_empty() {
                 eprintln!("{}", crate::messages::cli::AWS_REGIONS_REQUIRED);
                 std::process::exit(1);
             }
-            if provider == "scaleway" && resolved_regions.trim().is_empty() {
+            if kind == Some(ProviderKind::Scaleway) && resolved_regions.trim().is_empty() {
                 eprintln!("{}", crate::messages::cli::SCALEWAY_REGIONS_REQUIRED);
                 std::process::exit(1);
             }
-            if provider == "azure" {
+            if kind == Some(ProviderKind::Azure) {
                 if resolved_regions.trim().is_empty() {
                     eprintln!("{}", crate::messages::cli::AZURE_REGIONS_REQUIRED);
                     std::process::exit(1);
@@ -614,12 +621,12 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 }
             }
             // GCP requires --project
-            if provider == "gcp" && resolved_project.trim().is_empty() {
+            if kind == Some(ProviderKind::Gcp) && resolved_project.trim().is_empty() {
                 eprintln!("{}", crate::messages::cli::GCP_PROJECT_REQUIRED);
                 std::process::exit(1);
             }
             // Oracle requires --compartment
-            if provider == "oracle" && resolved_compartment.trim().is_empty() {
+            if kind == Some(ProviderKind::Oracle) && resolved_compartment.trim().is_empty() {
                 eprintln!("{}", crate::messages::cli::ORACLE_COMPARTMENT_REQUIRED);
                 std::process::exit(1);
             }

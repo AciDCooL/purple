@@ -77,6 +77,16 @@ pub struct UiSelection {
     pub region_picker: RegionPickerState,
     pub help_scroll: u16,
     pub detail_scroll: u16,
+    /// Set by handler, consumed by AnimationState to trigger detail panel transition.
+    pub detail_toggle_pending: bool,
+    /// Tracks when the welcome screen was opened to auto-dismiss it.
+    pub welcome_opened: Option<std::time::Instant>,
+    /// Set once the first time Esc-on-empty-list hint is shown per process.
+    pub esc_quit_hint_shown: bool,
+    /// Welcome-screen heuristic: number of known hosts at last render.
+    pub known_hosts_count: usize,
+    /// Pending SSH dispatch queued by connect actions; consumed by the event loop.
+    pub pending_connect: Option<(String, Option<String>)>,
 }
 
 impl UiSelection {

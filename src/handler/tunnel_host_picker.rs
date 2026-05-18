@@ -45,7 +45,7 @@ pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
         .collect()
 }
 
-pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     let total = filtered_hosts(app).len();
     match key.code {
         KeyCode::Esc => close(app),

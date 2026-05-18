@@ -4,9 +4,8 @@ use std::sync::mpsc;
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, HostForm, Screen};
+use crate::app::{App, Screen};
 use crate::event::AppEvent;
-use crate::ssh_config::model::HostEntry;
 
 mod bulk_tag_editor;
 mod confirm;
@@ -34,58 +33,12 @@ mod theme_picker;
 mod tunnel;
 pub(crate) mod tunnel_host_picker;
 mod tunnels_overview;
+mod welcome;
 mod whats_new;
 
+pub use confirm::{ConfirmAction, route_confirm_key};
 pub(crate) use provider::zone_data_for;
 pub use sync::spawn_provider_sync;
-
-/// Returns true when every host in `host_addrs` has no per-host Vault address
-/// and the process env also has no valid `VAULT_ADDR`. Extracted as a pure
-/// function so the V-key pre-check can be unit tested without env mutation.
-pub(super) fn vault_addr_missing(
-    host_addrs: &[Option<&str>],
-    env_vault_addr: Option<&str>,
-) -> bool {
-    let env_ok = env_vault_addr
-        .map(crate::vault_ssh::is_valid_vault_addr)
-        .unwrap_or(false);
-    if env_ok || host_addrs.is_empty() {
-        return false;
-    }
-    host_addrs.iter().all(|a| a.is_none())
-}
-
-/// Result of routing a confirm-dialog key event.
-///
-/// Confirm dialogs accept exactly three classes of keys:
-/// - `Yes`: y / Y
-/// - `No`: n / N / Esc
-/// - `Ignored`: anything else (must NOT change app state)
-///
-/// **Critical safety invariant**: a `_ =>` catch-all in a confirm handler
-/// that transitions screen state is forbidden. A misplaced keypress (e.g. a
-/// fat-fingered key next to `y` like `t` or `u`) must not silently cancel a
-/// destructive operation. Use [`route_confirm_key`] in every confirm handler
-/// to enforce the contract. The CI script enforces this via grep.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConfirmAction {
-    Yes,
-    No,
-    Ignored,
-}
-
-/// Single source of truth for confirm-dialog key routing.
-///
-/// Maps key events to [`ConfirmAction`]. Use this in every confirm handler
-/// instead of writing ad-hoc match arms. Other key codes are explicitly
-/// `Ignored`, never silently cancel.
-pub fn route_confirm_key(key: KeyEvent) -> ConfirmAction {
-    match key.code {
-        KeyCode::Char('y') | KeyCode::Char('Y') => ConfirmAction::Yes,
-        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => ConfirmAction::No,
-        _ => ConfirmAction::Ignored,
-    }
-}
 
 /// Handle a key event based on the current screen.
 pub fn handle_key_event(
@@ -108,7 +61,7 @@ pub fn handle_key_event(
                 }
             }
             app.snippets.output = None;
-            app.screen = Screen::HostList;
+            app.set_screen(Screen::HostList);
             return Ok(());
         }
         if let Some(ref cancel) = app.vault.signing_cancel {
@@ -120,269 +73,53 @@ pub fn handle_key_event(
 
     // Jump intercept
     if app.jump.is_some() {
-        jump::handle_jump(app, key, events_tx);
+        jump::handle_key(app, key, events_tx);
         return Ok(());
     }
 
     match &app.screen {
-        Screen::HostList => {
-            match app.top_page {
-                crate::app::TopPage::Tunnels => tunnels_overview::handle_keys(app, key),
-                crate::app::TopPage::Containers => {
-                    containers_overview::handle_keys(app, key, events_tx);
-                }
-                crate::app::TopPage::Keys => keys_overview::handle_keys(app, key),
-                crate::app::TopPage::Hosts => {
-                    if app.search.query.is_some() {
-                        host_list::handle_host_list_search(app, key, events_tx);
-                    } else {
-                        host_list::handle_host_list(app, key, events_tx);
-                    }
-                }
-            }
-            // Containers tab data load: every key event that lands on
-            // the tab triggers three lazy refreshes for the row under
-            // the cursor: `docker inspect` (per-container, 30s TTL),
-            // `docker logs --tail` for the LOGS card (same TTL), and
-            // `docker ps` for the host listing (per-host, 30s TTL).
-            // All three respect demo mode and shutdown internally.
-            if matches!(app.top_page, crate::app::TopPage::Containers)
-                && matches!(app.screen, Screen::HostList)
-            {
-                containers_overview::ensure_inspect_for_selected(app, events_tx);
-                containers_overview::ensure_logs_for_selected(app, events_tx);
-                containers_overview::ensure_list_for_selected_host(app, events_tx);
-                containers_overview::ensure_inspect_for_host_header(app, events_tx);
-            }
-        }
-        Screen::AddHost | Screen::EditHost { .. } => host_form::handle_form(app, key),
-        Screen::ConfirmDelete { .. } => confirm::handle_confirm_delete(app, key),
-        Screen::Help { .. } => help::handle_help(app, key),
-        Screen::KeyList => help::handle_key_list(app, key),
-        Screen::KeyDetail { .. } => help::handle_key_detail(app, key),
-        Screen::KeyPushPicker { .. } => key_push_picker::handle_keys(app, key),
-        Screen::ConfirmKeyPush { .. } => confirm::handle_confirm_key_push(app, key, events_tx),
-        Screen::HostDetail { .. } => host_detail::handle_host_detail(app, key),
-        Screen::TagPicker => tag_picker::handle_tag_picker_screen(app, key),
-        Screen::BulkTagEditor => bulk_tag_editor::handle_bulk_tag_editor_screen(app, key),
-        Screen::ThemePicker => theme_picker::handle_theme_picker(app, key),
-        Screen::Providers => provider::handle_provider_list(app, key, events_tx),
-        Screen::ProviderForm { .. } => provider::handle_provider_form(app, key, events_tx),
+        Screen::HostList => host_list::handle_key(app, key, events_tx),
+        Screen::AddHost | Screen::EditHost { .. } => host_form::handle_key(app, key),
+        Screen::ConfirmDelete { .. } => confirm::handle_delete_key(app, key),
+        Screen::Help { .. } => help::handle_key(app, key),
+        Screen::KeyList => help::handle_key_list_key(app, key),
+        Screen::KeyDetail { .. } => help::handle_key_detail_key(app, key),
+        Screen::KeyPushPicker { .. } => key_push_picker::handle_key(app, key),
+        Screen::ConfirmKeyPush { .. } => confirm::handle_key_push_key(app, key, events_tx),
+        Screen::HostDetail { .. } => host_detail::handle_key(app, key),
+        Screen::TagPicker => tag_picker::handle_key(app, key),
+        Screen::BulkTagEditor => bulk_tag_editor::handle_key(app, key),
+        Screen::ThemePicker => theme_picker::handle_key(app, key),
+        Screen::Providers => provider::handle_provider_list_key(app, key, events_tx),
+        Screen::ProviderForm { .. } => provider::handle_provider_form_key(app, key, events_tx),
         Screen::ProviderLabelMigration { .. } => {
-            provider::handle_label_migration(app, key, events_tx)
+            provider::handle_label_migration_key(app, key, events_tx)
         }
-        Screen::TunnelList { .. } => tunnel::handle_tunnel_list(app, key),
-        Screen::TunnelForm { .. } => tunnel::handle_tunnel_form(app, key),
-        Screen::TunnelHostPicker => tunnel_host_picker::handle_keys(app, key),
-        Screen::ContainerHostPicker => container_host_picker::handle_keys(app, key, events_tx),
-        Screen::SnippetPicker { .. } => snippet::handle_snippet_picker(app, key, events_tx),
-        Screen::SnippetForm { .. } => snippet::handle_snippet_form(app, key),
-        Screen::SnippetOutput { .. } => snippet::handle_snippet_output(app, key),
-        Screen::SnippetParamForm { .. } => snippet::handle_snippet_param_form(app, key, events_tx),
-        Screen::ConfirmHostKeyReset { .. } => confirm::handle_confirm_host_key_reset(app, key),
-        Screen::ConfirmVaultSign { .. } => confirm::handle_confirm_vault_sign(app, key, events_tx),
-        Screen::ConfirmImport { .. } => match route_confirm_key(key) {
-            ConfirmAction::Yes => {
-                app.screen = Screen::HostList;
-                execute_known_hosts_import(app);
-            }
-            ConfirmAction::No => {
-                app.screen = Screen::HostList;
-            }
-            ConfirmAction::Ignored => {}
-        },
-        Screen::ConfirmPurgeStale { provider: p, .. } => {
-            let provider = p.clone();
-            let return_screen = if provider.is_some() {
-                Screen::Providers
-            } else {
-                Screen::HostList
-            };
-            match route_confirm_key(key) {
-                ConfirmAction::Yes => {
-                    execute_purge_stale(app, provider.as_deref());
-                    app.screen = return_screen;
-                }
-                ConfirmAction::No => {
-                    app.screen = return_screen;
-                }
-                ConfirmAction::Ignored => {}
-            }
-        }
-        Screen::FileBrowser { .. } => file_browser::handle_file_browser(app, key, events_tx),
-        Screen::Containers { .. } => containers::handle_containers(app, key, events_tx)?,
-        Screen::ContainerLogs { .. } => container_logs::handle_keys(app, key, events_tx),
-        Screen::ConfirmContainerRestart { .. } => {
-            confirm::handle_confirm_container_restart(app, key)
-        }
-        Screen::ConfirmContainerStop { .. } => confirm::handle_confirm_container_stop(app, key),
-        Screen::ContainerExecPrompt { .. } => container_exec_prompt::handle_keys(app, key),
-        Screen::ConfirmStackRestart { .. } => confirm::handle_confirm_stack_restart(app, key),
-        Screen::ConfirmHostRestartAll { .. } => confirm::handle_confirm_host_restart_all(app, key),
-        Screen::ConfirmHostStopAll { .. } => confirm::handle_confirm_host_stop_all(app, key),
-        Screen::Welcome {
-            known_hosts_count, ..
-        } => {
-            let known_hosts_count = *known_hosts_count;
-            // Closing Welcome marks the first launch as complete. Seed
-            // last_seen_version so the next launch compares against the
-            // current release instead of triggering the "upgraded" flow.
-            let version = env!("CARGO_PKG_VERSION");
-            if let Err(e) = crate::preferences::save_last_seen_version(version) {
-                log::warn!("[purple] failed to seed last_seen_version on welcome close: {e}");
-            }
-            if key.code == KeyCode::Char('?') {
-                app.screen = Screen::Help {
-                    return_screen: Box::new(Screen::HostList),
-                };
-            } else if key.code == KeyCode::Char('I') && known_hosts_count > 0 {
-                app.screen = Screen::HostList;
-                execute_known_hosts_import(app);
-            } else {
-                app.screen = Screen::HostList;
-            }
-        }
-        Screen::WhatsNew(_) => whats_new::handle_whats_new(app, key),
+        Screen::TunnelList { .. } => tunnel::handle_tunnel_list_key(app, key),
+        Screen::TunnelForm { .. } => tunnel::handle_tunnel_form_key(app, key),
+        Screen::TunnelHostPicker => tunnel_host_picker::handle_key(app, key),
+        Screen::ContainerHostPicker => container_host_picker::handle_key(app, key, events_tx),
+        Screen::SnippetPicker { .. } => snippet::handle_picker_key(app, key, events_tx),
+        Screen::SnippetForm { .. } => snippet::handle_form_key(app, key),
+        Screen::SnippetOutput { .. } => snippet::handle_output_key(app, key),
+        Screen::SnippetParamForm { .. } => snippet::handle_param_form_key(app, key, events_tx),
+        Screen::ConfirmHostKeyReset { .. } => confirm::handle_host_key_reset_key(app, key),
+        Screen::ConfirmVaultSign { .. } => confirm::handle_vault_sign_key(app, key, events_tx),
+        Screen::ConfirmImport { .. } => confirm::handle_import_key(app, key),
+        Screen::ConfirmPurgeStale { .. } => confirm::handle_purge_stale_key(app, key),
+        Screen::FileBrowser { .. } => file_browser::handle_key(app, key, events_tx),
+        Screen::Containers { .. } => containers::handle_key(app, key, events_tx)?,
+        Screen::ContainerLogs { .. } => container_logs::handle_key(app, key, events_tx),
+        Screen::ConfirmContainerRestart { .. } => confirm::handle_container_restart_key(app, key),
+        Screen::ConfirmContainerStop { .. } => confirm::handle_container_stop_key(app, key),
+        Screen::ContainerExecPrompt { .. } => container_exec_prompt::handle_key(app, key),
+        Screen::ConfirmStackRestart { .. } => confirm::handle_stack_restart_key(app, key),
+        Screen::ConfirmHostRestartAll { .. } => confirm::handle_host_restart_all_key(app, key),
+        Screen::ConfirmHostStopAll { .. } => confirm::handle_host_stop_all_key(app, key),
+        Screen::Welcome { .. } => welcome::handle_key(app, key),
+        Screen::WhatsNew(_) => whats_new::handle_key(app, key),
     }
     Ok(())
-}
-
-/// Run known_hosts import and set status. Used by both ConfirmImport and Welcome handlers.
-fn execute_known_hosts_import(app: &mut App) {
-    let config_backup = app.hosts_state.ssh_config.clone();
-    match crate::import::import_from_known_hosts(
-        &mut app.hosts_state.ssh_config,
-        Some("known_hosts"),
-    ) {
-        Ok((imported, skipped, _, _)) => {
-            if imported > 0 {
-                if let Err(e) = app.hosts_state.ssh_config.write() {
-                    app.hosts_state.ssh_config = config_backup;
-                    app.notify_error(crate::messages::failed_to_save(&e));
-                    return;
-                }
-                app.reload_hosts();
-                app.notify(crate::messages::imported_hosts(imported, skipped));
-            } else {
-                app.notify(crate::messages::all_hosts_exist(skipped));
-            }
-            app.known_hosts_count = 0;
-        }
-        Err(e) => {
-            app.notify_error(e);
-        }
-    }
-}
-
-fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
-    let stale = app.hosts_state.ssh_config.stale_hosts();
-    if stale.is_empty() {
-        return;
-    }
-    // Filter by provider if specified
-    let targets: Vec<(String, u64)> = if let Some(prov) = provider {
-        stale
-            .into_iter()
-            .filter(|(alias, _)| {
-                app.hosts_state
-                    .ssh_config
-                    .host_entries()
-                    .iter()
-                    .any(|e| e.alias == *alias && e.provider.as_deref() == Some(prov))
-            })
-            .collect()
-    } else {
-        stale
-    };
-    if targets.is_empty() {
-        return;
-    }
-    let config_backup = app.hosts_state.ssh_config.clone();
-    let count = targets.len();
-    for (alias, _) in &targets {
-        app.hosts_state.ssh_config.delete_host(alias);
-    }
-    if let Err(e) = app.hosts_state.ssh_config.write() {
-        app.hosts_state.ssh_config = config_backup;
-        app.notify_error(crate::messages::failed_to_save(&e));
-        return;
-    }
-    // Kill active tunnels only after successful write (no rollback needed)
-    for (alias, _) in &targets {
-        if let Some(mut tunnel) = app.tunnels.active.remove(alias) {
-            let _ = tunnel.child.kill();
-            let _ = tunnel.child.wait();
-        }
-    }
-    app.hosts_state.undo_stack.clear();
-    app.update_last_modified();
-    app.reload_hosts();
-    let msg = if let Some(prov) = provider {
-        let display = crate::providers::provider_display_name(prov);
-        format!(
-            "Removed {} stale {} host{}.",
-            count,
-            display,
-            if count == 1 { "" } else { "s" }
-        )
-    } else {
-        format!(
-            "Removed {} stale host{}.",
-            count,
-            if count == 1 { "" } else { "s" }
-        )
-    };
-    app.notify(msg);
-}
-
-/// Build a provider hint clause for stale host messages, e.g. "Gone from DigitalOcean".
-/// Returned without surrounding whitespace or trailing punctuation so the
-/// caller composes the final sentence via `messages::stale_host`.
-pub(super) fn stale_provider_hint(host: &crate::ssh_config::model::HostEntry) -> String {
-    host.provider
-        .as_ref()
-        .map(|p| format!("Gone from {}", crate::providers::provider_display_name(p)))
-        .unwrap_or_default()
-}
-
-/// Open the edit form for `host`. Returns `true` if the form was opened,
-/// `false` if the host is from an include file (status message set instead).
-pub(super) fn open_edit_form(app: &mut App, host: HostEntry) -> bool {
-    if let Some(ref source) = host.source_file {
-        app.notify_error(crate::messages::included_host_lives_in(
-            &host.alias,
-            &source.display(),
-        ));
-        return false;
-    }
-    let stale_hint = host.stale.is_some().then(|| stale_provider_hint(&host));
-    // Load raw entry (without pattern inheritance) so inherited values are not
-    // shown as editable own values. Compute inherited hints separately.
-    let raw = match app.hosts_state.ssh_config.raw_host_entry(&host.alias) {
-        Some(entry) => entry,
-        None => {
-            app.notify_warning(crate::messages::HOST_NOT_FOUND_IN_CONFIG);
-            return false;
-        }
-    };
-    let inherited = app.hosts_state.ssh_config.inherited_hints(&host.alias);
-    app.forms.host = HostForm::from_entry(&raw, inherited);
-    if let Some(hint) = stale_hint {
-        app.notify_warning(crate::messages::stale_host(&hint));
-    }
-    app.screen = Screen::EditHost { alias: host.alias };
-    app.capture_form_mtime();
-    app.capture_form_baseline();
-    true
-}
-
-/// After a picker selection, try to auto-submit the host form if all
-/// required fields are filled. Lives at the handler level so picker
-/// submodules do not need a reverse dependency on host_form.
-pub(super) fn try_auto_submit_after_picker(app: &mut App) {
-    if !app.forms.host.alias.is_empty() && !app.forms.host.hostname.is_empty() {
-        host_form::submit_form(app);
-    }
 }
 
 #[cfg(test)]

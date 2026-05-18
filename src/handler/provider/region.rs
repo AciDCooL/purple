@@ -1,6 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::{App, Screen};
+use crate::providers::ProviderKind;
 
 type ZoneList = &'static [(&'static str, &'static str)];
 type ZoneGroups = &'static [(&'static str, usize, usize)];
@@ -32,36 +33,45 @@ pub(crate) fn rebuild_regions_string(
     ordered.join(",")
 }
 
-/// Return the zone/region data for a provider (aws or scaleway).
+/// Return the zone/region data for a provider. Empty pair when the
+/// provider has no region picker configured. Adding a new `ProviderKind`
+/// variant forces a compile error here so the dispatch stays exhaustive.
 pub(crate) fn zone_data_for(provider: &str) -> (ZoneList, ZoneGroups) {
-    match provider {
-        "scaleway" => (
+    let Ok(kind) = provider.parse::<ProviderKind>() else {
+        return (&[], &[]);
+    };
+    match kind {
+        ProviderKind::Scaleway => (
             crate::providers::scaleway::SCW_ZONES,
             crate::providers::scaleway::SCW_ZONE_GROUPS,
         ),
-        "aws" => (
+        ProviderKind::Aws => (
             crate::providers::aws::AWS_REGIONS,
             crate::providers::aws::AWS_REGION_GROUPS,
         ),
-        "gcp" => (
+        ProviderKind::Gcp => (
             crate::providers::gcp::GCP_ZONES,
             crate::providers::gcp::GCP_ZONE_GROUPS,
         ),
-        "oracle" => (
+        ProviderKind::Oracle => (
             crate::providers::oracle::OCI_REGIONS,
             crate::providers::oracle::OCI_REGION_GROUPS,
         ),
-        "ovh" => (
+        ProviderKind::Ovh => (
             crate::providers::ovh::OVH_ENDPOINTS,
             crate::providers::ovh::OVH_ENDPOINT_GROUPS,
         ),
-        _ => {
-            debug_assert!(
-                false,
-                "zone_data_for called for unsupported provider: {provider}"
-            );
-            (&[], &[])
-        }
+        ProviderKind::Azure
+        | ProviderKind::DigitalOcean
+        | ProviderKind::Hetzner
+        | ProviderKind::I3d
+        | ProviderKind::Leaseweb
+        | ProviderKind::Linode
+        | ProviderKind::Proxmox
+        | ProviderKind::Tailscale
+        | ProviderKind::Transip
+        | ProviderKind::UpCloud
+        | ProviderKind::Vultr => (&[], &[]),
     }
 }
 
@@ -70,6 +80,7 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
         Screen::ProviderForm { id } => id.provider.clone(),
         _ => return,
     };
+    let kind = provider_name.parse::<ProviderKind>().ok();
     let rows = region_picker_rows(&provider_name);
     let total = rows.len();
 
@@ -83,9 +94,9 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let zone_label = if matches!(provider_name.as_str(), "scaleway" | "gcp") {
+    let zone_label = if matches!(kind, Some(ProviderKind::Scaleway) | Some(ProviderKind::Gcp)) {
         "zone"
-    } else if provider_name == "ovh" {
+    } else if kind == Some(ProviderKind::Ovh) {
         "endpoint"
     } else {
         "region"
@@ -105,7 +116,7 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
             // For single-select providers (OVH): Enter on an item selects it
             // exclusively and closes. For multi-select: Enter confirms current
             // selection (same as Esc).
-            if provider_name == "ovh" {
+            if kind == Some(ProviderKind::Ovh) {
                 let cursor = app.ui.region_picker.cursor;
                 if let Some(Some(code)) = rows.get(cursor) {
                     selected.clear();

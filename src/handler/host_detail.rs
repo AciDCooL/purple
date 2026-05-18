@@ -72,7 +72,7 @@ pub(super) fn handle_tag_input(app: &mut App, key: KeyEvent) {
     }
 }
 
-pub(super) fn handle_host_detail(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     let index = match app.screen {
         Screen::HostDetail { index } => index,
         _ => return,
@@ -89,13 +89,13 @@ pub(super) fn handle_host_detail(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('e') => {
             if let Some(host) = app.hosts_state.list.get(index).cloned() {
-                super::open_edit_form(app, host);
+                super::host_form::open_edit_form(app, host);
             }
         }
         KeyCode::Char('T') => {
             if let Some(host) = app.hosts_state.list.get(index) {
                 let stale_hint = if host.stale.is_some() {
-                    Some(super::stale_provider_hint(host))
+                    Some(super::host_list::stale_provider_hint(host))
                 } else {
                     None
                 };
@@ -114,7 +114,7 @@ pub(super) fn handle_host_detail(app: &mut App, key: KeyEvent) {
         KeyCode::Char('r') => {
             if let Some(host) = app.hosts_state.list.get(index) {
                 let stale_hint = if host.stale.is_some() {
-                    Some(super::stale_provider_hint(host))
+                    Some(super::host_list::stale_provider_hint(host))
                 } else {
                     None
                 };

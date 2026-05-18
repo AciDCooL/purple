@@ -65,7 +65,7 @@ pub fn compute_detail_info(
             || host.provider.is_some(),
         has_provider_meta: !host.provider_meta.is_empty(),
         has_tunnels: host.tunnel_count > 0,
-        has_containers: false, // requires app.container_cache, not testable here
+        has_containers: false, // requires app.container_state.cache, not testable here
     }
 }
 
@@ -218,119 +218,139 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    // Header card: alias as title, then user@host:port + status line
-    {
-        section_open(&mut lines, &host.alias.clone(), box_width);
+    render_header(&mut lines, app, host, box_width, spinner_tick);
+    render_connection(&mut lines, app, host, box_width, max_value_width);
+    render_activity(&mut lines, app, host, box_width, max_value_width);
+    render_route(&mut lines, app, host, box_width);
+    render_tags(&mut lines, host, box_width);
+    render_provider_metadata(&mut lines, host, box_width, max_value_width);
+    render_vault_cert(&mut lines, app, host, box_width, max_value_width);
+    render_tunnels(&mut lines, app, host, box_width);
+    render_snippets(&mut lines, app, box_width);
+    render_containers(&mut lines, app, host, box_width, max_value_width);
+    render_pattern_matches(&mut lines, app, host, box_width, max_value_width);
+    render_source(&mut lines, host, box_width, max_value_width);
 
-        let user_display = host.user.as_str();
-        let port_display = host.port;
-        let host_addr = host.hostname.as_str();
-        let addr_str = if !user_display.is_empty() && !host_addr.is_empty() {
-            format!("{}@{}:{}", user_display, host_addr, port_display)
-        } else if !host_addr.is_empty() {
-            format!("{}:{}", host_addr, port_display)
-        } else {
-            String::new()
-        };
-        if !addr_str.is_empty() {
-            // Available width inside box: 2 cols left chrome (│ + space),
-            // 2 cols right chrome (space + │) so truncate at `sub(4)` to
-            // keep one column of breathing room before the right border.
-            let inner = box_width.saturating_sub(4);
-            let truncated = super::truncate(&addr_str, inner);
-            section_line(
-                &mut lines,
-                vec![Span::styled(truncated, theme::muted())],
-                box_width,
-            );
-        }
-
-        // Status line using dual-encoded glyphs (consistent with host list)
-        let mut status_spans: Vec<Span<'static>> = match app.ping.status.get(&host.alias) {
-            Some(status @ crate::app::PingStatus::Reachable { rtt_ms }) => {
-                // `online` is a live-state indicator — pulse it so it
-                // matches the host-list dot rhythm. `success()` would
-                // mis-tier this as an action outcome.
-                vec![Span::styled(
-                    format!(
-                        "{} online ({})",
-                        crate::app::status_glyph(Some(status), spinner_tick),
-                        format_rtt(*rtt_ms)
-                    ),
-                    theme::online_dot_pulsing(spinner_tick),
-                )]
-            }
-            Some(status @ crate::app::PingStatus::Slow { rtt_ms }) => {
-                vec![Span::styled(
-                    format!(
-                        "{} slow ({})",
-                        crate::app::status_glyph(Some(status), spinner_tick),
-                        format_rtt(*rtt_ms)
-                    ),
-                    theme::warning(),
-                )]
-            }
-            Some(status @ crate::app::PingStatus::Unreachable) => {
-                vec![Span::styled(
-                    format!(
-                        "{} offline",
-                        crate::app::status_glyph(Some(status), spinner_tick)
-                    ),
-                    theme::error(),
-                )]
-            }
-            Some(status @ crate::app::PingStatus::Checking) => {
-                vec![Span::styled(
-                    format!(
-                        "{} checking",
-                        crate::app::status_glyph(Some(status), spinner_tick)
-                    ),
-                    theme::muted(),
-                )]
-            }
-            Some(crate::app::PingStatus::Skipped) | None => vec![],
-        };
-        let stable = matches!(
-            app.ping.status.get(&host.alias),
-            Some(
-                crate::app::PingStatus::Reachable { .. }
-                    | crate::app::PingStatus::Slow { .. }
-                    | crate::app::PingStatus::Unreachable
-            )
-        );
-        if stable && !status_spans.is_empty() {
-            if let Some(t) = app.ping.last_checked.get(&host.alias) {
-                status_spans.push(Span::styled(
-                    format!("  checked {}", crate::messages::relative_age(t.elapsed())),
-                    theme::muted(),
-                ));
+    // Stretch: give all remaining vertical space to the last section card.
+    // Insert empty bordered lines before the last section_close line.
+    let available = area.height as usize;
+    if lines.len() < available {
+        let extra = available - lines.len();
+        // Find the last section_close line (╰...╯)
+        if let Some(last_close) = lines.iter().rposition(|line| {
+            line.spans
+                .first()
+                .map(|s| s.content.starts_with(BOX_BL))
+                .unwrap_or(false)
+        }) {
+            for _ in 0..extra {
+                lines.insert(last_close, section_empty_line(box_width));
             }
         }
-        if !status_spans.is_empty() {
-            section_line(&mut lines, status_spans, box_width);
-        }
-
-        section_close(&mut lines, box_width);
     }
 
-    // Connection section
-    section_open(&mut lines, "CONNECTION", box_width);
+    let paragraph = Paragraph::new(lines).scroll((app.ui.detail_scroll, 0));
+    frame.render_widget(paragraph, area);
+}
 
-    section_field(
-        &mut lines,
-        "Host",
-        &host.hostname,
-        max_value_width,
-        box_width,
+/// Renders the header card: alias title, user@host:port address, and ping status.
+fn render_header(
+    lines: &mut Vec<Line<'static>>,
+    app: &App,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+    spinner_tick: u64,
+) {
+    section_open(lines, &host.alias.clone(), box_width);
+
+    let user_display = host.user.as_str();
+    let port_display = host.port;
+    let host_addr = host.hostname.as_str();
+    let addr_str = if !user_display.is_empty() && !host_addr.is_empty() {
+        format!("{}@{}:{}", user_display, host_addr, port_display)
+    } else if !host_addr.is_empty() {
+        format!("{}:{}", host_addr, port_display)
+    } else {
+        String::new()
+    };
+    if !addr_str.is_empty() {
+        // Available width inside box: 2 cols left chrome (│ + space),
+        // 2 cols right chrome (space + │) so truncate at `sub(4)` to
+        // keep one column of breathing room before the right border.
+        let inner = box_width.saturating_sub(4);
+        let truncated = super::truncate(&addr_str, inner);
+        section_line(
+            lines,
+            vec![Span::styled(truncated, theme::muted())],
+            box_width,
+        );
+    }
+
+    // Status line using dual-encoded glyphs (consistent with host list).
+    // `online` pulses to match the host-list dot rhythm; other tiers use static styles.
+    let mut status_spans: Vec<Span<'static>> = app
+        .ping
+        .status
+        .get(&host.alias)
+        .and_then(|status| {
+            let glyph = crate::app::status_glyph(Some(status), spinner_tick);
+            let payload = match status {
+                crate::app::PingStatus::Reachable { rtt_ms } => Some((
+                    format!("online ({})", format_rtt(*rtt_ms)),
+                    theme::online_dot_pulsing(spinner_tick),
+                )),
+                crate::app::PingStatus::Slow { rtt_ms } => {
+                    Some((format!("slow ({})", format_rtt(*rtt_ms)), theme::warning()))
+                }
+                crate::app::PingStatus::Unreachable => Some(("offline".into(), theme::error())),
+                crate::app::PingStatus::Checking => Some(("checking".into(), theme::muted())),
+                crate::app::PingStatus::Skipped => None,
+            };
+            payload.map(|(label, style)| vec![Span::styled(format!("{} {}", glyph, label), style)])
+        })
+        .unwrap_or_default();
+    let stable = matches!(
+        app.ping.status.get(&host.alias),
+        Some(
+            crate::app::PingStatus::Reachable { .. }
+                | crate::app::PingStatus::Slow { .. }
+                | crate::app::PingStatus::Unreachable
+        )
     );
+    if stable && !status_spans.is_empty() {
+        if let Some(t) = app.ping.last_checked.get(&host.alias) {
+            status_spans.push(Span::styled(
+                format!("  checked {}", crate::messages::relative_age(t.elapsed())),
+                theme::muted(),
+            ));
+        }
+    }
+    if !status_spans.is_empty() {
+        section_line(lines, status_spans, box_width);
+    }
+
+    section_close(lines, box_width);
+}
+
+/// Renders the CONNECTION section: host, user, port, key, password, ping, stale.
+fn render_connection(
+    lines: &mut Vec<Line<'static>>,
+    app: &App,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+    max_value_width: usize,
+) {
+    section_open(lines, "CONNECTION", box_width);
+
+    section_field(lines, "Host", &host.hostname, max_value_width, box_width);
 
     if !host.user.is_empty() {
-        section_field(&mut lines, "User", &host.user, max_value_width, box_width);
+        section_field(lines, "User", &host.user, max_value_width, box_width);
     }
 
     if host.port != 22 {
         section_field(
-            &mut lines,
+            lines,
             "Port",
             &host.port.to_string(),
             max_value_width,
@@ -344,12 +364,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
             .rsplit('/')
             .next()
             .unwrap_or(&host.identity_file);
-        section_field(&mut lines, "Key", key_display, max_value_width, box_width);
+        section_field(lines, "Key", key_display, max_value_width, box_width);
     }
 
     if let Some(ref askpass) = host.askpass {
         section_field(
-            &mut lines,
+            lines,
             "Password",
             password_label(askpass),
             max_value_width,
@@ -365,7 +385,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
             crate::app::PingStatus::Skipped => "-- (proxied)".to_string(),
             crate::app::PingStatus::Checking => "...".to_string(),
         };
-        section_field(&mut lines, "Ping", &ping_text, max_value_width, box_width);
+        section_field(lines, "Ping", &ping_text, max_value_width, box_width);
     }
 
     if let Some(stale_ts) = host.stale {
@@ -381,7 +401,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
             stale_value
         };
         section_line(
-            &mut lines,
+            lines,
             vec![
                 Span::styled(
                     format!("{:<width$}", "Stale", width = LABEL_WIDTH),
@@ -393,22 +413,30 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
         );
     }
 
-    section_close(&mut lines, box_width);
+    section_close(lines, box_width);
+}
 
-    // Activity section
+/// Renders the ACTIVITY section with connection history and optional sparkline.
+fn render_activity(
+    lines: &mut Vec<Line<'static>>,
+    app: &App,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+    max_value_width: usize,
+) {
     let history_entry = app.history.entries.get(&host.alias);
 
     if history_entry.is_some() {
         // The sparkline chart width is the inner box content width: box_width - 4
         // ("│ " prefix = 2, " │" suffix = 2)
         let chart_width = box_width.saturating_sub(4);
-        section_open(&mut lines, "ACTIVITY", box_width);
+        section_open(lines, "ACTIVITY", box_width);
 
         if let Some(entry) = history_entry {
             let ago = ConnectionHistory::format_time_ago(entry.last_connected);
             if !ago.is_empty() {
                 section_field(
-                    &mut lines,
+                    lines,
                     "Last SSH",
                     &format!("{} ago", ago),
                     max_value_width,
@@ -416,7 +444,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 );
             }
             section_field(
-                &mut lines,
+                lines,
                 "Connections",
                 &entry.count.to_string(),
                 max_value_width,
@@ -453,7 +481,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                         let text = labels.join(", ");
                         let truncated = super::truncate(&text, chart_width);
                         section_line(
-                            &mut lines,
+                            lines,
                             vec![Span::styled(truncated, theme::muted())],
                             box_width,
                         );
@@ -463,49 +491,53 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                         super::activity_chart::render(&entry.timestamps, chart_width, now);
                     if !chart_lines.is_empty() {
                         // Empty separator row inside the box
-                        section_line(&mut lines, vec![], box_width);
+                        section_line(lines, vec![], box_width);
                         for chart_line in chart_lines {
-                            section_line(
-                                &mut lines,
-                                chart_line.spans.into_iter().collect(),
-                                box_width,
-                            );
+                            section_line(lines, chart_line.spans.into_iter().collect(), box_width);
                         }
                     }
                 }
             }
         }
 
-        section_close(&mut lines, box_width);
+        section_close(lines, box_width);
     }
+}
 
+/// Renders the ROUTE section showing the ProxyJump chain (or loop error).
+fn render_route(
+    lines: &mut Vec<Line<'static>>,
+    app: &App,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+) {
     // Route visualisation (only when ProxyJump resolves to known hosts)
     if !host.proxy_jump.is_empty() {
         let is_loop =
             crate::ssh_config::model::proxy_jump_contains_self(&host.proxy_jump, &host.alias);
         if is_loop {
-            section_open(&mut lines, "ROUTE", box_width);
+            section_open(lines, "ROUTE", box_width);
             let inner = box_width.saturating_sub(4);
             section_line(
-                &mut lines,
+                lines,
                 vec![Span::styled("ProxyJump loop", theme::error())],
                 box_width,
             );
             let fix = format!("add !{} to pattern", host.alias);
             section_line(
-                &mut lines,
+                lines,
                 vec![Span::styled(super::truncate(&fix, inner), theme::muted())],
                 box_width,
             );
-            section_close(&mut lines, box_width);
+            section_close(lines, box_width);
         } else {
             let chain = resolve_proxy_chain(host, &app.hosts_state.list);
             if !chain.is_empty() {
-                section_open(&mut lines, "ROUTE", box_width);
+                section_open(lines, "ROUTE", box_width);
                 // hop_width: content width minus "  ● " prefix (4 chars)
                 let hop_width = box_width.saturating_sub(4 + 4); // box borders (4) + indent+bullet (4)
                 section_line(
-                    &mut lines,
+                    lines,
                     vec![
                         Span::styled(format!("  {} ", design::ICON_STOPPED), theme::muted()),
                         Span::styled("you", theme::muted()),
@@ -514,7 +546,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 );
                 for (name, hostname, in_config) in chain.iter().rev() {
                     section_line(
-                        &mut lines,
+                        lines,
                         vec![Span::styled(
                             format!("  {}", design::ROUTE_BRANCH),
                             theme::muted(),
@@ -537,7 +569,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                         String::new()
                     };
                     section_line(
-                        &mut lines,
+                        lines,
                         vec![
                             Span::styled(format!("  {} ", design::ICON_ONLINE), theme::muted()),
                             Span::styled(name_trunc, name_style),
@@ -547,7 +579,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                     );
                 }
                 section_line(
-                    &mut lines,
+                    lines,
                     vec![Span::styled(
                         format!("  {}", design::ROUTE_BRANCH),
                         theme::muted(),
@@ -568,7 +600,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 // stands apart from intermediate hops even on terminals
                 // that don't honour the accent colour.
                 section_line(
-                    &mut lines,
+                    lines,
                     vec![
                         Span::styled(format!("  {} ", design::ICON_TARGET), theme::accent_bold()),
                         Span::styled(alias_trunc, theme::bold()),
@@ -576,14 +608,20 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                     ],
                     box_width,
                 );
-                section_close(&mut lines, box_width);
+                section_close(lines, box_width);
             }
         }
     }
+}
 
-    // Tags section
+/// Renders the TAGS section with provider tags, user tags and provider label.
+fn render_tags(
+    lines: &mut Vec<Line<'static>>,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+) {
     if !host.tags.is_empty() || !host.provider_tags.is_empty() || host.provider.is_some() {
-        section_open(&mut lines, "TAGS", box_width);
+        section_open(lines, "TAGS", box_width);
 
         let mut all_tags: Vec<String> = host
             .provider_tags
@@ -604,139 +642,154 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 }
                 spans.push(Span::styled(tag.to_string(), theme::tag_user()));
             }
-            section_line(&mut lines, spans, box_width);
+            section_line(lines, spans, box_width);
         }
 
-        section_close(&mut lines, box_width);
+        section_close(lines, box_width);
     }
+}
 
-    // Provider metadata section
+/// Renders the provider metadata section (e.g. AWS, DigitalOcean fields).
+fn render_provider_metadata(
+    lines: &mut Vec<Line<'static>>,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+    max_value_width: usize,
+) {
     if !host.provider_meta.is_empty() {
         let header = match host.provider.as_deref() {
             Some(name) => crate::providers::provider_display_name(name).to_uppercase(),
             None => "PROVIDER".to_string(),
         };
-        section_open(&mut lines, &header, box_width);
+        section_open(lines, &header, box_width);
 
         for (key, value) in &host.provider_meta {
             let label = meta_label(key);
-            section_field(&mut lines, &label, value, max_value_width, box_width);
+            section_field(lines, &label, value, max_value_width, box_width);
         }
 
-        section_close(&mut lines, box_width);
+        section_close(lines, box_width);
     }
+}
 
-    // Vault certificate section
-    {
-        let effective_role = crate::vault_ssh::resolve_vault_role(
-            host.vault_ssh.as_deref(),
-            host.provider.as_deref(),
-            host.provider_label.as_deref(),
-            &app.providers.config,
-        );
-        if let Some(ref role) = effective_role {
-            section_open(&mut lines, "VAULT SSH", box_width);
+/// Renders the VAULT SSH section showing role and certificate status.
+fn render_vault_cert(
+    lines: &mut Vec<Line<'static>>,
+    app: &App,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+    max_value_width: usize,
+) {
+    let effective_role = crate::vault_ssh::resolve_vault_role(
+        host.vault_ssh.as_deref(),
+        host.provider.as_deref(),
+        host.provider_label.as_deref(),
+        &app.providers.config,
+    );
+    if let Some(ref role) = effective_role {
+        section_open(lines, "VAULT SSH", box_width);
 
-            // Show the role name (last path segment). The full mount
-            // path is a config detail visible in the edit form (e).
-            let role_name = role.rsplit('/').next().unwrap_or(role);
-            let role_inherited = host.vault_ssh.is_none();
-            if role_inherited {
-                let provider_name = host.provider.as_deref().unwrap_or("provider");
-                let suffix = format!(" (from {})", provider_name);
-                let role_budget = max_value_width.saturating_sub(suffix.len());
-                let display_role = super::truncate(role_name, role_budget);
-                section_line(
-                    &mut lines,
-                    vec![
-                        Span::styled(
-                            format!("{:<width$}", "Role", width = LABEL_WIDTH),
-                            theme::muted(),
-                        ),
-                        Span::styled(display_role, theme::bold()),
-                        Span::styled(suffix, theme::muted()),
-                    ],
-                    box_width,
-                );
-            } else {
-                section_field(&mut lines, "Role", role_name, max_value_width, box_width);
-            }
+        // Show the role name (last path segment). The full mount
+        // path is a config detail visible in the edit form (e).
+        let role_name = role.rsplit('/').next().unwrap_or(role);
+        let role_inherited = host.vault_ssh.is_none();
+        if role_inherited {
+            let provider_name = host.provider.as_deref().unwrap_or("provider");
+            let suffix = format!(" (from {})", provider_name);
+            let role_budget = max_value_width.saturating_sub(suffix.len());
+            let display_role = super::truncate(role_name, role_budget);
+            section_line(
+                lines,
+                vec![
+                    Span::styled(
+                        format!("{:<width$}", "Role", width = LABEL_WIDTH),
+                        theme::muted(),
+                    ),
+                    Span::styled(display_role, theme::bold()),
+                    Span::styled(suffix, theme::muted()),
+                ],
+                box_width,
+            );
+        } else {
+            section_field(lines, "Role", role_name, max_value_width, box_width);
+        }
 
-            // Vault address is visible in the edit form (e) or provider
-            // form. Showing it here wastes space (the https:// prefix
-            // dominates the narrow column) and adds no actionable info.
-            // Check cert status from cache, fall back to file-existence check.
-            // While a signing check is in flight for this host, show "Checking...".
-            // `needs_action` flags states where the user can press V to fix
-            // things (missing/expired/invalid). It is consumed below to render
-            // a "(press V to sign)" affordance hint next to the status text.
-            let mut needs_action = false;
-            let (status_text, status_style) = if app
-                .vault
-                .cert_checks_in_flight
-                .contains(&host.alias)
-            {
-                ("Checking...".to_string(), theme::muted())
-            } else if let Some((checked_at, status, _mtime)) = app.vault.cert_cache.get(&host.alias)
-            {
-                let elapsed = checked_at.elapsed().as_secs() as i64;
-                match status {
-                    crate::vault_ssh::CertStatus::Valid { remaining_secs, .. } => {
-                        let adjusted = remaining_secs - elapsed;
-                        if adjusted <= 0 {
-                            needs_action = true;
-                            ("Expired".to_string(), theme::error())
-                        } else {
-                            let text =
-                                format!("Valid ({})", crate::vault_ssh::format_remaining(adjusted));
-                            (text, theme::success())
-                        }
-                    }
-                    crate::vault_ssh::CertStatus::Expired => {
+        // Vault address is visible in the edit form (e) or provider
+        // form. Showing it here wastes space (the https:// prefix
+        // dominates the narrow column) and adds no actionable info.
+        // Check cert status from cache, fall back to file-existence check.
+        // While a signing check is in flight for this host, show "Checking...".
+        // `needs_action` flags states where the user can press V to fix
+        // things (missing/expired/invalid). It is consumed below to render
+        // a "(press V to sign)" affordance hint next to the status text.
+        let mut needs_action = false;
+        let (status_text, status_style) = if app.vault.cert_checks_in_flight.contains(&host.alias) {
+            ("Checking...".to_string(), theme::muted())
+        } else if let Some((checked_at, status, _mtime)) = app.vault.cert_cache.get(&host.alias) {
+            let elapsed = checked_at.elapsed().as_secs() as i64;
+            match status {
+                crate::vault_ssh::CertStatus::Valid { remaining_secs, .. } => {
+                    let adjusted = remaining_secs - elapsed;
+                    if adjusted <= 0 {
                         needs_action = true;
                         ("Expired".to_string(), theme::error())
-                    }
-                    crate::vault_ssh::CertStatus::Missing => {
-                        needs_action = true;
-                        ("Not signed".to_string(), theme::muted())
-                    }
-                    crate::vault_ssh::CertStatus::Invalid(_) => {
-                        needs_action = true;
-                        ("Invalid".to_string(), theme::error())
+                    } else {
+                        let text =
+                            format!("Valid ({})", crate::vault_ssh::format_remaining(adjusted));
+                        (text, theme::success())
                     }
                 }
-            } else {
-                // No cached status -- check file existence as fallback.
-                // Any resolve error collapses to "Not signed" since the cert
-                // path is unreachable in practice (alias validated upstream).
-                match crate::vault_ssh::resolve_cert_path(&host.alias, &host.certificate_file) {
-                    Ok(cert_path) if cert_path.exists() => ("Signed".to_string(), theme::success()),
-                    _ => {
-                        needs_action = true;
-                        ("Not signed".to_string(), theme::muted())
-                    }
+                crate::vault_ssh::CertStatus::Expired => {
+                    needs_action = true;
+                    ("Expired".to_string(), theme::error())
                 }
-            };
-
-            // Affordance hint computed during the if/else chain above. When
-            // set, the user can press V to remediate the cert state.
-            let mut status_spans = vec![
-                Span::styled(
-                    format!("{:<width$}", "Status", width = LABEL_WIDTH),
-                    theme::muted(),
-                ),
-                Span::styled(status_text, status_style),
-            ];
-            if needs_action {
-                status_spans.push(Span::styled(" (press V to sign)", theme::muted()));
+                crate::vault_ssh::CertStatus::Missing => {
+                    needs_action = true;
+                    ("Not signed".to_string(), theme::muted())
+                }
+                crate::vault_ssh::CertStatus::Invalid(_) => {
+                    needs_action = true;
+                    ("Invalid".to_string(), theme::error())
+                }
             }
-            section_line(&mut lines, status_spans, box_width);
+        } else {
+            // No cached status -- check file existence as fallback.
+            // Any resolve error collapses to "Not signed" since the cert
+            // path is unreachable in practice (alias validated upstream).
+            match crate::vault_ssh::resolve_cert_path(&host.alias, &host.certificate_file) {
+                Ok(cert_path) if cert_path.exists() => ("Signed".to_string(), theme::success()),
+                _ => {
+                    needs_action = true;
+                    ("Not signed".to_string(), theme::muted())
+                }
+            }
+        };
 
-            section_close(&mut lines, box_width);
+        // Affordance hint computed during the if/else chain above. When
+        // set, the user can press V to remediate the cert state.
+        let mut status_spans = vec![
+            Span::styled(
+                format!("{:<width$}", "Status", width = LABEL_WIDTH),
+                theme::muted(),
+            ),
+            Span::styled(status_text, status_style),
+        ];
+        if needs_action {
+            status_spans.push(Span::styled(" (press V to sign)", theme::muted()));
         }
-    }
+        section_line(lines, status_spans, box_width);
 
-    // Tunnels section
+        section_close(lines, box_width);
+    }
+}
+
+/// Renders the TUNNELS section listing port-forward rules.
+fn render_tunnels(
+    lines: &mut Vec<Line<'static>>,
+    app: &App,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+) {
     let tunnel_active = app.tunnels.active.contains_key(&host.alias);
     if host.tunnel_count > 0 {
         let tunnel_label = if tunnel_active {
@@ -744,7 +797,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
         } else {
             "TUNNELS"
         };
-        section_open(&mut lines, tunnel_label, box_width);
+        section_open(lines, tunnel_label, box_width);
 
         let rules = find_tunnel_rules(&app.hosts_state.ssh_config.elements, &host.alias);
         let style = if tunnel_active {
@@ -755,28 +808,34 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
         let rule_content_width = box_width.saturating_sub(4);
         for rule in &rules {
             let truncated = super::truncate(rule, rule_content_width);
-            section_line(&mut lines, vec![Span::styled(truncated, style)], box_width);
+            section_line(lines, vec![Span::styled(truncated, style)], box_width);
         }
 
-        section_close(&mut lines, box_width);
+        section_close(lines, box_width);
     }
+}
 
-    // Snippets hint
+/// Renders the SNIPPETS hint when snippets are available.
+fn render_snippets(lines: &mut Vec<Line<'static>>, app: &App, box_width: usize) {
     let snippet_count = app.snippets.store.snippets.len();
     if snippet_count > 0 {
-        section_open(&mut lines, "SNIPPETS", box_width);
+        section_open(lines, "SNIPPETS", box_width);
         let msg = format!("{} available (r to run)", snippet_count);
-        section_line(
-            &mut lines,
-            vec![Span::styled(msg, theme::muted())],
-            box_width,
-        );
-        section_close(&mut lines, box_width);
+        section_line(lines, vec![Span::styled(msg, theme::muted())], box_width);
+        section_close(lines, box_width);
     }
+}
 
-    // Containers section (only shown when cache data exists)
-    if let Some(cache_entry) = app.container_cache.get(&host.alias) {
-        section_open(&mut lines, "CONTAINERS", box_width);
+/// Renders the CONTAINERS section when container cache data exists.
+fn render_containers(
+    lines: &mut Vec<Line<'static>>,
+    app: &App,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+    max_value_width: usize,
+) {
+    if let Some(cache_entry) = app.container_state.cache.get(&host.alias) {
+        section_open(lines, "CONTAINERS", box_width);
         let running = cache_entry
             .containers
             .iter()
@@ -784,21 +843,21 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
             .count();
         let total = cache_entry.containers.len();
         section_field(
-            &mut lines,
+            lines,
             "Total",
             &format!("{} running / {} total", running, total),
             max_value_width,
             box_width,
         );
         section_field(
-            &mut lines,
+            lines,
             "Runtime",
             cache_entry.runtime.as_str(),
             max_value_width,
             box_width,
         );
         section_field(
-            &mut lines,
+            lines,
             "Last checked",
             &crate::containers::format_relative_time(cache_entry.timestamp),
             max_value_width,
@@ -816,7 +875,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 max_value_width.saturating_sub(2),
             );
             section_line(
-                &mut lines,
+                lines,
                 vec![
                     Span::styled(
                         format!("{:>width$}", "", width = LABEL_WIDTH),
@@ -829,14 +888,23 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 box_width,
             );
         }
-        section_close(&mut lines, box_width);
+        section_close(lines, box_width);
     }
+}
 
+/// Renders PATTERN MATCH cards for inherited SSH config directives.
+fn render_pattern_matches(
+    lines: &mut Vec<Line<'static>>,
+    app: &App,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+    max_value_width: usize,
+) {
     // Inherited directives section — alias-only matching (SSH-faithful).
     // OpenSSH Host keyword matches only the alias typed on the command line.
     let inherited = app.hosts_state.ssh_config.matching_patterns(&host.alias);
     for pattern_entry in &inherited {
-        section_open(&mut lines, "PATTERN MATCH", box_width);
+        section_open(lines, "PATTERN MATCH", box_width);
         let inner = box_width.saturating_sub(4);
         let parts = split_patterns_truncated(&pattern_entry.pattern, inner);
         let pattern_rows = wrap_space_separated(&parts, inner);
@@ -848,47 +916,33 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
                 }
                 spans.push(Span::styled(p.clone(), theme::bold()));
             }
-            section_line(&mut lines, spans, box_width);
+            section_line(lines, spans, box_width);
         }
         for (key, value) in &pattern_entry.directives {
-            section_field(&mut lines, key, value, max_value_width, box_width);
+            section_field(lines, key, value, max_value_width, box_width);
         }
-        section_close(&mut lines, box_width);
+        section_close(lines, box_width);
     }
+}
 
-    // Source section (for included hosts)
+/// Renders the source file card for hosts loaded via SSH config Include.
+fn render_source(
+    lines: &mut Vec<Line<'static>>,
+    host: &crate::ssh_config::model::HostEntry,
+    box_width: usize,
+    max_value_width: usize,
+) {
     if let Some(ref source) = host.source_file {
-        section_open_notitle(&mut lines, box_width);
+        section_open_notitle(lines, box_width);
         section_field(
-            &mut lines,
+            lines,
             "Source",
             &source.display().to_string(),
             max_value_width,
             box_width,
         );
-        section_close(&mut lines, box_width);
+        section_close(lines, box_width);
     }
-
-    // Stretch: give all remaining vertical space to the last section card.
-    // Insert empty bordered lines before the last section_close line.
-    let available = area.height as usize;
-    if lines.len() < available {
-        let extra = available - lines.len();
-        // Find the last section_close line (╰...╯)
-        if let Some(last_close) = lines.iter().rposition(|line| {
-            line.spans
-                .first()
-                .map(|s| s.content.starts_with(BOX_BL))
-                .unwrap_or(false)
-        }) {
-            for _ in 0..extra {
-                lines.insert(last_close, section_empty_line(box_width));
-            }
-        }
-    }
-
-    let paragraph = Paragraph::new(lines).scroll((app.ui.detail_scroll, 0));
-    frame.render_widget(paragraph, area);
 }
 
 /// Empty bordered line for padding: │                              │
@@ -912,94 +966,11 @@ fn render_pattern_detail(
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    // Header card: PATTERN MATCH with patterns wrapped over multiple
-    // rows so a long space-separated list never overflows the right
-    // border.
-    section_open(&mut lines, "PATTERN MATCH", box_width);
-    let inner = box_width.saturating_sub(4);
-    let parts = split_patterns_truncated(&pattern.pattern, inner);
-    let pattern_rows = wrap_space_separated(&parts, inner);
-    for row in &pattern_rows {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-        for (i, p) in row.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::raw(" "));
-            }
-            spans.push(Span::styled(p.clone(), theme::bold()));
-        }
-        section_line(&mut lines, spans, box_width);
-    }
-    section_close(&mut lines, box_width);
-
-    // Directives section
-    if !pattern.directives.is_empty() {
-        section_open(&mut lines, "DIRECTIVES", box_width);
-        for (key, value) in &pattern.directives {
-            section_field(&mut lines, key, value, max_value_width, box_width);
-        }
-        section_close(&mut lines, box_width);
-    }
-
-    // Tags section
-    if !pattern.tags.is_empty() {
-        section_open(&mut lines, "TAGS", box_width);
-        let tag_strings: Vec<String> = pattern.tags.to_vec();
-        let inner_width = box_width.saturating_sub(4);
-        let tag_rows = wrap_tags(&tag_strings, inner_width);
-        for row in &tag_rows {
-            let mut spans: Vec<Span<'static>> = Vec::new();
-            for (i, tag) in row.iter().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled(", ".to_string(), theme::muted()));
-                }
-                spans.push(Span::styled(tag.to_string(), theme::tag_user()));
-            }
-            section_line(&mut lines, spans, box_width);
-        }
-        section_close(&mut lines, box_width);
-    }
-
-    // Matches section — alias-only matching (SSH-faithful).
-    let matching_aliases: Vec<String> = app
-        .hosts_state
-        .list
-        .iter()
-        .filter(|h| crate::ssh_config::model::host_pattern_matches(&pattern.pattern, &h.alias))
-        .map(|h| h.alias.clone())
-        .collect();
-
-    if !matching_aliases.is_empty() {
-        section_open(
-            &mut lines,
-            &format!("MATCHES ({})", matching_aliases.len()),
-            box_width,
-        );
-        let inner_width = box_width.saturating_sub(4);
-        for alias in &matching_aliases {
-            section_line(
-                &mut lines,
-                vec![Span::styled(
-                    super::truncate(alias, inner_width),
-                    theme::bold(),
-                )],
-                box_width,
-            );
-        }
-        section_close(&mut lines, box_width);
-    }
-
-    // Source file
-    if let Some(ref source) = pattern.source_file {
-        section_open(&mut lines, "SOURCE", box_width);
-        section_field(
-            &mut lines,
-            "File",
-            &source.display().to_string(),
-            max_value_width,
-            box_width,
-        );
-        section_close(&mut lines, box_width);
-    }
+    render_pat_header(&mut lines, &pattern.pattern, box_width);
+    render_pat_directives(&mut lines, &pattern.directives, max_value_width, box_width);
+    render_pat_tags(&mut lines, &pattern.tags, box_width);
+    render_pat_matches(&mut lines, &pattern.pattern, app, box_width);
+    render_pat_source(&mut lines, &pattern.source_file, max_value_width, box_width);
 
     // Stretch: give all remaining vertical space to the last section card.
     let available = area.height as usize;
@@ -1019,6 +990,116 @@ fn render_pattern_detail(
 
     let paragraph = Paragraph::new(lines).scroll((app.ui.detail_scroll, 0));
     frame.render_widget(paragraph, area);
+}
+
+/// Renders the PATTERN MATCH header card with wrapped pattern tokens.
+fn render_pat_header(lines: &mut Vec<Line<'static>>, pattern: &str, box_width: usize) {
+    section_open(lines, "PATTERN MATCH", box_width);
+    let inner = box_width.saturating_sub(4);
+    let parts = split_patterns_truncated(pattern, inner);
+    let pattern_rows = wrap_space_separated(&parts, inner);
+    for row in &pattern_rows {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for (i, p) in row.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw(" "));
+            }
+            spans.push(Span::styled(p.clone(), theme::bold()));
+        }
+        section_line(lines, spans, box_width);
+    }
+    section_close(lines, box_width);
+}
+
+/// Renders the DIRECTIVES card; skipped when there are no directives.
+fn render_pat_directives(
+    lines: &mut Vec<Line<'static>>,
+    directives: &[(String, String)],
+    max_value_width: usize,
+    box_width: usize,
+) {
+    if directives.is_empty() {
+        return;
+    }
+    section_open(lines, "DIRECTIVES", box_width);
+    for (key, value) in directives {
+        section_field(lines, key, value, max_value_width, box_width);
+    }
+    section_close(lines, box_width);
+}
+
+/// Renders the TAGS card; skipped when there are no tags.
+fn render_pat_tags(lines: &mut Vec<Line<'static>>, tags: &[String], box_width: usize) {
+    if tags.is_empty() {
+        return;
+    }
+    section_open(lines, "TAGS", box_width);
+    let inner_width = box_width.saturating_sub(4);
+    let tag_rows = wrap_tags(tags, inner_width);
+    for row in &tag_rows {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        for (i, tag) in row.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(", ".to_string(), theme::muted()));
+            }
+            spans.push(Span::styled(tag.to_string(), theme::tag_user()));
+        }
+        section_line(lines, spans, box_width);
+    }
+    section_close(lines, box_width);
+}
+
+/// Renders the MATCHES card listing aliases that match the pattern; skipped when empty.
+fn render_pat_matches(lines: &mut Vec<Line<'static>>, pattern: &str, app: &App, box_width: usize) {
+    let matching_aliases: Vec<String> = app
+        .hosts_state
+        .list
+        .iter()
+        .filter(|h| crate::ssh_config::model::host_pattern_matches(pattern, &h.alias))
+        .map(|h| h.alias.clone())
+        .collect();
+
+    if matching_aliases.is_empty() {
+        return;
+    }
+    section_open(
+        lines,
+        &format!("MATCHES ({})", matching_aliases.len()),
+        box_width,
+    );
+    let inner_width = box_width.saturating_sub(4);
+    for alias in &matching_aliases {
+        section_line(
+            lines,
+            vec![Span::styled(
+                super::truncate(alias, inner_width),
+                theme::bold(),
+            )],
+            box_width,
+        );
+    }
+    section_close(lines, box_width);
+}
+
+/// Renders the SOURCE card showing the config file path; skipped when absent.
+fn render_pat_source(
+    lines: &mut Vec<Line<'static>>,
+    source_file: &Option<std::path::PathBuf>,
+    max_value_width: usize,
+    box_width: usize,
+) {
+    let Some(source) = source_file else {
+        return;
+    };
+    section_open(lines, "SOURCE", box_width);
+    section_field(
+        lines,
+        "File",
+        &source.display().to_string(),
+        max_value_width,
+        box_width,
+    );
+    section_close(lines, box_width);
 }
 
 /// Resolve the ProxyJump chain for a host. Returns the list of hops from

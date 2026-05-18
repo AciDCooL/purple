@@ -7,10 +7,10 @@ use ratatui::widgets::{Clear, List, ListItem, Paragraph, StatefulWidget};
 use super::design;
 use super::theme;
 use crate::app::App;
-use crate::file_browser::{BrowserPane, BrowserSort, FileBrowserState};
+use crate::file_browser::{BrowserPane, BrowserSort, FileBrowserSession};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let fb = match app.file_browser.as_mut() {
+    let fb = match app.file_browser_session.as_mut() {
         Some(fb) => fb,
         None => return,
     };
@@ -174,7 +174,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     super::render_footer_with_status(frame, footer_area, footer_spans, app);
 }
 
-fn render_local_pane(frame: &mut Frame, fb: &mut FileBrowserState, area: Rect) {
+fn render_local_pane(frame: &mut Frame, fb: &mut FileBrowserSession, area: Rect) {
     if let Some(ref err) = fb.local_error {
         let lines = vec![
             Line::from(Span::styled(err.as_str(), theme::error())),
@@ -198,7 +198,7 @@ fn render_local_pane(frame: &mut Frame, fb: &mut FileBrowserState, area: Rect) {
     StatefulWidget::render(list, area, frame.buffer_mut(), &mut fb.local_list_state);
 }
 
-fn render_remote_pane(frame: &mut Frame, fb: &mut FileBrowserState, area: Rect) {
+fn render_remote_pane(frame: &mut Frame, fb: &mut FileBrowserSession, area: Rect) {
     if fb.remote_loading {
         let path = if fb.remote_path.is_empty() {
             "~"
@@ -323,7 +323,7 @@ fn build_file_list_items<'a>(
 
 fn render_confirm_dialog(
     frame: &mut Frame,
-    fb: &FileBrowserState,
+    fb: &FileBrowserSession,
     req: &crate::file_browser::CopyRequest,
     area: Rect,
 ) {

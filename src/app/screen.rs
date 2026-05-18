@@ -1,7 +1,5 @@
 //! Screen enum: tags the currently-displayed overlay or view.
 
-use std::path::PathBuf;
-
 /// Top-level page selected via the top navigation bar.
 ///
 /// Orthogonal to [`Screen`]. `Screen` tracks overlays and modal forms,
@@ -307,13 +305,11 @@ pub enum Screen {
         provider: Option<String>,
     },
     ConfirmVaultSign {
-        /// Precomputed list of (alias, role, certificate_file, pubkey_path) for
-        /// hosts that resolve to a vault SSH role. Computed when the user
-        /// presses `V`. `certificate_file` is the host's existing
-        /// `CertificateFile` directive (empty when unset) and is needed so the
-        /// background worker checks renewal status against the actually
-        /// configured cert path rather than purple's default.
-        signable: Vec<(String, String, String, PathBuf, Option<String>)>,
+        /// Precomputed list of hosts that resolve to a Vault SSH role. Computed
+        /// when the user presses `V`. `certificate_file` is the host's existing
+        /// `CertificateFile` directive (empty when unset) so the background
+        /// worker checks renewal against the configured cert path.
+        signable: Vec<crate::vault_ssh::VaultSignTarget>,
     },
     Welcome {
         has_backup: bool,

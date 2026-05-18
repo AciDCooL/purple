@@ -196,11 +196,11 @@ fn view_fingerprint(app: &App) -> u64 {
         c.hash(&mut hasher);
     }
 
-    let mut aliases: Vec<&String> = app.container_cache.keys().collect();
+    let mut aliases: Vec<&String> = app.container_state.cache.keys().collect();
     aliases.sort();
     aliases.len().hash(&mut hasher);
     for alias in aliases {
-        let entry = &app.container_cache[alias];
+        let entry = &app.container_state.cache[alias];
         alias.hash(&mut hasher);
         entry.timestamp.hash(&mut hasher);
         entry.containers.len().hash(&mut hasher);
@@ -233,7 +233,7 @@ fn collect_rows(app: &App) -> Vec<ContainerRow> {
         .filter(|q| !q.is_empty());
 
     let mut rows: Vec<ContainerRow> = Vec::new();
-    for (alias, entry) in &app.container_cache {
+    for (alias, entry) in &app.container_state.cache {
         for c in &entry.containers {
             let name = clean_name(&c.names);
             if let Some(ref q) = query {
@@ -323,7 +323,8 @@ fn sort_rows(rows: &mut [ContainerRow], mode: ContainersSortMode) {
 /// Total cached container count across every host (ignores the active
 /// search filter). Used in the search-mode title to render `N/total`.
 fn total_cached_count(app: &App) -> usize {
-    app.container_cache
+    app.container_state
+        .cache
         .values()
         .map(|e| e.containers.len())
         .sum()
@@ -1080,7 +1081,7 @@ fn build_host_detail_lines(
         .saturating_sub(design::SECTION_LABEL_W as usize);
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    let entry = app.container_cache.get(alias);
+    let entry = app.container_state.cache.get(alias);
     let host = app.hosts_state.list.iter().find(|h| h.alias == alias);
     let collapsed = app.containers_overview.collapsed_hosts.contains(alias);
     let now = current_unix_secs();
@@ -2584,7 +2585,7 @@ mod tests {
 
     fn app_with_cache(cache: HashMap<String, ContainerCacheEntry>) -> App {
         let mut app = crate::demo::build_demo_app();
-        app.container_cache = cache;
+        app.container_state.cache = cache;
         app
     }
 
@@ -2998,7 +2999,7 @@ mod tests {
         *app.containers_overview.view_cache.borrow_mut() = None;
         let _ = visible_rows(&app);
         let fp_before = cached_fp(&app).unwrap();
-        if let Some(entry) = app.container_cache.get_mut("h") {
+        if let Some(entry) = app.container_state.cache.get_mut("h") {
             entry.timestamp += 1;
         }
         let _ = visible_rows(&app);
@@ -4055,7 +4056,7 @@ mod tests {
         // engine_version on the cache entry.
         let app = crate::demo::build_demo_app();
         let alias = "aws-api-staging";
-        let entry = app.container_cache.get(alias).expect("demo seeded");
+        let entry = app.container_state.cache.get(alias).expect("demo seeded");
         let total = entry.containers.len();
         let running = entry
             .containers
@@ -4075,7 +4076,11 @@ mod tests {
         // bastion-ams in the demo carries a container with restart_count=14
         // (app-backend) so the inspect-aggregate ATTENTION row triggers.
         let app = crate::demo::build_demo_app();
-        let entry = app.container_cache.get("bastion-ams").expect("seeded");
+        let entry = app
+            .container_state
+            .cache
+            .get("bastion-ams")
+            .expect("seeded");
         let total = entry.containers.len();
         let running = entry
             .containers
@@ -4093,7 +4098,11 @@ mod tests {
         // its cache line. The Runtime row must still render with just
         // "Docker" (no trailing version).
         let app = crate::demo::build_demo_app();
-        let entry = app.container_cache.get("gateway-vpn").expect("seeded");
+        let entry = app
+            .container_state
+            .cache
+            .get("gateway-vpn")
+            .expect("seeded");
         let total = entry.containers.len();
         let running = entry
             .containers
@@ -4391,7 +4400,7 @@ mod tests {
         }
         // Override the demo cache so build_host_detail_lines reads the
         // synthetic containers under one alias.
-        app.container_cache.insert(
+        app.container_state.cache.insert(
             "loopy-host".into(),
             ContainerCacheEntry {
                 timestamp: current_unix_secs(),

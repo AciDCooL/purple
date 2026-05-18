@@ -8,6 +8,7 @@ use super::design;
 use super::theme;
 use crate::app::{App, ProviderFormField};
 use crate::history::ConnectionHistory;
+use crate::providers::ProviderKind;
 
 /// Render the provider management list as a centered overlay.
 pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
@@ -430,6 +431,7 @@ pub fn render_label_migration(frame: &mut Frame, app: &mut App, provider_name: &
 
 /// Render the provider configuration form.
 pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &str) {
+    let kind = provider_name.parse::<ProviderKind>().ok();
     let display_name = crate::providers::provider_display_name(provider_name);
     let title = format!("Providers > {}", display_name);
 
@@ -447,7 +449,6 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
     // VaultRole and VaultAddr are both optional fields and are gated behind
     // the expanded state, identical to every other non-required field.
     // Per-host VaultSsh (in host_form.rs) follows the same rule.
-    // TODO: Enter-to-pick from `vault list <mount>/roles`
     let base_fields: &[ProviderFormField] = if expanded {
         all_fields
     } else {
@@ -482,16 +483,17 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
             theme::muted()
         };
         let is_mandatory = ProviderFormField::is_mandatory_field(field, provider_name);
-        let field_label =
-            if field == ProviderFormField::Regions && matches!(provider_name, "scaleway" | "gcp") {
-                "Zones"
-            } else if field == ProviderFormField::Regions && provider_name == "azure" {
-                "Subscriptions"
-            } else if field == ProviderFormField::Regions && provider_name == "ovh" {
-                "Endpoint"
-            } else {
-                field.label()
-            };
+        let field_label = if field == ProviderFormField::Regions
+            && matches!(kind, Some(ProviderKind::Scaleway) | Some(ProviderKind::Gcp))
+        {
+            "Zones"
+        } else if field == ProviderFormField::Regions && kind == Some(ProviderKind::Azure) {
+            "Subscriptions"
+        } else if field == ProviderFormField::Regions && kind == Some(ProviderKind::Ovh) {
+            "Endpoint"
+        } else {
+            field.label()
+        };
         let label = if is_mandatory {
             format!(" {}* ", field_label)
         } else {
@@ -544,56 +546,98 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
 
 fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static str {
     use crate::messages::hints;
+    let kind = provider_name.parse::<ProviderKind>().ok();
     match field {
         ProviderFormField::Url => hints::PROVIDER_URL,
-        ProviderFormField::Token => match provider_name {
-            "proxmox" => hints::PROVIDER_TOKEN_PROXMOX,
-            "aws" => hints::PROVIDER_TOKEN_AWS,
-            "gcp" => hints::PROVIDER_TOKEN_GCP,
-            "azure" => hints::PROVIDER_TOKEN_AZURE,
-            "tailscale" => hints::PROVIDER_TOKEN_TAILSCALE,
-            "oracle" => hints::PROVIDER_TOKEN_ORACLE,
-            "ovh" => hints::PROVIDER_TOKEN_OVH,
-            _ => hints::PROVIDER_TOKEN_DEFAULT,
+        ProviderFormField::Token => match kind {
+            None => hints::PROVIDER_TOKEN_DEFAULT,
+            Some(ProviderKind::Proxmox) => hints::PROVIDER_TOKEN_PROXMOX,
+            Some(ProviderKind::Aws) => hints::PROVIDER_TOKEN_AWS,
+            Some(ProviderKind::Gcp) => hints::PROVIDER_TOKEN_GCP,
+            Some(ProviderKind::Azure) => hints::PROVIDER_TOKEN_AZURE,
+            Some(ProviderKind::Tailscale) => hints::PROVIDER_TOKEN_TAILSCALE,
+            Some(ProviderKind::Oracle) => hints::PROVIDER_TOKEN_ORACLE,
+            Some(ProviderKind::Ovh) => hints::PROVIDER_TOKEN_OVH,
+            Some(
+                ProviderKind::DigitalOcean
+                | ProviderKind::Hetzner
+                | ProviderKind::I3d
+                | ProviderKind::Leaseweb
+                | ProviderKind::Linode
+                | ProviderKind::Scaleway
+                | ProviderKind::Transip
+                | ProviderKind::UpCloud
+                | ProviderKind::Vultr,
+            ) => hints::PROVIDER_TOKEN_DEFAULT,
         },
         ProviderFormField::Profile => hints::PROVIDER_PROFILE,
-        ProviderFormField::Project => match provider_name {
-            "ovh" => hints::PROVIDER_PROJECT_OVH,
-            _ => hints::PROVIDER_PROJECT_DEFAULT,
+        ProviderFormField::Project => match kind {
+            None => hints::PROVIDER_PROJECT_DEFAULT,
+            Some(ProviderKind::Ovh) => hints::PROVIDER_PROJECT_OVH,
+            Some(
+                ProviderKind::Aws
+                | ProviderKind::Azure
+                | ProviderKind::DigitalOcean
+                | ProviderKind::Gcp
+                | ProviderKind::Hetzner
+                | ProviderKind::I3d
+                | ProviderKind::Leaseweb
+                | ProviderKind::Linode
+                | ProviderKind::Oracle
+                | ProviderKind::Proxmox
+                | ProviderKind::Scaleway
+                | ProviderKind::Tailscale
+                | ProviderKind::Transip
+                | ProviderKind::UpCloud
+                | ProviderKind::Vultr,
+            ) => hints::PROVIDER_PROJECT_DEFAULT,
         },
         ProviderFormField::Compartment => hints::PROVIDER_COMPARTMENT,
-        ProviderFormField::Regions => match provider_name {
-            "gcp" => hints::PROVIDER_REGIONS_GCP,
-            "scaleway" => hints::PROVIDER_REGIONS_SCALEWAY,
-            "azure" => hints::PROVIDER_REGIONS_AZURE,
-            "ovh" => hints::PROVIDER_REGIONS_OVH,
-            _ => hints::PROVIDER_REGIONS_DEFAULT,
+        ProviderFormField::Regions => match kind {
+            None => hints::PROVIDER_REGIONS_DEFAULT,
+            Some(ProviderKind::Gcp) => hints::PROVIDER_REGIONS_GCP,
+            Some(ProviderKind::Scaleway) => hints::PROVIDER_REGIONS_SCALEWAY,
+            Some(ProviderKind::Azure) => hints::PROVIDER_REGIONS_AZURE,
+            Some(ProviderKind::Ovh) => hints::PROVIDER_REGIONS_OVH,
+            Some(
+                ProviderKind::Aws
+                | ProviderKind::DigitalOcean
+                | ProviderKind::Hetzner
+                | ProviderKind::I3d
+                | ProviderKind::Leaseweb
+                | ProviderKind::Linode
+                | ProviderKind::Oracle
+                | ProviderKind::Proxmox
+                | ProviderKind::Tailscale
+                | ProviderKind::Transip
+                | ProviderKind::UpCloud
+                | ProviderKind::Vultr,
+            ) => hints::PROVIDER_REGIONS_DEFAULT,
         },
-        // Alias prefix suggestions are provider short labels (identifiers),
-        // not translatable copy, so they stay inline.
-        ProviderFormField::AliasPrefix => match provider_name {
-            "digitalocean" => "do",
-            "vultr" => "vultr",
-            "linode" => "linode",
-            "hetzner" => "hetzner",
-            "upcloud" => "uc",
-            "proxmox" => "pve",
-            "aws" => "aws",
-            "scaleway" => "scw",
-            "gcp" => "gcp",
-            "azure" => "az",
-            "tailscale" => "ts",
-            "oracle" => "oci",
-            "ovh" => "ovh",
-            _ => hints::PROVIDER_ALIAS_PREFIX_DEFAULT,
-        },
-        ProviderFormField::User => match provider_name {
-            "aws" => hints::PROVIDER_USER_AWS,
-            "gcp" => hints::PROVIDER_USER_GCP,
-            "azure" => hints::PROVIDER_USER_AZURE,
-            "oracle" => hints::PROVIDER_USER_ORACLE,
-            "ovh" => hints::PROVIDER_USER_OVH,
-            _ => hints::DEFAULT_SSH_USER,
+        // Alias prefix lookup table lives on ProviderKind so additions stay typed.
+        ProviderFormField::AliasPrefix => kind
+            .map(ProviderKind::alias_prefix)
+            .unwrap_or(hints::PROVIDER_ALIAS_PREFIX_DEFAULT),
+        ProviderFormField::User => match kind {
+            None => hints::DEFAULT_SSH_USER,
+            Some(ProviderKind::Aws) => hints::PROVIDER_USER_AWS,
+            Some(ProviderKind::Gcp) => hints::PROVIDER_USER_GCP,
+            Some(ProviderKind::Azure) => hints::PROVIDER_USER_AZURE,
+            Some(ProviderKind::Oracle) => hints::PROVIDER_USER_ORACLE,
+            Some(ProviderKind::Ovh) => hints::PROVIDER_USER_OVH,
+            Some(
+                ProviderKind::DigitalOcean
+                | ProviderKind::Hetzner
+                | ProviderKind::I3d
+                | ProviderKind::Leaseweb
+                | ProviderKind::Linode
+                | ProviderKind::Proxmox
+                | ProviderKind::Scaleway
+                | ProviderKind::Tailscale
+                | ProviderKind::Transip
+                | ProviderKind::UpCloud
+                | ProviderKind::Vultr,
+            ) => hints::DEFAULT_SSH_USER,
         },
         ProviderFormField::IdentityFile => hints::IDENTITY_FILE_PICK,
         ProviderFormField::VaultRole => hints::PROVIDER_VAULT_ROLE,
@@ -666,9 +710,18 @@ fn render_field_content(
             value.clone()
         };
 
+    let provider_supports_region_picker = matches!(
+        provider_name.parse::<ProviderKind>().ok(),
+        Some(
+            ProviderKind::Aws
+                | ProviderKind::Scaleway
+                | ProviderKind::Gcp
+                | ProviderKind::Oracle
+                | ProviderKind::Ovh
+        )
+    );
     let is_picker = matches!(field, ProviderFormField::IdentityFile)
-        || (field == ProviderFormField::Regions
-            && matches!(provider_name, "aws" | "scaleway" | "gcp" | "oracle" | "ovh"));
+        || (field == ProviderFormField::Regions && provider_supports_region_picker);
 
     let content = if value.is_empty() && is_focused && !is_picker {
         Line::from(Span::styled(
@@ -749,6 +802,7 @@ fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
         crate::app::Screen::ProviderForm { id } => id.provider.as_str(),
         _ => "aws",
     };
+    let picker_kind = provider_name.parse::<ProviderKind>().ok();
     let rows = build_region_rows(provider_name);
     let selected: std::collections::HashSet<&str> = app
         .providers
@@ -766,9 +820,12 @@ fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
     frame.render_widget(Clear, picker_area);
 
     let count = selected.len();
-    let zone_label = if matches!(provider_name, "scaleway" | "gcp") {
+    let zone_label = if matches!(
+        picker_kind,
+        Some(ProviderKind::Scaleway) | Some(ProviderKind::Gcp)
+    ) {
         "Zones"
-    } else if provider_name == "ovh" {
+    } else if picker_kind == Some(ProviderKind::Ovh) {
         "Endpoint"
     } else {
         "Regions"

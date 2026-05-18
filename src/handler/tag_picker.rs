@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::{App, Screen};
 
-pub(super) fn handle_tag_picker_screen(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('#') => {
             app.set_screen(Screen::HostList);

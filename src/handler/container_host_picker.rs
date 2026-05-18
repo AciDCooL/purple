@@ -20,7 +20,7 @@ pub(crate) fn uncached_aliases(app: &App) -> Vec<String> {
     app.hosts_state
         .list
         .iter()
-        .filter(|h| !app.container_cache.contains_key(&h.alias))
+        .filter(|h| !app.container_state.cache.contains_key(&h.alias))
         .map(|h| h.alias.clone())
         .collect()
 }
@@ -33,7 +33,7 @@ pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
     app.hosts_state
         .list
         .iter()
-        .filter(|h| !app.container_cache.contains_key(&h.alias))
+        .filter(|h| !app.container_state.cache.contains_key(&h.alias))
         .filter(|h| {
             if query.is_empty() {
                 return true;
@@ -44,7 +44,7 @@ pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
         .collect()
 }
 
-pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     let total = filtered_hosts(app).len();
     match key.code {
         KeyCode::Esc => close(app),

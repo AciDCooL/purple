@@ -1,15 +1,15 @@
 use super::*;
 
-/// Module-wide lock shared by every test that mutates `PATH` to install
-/// a mock `ssh-keygen` or `vault` binary. Without this, parallel tests
-/// race on the process-wide environment and one test's PATH restore
-/// overwrites another's mock.
-/// Module-wide lock shared by every test in the crate that mutates `PATH`,
-/// `HOME`, or any other process-global env var. Marked `pub(crate)` so
-/// regression tests in sibling modules (e.g. `main_tests.rs`) can serialize
-/// against vault and ssh-keygen mocks here without spawning a second lock.
+/// Process-wide lock serialising every test that mutates a global env var.
+/// Covers `PATH` (installing mock `ssh-keygen` or `vault` binaries),
+/// `HOME` (overriding the user config dir), and `VAULT_ADDR` (forcing a
+/// resolver result). Marked `pub(crate)` so regression tests in sibling
+/// modules (e.g. `main_tests.rs`, `askpass_tests.rs`) can serialise against
+/// the vault/ssh-keygen mocks defined here. Any new test in the binary
+/// crate that touches `std::env::set_var` MUST hold this lock for the
+/// duration of the mutation and restore the prior value before releasing.
 #[cfg(unix)]
-pub(crate) static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[test]
 fn cert_path_for_simple_alias() {
@@ -67,7 +67,7 @@ fn sign_certificate_vault_not_configured() {
     // Serialize against other vault tests that inject a mock `vault` into
     // PATH. Without this lock a parallel mock injection makes the spawn
     // here succeed and the assertion below fails.
-    let _guard = PATH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let tmpdir = std::env::temp_dir();
     let fake_key = tmpdir.join("purple_test_vault_sign_key.pub");
@@ -672,7 +672,7 @@ fn ensure_cert_returns_error_without_vault() {
     // PATH. Without this lock a concurrent mock makes `ensure_cert`
     // succeed and the `is_err` assertion below flips, manifesting as a
     // flaky failure under the precommit's repeated `cargo test` runs.
-    let _guard = PATH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let tmpdir = std::env::temp_dir();
     let fake_key = tmpdir.join("purple_test_ensure_cert_key.pub");
@@ -1017,9 +1017,9 @@ fn unique_tmp_subdir(tag: &str) -> PathBuf {
 #[cfg(unix)]
 fn with_mock_vault<F: FnOnce()>(tag: &str, stderr: &str, stdout: &str, exit_code: i32, f: F) {
     use std::os::unix::fs::PermissionsExt;
-    // Use the module-wide PATH_LOCK so vault-mocking tests don't race
+    // Use the module-wide ENV_LOCK so vault-mocking tests don't race
     // against ssh-keygen-mocking tests (both mutate the same PATH).
-    let _guard = PATH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir(tag);
     let script = dir.join("vault");
@@ -1161,7 +1161,7 @@ fn sign_certificate_success_writes_cert() {
 #[cfg(unix)]
 fn with_env_capturing_vault<F: FnOnce(&Path)>(tag: &str, f: F) {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = PATH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir(tag);
     let capture = dir.join("captured_addr.txt");
@@ -1181,7 +1181,7 @@ fn with_env_capturing_vault<F: FnOnce(&Path)>(tag: &str, f: F) {
     let old_path = std::env::var("PATH").unwrap_or_default();
     let old_vault_addr = std::env::var("VAULT_ADDR").ok();
     let new_path = format!("{}:{}", dir.display(), old_path);
-    // SAFETY: see with_mock_vault — PATH_LOCK serializes all env mutations
+    // SAFETY: see with_mock_vault — ENV_LOCK serializes all env mutations
     // in this test module. We clear VAULT_ADDR up front so the
     // "None = inherit parent env" test starts from a clean slate.
     unsafe {
@@ -1273,7 +1273,7 @@ fn sign_certificate_rejects_invalid_vault_addr() {
 #[test]
 fn check_cert_validity_handles_forever() {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = PATH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir("forever");
     let script = dir.join("ssh-keygen");
@@ -1316,7 +1316,7 @@ fn check_cert_validity_rejects_non_positive_window() {
     // calculation. The guard in check_cert_validity must reject it as
     // Invalid before it ever reaches the cache.
     use std::os::unix::fs::PermissionsExt;
-    let _guard = PATH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir("non_positive");
     let script = dir.join("ssh-keygen");
@@ -1397,7 +1397,7 @@ fn check_cert_validity_invalid_file() {
     // ssh-keygen behavior on non-certificate files varies across
     // platforms (macOS returns Invalid, some Linux versions return Valid).
     use std::os::unix::fs::PermissionsExt;
-    let _guard = PATH_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir("invalid_file");
     let script = dir.join("ssh-keygen");
@@ -1645,4 +1645,46 @@ fn cert_fill_ratio_forever_returns_one() {
 fn cert_fill_ratio_midpoint() {
     // 900s of 1800s = exactly 50%.
     assert!((cert_fill_ratio(900, 1800) - 0.5).abs() < 0.0001);
+}
+
+#[test]
+fn vault_sign_target_debug_redacts_vault_addr() {
+    let target = VaultSignTarget {
+        alias: "gateway".to_string(),
+        role: "ssh/sign/engineer".to_string(),
+        certificate_file: "~/.purple/certs/gateway-cert.pub".to_string(),
+        pubkey: std::path::PathBuf::from("/home/u/.ssh/id_ed25519.pub"),
+        vault_addr: Some("https://vault.internal.example.com:8200".to_string()),
+    };
+    let dbg = format!("{:?}", target);
+    assert!(
+        !dbg.contains("vault.internal.example.com"),
+        "vault_addr leaked: {dbg}"
+    );
+    assert!(
+        dbg.contains("<redacted>"),
+        "missing redaction marker: {dbg}"
+    );
+    assert!(dbg.contains("gateway"), "alias should remain visible");
+    assert!(
+        dbg.contains("ssh/sign/engineer"),
+        "role should remain visible"
+    );
+}
+
+#[test]
+fn vault_sign_target_debug_marks_none_vault_addr() {
+    let target = VaultSignTarget {
+        alias: "host".to_string(),
+        role: "r".to_string(),
+        certificate_file: String::new(),
+        pubkey: std::path::PathBuf::new(),
+        vault_addr: None,
+    };
+    let dbg = format!("{:?}", target);
+    assert!(
+        dbg.contains("None"),
+        "None addr should render as None: {dbg}"
+    );
+    assert!(!dbg.contains("<redacted>"));
 }

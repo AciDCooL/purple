@@ -310,7 +310,7 @@ pub(crate) fn handle_file_browser_listing(
     terminal: &mut tui::Tui,
 ) {
     let mut record_connection = false;
-    if let Some(ref mut fb) = app.file_browser {
+    if let Some(ref mut fb) = app.file_browser_session {
         if fb.alias == alias {
             fb.remote_loading = false;
             match entries {
@@ -364,12 +364,12 @@ pub(crate) fn handle_scp_complete(
         bool,
         file_browser::BrowserSort,
     )> = None;
-    let matched = if let Some(ref mut fb) = app.file_browser {
+    let matched = if let Some(ref mut fb) = app.file_browser_session {
         if fb.alias == alias {
             fb.transferring = None;
             if success {
                 app.history.record(&alias);
-                // Field-disjoint helper: fb already holds &mut app.file_browser,
+                // Field-disjoint helper: fb already holds &mut app.file_browser_session,
                 // so the `App::record_key_use` method would not borrow-check.
                 crate::key_activity::record_and_flush(
                     &mut app.keys.activity,
@@ -633,7 +633,7 @@ pub(crate) fn handle_container_listing(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            app.container_cache.insert(
+            app.container_state.cache.insert(
                 alias.clone(),
                 containers::ContainerCacheEntry {
                     timestamp: now,
@@ -642,7 +642,7 @@ pub(crate) fn handle_container_listing(
                     containers: listing.containers.clone(),
                 },
             );
-            containers::save_container_cache(&app.container_cache);
+            containers::save_container_cache(&app.container_state.cache);
             // Prefetch `docker inspect` for every container in this
             // listing so HEALTH and the inspect-sourced detail cards
             // populate without waiting for the user to scroll over
@@ -658,14 +658,14 @@ pub(crate) fn handle_container_listing(
         Err(e) => {
             // Preserve runtime even on error
             if let Some(rt) = e.runtime {
-                if let Some(entry) = app.container_cache.get_mut(&alias) {
+                if let Some(entry) = app.container_state.cache.get_mut(&alias) {
                     entry.runtime = rt;
                 }
             }
         }
     }
     // Update overlay state if open
-    if let Some(ref mut state) = app.container_state {
+    if let Some(ref mut state) = app.container_session {
         if state.alias == alias {
             match result {
                 Ok(listing) => {
@@ -988,7 +988,7 @@ pub(crate) fn handle_container_action_complete(
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
     // Check if overlay matches and extract refresh info before notify
-    let should_refresh = if let Some(ref mut state) = app.container_state {
+    let should_refresh = if let Some(ref mut state) = app.container_session {
         if state.alias == alias {
             state.action_in_progress = None;
             match result {
@@ -1144,7 +1144,7 @@ pub(crate) fn handle_vault_sign_all_done(
     if signed > 0 {
         if app.is_form_open() {
             // Defer config write to avoid mtime conflict with open forms
-            app.pending_vault_config_write = true;
+            app.vault.pending_config_write = true;
             if failed > 0 {
                 app.notify_sticky_error(summary_msg);
             } else {

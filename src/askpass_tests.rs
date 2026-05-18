@@ -2000,7 +2000,7 @@ Host UnrelatedServer
 #[cfg(unix)]
 fn with_mock_passcli<F: FnOnce()>(tag: &str, stderr: &str, stdout: &str, exit_code: i32, f: F) {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::PATH_LOCK
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
 
@@ -2023,7 +2023,7 @@ fn with_mock_passcli<F: FnOnce()>(tag: &str, stderr: &str, stdout: &str, exit_co
 
     let old_path = std::env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: PATH_LOCK serializes all PATH mutations across the crate.
+    // SAFETY: ENV_LOCK serializes all PATH mutations across the crate.
     unsafe { std::env::set_var("PATH", &new_path) };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
     unsafe { std::env::set_var("PATH", &old_path) };
@@ -2035,11 +2035,11 @@ fn with_mock_passcli<F: FnOnce()>(tag: &str, stderr: &str, stdout: &str, exit_co
 
 #[cfg(unix)]
 fn with_empty_path<F: FnOnce()>(f: F) {
-    let _guard = crate::vault_ssh::tests::PATH_LOCK
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     let old_path = std::env::var("PATH").unwrap_or_default();
-    // SAFETY: PATH_LOCK guards all PATH mutations.
+    // SAFETY: ENV_LOCK guards all PATH mutations.
     unsafe { std::env::set_var("PATH", "/nonexistent-purple-test-path") };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
     unsafe { std::env::set_var("PATH", &old_path) };
@@ -2091,7 +2091,7 @@ fn proton_login_empty_pat_rejected() {
 #[test]
 fn proton_login_pat_via_env_not_argv() {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::PATH_LOCK
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
 
@@ -2114,7 +2114,7 @@ fn proton_login_pat_via_env_not_argv() {
 
     let old_path = std::env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: PATH_LOCK held.
+    // SAFETY: ENV_LOCK held.
     unsafe { std::env::set_var("PATH", &new_path) };
     let pat = "pst_secret-value::tokenkey";
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2159,7 +2159,7 @@ fn proton_login_propagates_stderr() {
 #[test]
 fn retrieve_from_proton_pass_constructs_uri() {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::PATH_LOCK
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
 
@@ -2180,7 +2180,7 @@ fn retrieve_from_proton_pass_constructs_uri() {
 
     let old_path = std::env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: PATH_LOCK held.
+    // SAFETY: ENV_LOCK held.
     unsafe { std::env::set_var("PATH", &new_path) };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let got = super::retrieve_from_proton_pass("Personal/web/password").unwrap();
@@ -2254,7 +2254,7 @@ fn retrieve_from_proton_pass_env_not_propagated() {
     // `pass-cli view` child. Only the login child gets the env var. This
     // catches any regression that copies the login env through.
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::PATH_LOCK
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
 
@@ -2275,7 +2275,7 @@ fn retrieve_from_proton_pass_env_not_propagated() {
 
     let old_path = std::env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: PATH_LOCK held.
+    // SAFETY: ENV_LOCK held.
     unsafe { std::env::set_var("PATH", &new_path) };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         super::retrieve_from_proton_pass("Foo/Bar/p").expect("view should succeed");
@@ -2314,7 +2314,7 @@ fn proton_login_empty_pat_does_not_spawn() {
     // spawn. The mock would record any invocation; we assert the log file is
     // never created.
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::PATH_LOCK
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
 
@@ -2335,7 +2335,7 @@ fn proton_login_empty_pat_does_not_spawn() {
 
     let old_path = std::env::var("PATH").unwrap_or_default();
     let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: PATH_LOCK held.
+    // SAFETY: ENV_LOCK held.
     unsafe { std::env::set_var("PATH", &new_path) };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let err = super::proton_login("").expect_err("empty PAT must reject");

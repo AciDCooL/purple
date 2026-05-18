@@ -384,6 +384,7 @@ pub fn render_welcome(
     // MAX causes all phases to resolve as "already done" — skipping animation
     // gracefully instead of showing a partially animated state.
     let elapsed = app
+        .ui
         .welcome_opened
         .map(|t| t.elapsed().as_millis())
         .unwrap_or(u128::MAX);

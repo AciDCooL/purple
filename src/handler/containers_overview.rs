@@ -117,7 +117,8 @@ fn toggle_collapse_for_selected_host(app: &mut App) {
 /// Used to seed the bulk-action confirm dialogs the user opens with K
 /// or S while the cursor is on a host-divider row.
 fn host_running_members(app: &App, alias: &str) -> Vec<crate::app::StackMember> {
-    app.container_cache
+    app.container_state
+        .cache
         .get(alias)
         .into_iter()
         .flat_map(|entry| entry.containers.iter())
@@ -181,7 +182,7 @@ fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         // host built from the cached entry. The standard handler
         // bumps the cache timestamp to now, clearing the staleness
         // banner. Short delay so the in-flight toast is visible.
-        let Some(entry) = app.container_cache.get(&alias).cloned() else {
+        let Some(entry) = app.container_state.cache.get(&alias).cloned() else {
             return;
         };
         app.notify(crate::messages::container_refreshing(&alias));
@@ -203,7 +204,7 @@ fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         });
         return;
     }
-    let cached_runtime = app.container_cache.get(&alias).map(|e| e.runtime);
+    let cached_runtime = app.container_state.cache.get(&alias).map(|e| e.runtime);
     let askpass = app
         .hosts_state
         .list
@@ -239,7 +240,7 @@ fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
 /// are no-ops. The drain happens unconditionally so a second tick
 /// does not retry the same items.
 pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
-    let drained: Vec<String> = std::mem::take(&mut app.pending_container_fetch_aliases);
+    let drained: Vec<String> = std::mem::take(&mut app.container_state.pending_fetch_aliases);
     if app.demo_mode || drained.is_empty() {
         return;
     }
@@ -250,7 +251,7 @@ pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEv
         if !seen.insert(alias.clone()) {
             continue;
         }
-        if app.container_cache.contains_key(&alias) {
+        if app.container_state.cache.contains_key(&alias) {
             continue;
         }
         let Some(host) = app.hosts_state.list.iter().find(|h| h.alias == alias) else {
@@ -328,7 +329,8 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         // stagger. The standard handler bumps each entry's timestamp
         // to now, clearing every staleness banner in turn.
         let snapshots: Vec<(String, crate::containers::ContainerCacheEntry)> = app
-            .container_cache
+            .container_state
+            .cache
             .iter()
             .map(|(a, e)| (a.clone(), e.clone()))
             .collect();
@@ -370,7 +372,7 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
     let mut queue: std::collections::VecDeque<crate::app::RefreshQueueItem> =
         std::collections::VecDeque::new();
-    for (alias, entry) in &app.container_cache {
+    for (alias, entry) in &app.container_state.cache {
         let askpass = app
             .hosts_state
             .list
@@ -443,7 +445,7 @@ fn exec_into_selected_container(app: &mut App) {
         row.name,
         row.id
     );
-    app.pending_container_exec = Some(crate::app::ContainerExecRequest {
+    app.container_state.pending_exec = Some(crate::app::ContainerExecRequest {
         alias: row.alias,
         askpass,
         runtime,
@@ -476,7 +478,7 @@ fn selected_running_row_with_runtime(
         app.notify_error(e);
         return None;
     }
-    let entry = app.container_cache.get(&row.alias)?;
+    let entry = app.container_state.cache.get(&row.alias)?;
     let runtime = entry.runtime;
     let (askpass, stale_hint) = app
         .hosts_state
@@ -484,7 +486,10 @@ fn selected_running_row_with_runtime(
         .iter()
         .find(|h| h.alias == row.alias)
         .map(|h| {
-            let hint = h.stale.as_ref().map(|_| super::stale_provider_hint(h));
+            let hint = h
+                .stale
+                .as_ref()
+                .map(|_| super::host_list::stale_provider_hint(h));
             (h.askpass.clone(), hint)
         })
         .unwrap_or((None, None));
@@ -504,7 +509,7 @@ fn queue_logs_fetch_for_selected(app: &mut App) {
         row.name,
         row.id
     );
-    app.pending_container_logs = Some(crate::app::ContainerLogsRequest {
+    app.container_state.pending_logs = Some(crate::app::ContainerLogsRequest {
         alias: row.alias.clone(),
         askpass,
         runtime,
@@ -663,7 +668,8 @@ fn open_stack_restart_confirm(app: &mut App) {
     // (cache TTL race) are excluded; the user can re-trigger after a
     // refresh.
     let members: Vec<crate::app::StackMember> = app
-        .container_cache
+        .container_state
+        .cache
         .get(&row.alias)
         .into_iter()
         .flat_map(|entry| entry.containers.iter())
@@ -729,7 +735,7 @@ fn open_exec_prompt(app: &mut App) {
 /// inspect-fetch trigger lives in `handler.rs::handle_main_screen`
 /// because it needs the sender after this returns; refresh and add
 /// (`r`/`R`/`a`) need the sender directly to spawn listings.
-pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     if app.search.query.is_some() {
         handle_search_keys(app, key);
         return;
@@ -888,7 +894,7 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender
                 ViewMode::Compact
             };
             app.containers_overview.view_mode = new_mode;
-            app.detail_toggle_pending = true;
+            app.ui.detail_toggle_pending = true;
             app.ui.detail_scroll = 0;
             if let Err(e) = preferences::save_containers_view_mode(new_mode) {
                 log::warn!("[config] Failed to persist containers view mode: {e}");
@@ -912,12 +918,12 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender
             app.running = false;
         }
         KeyCode::Esc
-            if !app.esc_quit_hint_shown
+            if !app.ui.esc_quit_hint_shown
                 && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky) =>
         {
             log::debug!("[purple] esc on idle containers overview, showing quit hint toast");
             app.notify(crate::messages::ESC_QUIT_HINT);
-            app.esc_quit_hint_shown = true;
+            app.ui.esc_quit_hint_shown = true;
         }
         _ => {}
     }
@@ -1035,7 +1041,7 @@ pub(super) fn ensure_inspect_for_selected(app: &mut App, events_tx: &mpsc::Sende
 /// selected row's data has gone stale between frames.
 fn selected_inspect_target(app: &App) -> Option<(String, String, ContainerRuntime)> {
     let row = selected_container_row(app)?;
-    let entry = app.container_cache.get(&row.alias)?;
+    let entry = app.container_state.cache.get(&row.alias)?;
     Some((row.alias, row.id, entry.runtime))
 }
 
@@ -1127,7 +1133,8 @@ pub(super) fn ensure_logs_for_selected(app: &mut App, events_tx: &mpsc::Sender<A
     // Resolve the container name once so the event carries it back for
     // the toast / log line, mirroring the existing inspect path.
     let container_name = app
-        .container_cache
+        .container_state
+        .cache
         .get(&alias)
         .and_then(|e| e.containers.iter().find(|c| c.id == container_id))
         .map(|c| c.names.clone())
@@ -1207,7 +1214,7 @@ pub(super) fn ensure_inspect_for_host_header(app: &mut App, events_tx: &mpsc::Se
     let Some(alias) = selected_header_alias(app) else {
         return;
     };
-    let Some(cache_entry) = app.container_cache.get(&alias) else {
+    let Some(cache_entry) = app.container_state.cache.get(&alias) else {
         return;
     };
     let runtime = cache_entry.runtime;
@@ -1320,7 +1327,7 @@ pub(super) fn ensure_list_for_selected_host(app: &mut App, events_tx: &mpsc::Sen
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let cached_runtime = if let Some(entry) = app.container_cache.get(&alias) {
+    let cached_runtime = if let Some(entry) = app.container_state.cache.get(&alias) {
         if now.saturating_sub(entry.timestamp) < crate::app::LIST_CACHE_TTL_SECS {
             return;
         }

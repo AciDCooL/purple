@@ -751,7 +751,7 @@ fn confirm_import_arrow_key_stays() {
 #[test]
 fn app_known_hosts_count_default_zero() {
     let app = empty_app();
-    assert_eq!(app.known_hosts_count, 0);
+    assert_eq!(app.ui.known_hosts_count, 0);
 }
 
 // =========================================================================
@@ -1066,29 +1066,29 @@ fn known_hosts_count_not_reset_on_write_failure() {
     // without resetting known_hosts_count. This is correct behavior:
     // if the import didn't save, the user might want to try again.
     let mut app = empty_app();
-    app.known_hosts_count = 10;
-    // Simulate: write failure would do `return` before `app.known_hosts_count = 0`
+    app.ui.known_hosts_count = 10;
+    // Simulate: write failure would do `return` before `app.ui.known_hosts_count = 0`
     // So known_hosts_count should remain 10
-    assert_eq!(app.known_hosts_count, 10);
+    assert_eq!(app.ui.known_hosts_count, 10);
 }
 
 #[test]
 fn known_hosts_count_not_reset_on_import_error() {
     // When import_from_known_hosts returns Err, known_hosts_count is not reset
     let mut app = empty_app();
-    app.known_hosts_count = 5;
+    app.ui.known_hosts_count = 5;
     // The Err branch only sets status, doesn't touch known_hosts_count
     app.notify_error("some error");
-    assert_eq!(app.known_hosts_count, 5);
+    assert_eq!(app.ui.known_hosts_count, 5);
 }
 
 #[test]
 fn known_hosts_count_reset_on_success() {
     // When import succeeds (even with 0 imported), known_hosts_count is reset
     let mut app = empty_app();
-    app.known_hosts_count = 15;
-    app.known_hosts_count = 0; // simulates the Ok branch
-    assert_eq!(app.known_hosts_count, 0);
+    app.ui.known_hosts_count = 15;
+    app.ui.known_hosts_count = 0; // simulates the Ok branch
+    assert_eq!(app.ui.known_hosts_count, 0);
 }
 
 // =========================================================================
@@ -1456,7 +1456,7 @@ fn ensure_vault_ssh_chain_unknown_target_safe() {
 ///
 /// Lives in `main_tests.rs` (not `vault_ssh_tests.rs`) because the
 /// function under test only exists in the binary crate. The shared
-/// `PATH_LOCK` from `vault_ssh::tests` serializes env mutations against
+/// `ENV_LOCK` from `vault_ssh::tests` serializes env mutations against
 /// every other vault- and ssh-keygen-mocking test in the suite so we
 /// never race on `PATH` / `HOME`.
 #[cfg(unix)]
@@ -1464,7 +1464,7 @@ fn ensure_vault_ssh_chain_unknown_target_safe() {
 fn ensure_vault_ssh_chain_signs_proxy_before_target() {
     use std::os::unix::fs::PermissionsExt;
 
-    let _guard = crate::vault_ssh::tests::PATH_LOCK
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
 
@@ -1506,10 +1506,10 @@ fn ensure_vault_ssh_chain_signs_proxy_before_target() {
     let old_home = std::env::var("HOME").ok();
     let new_path = format!("{}:{}", mock_dir.display(), old_path);
 
-    // SAFETY: PATH_LOCK held above serializes all env mutations within
+    // SAFETY: ENV_LOCK held above serializes all env mutations within
     // this test binary. Both PATH and HOME are restored before the lock
     // releases. Any future test that mutates HOME MUST also acquire
-    // PATH_LOCK (or an equivalent process-wide lock).
+    // ENV_LOCK (or an equivalent process-wide lock).
     unsafe { std::env::set_var("PATH", &new_path) };
     unsafe { std::env::set_var("HOME", &home) };
 
@@ -1586,14 +1586,14 @@ fn cli_legacy_vault_sign_flat_form_rejected() {
 // once directly to capture the expected value and once inside
 // `expand_user_path()`. Both reads consult $HOME. Other tests in the
 // suite (e.g. `ensure_vault_ssh_chain_signs_proxy_before_target`)
-// mutate $HOME under `vault_ssh::tests::PATH_LOCK`. If we read $HOME
+// mutate $HOME under `vault_ssh::tests::ENV_LOCK`. If we read $HOME
 // here without the lock, the mutator can change it between our two
-// reads and the assertion flips. Holding `PATH_LOCK` for the whole
+// reads and the assertion flips. Holding `ENV_LOCK` for the whole
 // test serialises us against every env-mutating test in the binary.
 
 #[test]
 fn expand_user_path_tilde_slash() {
-    let _g = crate::vault_ssh::tests::PATH_LOCK
+    let _g = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
@@ -1603,7 +1603,7 @@ fn expand_user_path_tilde_slash() {
 
 #[test]
 fn expand_user_path_dollar_brace_home_slash() {
-    let _g = crate::vault_ssh::tests::PATH_LOCK
+    let _g = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
@@ -1613,7 +1613,7 @@ fn expand_user_path_dollar_brace_home_slash() {
 
 #[test]
 fn expand_user_path_dollar_home_slash() {
-    let _g = crate::vault_ssh::tests::PATH_LOCK
+    let _g = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
@@ -1623,7 +1623,7 @@ fn expand_user_path_dollar_home_slash() {
 
 #[test]
 fn expand_user_path_bare_tilde() {
-    let _g = crate::vault_ssh::tests::PATH_LOCK
+    let _g = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
@@ -1632,7 +1632,7 @@ fn expand_user_path_bare_tilde() {
 
 #[test]
 fn expand_user_path_bare_dollar_brace_home() {
-    let _g = crate::vault_ssh::tests::PATH_LOCK
+    let _g = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
@@ -1641,7 +1641,7 @@ fn expand_user_path_bare_dollar_brace_home() {
 
 #[test]
 fn expand_user_path_bare_dollar_home() {
-    let _g = crate::vault_ssh::tests::PATH_LOCK
+    let _g = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
@@ -1686,11 +1686,11 @@ fn ensure_proton_login_skips_non_proton_askpass() {
 #[cfg(unix)]
 #[test]
 fn ensure_proton_login_skips_when_not_installed() {
-    let _guard = crate::vault_ssh::tests::PATH_LOCK
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
     let old_path = std::env::var("PATH").unwrap_or_default();
-    // SAFETY: PATH_LOCK held.
+    // SAFETY: ENV_LOCK held.
     unsafe { std::env::set_var("PATH", "/nonexistent-purple-test-path") };
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         super::ensure_proton_login(Some("proton:Foo/Bar/p"));
@@ -1705,7 +1705,7 @@ fn ensure_proton_login_skips_when_not_installed() {
 #[test]
 fn ensure_proton_login_skips_when_authenticated() {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::PATH_LOCK
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|p| p.into_inner());
 
@@ -1828,14 +1828,14 @@ mod proton_di_tests {
     fn at_most_two_attempts_when_login_keeps_failing() {
         // proton_login spawns `pass-cli` via PATH. To force every login attempt
         // to fail (and prove the retry loop caps at 2), point PATH at a
-        // guaranteed-non-existent directory under PATH_LOCK so concurrent
+        // guaranteed-non-existent directory under ENV_LOCK so concurrent
         // PATH-mutating tests cannot accidentally provide a working pass-cli
         // shim.
-        let _guard = crate::vault_ssh::tests::PATH_LOCK
+        let _guard = crate::vault_ssh::tests::ENV_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let old_path = std::env::var("PATH").unwrap_or_default();
-        // SAFETY: PATH_LOCK held.
+        // SAFETY: ENV_LOCK held.
         unsafe { std::env::set_var("PATH", "/nonexistent-purple-di-test-path") };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             run_with(

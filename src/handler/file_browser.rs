@@ -6,14 +6,10 @@ use log::{debug, error, info};
 use crate::app::{App, Screen};
 use crate::event::AppEvent;
 
-pub(super) fn handle_file_browser(
-    app: &mut App,
-    key: KeyEvent,
-    events_tx: &mpsc::Sender<AppEvent>,
-) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     use crate::file_browser::{BrowserPane, CopyRequest};
 
-    let fb = match app.file_browser.as_mut() {
+    let fb = match app.file_browser_session.as_mut() {
         Some(fb) => fb,
         None => return,
     };
@@ -129,13 +125,15 @@ pub(super) fn handle_file_browser(
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             // Save paths for next time
-            if let Some(ref fb) = app.file_browser {
+            if let Some(ref fb) = app.file_browser_session {
                 let alias = fb.alias.clone();
                 let local = fb.local_path.clone();
                 let remote = fb.remote_path.clone();
-                app.file_browser_paths.insert(alias, (local, remote));
+                app.file_browser_state
+                    .host_paths
+                    .insert(alias, (local, remote));
             }
-            app.file_browser = None;
+            app.file_browser_session = None;
             app.set_screen(Screen::HostList);
         }
         KeyCode::Tab => {

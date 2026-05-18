@@ -546,7 +546,7 @@ impl App {
         if !self.forms.bulk_tag_editor.rows.is_empty() {
             self.ui.bulk_tag_editor_state.select(Some(0));
         }
-        self.screen = Screen::BulkTagEditor;
+        self.set_screen(Screen::BulkTagEditor);
         true
     }
 
@@ -738,7 +738,7 @@ impl App {
         if !self.tags.list.is_empty() {
             self.ui.tag_picker_state.select(Some(0));
         }
-        self.screen = Screen::TagPicker;
+        self.set_screen(Screen::TagPicker);
     }
 
     /// Move tag picker selection up.

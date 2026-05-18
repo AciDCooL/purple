@@ -590,10 +590,10 @@ mod tests {
     #[test]
     fn empty_state_caps_actions_and_shows_relational_count() {
         // With ~29 actions in the unified set, the empty state caps to
-        // crate::app::JUMP_EMPTY_STATE_ACTIONS_CAP and the header reads `Actions  N of 29`.
+        // crate::app::jump::JUMP_EMPTY_STATE_ACTIONS_CAP and the header reads `Actions  N of 29`.
         let total = crate::app::JumpAction::all().len();
         assert!(
-            total > crate::app::JUMP_EMPTY_STATE_ACTIONS_CAP,
+            total > crate::app::jump::JUMP_EMPTY_STATE_ACTIONS_CAP,
             "this test assumes the unified set has more actions than the cap"
         );
         let mut app = test_app();
@@ -676,18 +676,18 @@ mod tests {
             .find(|(l, _)| *l == "ACTIONS")
             .map(|(_, h)| h.clone())
             .unwrap_or_default();
-        assert!(actions.len() >= crate::app::JUMP_EMPTY_STATE_ACTIONS_CAP);
+        assert!(actions.len() >= crate::app::jump::JUMP_EMPTY_STATE_ACTIONS_CAP);
         let mut categories = std::collections::HashSet::new();
         for hit in actions
             .iter()
-            .take(crate::app::JUMP_EMPTY_STATE_ACTIONS_CAP)
+            .take(crate::app::jump::JUMP_EMPTY_STATE_ACTIONS_CAP)
         {
             if let crate::app::JumpHit::Action(a) = hit {
                 let cat = a.label.split_once(':').map(|(c, _)| c.trim().to_string());
                 categories.insert(cat);
             }
         }
-        let cap = crate::app::JUMP_EMPTY_STATE_ACTIONS_CAP;
+        let cap = crate::app::jump::JUMP_EMPTY_STATE_ACTIONS_CAP;
         assert!(
             categories.len() >= 4,
             "top-{cap} should sample at least 4 distinct categories, got {categories:?}"

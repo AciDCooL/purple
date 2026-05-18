@@ -2,6 +2,7 @@ use super::tag_state::DisplayTag;
 use super::*;
 use crate::ssh_config::model::{HostEntry, SshConfigFile};
 use crate::tunnel::TunnelType;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -259,52 +260,52 @@ fn vault_kv_only_host_does_not_get_vault_ssh_tag() {
 #[test]
 fn flush_pending_vault_write_noop_when_flag_false() {
     let mut app = test_app_with_hosts(&["Host a\n  HostName 1.2.3.4\n"]);
-    app.pending_vault_config_write = false;
+    app.vault.pending_config_write = false;
     app.flush_pending_vault_write();
-    assert!(!app.pending_vault_config_write);
+    assert!(!app.vault.pending_config_write);
 }
 
 #[test]
 fn flush_pending_vault_write_clears_flag_after_flush() {
     let mut app = test_app_with_hosts(&["Host a\n  HostName 1.2.3.4\n"]);
-    app.pending_vault_config_write = true;
+    app.vault.pending_config_write = true;
     let tmpdir = std::env::temp_dir();
     let path = tmpdir.join("purple_test_flush_pending.ini");
     app.hosts_state.ssh_config.path = path.clone();
     app.flush_pending_vault_write();
-    assert!(!app.pending_vault_config_write);
+    assert!(!app.vault.pending_config_write);
     let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn reload_hosts_clears_pending_vault_write_flag() {
     let mut app = test_app_with_hosts(&["Host a\n  HostName 1.2.3.4\n"]);
-    app.pending_vault_config_write = true;
+    app.vault.pending_config_write = true;
     let tmpdir = std::env::temp_dir();
     let path = tmpdir.join("purple_test_reload_flush.ini");
     app.hosts_state.ssh_config.path = path.clone();
     app.reload_hosts();
-    assert!(!app.pending_vault_config_write);
+    assert!(!app.vault.pending_config_write);
     let _ = std::fs::remove_file(&path);
 }
 
 #[test]
 fn confirm_vault_sign_screen_stores_signable_list() {
     let mut app = test_app_with_hosts(&["Host a\n  HostName 1.2.3.4\n"]);
-    let signable = vec![(
-        "a".to_string(),
-        "ssh/sign/engineer".to_string(),
-        String::new(),
-        std::path::PathBuf::from("/tmp/id_ed25519.pub"),
-        None,
-    )];
+    let signable = vec![crate::vault_ssh::VaultSignTarget {
+        alias: "a".to_string(),
+        role: "ssh/sign/engineer".to_string(),
+        certificate_file: String::new(),
+        pubkey: std::path::PathBuf::from("/tmp/id_ed25519.pub"),
+        vault_addr: None,
+    }];
     app.screen = Screen::ConfirmVaultSign {
         signable: signable.clone(),
     };
     match &app.screen {
         Screen::ConfirmVaultSign { signable: s } => {
             assert_eq!(s.len(), 1);
-            assert_eq!(s[0].0, "a");
+            assert_eq!(s[0].alias, "a");
         }
         _ => panic!("wrong screen"),
     }
@@ -6998,7 +6999,7 @@ fn resolve_recent_ref_snippet_dangling_returns_none() {
 fn record_jump_hit_round_trips_via_recents() {
     // End-to-end: record a hit through the public API, then opening the
     // jump again should surface it as a recent.
-    let _g = crate::app::jump::tests::PATH_LOCK
+    let _g = crate::app::jump::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let recents_dir = tempfile::tempdir().expect("tempdir");
@@ -8296,7 +8297,7 @@ fn migrate_alias_keyed_caches_moves_ping_container_and_in_flight_sets() {
     app.ping
         .last_checked
         .insert("a".to_string(), std::time::Instant::now());
-    app.container_cache.insert(
+    app.container_state.cache.insert(
         "a".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 0,
@@ -8329,8 +8330,8 @@ fn migrate_alias_keyed_caches_moves_ping_container_and_in_flight_sets() {
     ));
     assert!(!app.ping.last_checked.contains_key("a"));
     assert!(app.ping.last_checked.contains_key("b"));
-    assert!(!app.container_cache.contains_key("a"));
-    assert!(app.container_cache.contains_key("b"));
+    assert!(!app.container_state.cache.contains_key("a"));
+    assert!(app.container_state.cache.contains_key("b"));
     assert!(!app.containers_overview.auto_list_in_flight.contains("a"));
     assert!(app.containers_overview.auto_list_in_flight.contains("b"));
     assert!(!app.vault.cert_checks_in_flight.contains("a"));
@@ -8374,7 +8375,7 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
     // both route through this function; if a future refactor splits
     // the protocol again, this test fails before the user sees a
     // regression.
-    let _g = crate::app::jump::tests::PATH_LOCK
+    let _g = crate::app::jump::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().expect("tempdir");
@@ -8414,7 +8415,7 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
         "top-old".to_string(),
         crate::app::PingStatus::Reachable { rtt_ms: 42 },
     );
-    app.container_cache.insert(
+    app.container_state.cache.insert(
         "top-old".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 1_700_000_000,
@@ -8439,7 +8440,7 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
         ),
         "ping.status must follow the rename through rename_aliases"
     );
-    assert!(app.container_cache.contains_key("top-new"));
+    assert!(app.container_state.cache.contains_key("top-new"));
 
     // History migrated (would stay under top-old without apply_alias_renames).
     assert!(!app.history.entries.contains_key("top-old"));

@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use crate::app::{App, JumpActionTarget, JumpHit, JumpMode, Screen, TopPage};
 use crate::event::AppEvent;
 
-pub(super) fn handle_jump(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     if app.jump.is_none() {
         return;
     }
@@ -109,7 +109,7 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
             app.select_host_by_alias(&h.alias);
             // Default action on a host: trigger the connect flow exactly like
             // pressing Enter on the host list.
-            super::host_list::handle_host_list(
+            super::host_list::handle_main_key(
                 app,
                 KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
                 events_tx,
@@ -197,21 +197,21 @@ fn execute_action(
     match action.target {
         JumpActionTarget::Hosts => {
             app.top_page = TopPage::Hosts;
-            super::host_list::handle_host_list(app, key, events_tx);
+            super::host_list::handle_main_key(app, key, events_tx);
         }
         JumpActionTarget::Tunnels => {
             app.top_page = TopPage::Tunnels;
-            super::tunnels_overview::handle_keys(app, key);
+            super::tunnels_overview::handle_key(app, key);
         }
         JumpActionTarget::Containers => {
             app.top_page = TopPage::Containers;
             app.set_screen(Screen::HostList);
-            super::containers_overview::handle_keys(app, key, events_tx);
+            super::containers_overview::handle_key(app, key, events_tx);
         }
         JumpActionTarget::Keys => {
             app.top_page = TopPage::Keys;
             app.set_screen(Screen::HostList);
-            super::keys_overview::handle_keys(app, key);
+            super::keys_overview::handle_key(app, key);
         }
     }
 }

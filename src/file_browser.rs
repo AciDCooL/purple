@@ -38,8 +38,8 @@ pub struct CopyRequest {
     pub has_dirs: bool,
 }
 
-/// State for the dual-pane file browser overlay.
-pub struct FileBrowserState {
+/// Per-host overlay session state; alive while the file browser is open.
+pub struct FileBrowserSession {
     pub alias: String,
     pub askpass: Option<String>,
     pub active_pane: BrowserPane,

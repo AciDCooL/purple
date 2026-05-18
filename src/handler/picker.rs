@@ -69,7 +69,7 @@ pub(super) fn handle_password_picker(app: &mut App, key: KeyEvent) {
             }
             app.ui.password_picker.open = false;
             if !needs_more_input {
-                super::try_auto_submit_after_picker(app);
+                try_auto_submit_after_picker(app);
             }
         }
         _ => {}
@@ -103,7 +103,7 @@ pub(super) fn handle_key_picker_shared(app: &mut App, key: KeyEvent, for_provide
             }
             app.ui.key_picker.open = false;
             if !for_provider {
-                super::try_auto_submit_after_picker(app);
+                try_auto_submit_after_picker(app);
             }
         }
         _ => {}
@@ -132,7 +132,7 @@ pub(super) fn handle_proxyjump_picker(app: &mut App, key: KeyEvent) {
                     app.forms.host.sync_cursor_to_end();
                     app.notify(crate::messages::proxy_jump_set(alias));
                     app.ui.proxyjump_picker.open = false;
-                    super::try_auto_submit_after_picker(app);
+                    try_auto_submit_after_picker(app);
                 }
                 // Separator selected: no-op, stay in picker.
             }
@@ -164,5 +164,12 @@ pub(super) fn handle_vault_role_picker(app: &mut App, key: KeyEvent) {
             app.ui.vault_role_picker.open = false;
         }
         _ => {}
+    }
+}
+
+/// Auto-submit the host form after a picker selection if all required fields are filled.
+pub(super) fn try_auto_submit_after_picker(app: &mut App) {
+    if !app.forms.host.alias.is_empty() && !app.forms.host.hostname.is_empty() {
+        super::host_form::submit_form(app);
     }
 }

@@ -200,7 +200,7 @@ fn nth_row(app: &App, target: usize) -> Option<(String, TunnelRule)> {
 
 /// Handle a key event while the user is on the Tunnels tab. Caller is
 /// responsible for confirming `app.top_page == TopPage::Tunnels`.
-pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     // Pending delete confirmation is exclusive: only y/n/Esc are handled,
     // every other key is ignored so a stray press cannot silently cancel.
     if app.tunnels.pending_delete.is_some() {
@@ -350,12 +350,12 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
         // Esc presses (or Esc while a sticky is up) fall through to the no-op
         // arm below.
         KeyCode::Esc
-            if !app.esc_quit_hint_shown
+            if !app.ui.esc_quit_hint_shown
                 && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky) =>
         {
             log::debug!("[purple] esc on idle tunnels overview, showing quit hint toast");
             app.notify(crate::messages::ESC_QUIT_HINT);
-            app.esc_quit_hint_shown = true;
+            app.ui.esc_quit_hint_shown = true;
         }
         _ => {}
     }

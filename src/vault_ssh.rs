@@ -7,6 +7,33 @@ use std::time::{Instant, SystemTime};
 
 use crate::ssh_config::model::HostEntry;
 
+/// One host resolved to a Vault SSH role, ready for bulk signing.
+#[derive(Clone, PartialEq)]
+pub struct VaultSignTarget {
+    pub alias: String,
+    pub role: String,
+    pub certificate_file: String,
+    pub pubkey: std::path::PathBuf,
+    pub vault_addr: Option<String>,
+}
+
+/// Manual `Debug` so `vault_addr` (a Vault server hostname revealing
+/// infrastructure topology) never appears unredacted in `{:?}` output.
+impl std::fmt::Debug for VaultSignTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VaultSignTarget")
+            .field("alias", &self.alias)
+            .field("role", &self.role)
+            .field("certificate_file", &self.certificate_file)
+            .field("pubkey", &self.pubkey)
+            .field(
+                "vault_addr",
+                &self.vault_addr.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
+}
+
 /// Result of a certificate signing operation.
 #[derive(Debug)]
 pub struct SignResult {
@@ -945,7 +972,7 @@ pub fn format_remaining(remaining_secs: i64) -> String {
 }
 
 // Visible to sibling test modules (`main_tests.rs`) so they can share
-// `PATH_LOCK` and other process-global mocking helpers without spawning
+// `ENV_LOCK` and other process-global mocking helpers without spawning
 // a second lock that would race against this one.
 #[cfg(test)]
 #[path = "vault_ssh_tests.rs"]

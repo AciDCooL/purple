@@ -92,7 +92,7 @@ impl App {
             return Err(crate::messages::failed_to_save(&e));
         }
         // Form submit writes the full config including any pending vault mutations
-        self.pending_vault_config_write = false;
+        self.vault.pending_config_write = false;
         self.update_last_modified();
         self.reload_hosts();
         self.select_host_by_alias(&alias);
@@ -296,7 +296,7 @@ impl App {
             return Err(crate::messages::failed_to_save(&e));
         }
         // Form submit writes the full config including any pending vault mutations
-        self.pending_vault_config_write = false;
+        self.vault.pending_config_write = false;
         self.update_last_modified();
         let renames: Vec<(String, String)> = if alias != old_alias {
             vec![(old_alias.to_string(), alias.clone())]
@@ -412,8 +412,8 @@ impl App {
             if let Some(v) = self.ping.last_checked.remove(old_alias) {
                 self.ping.last_checked.insert(new_alias.clone(), v);
             }
-            if let Some(v) = self.container_cache.remove(old_alias) {
-                self.container_cache.insert(new_alias.clone(), v);
+            if let Some(v) = self.container_state.cache.remove(old_alias) {
+                self.container_state.cache.insert(new_alias.clone(), v);
                 container_cache_changed = true;
             }
             if self
@@ -433,7 +433,7 @@ impl App {
             }
         }
         if container_cache_changed {
-            crate::containers::save_container_cache(&self.container_cache);
+            crate::containers::save_container_cache(&self.container_state.cache);
         }
     }
 

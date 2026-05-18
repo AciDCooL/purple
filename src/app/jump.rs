@@ -389,15 +389,373 @@ fn current_unix_ts() -> i64 {
         .unwrap_or(0)
 }
 
+/// Which command set the jump bar displays. Determined by the screen that
+/// opened the jump bar so the action list matches what the underlying
+/// handler can dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum JumpMode {
+    #[default]
+    Hosts,
+    Tunnels,
+    Containers,
+    Keys,
+}
+
+/// On the empty-query state we show only the top-N actions to keep the
+/// first impression a short menu rather than a wall. The full list is
+/// one keystroke away. Lives in the data layer so `visible_hits()`,
+/// `empty_state_groups()` and the Down handler all agree on the bound.
+pub const JUMP_EMPTY_STATE_ACTIONS_CAP: usize = 6;
+
+/// On context-specific tabs (Tunnels, Containers) the empty-state bumps
+/// up to this many actions of the active tab's category to the front,
+/// before round-robining the remaining slots across other categories.
+/// Sized so half the cap surfaces tab actions and the other half stays
+/// reachable as a hub menu (cross-tab discovery).
+const EMPTY_STATE_TAB_BIAS: usize = 3;
+
+/// Display order for action categories on the empty state. The
+/// round-robin walks these buckets in this order, NOT in static-table
+/// order, so the first impression always shows the most-used categories
+/// regardless of how the static action list happens to be sorted.
+/// Categories not listed here fall through to a stable last-seen order.
+const CATEGORY_PRIORITY: &[&str] = &[
+    "Hosts",
+    "Tunnels",
+    "Containers",
+    "Files",
+    "Vault",
+    "Keys",
+    "Providers",
+    "Snippets",
+    "Clipboard",
+    "Settings",
+    "Help",
+];
+
+/// Minimum nucleo score for actions. Below this the action is dropped from
+/// results. Stops broad character-scatter matches on action labels.
+pub(crate) const PALETTE_ACTION_FLOOR: u32 = 30;
+
+/// Reorder actions so the first N show one per category, the next N
+/// show the second action of each category, etc. Preserves within-bucket
+/// order so muscle memory survives. Buckets are visited in
+/// `CATEGORY_PRIORITY` order. declarative, decoupled from static-table
+/// row order. so the empty-state top-N always leads with the most
+/// important categories. Categories not in the priority list fall to
+/// the end in stable encounter order.
+fn round_robin_actions_by_category(actions: impl Iterator<Item = JumpAction>) -> Vec<JumpHit> {
+    let mut buckets: Vec<(String, Vec<JumpAction>)> = Vec::new();
+    for action in actions {
+        let category = action
+            .label
+            .split_once(':')
+            .map(|(c, _)| c.trim().to_string())
+            .unwrap_or_else(|| "Other".to_string());
+        if let Some(slot) = buckets.iter_mut().find(|(c, _)| c == &category) {
+            slot.1.push(action);
+        } else {
+            buckets.push((category, vec![action]));
+        }
+    }
+    let priority_index = |cat: &str| -> usize {
+        CATEGORY_PRIORITY
+            .iter()
+            .position(|p| *p == cat)
+            .unwrap_or(usize::MAX)
+    };
+    buckets.sort_by_key(|(c, _)| priority_index(c));
+    let mut out: Vec<JumpHit> = Vec::new();
+    let mut depth = 0usize;
+    let max_depth = buckets.iter().map(|(_, v)| v.len()).max().unwrap_or(0);
+    while depth < max_depth {
+        for (_, bucket) in &buckets {
+            if let Some(action) = bucket.get(depth) {
+                out.push(JumpHit::Action(*action));
+            }
+        }
+        depth += 1;
+    }
+    out
+}
+
+/// Like `round_robin_actions_by_category` but pulls up to `bump` actions
+/// whose dispatch `target` matches `preferred` to the front before
+/// round-robining the rest. Used by the empty-state on context-specific
+/// tabs (Tunnels, Containers) so the user sees actions that operate on
+/// the active tab, not just actions whose label happens to start with
+/// the same prefix. Filtering by `target` (dispatch destination) instead
+/// of label category keeps `Containers: List containers` (target=Hosts,
+/// opens the legacy per-host overlay) out of the bias on the Containers
+/// tab, where it would otherwise crowd out the genuinely tab-relevant
+/// `Refresh / Cycle sort / Toggle detail panel` actions.
+fn round_robin_actions_with_bias(
+    actions: impl Iterator<Item = JumpAction>,
+    preferred: JumpActionTarget,
+    bump: usize,
+) -> Vec<JumpHit> {
+    let collected: Vec<JumpAction> = actions.collect();
+    let biased: Vec<JumpAction> = collected
+        .iter()
+        .filter(|a| a.target == preferred)
+        .take(bump)
+        .copied()
+        .collect();
+    let biased_keys: std::collections::HashSet<char> = biased.iter().map(|a| a.key).collect();
+    let rest: Vec<JumpAction> = collected
+        .into_iter()
+        .filter(|a| !(biased_keys.contains(&a.key) && a.target == preferred))
+        .collect();
+    let mut out: Vec<JumpHit> = biased.into_iter().map(JumpHit::Action).collect();
+    out.extend(round_robin_actions_by_category(rest.into_iter()));
+    out
+}
+
+#[derive(Debug, Default)]
+pub struct JumpState {
+    pub query: String,
+    pub selected: usize,
+    pub mode: JumpMode,
+    /// Computed result list, recomputed on every query change. Empty until
+    /// `App::recompute_jump_hits` runs.
+    pub hits: Vec<JumpHit>,
+    /// MRU snapshot loaded on jump bar open, used by the empty-query state.
+    pub recents: Vec<JumpHit>,
+    /// True once the user has navigated (Down/Up/Tab) at least once. The
+    /// renderer keeps the selection invisible on the empty state until
+    /// this flips, so the eye stays on the input field on first open.
+    /// Also makes the FIRST Down keystroke land on row 0 instead of
+    /// skipping to row 1.
+    pub cursor_revealed: bool,
+    /// Reused matcher with growable scratch buffers. Populated lazily on
+    /// the first scoring pass and kept across keystrokes so nucleo's
+    /// internal vectors do not reallocate every recompute.
+    pub matcher: Option<nucleo_matcher::Matcher>,
+}
+
+// Manual `Clone` because `nucleo_matcher::Matcher` is not `Clone`. State
+// clones (e.g. in tests) drop the cached matcher and let the next
+// recompute build a fresh one. correct behavior, just slightly slower
+// for the next keystroke after a clone.
+impl Clone for JumpState {
+    fn clone(&self) -> Self {
+        Self {
+            query: self.query.clone(),
+            selected: self.selected,
+            mode: self.mode,
+            hits: self.hits.clone(),
+            recents: self.recents.clone(),
+            cursor_revealed: self.cursor_revealed,
+            matcher: None,
+        }
+    }
+}
+
+impl JumpState {
+    pub fn for_mode(mode: JumpMode) -> Self {
+        Self {
+            mode,
+            ..Self::default()
+        }
+    }
+
+    pub fn push_query(&mut self, c: char) {
+        if self.query.len() < 64 {
+            self.query.push(c);
+        }
+        // Selection is handled by `App::recompute_jump_hits` which
+        // tries to keep the previously-selected hit's identity. We do
+        // NOT reset to 0 here because that would defeat mid-typing
+        // navigation: typing a char must not jump the cursor.
+    }
+
+    pub fn pop_query(&mut self) {
+        self.query.pop();
+    }
+
+    /// Return the hit list to render. With an empty query this is the
+    /// composed empty-state view (recents + the round-robin top-N
+    /// actions); otherwise it is the live computed `hits`. The cap on
+    /// the empty state is applied HERE (data layer) so the Down/Up
+    /// handlers, `visible_hits().len()`, and the renderer all agree on
+    /// the same bound. without this, scrolling past the rendered cap
+    /// would silently advance `selected` into invisible rows and the
+    /// highlight would appear to jump back to row 0.
+    pub fn visible_hits(&self) -> Vec<JumpHit> {
+        if self.query.is_empty() {
+            let mut out: Vec<JumpHit> = self.recents.clone();
+            out.extend(self.empty_state_actions());
+            out
+        } else {
+            self.hits.clone()
+        }
+    }
+
+    /// Action set for the empty-state, after the `recent_keys` filter
+    /// is applied. Shared by `empty_state_actions` (which adds bias and
+    /// caps) and `empty_state_actions_total` (which just counts).
+    /// Centralising the filter predicate guarantees the rendered
+    /// "Actions  N of M" header stays in sync with the rendered list
+    /// across future edits.
+    fn filtered_actions_for_empty_state(&self) -> Vec<JumpAction> {
+        let recent_keys: std::collections::HashSet<RecentRef> =
+            self.recents.iter().map(|h| h.identity()).collect();
+        JumpAction::for_mode(self.mode)
+            .iter()
+            .filter(|a| {
+                let id = RecentRef::new(SourceKind::Action, a.key.to_string());
+                !recent_keys.contains(&id)
+            })
+            .copied()
+            .collect()
+    }
+
+    /// Top-N actions for the empty-state, after `recent_keys` filtering
+    /// and the optional tab-bias. Single source of truth for both the
+    /// renderer (`empty_state_groups`) and the navigation handler
+    /// (`visible_hits`); without it the two would drift on the bias and
+    /// the cursor would land on different rows than the user sees.
+    fn empty_state_actions(&self) -> Vec<JumpHit> {
+        let filtered = self.filtered_actions_for_empty_state();
+        let preferred_target = match self.mode {
+            JumpMode::Hosts => None,
+            JumpMode::Tunnels => Some(JumpActionTarget::Tunnels),
+            JumpMode::Containers => Some(JumpActionTarget::Containers),
+            JumpMode::Keys => Some(JumpActionTarget::Keys),
+        };
+        let actions = match preferred_target {
+            Some(t) => round_robin_actions_with_bias(filtered.into_iter(), t, EMPTY_STATE_TAB_BIAS),
+            None => round_robin_actions_by_category(filtered.into_iter()),
+        };
+        actions
+            .into_iter()
+            .take(JUMP_EMPTY_STATE_ACTIONS_CAP)
+            .collect()
+    }
+
+    /// Number of actions available for the empty-state ACTIONS section
+    /// BEFORE the cap. Used by the renderer to render `Actions  6 of 29`
+    /// when the cap is applied.
+    pub fn empty_state_actions_total(&self) -> usize {
+        self.filtered_actions_for_empty_state().len()
+    }
+
+    /// Group `visible_hits()` for the query view: by `SourceKind` in render
+    /// order. Empty sections are omitted. Only meaningful when a query is
+    /// active; the empty-state view uses `empty_state_groups` instead.
+    pub fn grouped_hits(&self) -> Vec<(SourceKind, Vec<JumpHit>)> {
+        let visible = self.visible_hits();
+        let mut out = Vec::with_capacity(SourceKind::render_order().len());
+        for kind in SourceKind::render_order() {
+            let group: Vec<JumpHit> = visible
+                .iter()
+                .filter(|h| h.kind() == kind)
+                .cloned()
+                .collect();
+            if !group.is_empty() {
+                out.push((kind, group));
+            }
+        }
+        out
+    }
+
+    /// Empty-state grouping: a single `RECENT` group (everything that came
+    /// from the MRU log, of any kind) followed by an `ACTIONS` group.
+    /// Returns `(label, hits)` rather than `(kind, hits)` so the renderer
+    /// can distinguish "RECENT" from a per-kind label.
+    pub fn empty_state_groups(&self) -> Vec<(&'static str, Vec<JumpHit>)> {
+        let mut out: Vec<(&'static str, Vec<JumpHit>)> = Vec::new();
+        if !self.recents.is_empty() {
+            out.push(("RECENT", self.recents.clone()));
+        }
+        // Single source of truth shared with `visible_hits` so the
+        // navigation cursor and the rendered list cannot drift.
+        let actions = self.empty_state_actions();
+        if !actions.is_empty() {
+            out.push(("ACTIONS", actions));
+        }
+        out
+    }
+
+    /// Map `selected` index (into `visible_hits()`) to a `SourceKind` so the
+    /// renderer knows which section header is currently active.
+    pub fn selected_section(&self) -> Option<SourceKind> {
+        self.visible_hits().get(self.selected).map(|h| h.kind())
+    }
+
+    /// Return actions whose label substring-matches the current query.
+    /// Test-only shim for tests that predate the unified jump bar.
+    /// Production code iterates `visible_hits()` instead.
+    #[cfg(test)]
+    pub fn filtered_commands(&self) -> Vec<JumpAction> {
+        let all = JumpAction::for_mode(self.mode);
+        if self.query.is_empty() {
+            return all.to_vec();
+        }
+        let q = self.query.to_lowercase();
+        all.iter()
+            .filter(|cmd| {
+                cmd.label.to_lowercase().contains(&q)
+                    || cmd.aliases.iter().any(|a| a.to_lowercase().contains(&q))
+            })
+            .copied()
+            .collect()
+    }
+
+    /// Move selection to the first hit in the next non-empty section. Wraps.
+    pub fn jump_next_section(&mut self) {
+        let visible = self.visible_hits();
+        if visible.is_empty() {
+            return;
+        }
+        if self.query.is_empty() {
+            // Empty-state has up to two groups: RECENT (length =
+            // recents.len()) and ACTIONS (the rest). Tab toggles between
+            // their first rows. Skip the toggle if there is no second
+            // group to jump to (e.g. no recents, or no actions after
+            // recents). The two `if` branches inside this block both fire
+            // in real cases: from RECENT row n we jump to actions; from
+            // an action row we wrap back to the first recent.
+            let n_recent = self.recents.len();
+            if n_recent == 0 || n_recent >= visible.len() {
+                return;
+            }
+            if self.selected < n_recent {
+                self.selected = n_recent; // RECENT -> ACTIONS
+            } else {
+                self.selected = 0; // ACTIONS -> first RECENT
+            }
+            return;
+        }
+        let groups = self.grouped_hits();
+        if groups.len() < 2 {
+            return;
+        }
+        let cur_kind = match self.selected_section() {
+            Some(k) => k,
+            None => {
+                self.selected = 0;
+                return;
+            }
+        };
+        let cur_idx = groups.iter().position(|(k, _)| *k == cur_kind).unwrap_or(0);
+        let next_idx = (cur_idx + 1) % groups.len();
+        let next_kind = groups[next_idx].0;
+        if let Some(pos) = visible.iter().position(|h| h.kind() == next_kind) {
+            self.selected = pos;
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
     use std::sync::Mutex;
 
-    pub(crate) static PATH_LOCK: Mutex<()> = Mutex::new(());
+    pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn with_temp<F: FnOnce(&std::path::Path)>(f: F) {
-        let _g = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("recents.json");
         test_path::set(path.clone());

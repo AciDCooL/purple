@@ -35,7 +35,7 @@ pub(super) fn clone_selected(app: &mut App) {
             return;
         }
         let stale_hint = if host.stale.is_some() {
-            Some(crate::handler::stale_provider_hint(host))
+            Some(super::stale_provider_hint(host))
         } else {
             None
         };
@@ -82,8 +82,7 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
     }
     let provider_config = crate::providers::config::ProviderConfig::load();
     let entries = app.hosts_state.ssh_config.host_entries();
-    let mut signable: Vec<(String, String, String, std::path::PathBuf, Option<String>)> =
-        Vec::new();
+    let mut signable: Vec<crate::vault_ssh::VaultSignTarget> = Vec::new();
     let mut pubkey_error: Option<String> = None;
     for e in &entries {
         let Some(role) = crate::vault_ssh::resolve_vault_role(
@@ -101,13 +100,13 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
             &provider_config,
         );
         match crate::vault_ssh::resolve_pubkey_path(&e.identity_file) {
-            Ok(pubkey) => signable.push((
-                e.alias.clone(),
+            Ok(pubkey) => signable.push(crate::vault_ssh::VaultSignTarget {
+                alias: e.alias.clone(),
                 role,
-                e.certificate_file.clone(),
+                certificate_file: e.certificate_file.clone(),
                 pubkey,
                 vault_addr,
-            )),
+            }),
             Err(err) => {
                 if pubkey_error.is_none() {
                     pubkey_error = Some(err.to_string());
@@ -130,11 +129,8 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
     // error only after the user confirms the dialog. Surface this upfront
     // with a clear, actionable message.
     let env_vault_addr = std::env::var("VAULT_ADDR").ok();
-    let host_addrs: Vec<Option<&str>> = signable
-        .iter()
-        .map(|(_, _, _, _, a)| a.as_deref())
-        .collect();
-    if crate::handler::vault_addr_missing(&host_addrs, env_vault_addr.as_deref()) {
+    let host_addrs: Vec<Option<&str>> = signable.iter().map(|t| t.vault_addr.as_deref()).collect();
+    if vault_addr_missing(&host_addrs, env_vault_addr.as_deref()) {
         app.notify_error(crate::messages::VAULT_NO_ADDRESS);
         return;
     }
@@ -142,17 +138,17 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
     // Pre-filter to hosts that actually need renewal, so the confirm
     // dialog count matches what will actually be signed. Hosts with a
     // valid cached cert are skipped silently.
-    let mut needs_signing: Vec<(String, String, String, std::path::PathBuf, Option<String>)> =
+    let mut needs_signing: Vec<crate::vault_ssh::VaultSignTarget> =
         Vec::with_capacity(signable.len());
     for entry in &signable {
-        let (alias, _role, cert_file, _pubkey, _vault_addr) = entry;
-        let check_path = match crate::vault_ssh::resolve_cert_path(alias, cert_file) {
-            Ok(p) => p,
-            Err(_) => {
-                needs_signing.push(entry.clone());
-                continue;
-            }
-        };
+        let check_path =
+            match crate::vault_ssh::resolve_cert_path(&entry.alias, &entry.certificate_file) {
+                Ok(p) => p,
+                Err(_) => {
+                    needs_signing.push(entry.clone());
+                    continue;
+                }
+            };
         let status = crate::vault_ssh::check_cert_validity(&check_path);
         if crate::vault_ssh::needs_renewal(&status) {
             needs_signing.push(entry.clone());
@@ -183,7 +179,7 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
         return;
     };
     let stale_hint = if host.stale.is_some() {
-        Some(crate::handler::stale_provider_hint(host))
+        Some(super::stale_provider_hint(host))
     } else {
         None
     };
@@ -193,16 +189,17 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
         app.notify_warning(crate::messages::stale_host(&hint));
     }
     let has_tunnel = app.tunnels.active.contains_key(&alias);
-    let (local_path, remote_path) =
-        app.file_browser_paths
-            .get(&alias)
-            .cloned()
-            .unwrap_or_else(|| {
-                (
-                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
-                    String::new(),
-                )
-            });
+    let (local_path, remote_path) = app
+        .file_browser_state
+        .host_paths
+        .get(&alias)
+        .cloned()
+        .unwrap_or_else(|| {
+            (
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
+                String::new(),
+            )
+        });
     let (local_entries, local_error) = match crate::file_browser::list_local(
         &local_path,
         false,
@@ -213,7 +210,7 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
     };
     let mut local_list_state = ratatui::widgets::ListState::default();
     local_list_state.select(Some(0)); // Always select ".." entry
-    let fb = crate::file_browser::FileBrowserState {
+    let fb = crate::file_browser::FileBrowserSession {
         alias: alias.clone(),
         askpass: askpass.clone(),
         active_pane: crate::file_browser::BrowserPane::Local,
@@ -235,7 +232,7 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
         transfer_error: None,
         connection_recorded: false,
     };
-    app.file_browser = Some(fb);
+    app.file_browser_session = Some(fb);
     app.set_screen(Screen::FileBrowser {
         alias: alias.clone(),
     });
@@ -294,7 +291,7 @@ pub(super) fn open_container_overlay(app: &mut App, events_tx: &mpsc::Sender<App
         return;
     };
     let stale_hint = if host.stale.is_some() {
-        Some(crate::handler::stale_provider_hint(host))
+        Some(super::stale_provider_hint(host))
     } else {
         None
     };
@@ -304,4 +301,19 @@ pub(super) fn open_container_overlay(app: &mut App, events_tx: &mpsc::Sender<App
         app.notify_warning(crate::messages::stale_host(&hint));
     }
     crate::handler::containers::open_overlay_for_host(app, alias, askpass, events_tx);
+}
+
+/// Returns true when every host in `host_addrs` has no per-host Vault address
+/// and the process env also has no valid `VAULT_ADDR`.
+pub(crate) fn vault_addr_missing(
+    host_addrs: &[Option<&str>],
+    env_vault_addr: Option<&str>,
+) -> bool {
+    let env_ok = env_vault_addr
+        .map(crate::vault_ssh::is_valid_vault_addr)
+        .unwrap_or(false);
+    if env_ok || host_addrs.is_empty() {
+        return false;
+    }
+    host_addrs.iter().all(|a| a.is_none())
 }

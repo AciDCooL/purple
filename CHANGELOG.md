@@ -1,3 +1,12 @@
+## 3.14.4 - 2026-05-18
+
+- feat: Safer logs and sturdier internals, with no UI changes.
+- feat: Your provider API tokens and Vault server hostnames are redacted in every debug output, log line, panic message and test failure. You can share a log without scrubbing it first.
+- feat: Every screen transition lands in the debug log. When a bug needs support, the screen path is traceable instead of guessed.
+- feat: Container paused and restarting states are pinned by regression goldens, alongside five new goldens for Vault TTL boundaries, proxy chains and other detail-panel edges. The visual contract stops drifting between releases.
+- change: Adding a new cloud provider now fails to compile until every required form-field and capability site is wired. No silent fall-through to generic defaults.
+- change: Internal architecture decoupled across the App struct, key dispatch, the detail panel and provider identity checks. Future feature work lands faster and with fewer regressions.
+
 ## 3.14.3 - 2026-05-17
 
 - change: Tighter design system across the binary and the docs.

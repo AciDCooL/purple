@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::app::{App, ProviderFormFields, Screen};
 use crate::event::AppEvent;
 use crate::providers;
+use crate::providers::ProviderKind;
 
 mod region;
 
@@ -17,7 +18,7 @@ mod region;
 pub(super) use region::region_picker_rows;
 pub(crate) use region::zone_data_for;
 
-pub(super) fn handle_provider_list(
+pub(super) fn handle_provider_list_key(
     app: &mut App,
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
@@ -392,7 +393,7 @@ fn open_provider_form(app: &mut App, id: crate::providers::config::ProviderConfi
             user: "root".to_string(),
             identity_file: String::new(),
             verify_tls: true,
-            auto_sync: !matches!(id.provider.as_str(), "proxmox"),
+            auto_sync: id.kind().is_none_or(ProviderKind::default_auto_sync),
             vault_role: String::new(),
             vault_addr: String::new(),
             focused_field: first_field,
@@ -408,7 +409,11 @@ fn open_provider_form(app: &mut App, id: crate::providers::config::ProviderConfi
 /// Step 1 of the lazy add-second-config flow: pick labels for the existing
 /// (bare) config AND the new one. On Enter, validate both and transition
 /// to step 2 (the standard provider form). On Esc, drop pending state.
-pub fn handle_label_migration(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender<AppEvent>) {
+pub fn handle_label_migration_key(
+    app: &mut App,
+    key: KeyEvent,
+    _events_tx: &mpsc::Sender<AppEvent>,
+) {
     let provider = match &app.screen {
         Screen::ProviderLabelMigration { provider } => provider.clone(),
         _ => return,
@@ -587,7 +592,7 @@ fn open_add_config_flow(app: &mut App, provider_name: &str) {
 
 /// Show a non-blocking warning when leaving the Token field with an invalid format.
 fn warn_aws_token_format(app: &mut App, provider_name: &str) {
-    if provider_name != "aws" {
+    if provider_name.parse::<ProviderKind>().ok() != Some(ProviderKind::Aws) {
         return;
     }
     if app.providers.form.focused_field != crate::app::ProviderFormField::Token {
@@ -602,7 +607,7 @@ fn warn_aws_token_format(app: &mut App, provider_name: &str) {
     }
 }
 
-pub(super) fn handle_provider_form(
+pub(super) fn handle_provider_form_key(
     app: &mut App,
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
@@ -824,6 +829,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         _ => return,
     };
     let provider_name = form_id.provider.clone();
+    let kind = provider_name.parse::<ProviderKind>().ok();
 
     // Check for external provider config changes since form was opened
     if app.provider_config_changed_since_form_open() {
@@ -850,7 +856,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
 
     // Proxmox requires a URL
-    if provider_name == "proxmox" {
+    if kind == Some(ProviderKind::Proxmox) {
         let url = app.providers.form.url.trim();
         if url.is_empty() {
             app.notify_warning(crate::messages::URL_REQUIRED_PROXMOX);
@@ -864,12 +870,12 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
 
     // AWS allows empty token when profile is set (credentials from ~/.aws/credentials)
     if app.providers.form.token.trim().is_empty()
-        && provider_name != "tailscale"
-        && (provider_name != "aws" || app.providers.form.profile.trim().is_empty())
+        && kind != Some(ProviderKind::Tailscale)
+        && (kind != Some(ProviderKind::Aws) || app.providers.form.profile.trim().is_empty())
     {
-        let hint = if provider_name == "gcp" {
+        let hint = if kind == Some(ProviderKind::Gcp) {
             crate::messages::PROVIDER_TOKEN_REQUIRED_GCP.to_string()
-        } else if provider_name == "oracle" {
+        } else if kind == Some(ProviderKind::Oracle) {
             crate::messages::PROVIDER_TOKEN_REQUIRED_ORACLE.to_string()
         } else {
             let display_name = crate::providers::provider_display_name(provider_name.as_str());
@@ -880,27 +886,27 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
 
     // GCP requires a project ID
-    if provider_name == "gcp" && app.providers.form.project.trim().is_empty() {
+    if kind == Some(ProviderKind::Gcp) && app.providers.form.project.trim().is_empty() {
         app.notify_warning(crate::messages::PROJECT_REQUIRED_GCP);
         return;
     }
 
     // Oracle requires a compartment OCID
-    if provider_name == "oracle" && app.providers.form.compartment.trim().is_empty() {
+    if kind == Some(ProviderKind::Oracle) && app.providers.form.compartment.trim().is_empty() {
         app.notify_warning(crate::messages::COMPARTMENT_REQUIRED_OCI);
         return;
     }
 
     // AWS/Scaleway require at least one region/zone
-    if provider_name == "aws" && app.providers.form.regions.trim().is_empty() {
+    if kind == Some(ProviderKind::Aws) && app.providers.form.regions.trim().is_empty() {
         app.notify_warning(crate::messages::REGIONS_REQUIRED_AWS);
         return;
     }
-    if provider_name == "scaleway" && app.providers.form.regions.trim().is_empty() {
+    if kind == Some(ProviderKind::Scaleway) && app.providers.form.regions.trim().is_empty() {
         app.notify_warning(crate::messages::ZONES_REQUIRED_SCALEWAY);
         return;
     }
-    if provider_name == "azure" {
+    if kind == Some(ProviderKind::Azure) {
         let subs = app.providers.form.regions.trim();
         if subs.is_empty() {
             app.notify_warning(crate::messages::SUBSCRIPTIONS_REQUIRED_AZURE);
@@ -1077,4 +1083,59 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     app.providers.form_baseline = None;
     app.set_screen(Screen::Providers);
     app.flush_pending_vault_write();
+}
+
+#[cfg(test)]
+mod label_migration_tests {
+    use super::*;
+    use crate::app::LabelMigrationField;
+    use crate::ssh_config::model::SshConfigFile;
+    use crossterm::event::KeyModifiers;
+
+    fn make_app() -> App {
+        let scratch = tempfile::tempdir().expect("tempdir").keep();
+        crate::preferences::set_path_override(scratch.join("preferences"));
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content(""),
+            path: scratch.join("test_config"),
+            crlf: false,
+            bom: false,
+        };
+        let mut app = App::new(config);
+        app.screen = Screen::ProviderLabelMigration {
+            provider: "aws".to_string(),
+        };
+        app.providers.pending_label_migration = Some(crate::app::PendingLabelMigration {
+            provider: "aws".to_string(),
+            existing_label: "default".to_string(),
+            new_label: String::new(),
+            focused: LabelMigrationField::New,
+            cursor_pos: 0,
+        });
+        app
+    }
+
+    fn k(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn esc_returns_to_providers_and_clears_pending() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        let (tx, _rx) = mpsc::channel();
+        handle_label_migration_key(&mut app, k(KeyCode::Esc), &tx);
+        assert!(matches!(app.screen, Screen::Providers));
+        assert!(app.providers.pending_label_migration.is_none());
+    }
+
+    #[test]
+    fn tab_toggles_focused_field() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        let (tx, _rx) = mpsc::channel();
+        handle_label_migration_key(&mut app, k(KeyCode::Tab), &tx);
+        let p = app.providers.pending_label_migration.as_ref().unwrap();
+        assert!(matches!(p.focused, LabelMigrationField::Existing));
+    }
 }

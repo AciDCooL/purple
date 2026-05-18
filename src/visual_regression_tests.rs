@@ -660,7 +660,7 @@ fn visual_containers_overview_empty() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    app.container_cache.clear();
+    app.container_state.cache.clear();
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_empty", &actual);
 }
@@ -1040,6 +1040,44 @@ fn visual_containers_overview_collapsed_group() {
     assert_golden("containers_overview_collapsed_group", &actual);
 }
 
+/// Container in `paused` state. Exercises the warning-tier glyph
+/// (`ICON_PAUSED`) and colour path for transitional container states.
+/// Counterpart of the existing running/exited goldens which cover the
+/// online and stopped tiers.
+#[test]
+fn visual_containers_overview_paused() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    if let Some(entry) = app.container_state.cache.get_mut("bastion-ams") {
+        if let Some(first) = entry.containers.first_mut() {
+            first.state = "paused".to_string();
+            first.status = "Paused".to_string();
+        }
+    }
+    app.ui.containers_overview_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("containers_overview_paused", &actual);
+}
+
+/// Container in `restarting` state. Exercises the warning-tier glyph
+/// for the transitional restart path, distinct from `paused`.
+#[test]
+fn visual_containers_overview_restarting() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.top_page = crate::app::TopPage::Containers;
+    if let Some(entry) = app.container_state.cache.get_mut("db-primary") {
+        if let Some(first) = entry.containers.first_mut() {
+            first.state = "restarting".to_string();
+            first.status = "Restarting (1) 2 seconds ago".to_string();
+        }
+    }
+    app.ui.containers_overview_state.select(Some(0));
+    let actual = render_screen(&mut app);
+    assert_golden("containers_overview_restarting", &actual);
+}
+
 #[test]
 fn visual_container_exec_prompt() {
     let _g = setup();
@@ -1206,11 +1244,12 @@ fn visual_containers() {
     // Containers screen requires container_state. Populate from the demo cache.
     let alias = "bastion-ams".to_string();
     let cached = app
-        .container_cache
+        .container_state
+        .cache
         .get(&alias)
         .map(|c| c.containers.clone())
         .unwrap_or_default();
-    app.container_state = Some(crate::app::ContainerState {
+    app.container_session = Some(crate::app::ContainerSession {
         alias: alias.clone(),
         askpass: None,
         runtime: Some(crate::containers::ContainerRuntime::Docker),
@@ -1233,7 +1272,7 @@ fn visual_file_browser() {
     let alias = "bastion-ams".to_string();
     // Use a deterministic empty browser state. remote_loading=true skips remote
     // I/O and local entries are intentionally empty so output is host-agnostic.
-    app.file_browser = Some(crate::file_browser::FileBrowserState {
+    app.file_browser_session = Some(crate::file_browser::FileBrowserSession {
         alias: alias.clone(),
         askpass: None,
         active_pane: crate::file_browser::BrowserPane::Local,
@@ -1483,4 +1522,121 @@ fn visual_whats_new() {
     if let Err(e) = result {
         std::panic::resume_unwind(e);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Detail-panel branch coverage tests. Each test targets a sub-section of
+// detail_panel::render that is not exercised by the existing
+// host_list_detail_panel golden.
+// ---------------------------------------------------------------------------
+
+/// Select a host by alias in the main list so detail_panel renders it.
+fn select_host_by_alias(app: &mut App, alias: &str) {
+    use crate::app::HostListItem;
+    let pos = app.hosts_state.display_list.iter().position(|item| {
+        if let HostListItem::Host { index } = item {
+            app.hosts_state
+                .list
+                .get(*index)
+                .map(|h| h.alias == alias)
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    });
+    app.ui.list_state.select(pos);
+}
+
+#[test]
+fn visual_host_detail_vault_expired() {
+    // Exercises the VAULT SSH section with CertStatus::Expired:
+    // shows "Expired" in error style and "(press V to sign)" affordance.
+    // gateway-vpn has a direct vault-ssh role (not inherited) and no provider
+    // so the role line takes the non-inherited path.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.vault.cert_cache.insert(
+        "gateway-vpn".to_string(),
+        (
+            std::time::Instant::now(),
+            crate::vault_ssh::CertStatus::Expired,
+            None,
+        ),
+    );
+    select_host_by_alias(&mut app, "gateway-vpn");
+    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    let actual = render_screen(&mut app);
+    assert_golden("host_detail_vault_expired", &actual);
+}
+
+#[test]
+fn visual_host_detail_long_proxy_chain() {
+    // Exercises the ROUTE section with a 3-hop ProxyJump chain.
+    // customer-db-1 already jumps via customer-jump. We extend its
+    // proxy_jump to include two additional known hosts so the route
+    // visualisation renders three intermediate hop lines.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    // Inject a 3-hop chain: customer-jump, bastion-ams, gateway-vpn
+    // All three are in the demo host list, so they render as known hops.
+    if let Some(h) = app
+        .hosts_state
+        .list
+        .iter_mut()
+        .find(|h| h.alias == "customer-db-1")
+    {
+        h.proxy_jump = "customer-jump,bastion-ams,gateway-vpn".to_string();
+    }
+    select_host_by_alias(&mut app, "customer-db-1");
+    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    let actual = render_screen(&mut app);
+    assert_golden("host_detail_long_proxy_chain", &actual);
+}
+
+#[test]
+fn visual_host_detail_no_provider_tag() {
+    // Exercises the detail panel for a host with no provider, no provider
+    // metadata and no vault role. The Tags section still renders (user tags
+    // present) but the Provider metadata and Vault SSH sections are absent.
+    // prod-eu2 has user tags, vault-ssh, no provider. We clear the vault
+    // cert cache for it so the status falls back to "Not signed".
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.vault.cert_cache.remove("prod-eu2");
+    select_host_by_alias(&mut app, "prod-eu2");
+    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    let actual = render_screen(&mut app);
+    assert_golden("host_detail_no_provider_tag", &actual);
+}
+
+#[test]
+fn visual_host_detail_no_containers() {
+    // Exercises the detail panel for a host that has no entry in the
+    // container_state cache. The CONTAINERS section must be absent.
+    // prod-eu1 has user tags, vault-ssh (with an inherited provider role
+    // absent since there is no provider), yubikey identity. The demo
+    // container cache has no entry for it.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    // Ensure there is definitely no container cache entry.
+    app.container_state.cache.remove("prod-eu1");
+    select_host_by_alias(&mut app, "prod-eu1");
+    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    let actual = render_screen(&mut app);
+    assert_golden("host_detail_no_containers", &actual);
+}
+
+#[test]
+fn visual_host_detail_with_tags() {
+    // Exercises the Tags section together with the Provider metadata section.
+    // aws-api-prod carries user tags, provider tags (via provider comment),
+    // provider metadata (region, instance, os, status) and an inherited
+    // vault role from the aws provider config. This is the densest path
+    // through the lower half of detail_panel::render.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    select_host_by_alias(&mut app, "aws-api-prod");
+    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    let actual = render_screen(&mut app);
+    assert_golden("host_detail_with_tags", &actual);
 }

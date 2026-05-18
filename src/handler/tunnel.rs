@@ -18,7 +18,7 @@ fn tunnel_form_return_screen(app: &App, alias: &str) -> Screen {
     }
 }
 
-pub(super) fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
     let alias = match &app.screen {
         Screen::TunnelList { alias } => alias.clone(),
         _ => return,
@@ -208,7 +208,7 @@ pub(super) fn handle_tunnel_list(app: &mut App, key: KeyEvent) {
     }
 }
 
-pub(super) fn handle_tunnel_form(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_tunnel_form_key(app: &mut App, key: KeyEvent) {
     let (alias, editing) = match &app.screen {
         Screen::TunnelForm { alias, editing } => (alias.clone(), *editing),
         _ => return,

@@ -85,6 +85,7 @@ impl AnimationState {
     /// Whether any animation is running.
     pub fn is_animating(&self, app: &App) -> bool {
         let welcome_animating = app
+            .ui
             .welcome_opened
             .is_some_and(|t| t.elapsed().as_millis() < 3000);
         self.detail_anim.is_some()
@@ -211,7 +212,7 @@ impl AnimationState {
         if is_overlay && !self.prev_was_overlay {
             let is_welcome = matches!(app.screen, Screen::Welcome { .. });
             if is_welcome {
-                app.welcome_opened = Some(Instant::now());
+                app.ui.welcome_opened = Some(Instant::now());
             }
             self.overlay_anim = Some(OverlayAnim {
                 start: Instant::now(),
@@ -230,15 +231,15 @@ impl AnimationState {
                     duration_ms: OVERLAY_ANIM_DURATION_MS,
                 });
             }
-            app.welcome_opened = None;
+            app.ui.welcome_opened = None;
         }
 
         // Detail panel toggle. Branched on `top_page` so the same
         // `v` keybinding drives the right view_mode for the active
         // tab. Only one detail panel is animating at a time, so a
         // single `detail_anim` slot suffices.
-        if app.detail_toggle_pending {
-            app.detail_toggle_pending = false;
+        if app.ui.detail_toggle_pending {
+            app.ui.detail_toggle_pending = false;
             let opening = match app.top_page {
                 crate::app::TopPage::Containers => {
                     app.containers_overview.view_mode == crate::app::ViewMode::Detailed
@@ -342,7 +343,7 @@ mod tests {
     fn is_animating_with_detail_anim() {
         let mut app = make_app();
         let mut anim = AnimationState::new();
-        app.detail_toggle_pending = true;
+        app.ui.detail_toggle_pending = true;
         app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
         anim.detect_transitions(&mut app);
         assert!(anim.is_animating(&app));
@@ -504,7 +505,7 @@ mod tests {
             known_hosts_count: 0,
         };
         anim.detect_transitions(&mut app);
-        assert!(app.welcome_opened.is_some());
+        assert!(app.ui.welcome_opened.is_some());
         assert_eq!(
             anim.overlay_anim.as_ref().unwrap().duration_ms,
             WELCOME_ANIM_DURATION_MS
@@ -523,21 +524,21 @@ mod tests {
         anim.detect_transitions(&mut app);
         app.screen = Screen::HostList;
         anim.detect_transitions(&mut app);
-        assert!(app.welcome_opened.is_none());
+        assert!(app.ui.welcome_opened.is_none());
     }
 
     #[test]
     fn close_non_welcome_overlay_clears_welcome_opened() {
         let mut app = make_app();
         let mut anim = AnimationState::new();
-        app.welcome_opened = Some(Instant::now());
+        app.ui.welcome_opened = Some(Instant::now());
         app.screen = Screen::Help {
             return_screen: Box::new(Screen::HostList),
         };
         anim.detect_transitions(&mut app);
         app.screen = Screen::HostList;
         anim.detect_transitions(&mut app);
-        assert!(app.welcome_opened.is_none());
+        assert!(app.ui.welcome_opened.is_none());
     }
 
     // --- detail animation tests ---
@@ -546,10 +547,10 @@ mod tests {
     fn detail_toggle_open_starts_anim() {
         let mut app = make_app();
         let mut anim = AnimationState::new();
-        app.detail_toggle_pending = true;
+        app.ui.detail_toggle_pending = true;
         app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
         anim.detect_transitions(&mut app);
-        assert!(!app.detail_toggle_pending);
+        assert!(!app.ui.detail_toggle_pending);
         assert!(anim.detail_anim.is_some());
     }
 
@@ -557,7 +558,7 @@ mod tests {
     fn detail_toggle_close_starts_anim() {
         let mut app = make_app();
         let mut anim = AnimationState::new();
-        app.detail_toggle_pending = true;
+        app.ui.detail_toggle_pending = true;
         app.hosts_state.view_mode = crate::app::ViewMode::Compact;
         anim.detect_transitions(&mut app);
         assert!(anim.detail_anim.is_some());
@@ -567,7 +568,7 @@ mod tests {
     fn detail_anim_progress_returns_value() {
         let mut app = make_app();
         let mut anim = AnimationState::new();
-        app.detail_toggle_pending = true;
+        app.ui.detail_toggle_pending = true;
         app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
         anim.detect_transitions(&mut app);
         let p = anim.detail_anim_progress();
@@ -585,7 +586,7 @@ mod tests {
     fn detail_anim_completes_and_clears() {
         let mut app = make_app();
         let mut anim = AnimationState::new();
-        app.detail_toggle_pending = true;
+        app.ui.detail_toggle_pending = true;
         app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
         anim.detect_transitions(&mut app);
         anim.detail_anim.as_mut().unwrap().start =
@@ -598,12 +599,12 @@ mod tests {
     fn detail_anim_reversal_mid_flight() {
         let mut app = make_app();
         let mut anim = AnimationState::new();
-        app.detail_toggle_pending = true;
+        app.ui.detail_toggle_pending = true;
         app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
         anim.detect_transitions(&mut app);
         let _ = anim.detail_anim_progress();
 
-        app.detail_toggle_pending = true;
+        app.ui.detail_toggle_pending = true;
         app.hosts_state.view_mode = crate::app::ViewMode::Compact;
         anim.detect_transitions(&mut app);
         assert!(anim.detail_anim.is_some());
@@ -614,7 +615,7 @@ mod tests {
     fn detail_anim_independent_of_overlay() {
         let mut app = make_app();
         let mut anim = AnimationState::new();
-        app.detail_toggle_pending = true;
+        app.ui.detail_toggle_pending = true;
         app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
         app.screen = Screen::Help {
             return_screen: Box::new(Screen::HostList),

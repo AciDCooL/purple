@@ -2,105 +2,256 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::{App, Screen};
 use crate::event::AppEvent;
 
-pub(super) fn handle_confirm_delete(app: &mut App, key: KeyEvent) {
-    // Use the central confirm-key router so the y/n/Esc contract is uniform
-    // across all confirm dialogs.
-    match super::route_confirm_key(key) {
-        super::ConfirmAction::Yes => {
-            if let Screen::ConfirmDelete { ref alias } = app.screen {
-                let alias = alias.clone();
-                let siblings = app.hosts_state.ssh_config.siblings_of(&alias);
+/// Result of routing a confirm-dialog key event.
+///
+/// Confirm dialogs accept exactly three classes of keys:
+/// - `Yes`: y / Y
+/// - `No`: n / N / Esc
+/// - `Ignored`: anything else (must NOT change app state)
+///
+/// **Critical safety invariant**: a `_ =>` catch-all in a confirm handler
+/// that transitions screen state is forbidden. A misplaced keypress must not
+/// silently cancel a destructive operation. Use [`route_confirm_key`] in every
+/// confirm handler to enforce the contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfirmAction {
+    Yes,
+    No,
+    Ignored,
+}
 
-                if !siblings.is_empty() {
-                    // Multi-alias block: strip only the selected token.
-                    // `delete_host_undoable` refuses this case (returning
-                    // None) because re-inserting the whole element via
-                    // `insert_host_at` cannot reverse a token strip. We
-                    // therefore skip the undo stack and surface the event
-                    // via a dedicated toast that names the surviving
-                    // siblings, so the user knows what did and did not
-                    // change on disk.
-                    app.hosts_state.ssh_config.delete_host(&alias);
-                    if let Err(e) = app.hosts_state.ssh_config.write() {
-                        // Disk write failed: reload from disk to discard
-                        // the in-memory strip so view and storage match.
-                        app.notify_error(crate::messages::failed_to_save(&e));
-                        app.reload_hosts();
-                    } else {
-                        if let Some(mut tunnel) = app.tunnels.active.remove(&alias) {
-                            let _ = tunnel.child.kill();
-                            let _ = tunnel.child.wait();
-                        }
-                        app.update_last_modified();
-                        app.reload_hosts();
-                        app.notify(crate::messages::siblings_stripped(&alias, siblings.len()));
-                    }
-                } else if let Some((element, position)) =
-                    app.hosts_state.ssh_config.delete_host_undoable(&alias)
-                {
-                    if let Err(e) = app.hosts_state.ssh_config.write() {
-                        // Restore the element on write failure
-                        app.hosts_state.ssh_config.insert_host_at(element, position);
-                        app.notify_error(crate::messages::failed_to_save(&e));
-                    } else {
-                        // Stop active tunnel for the deleted host
-                        if let Some(mut tunnel) = app.tunnels.active.remove(&alias) {
-                            let _ = tunnel.child.kill();
-                            let _ = tunnel.child.wait();
-                        }
-                        // Clean up cert file if it exists. NotFound is the
-                        // expected case for hosts that never had a cert. Other
-                        // errors are surfaced via the status bar (never via
-                        // eprintln, which would corrupt the ratatui screen).
-                        let mut cert_cleanup_warning: Option<String> = None;
-                        if !crate::demo_flag::is_demo() {
-                            if let Ok(cert_path) = crate::vault_ssh::cert_path_for(&alias) {
-                                match std::fs::remove_file(&cert_path) {
-                                    Ok(()) => {}
-                                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                                    Err(e) => {
-                                        cert_cleanup_warning =
-                                            Some(crate::messages::cert_cleanup_warning(
-                                                &cert_path.display(),
-                                                &e,
-                                            ));
-                                    }
-                                }
-                            }
-                        }
-                        app.hosts_state
-                            .undo_stack
-                            .push(crate::app::DeletedHost { element, position });
-                        if app.hosts_state.undo_stack.len() > 50 {
-                            app.hosts_state.undo_stack.remove(0);
-                        }
-                        app.update_last_modified();
-                        app.reload_hosts();
-                        if let Some(warning) = cert_cleanup_warning {
-                            app.notify_error(warning);
-                        } else {
-                            app.notify(crate::messages::goodbye_host(&alias));
-                        }
-                    }
-                } else {
-                    app.notify_warning(crate::messages::host_not_found(&alias));
-                }
-            }
-            app.set_screen(Screen::HostList);
-        }
-        super::ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
-        }
-        super::ConfirmAction::Ignored => {}
+/// Single source of truth for confirm-dialog key routing.
+pub fn route_confirm_key(key: KeyEvent) -> ConfirmAction {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => ConfirmAction::Yes,
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => ConfirmAction::No,
+        _ => ConfirmAction::Ignored,
     }
 }
 
-pub(super) fn handle_confirm_vault_sign(
+/// Run known_hosts import and set status. Used by both ConfirmImport and Welcome handlers.
+pub(super) fn execute_known_hosts_import(app: &mut App) {
+    let config_backup = app.hosts_state.ssh_config.clone();
+    match crate::import::import_from_known_hosts(
+        &mut app.hosts_state.ssh_config,
+        Some("known_hosts"),
+    ) {
+        Ok((imported, skipped, _, _)) => {
+            if imported > 0 {
+                if let Err(e) = app.hosts_state.ssh_config.write() {
+                    app.hosts_state.ssh_config = config_backup;
+                    app.notify_error(crate::messages::failed_to_save(&e));
+                    return;
+                }
+                app.reload_hosts();
+                app.notify(crate::messages::imported_hosts(imported, skipped));
+            } else {
+                app.notify(crate::messages::all_hosts_exist(skipped));
+            }
+            app.ui.known_hosts_count = 0;
+        }
+        Err(e) => {
+            app.notify_error(e);
+        }
+    }
+}
+
+pub(super) fn handle_import_key(app: &mut App, key: KeyEvent) {
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            app.set_screen(Screen::HostList);
+            execute_known_hosts_import(app);
+        }
+        ConfirmAction::No => {
+            app.set_screen(Screen::HostList);
+        }
+        ConfirmAction::Ignored => {}
+    }
+}
+
+pub(super) fn handle_purge_stale_key(app: &mut App, key: KeyEvent) {
+    let Screen::ConfirmPurgeStale { provider: p, .. } = &app.screen else {
+        return;
+    };
+    let provider = p.clone();
+    let return_screen = if provider.is_some() {
+        Screen::Providers
+    } else {
+        Screen::HostList
+    };
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            execute_purge_stale(app, provider.as_deref());
+            app.screen = return_screen;
+        }
+        ConfirmAction::No => {
+            app.screen = return_screen;
+        }
+        ConfirmAction::Ignored => {}
+    }
+}
+
+fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
+    let stale = app.hosts_state.ssh_config.stale_hosts();
+    if stale.is_empty() {
+        return;
+    }
+    // Filter by provider if specified.
+    let targets: Vec<(String, u64)> = if let Some(prov) = provider {
+        stale
+            .into_iter()
+            .filter(|(alias, _)| {
+                app.hosts_state
+                    .ssh_config
+                    .host_entries()
+                    .iter()
+                    .any(|e| e.alias == *alias && e.provider.as_deref() == Some(prov))
+            })
+            .collect()
+    } else {
+        stale
+    };
+    if targets.is_empty() {
+        return;
+    }
+    let config_backup = app.hosts_state.ssh_config.clone();
+    let count = targets.len();
+    for (alias, _) in &targets {
+        app.hosts_state.ssh_config.delete_host(alias);
+    }
+    if let Err(e) = app.hosts_state.ssh_config.write() {
+        app.hosts_state.ssh_config = config_backup;
+        app.notify_error(crate::messages::failed_to_save(&e));
+        return;
+    }
+    // Kill active tunnels only after successful write (no rollback needed).
+    for (alias, _) in &targets {
+        if let Some(mut tunnel) = app.tunnels.active.remove(alias) {
+            let _ = tunnel.child.kill();
+            let _ = tunnel.child.wait();
+        }
+    }
+    app.hosts_state.undo_stack.clear();
+    app.update_last_modified();
+    app.reload_hosts();
+    let msg = if let Some(prov) = provider {
+        let display = crate::providers::provider_display_name(prov);
+        format!(
+            "Removed {} stale {} host{}.",
+            count,
+            display,
+            if count == 1 { "" } else { "s" }
+        )
+    } else {
+        format!(
+            "Removed {} stale host{}.",
+            count,
+            if count == 1 { "" } else { "s" }
+        )
+    };
+    app.notify(msg);
+}
+
+pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
+    let Screen::ConfirmDelete { alias } = &app.screen else {
+        return;
+    };
+    let alias = alias.clone();
+    // Use the central confirm-key router so the y/n/Esc contract is uniform
+    // across all confirm dialogs.
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            let siblings = app.hosts_state.ssh_config.siblings_of(&alias);
+
+            if !siblings.is_empty() {
+                // Multi-alias block: strip only the selected token.
+                // `delete_host_undoable` refuses this case (returning
+                // None) because re-inserting the whole element via
+                // `insert_host_at` cannot reverse a token strip. We
+                // therefore skip the undo stack and surface the event
+                // via a dedicated toast that names the surviving
+                // siblings, so the user knows what did and did not
+                // change on disk.
+                app.hosts_state.ssh_config.delete_host(&alias);
+                if let Err(e) = app.hosts_state.ssh_config.write() {
+                    // Disk write failed: reload from disk to discard
+                    // the in-memory strip so view and storage match.
+                    app.notify_error(crate::messages::failed_to_save(&e));
+                    app.reload_hosts();
+                } else {
+                    if let Some(mut tunnel) = app.tunnels.active.remove(&alias) {
+                        let _ = tunnel.child.kill();
+                        let _ = tunnel.child.wait();
+                    }
+                    app.update_last_modified();
+                    app.reload_hosts();
+                    app.notify(crate::messages::siblings_stripped(&alias, siblings.len()));
+                }
+            } else if let Some((element, position)) =
+                app.hosts_state.ssh_config.delete_host_undoable(&alias)
+            {
+                if let Err(e) = app.hosts_state.ssh_config.write() {
+                    // Restore the element on write failure
+                    app.hosts_state.ssh_config.insert_host_at(element, position);
+                    app.notify_error(crate::messages::failed_to_save(&e));
+                } else {
+                    // Stop active tunnel for the deleted host
+                    if let Some(mut tunnel) = app.tunnels.active.remove(&alias) {
+                        let _ = tunnel.child.kill();
+                        let _ = tunnel.child.wait();
+                    }
+                    // Clean up cert file if it exists. NotFound is the
+                    // expected case for hosts that never had a cert. Other
+                    // errors are surfaced via the status bar (never via
+                    // eprintln, which would corrupt the ratatui screen).
+                    let mut cert_cleanup_warning: Option<String> = None;
+                    if !crate::demo_flag::is_demo() {
+                        if let Ok(cert_path) = crate::vault_ssh::cert_path_for(&alias) {
+                            match std::fs::remove_file(&cert_path) {
+                                Ok(()) => {}
+                                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                                Err(e) => {
+                                    cert_cleanup_warning =
+                                        Some(crate::messages::cert_cleanup_warning(
+                                            &cert_path.display(),
+                                            &e,
+                                        ));
+                                }
+                            }
+                        }
+                    }
+                    app.hosts_state
+                        .undo_stack
+                        .push(crate::app::DeletedHost { element, position });
+                    if app.hosts_state.undo_stack.len() > 50 {
+                        app.hosts_state.undo_stack.remove(0);
+                    }
+                    app.update_last_modified();
+                    app.reload_hosts();
+                    if let Some(warning) = cert_cleanup_warning {
+                        app.notify_error(warning);
+                    } else {
+                        app.notify(crate::messages::goodbye_host(&alias));
+                    }
+                }
+            } else {
+                app.notify_warning(crate::messages::host_not_found(&alias));
+            }
+            app.set_screen(Screen::HostList);
+        }
+        ConfirmAction::No => {
+            app.set_screen(Screen::HostList);
+        }
+        ConfirmAction::Ignored => {}
+    }
+}
+
+pub(super) fn handle_vault_sign_key(
     app: &mut App,
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
@@ -111,8 +262,8 @@ pub(super) fn handle_confirm_vault_sign(
     // History: an earlier `_ => app.screen = Screen::HostList` catch-all
     // could be triggered by any keypress next to `y` (e.g. fat-fingered
     // `t` or `u`), silently aborting a bulk sign.
-    match super::route_confirm_key(key) {
-        super::ConfirmAction::Yes => {
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
             // Extract the precomputed signable list, then transition back to
             // the host list and kick off the background signing loop.
             let signable = if let Screen::ConfirmVaultSign { signable } = &app.screen {
@@ -123,10 +274,10 @@ pub(super) fn handle_confirm_vault_sign(
             app.set_screen(Screen::HostList);
             start_vault_bulk_sign(app, signable, events_tx);
         }
-        super::ConfirmAction::No => {
+        ConfirmAction::No => {
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::Ignored => {}
+        ConfirmAction::Ignored => {}
     }
 }
 
@@ -134,7 +285,7 @@ pub(super) fn handle_confirm_vault_sign(
 /// coordination and cancellation. Stores the JoinHandle on App for clean exit.
 fn start_vault_bulk_sign(
     app: &mut App,
-    signable: Vec<(String, String, String, std::path::PathBuf, Option<String>)>,
+    signable: Vec<crate::vault_ssh::VaultSignTarget>,
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
     let total = signable.len();
@@ -163,7 +314,14 @@ fn start_vault_bulk_sign(
             let mut first_error: Option<String> = None;
             let mut aborted_message: Option<String> = None;
 
-            for (idx, (alias, role, cert_file, pubkey, vault_addr)) in signable.iter().enumerate() {
+            for (idx, target) in signable.iter().enumerate() {
+                let crate::vault_ssh::VaultSignTarget {
+                    alias,
+                    role,
+                    certificate_file: cert_file,
+                    pubkey,
+                    vault_addr,
+                } = target;
                 if cancel.load(Ordering::Relaxed) {
                     break;
                 }
@@ -308,54 +466,54 @@ pub(super) fn remove_in_flight(
     guard.remove(alias);
 }
 
-pub(super) fn handle_confirm_host_key_reset(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_host_key_reset_key(app: &mut App, key: KeyEvent) {
+    let Screen::ConfirmHostKeyReset {
+        alias,
+        hostname,
+        known_hosts_path,
+        askpass,
+    } = &app.screen
+    else {
+        return;
+    };
+    let alias = alias.clone();
+    let hostname = hostname.clone();
+    let known_hosts_path = known_hosts_path.clone();
+    let askpass = askpass.clone();
     // Host key reset wipes the host's known_hosts entry. uniform y/n/Esc
     // contract via the central router so stray keys cannot trigger it.
-    match super::route_confirm_key(key) {
-        super::ConfirmAction::Yes => {
-            if let Screen::ConfirmHostKeyReset {
-                ref alias,
-                ref hostname,
-                ref known_hosts_path,
-                ref askpass,
-            } = app.screen
-            {
-                let alias = alias.clone();
-                let hostname = hostname.clone();
-                let known_hosts_path = known_hosts_path.clone();
-                let askpass = askpass.clone();
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            let output = std::process::Command::new("ssh-keygen")
+                .arg("-R")
+                .arg(&hostname)
+                .arg("-f")
+                .arg(&known_hosts_path)
+                .output();
 
-                let output = std::process::Command::new("ssh-keygen")
-                    .arg("-R")
-                    .arg(&hostname)
-                    .arg("-f")
-                    .arg(&known_hosts_path)
-                    .output();
-
-                match output {
-                    Ok(result) if result.status.success() => {
-                        app.notify(crate::messages::removed_host_key(&hostname));
-                        if app.demo_mode {
-                            app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
-                        } else {
-                            app.pending_connect = Some((alias, askpass));
-                        }
+            match output {
+                Ok(result) if result.status.success() => {
+                    app.notify(crate::messages::removed_host_key(&hostname));
+                    if app.demo_mode {
+                        app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
+                    } else {
+                        app.ui.pending_connect = Some((alias, askpass));
                     }
-                    Ok(result) => {
-                        let stderr = String::from_utf8_lossy(&result.stderr);
-                        app.notify_error(crate::messages::host_key_remove_failed(stderr.trim()));
-                    }
-                    Err(e) => {
-                        app.notify_error(crate::messages::ssh_keygen_failed(&e));
-                    }
+                }
+                Ok(result) => {
+                    let stderr = String::from_utf8_lossy(&result.stderr);
+                    app.notify_error(crate::messages::host_key_remove_failed(stderr.trim()));
+                }
+                Err(e) => {
+                    app.notify_error(crate::messages::ssh_keygen_failed(&e));
                 }
             }
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::No => {
+        ConfirmAction::No => {
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::Ignored => {}
+        ConfirmAction::Ignored => {}
     }
 }
 
@@ -363,60 +521,68 @@ pub(super) fn handle_confirm_host_key_reset(app: &mut App, key: KeyEvent) {
 /// `ContainerActionKind::Restart` request; the main loop picks it
 /// up, fires the SSH command, and emits a result event. On No or
 /// Esc, the screen drops without side effects.
-pub(super) fn handle_confirm_container_restart(app: &mut App, key: KeyEvent) {
-    match super::route_confirm_key(key) {
-        super::ConfirmAction::Yes => {
-            if let Screen::ConfirmContainerRestart {
-                ref alias,
-                ref container_id,
-                ref container_name,
-                ..
-            } = app.screen
-            {
-                queue_container_action(
-                    app,
-                    alias.clone(),
-                    container_id.clone(),
-                    container_name.clone(),
-                    crate::containers::ContainerAction::Restart,
-                );
-            }
+pub(super) fn handle_container_restart_key(app: &mut App, key: KeyEvent) {
+    let Screen::ConfirmContainerRestart {
+        alias,
+        container_id,
+        container_name,
+        ..
+    } = &app.screen
+    else {
+        return;
+    };
+    let alias = alias.clone();
+    let container_id = container_id.clone();
+    let container_name = container_name.clone();
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            queue_container_action(
+                app,
+                alias,
+                container_id,
+                container_name,
+                crate::containers::ContainerAction::Restart,
+            );
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::No => {
+        ConfirmAction::No => {
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::Ignored => {}
+        ConfirmAction::Ignored => {}
     }
 }
 
 /// Confirm handler for `S` (stop). Same shape as restart; the action
 /// kind differs and so does the destructive wording in the dialog
 /// body.
-pub(super) fn handle_confirm_container_stop(app: &mut App, key: KeyEvent) {
-    match super::route_confirm_key(key) {
-        super::ConfirmAction::Yes => {
-            if let Screen::ConfirmContainerStop {
-                ref alias,
-                ref container_id,
-                ref container_name,
-                ..
-            } = app.screen
-            {
-                queue_container_action(
-                    app,
-                    alias.clone(),
-                    container_id.clone(),
-                    container_name.clone(),
-                    crate::containers::ContainerAction::Stop,
-                );
-            }
+pub(super) fn handle_container_stop_key(app: &mut App, key: KeyEvent) {
+    let Screen::ConfirmContainerStop {
+        alias,
+        container_id,
+        container_name,
+        ..
+    } = &app.screen
+    else {
+        return;
+    };
+    let alias = alias.clone();
+    let container_id = container_id.clone();
+    let container_name = container_name.clone();
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            queue_container_action(
+                app,
+                alias,
+                container_id,
+                container_name,
+                crate::containers::ContainerAction::Stop,
+            );
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::No => {
+        ConfirmAction::No => {
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::Ignored => {}
+        ConfirmAction::Ignored => {}
     }
 }
 
@@ -424,33 +590,29 @@ pub(super) fn handle_confirm_container_stop(app: &mut App, key: KeyEvent) {
 /// member list and queues a Restart for each through the same drain
 /// mechanism that powers single-container restart. The drain
 /// processes one request per tick, giving a sequential cadence.
-pub(super) fn handle_confirm_stack_restart(app: &mut App, key: KeyEvent) {
-    match super::route_confirm_key(key) {
-        super::ConfirmAction::Yes => {
-            if let Screen::ConfirmStackRestart {
-                ref alias,
-                ref members,
-                ..
-            } = app.screen
-            {
-                let alias = alias.clone();
-                let members = members.clone();
-                for m in members {
-                    queue_container_action(
-                        app,
-                        alias.clone(),
-                        m.container_id,
-                        m.container_name,
-                        crate::containers::ContainerAction::Restart,
-                    );
-                }
+pub(super) fn handle_stack_restart_key(app: &mut App, key: KeyEvent) {
+    let Screen::ConfirmStackRestart { alias, members, .. } = &app.screen else {
+        return;
+    };
+    let alias = alias.clone();
+    let members = members.clone();
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            for m in members {
+                queue_container_action(
+                    app,
+                    alias.clone(),
+                    m.container_id,
+                    m.container_name,
+                    crate::containers::ContainerAction::Restart,
+                );
             }
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::No => {
+        ConfirmAction::No => {
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::Ignored => {}
+        ConfirmAction::Ignored => {}
     }
 }
 
@@ -458,63 +620,57 @@ pub(super) fn handle_confirm_stack_restart(app: &mut App, key: KeyEvent) {
 /// overview. Iterates every running container of the host and queues
 /// a Restart, regardless of compose project. Mirrors the stack-restart
 /// drain. one request per tick keeps remote SSH sane.
-pub(super) fn handle_confirm_host_restart_all(app: &mut App, key: KeyEvent) {
-    match super::route_confirm_key(key) {
-        super::ConfirmAction::Yes => {
-            if let Screen::ConfirmHostRestartAll {
-                ref alias,
-                ref members,
-            } = app.screen
-            {
-                let alias = alias.clone();
-                let members = members.clone();
-                for m in members {
-                    queue_container_action(
-                        app,
-                        alias.clone(),
-                        m.container_id,
-                        m.container_name,
-                        crate::containers::ContainerAction::Restart,
-                    );
-                }
+pub(super) fn handle_host_restart_all_key(app: &mut App, key: KeyEvent) {
+    let Screen::ConfirmHostRestartAll { alias, members } = &app.screen else {
+        return;
+    };
+    let alias = alias.clone();
+    let members = members.clone();
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            for m in members {
+                queue_container_action(
+                    app,
+                    alias.clone(),
+                    m.container_id,
+                    m.container_name,
+                    crate::containers::ContainerAction::Restart,
+                );
             }
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::No => {
+        ConfirmAction::No => {
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::Ignored => {}
+        ConfirmAction::Ignored => {}
     }
 }
 
 /// Confirm handler for `S` on a host-divider row. Stops every running
 /// container on the host. Same drain shape as host-restart.
-pub(super) fn handle_confirm_host_stop_all(app: &mut App, key: KeyEvent) {
-    match super::route_confirm_key(key) {
-        super::ConfirmAction::Yes => {
-            if let Screen::ConfirmHostStopAll {
-                ref alias,
-                ref members,
-            } = app.screen
-            {
-                let alias = alias.clone();
-                let members = members.clone();
-                for m in members {
-                    queue_container_action(
-                        app,
-                        alias.clone(),
-                        m.container_id,
-                        m.container_name,
-                        crate::containers::ContainerAction::Stop,
-                    );
-                }
+pub(super) fn handle_host_stop_all_key(app: &mut App, key: KeyEvent) {
+    let Screen::ConfirmHostStopAll { alias, members } = &app.screen else {
+        return;
+    };
+    let alias = alias.clone();
+    let members = members.clone();
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            for m in members {
+                queue_container_action(
+                    app,
+                    alias.clone(),
+                    m.container_id,
+                    m.container_name,
+                    crate::containers::ContainerAction::Stop,
+                );
             }
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::No => {
+        ConfirmAction::No => {
             app.set_screen(Screen::HostList);
         }
-        super::ConfirmAction::Ignored => {}
+        ConfirmAction::Ignored => {}
     }
 }
 
@@ -525,7 +681,7 @@ fn queue_container_action(
     container_name: String,
     action: crate::containers::ContainerAction,
 ) {
-    let Some(entry) = app.container_cache.get(&alias) else {
+    let Some(entry) = app.container_state.cache.get(&alias) else {
         log::debug!(
             "[purple] container_action: queue aborted, no cache for alias={}",
             alias
@@ -545,7 +701,8 @@ fn queue_container_action(
         container_id,
         action
     );
-    app.pending_container_actions
+    app.container_state
+        .pending_actions
         .push_back(crate::app::ContainerActionRequest {
             alias,
             askpass,
@@ -559,13 +716,13 @@ fn queue_container_action(
 /// Confirm for the `p` push action from the Keys tab. Stakes test:
 /// pushing modifies remote `authorized_keys`, so the footer uses
 /// action verbs (`push` / `keep`) and we only accept y/n/Esc.
-pub(super) fn handle_confirm_key_push(
+pub(super) fn handle_key_push_key(
     app: &mut App,
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
-    match super::route_confirm_key(key) {
-        super::ConfirmAction::Yes => {
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
             let key_index = match &app.screen {
                 Screen::ConfirmKeyPush { key_index } => *key_index,
                 _ => return,
@@ -574,7 +731,7 @@ pub(super) fn handle_confirm_key_push(
             app.set_screen(Screen::HostList);
             start_key_push(app, key_index, aliases, events_tx);
         }
-        super::ConfirmAction::No => {
+        ConfirmAction::No => {
             // Return to the picker with the selection still intact so the
             // user can refine it.
             let key_index = match &app.screen {
@@ -584,7 +741,7 @@ pub(super) fn handle_confirm_key_push(
             app.keys.push.committed.clear();
             app.set_screen(Screen::KeyPushPicker { key_index });
         }
-        super::ConfirmAction::Ignored => {}
+        ConfirmAction::Ignored => {}
     }
 }
 
@@ -802,7 +959,7 @@ mod key_push_confirm_tests {
         app.keys.push.committed = vec!["h1".into()];
         app.screen = Screen::ConfirmKeyPush { key_index: 0 };
         let (tx, _rx) = mpsc::channel();
-        handle_confirm_key_push(&mut app, k(KeyCode::Char('n')), &tx);
+        handle_key_push_key(&mut app, k(KeyCode::Char('n')), &tx);
         match app.screen {
             Screen::KeyPushPicker { key_index } => assert_eq!(key_index, 0),
             ref other => panic!("expected KeyPushPicker, got {:?}", other),
@@ -819,7 +976,7 @@ mod key_push_confirm_tests {
         app.keys.push.committed = vec!["h1".into()];
         app.screen = Screen::ConfirmKeyPush { key_index: 0 };
         let (tx, _rx) = mpsc::channel();
-        handle_confirm_key_push(&mut app, k(KeyCode::Esc), &tx);
+        handle_key_push_key(&mut app, k(KeyCode::Esc), &tx);
         assert!(matches!(app.screen, Screen::KeyPushPicker { .. }));
     }
 

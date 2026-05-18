@@ -18,7 +18,7 @@ use crate::app::{App, Screen};
 /// Dispatch a key event for the Keys overview tab. Routes to a dedicated
 /// search sub-handler while a query is active so typing characters edits
 /// the query instead of triggering the normal-mode shortcuts.
-pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     if app.search.query.is_some() {
         handle_search_keys(app, key);
         return;
@@ -109,12 +109,12 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
         // session. The sticky-toast guard skips the hint when a sticky toast
         // is active so an informational nudge cannot displace a sticky error.
         KeyCode::Esc
-            if !app.esc_quit_hint_shown
+            if !app.ui.esc_quit_hint_shown
                 && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky) =>
         {
             log::debug!("[purple] esc on idle keys overview, showing quit hint toast");
             app.notify(crate::messages::ESC_QUIT_HINT);
-            app.esc_quit_hint_shown = true;
+            app.ui.esc_quit_hint_shown = true;
         }
         _ => {}
     }
@@ -461,7 +461,7 @@ mod tests {
         });
         app.keys.push.selected.insert("h1".to_string());
         // Esc should observe push_in_flight and cancel.
-        handle_keys(&mut app, k(KeyCode::Esc));
+        handle_key(&mut app, k(KeyCode::Esc));
         assert!(flag.load(std::sync::atomic::Ordering::Relaxed));
         assert_eq!(app.keys.push.expected_count, 0);
         assert!(app.keys.push.results.is_empty());
@@ -478,7 +478,7 @@ mod tests {
         let mut app = make_app();
         app.keys.list = vec![key("a"), key("b"), key("c")];
         app.keys.list_state.select(Some(0));
-        handle_keys(&mut app, k(KeyCode::Right));
+        handle_key(&mut app, k(KeyCode::Right));
         assert_eq!(app.keys.list_state.selected(), Some(1));
     }
 
@@ -487,7 +487,7 @@ mod tests {
         let mut app = make_app();
         app.keys.list = vec![key("a"), key("b"), key("c")];
         app.keys.list_state.select(Some(2));
-        handle_keys(&mut app, k(KeyCode::Left));
+        handle_key(&mut app, k(KeyCode::Left));
         assert_eq!(app.keys.list_state.selected(), Some(1));
     }
 
@@ -498,7 +498,7 @@ mod tests {
         let mut app = make_app();
         app.keys.list = vec![key("a"), key("b")];
         app.keys.list_state.select(Some(1));
-        handle_keys(&mut app, k(KeyCode::Right));
+        handle_key(&mut app, k(KeyCode::Right));
         assert_eq!(app.keys.list_state.selected(), Some(0));
     }
 
@@ -507,7 +507,7 @@ mod tests {
         let mut app = make_app();
         app.keys.list = vec![key("a"), key("b")];
         app.keys.list_state.select(Some(0));
-        handle_keys(&mut app, k(KeyCode::Left));
+        handle_key(&mut app, k(KeyCode::Left));
         assert_eq!(app.keys.list_state.selected(), Some(1));
     }
 
@@ -518,7 +518,7 @@ mod tests {
         let mut app = make_app();
         app.keys.list = vec![key("a"), key("b"), key("c")];
         app.keys.list_state.select(Some(2));
-        handle_keys(&mut app, k(KeyCode::Char('/')));
+        handle_key(&mut app, k(KeyCode::Char('/')));
         assert_eq!(app.search.query.as_deref(), Some(""));
         assert_eq!(
             app.keys.list_state.selected(),
@@ -531,9 +531,9 @@ mod tests {
     fn search_typing_appends_to_query() {
         let mut app = make_app();
         app.keys.list = vec![key("alpha"), key("bravo")];
-        handle_keys(&mut app, k(KeyCode::Char('/')));
-        handle_keys(&mut app, k(KeyCode::Char('a')));
-        handle_keys(&mut app, k(KeyCode::Char('l')));
+        handle_key(&mut app, k(KeyCode::Char('/')));
+        handle_key(&mut app, k(KeyCode::Char('a')));
+        handle_key(&mut app, k(KeyCode::Char('l')));
         assert_eq!(app.search.query.as_deref(), Some("al"));
     }
 
@@ -541,9 +541,9 @@ mod tests {
     fn search_esc_clears_query() {
         let mut app = make_app();
         app.keys.list = vec![key("alpha")];
-        handle_keys(&mut app, k(KeyCode::Char('/')));
-        handle_keys(&mut app, k(KeyCode::Char('a')));
-        handle_keys(&mut app, k(KeyCode::Esc));
+        handle_key(&mut app, k(KeyCode::Char('/')));
+        handle_key(&mut app, k(KeyCode::Char('a')));
+        handle_key(&mut app, k(KeyCode::Esc));
         assert!(app.search.query.is_none(), "Esc must close search");
     }
 
@@ -554,8 +554,8 @@ mod tests {
         // Esc is the explicit "close search" affordance.
         let mut app = make_app();
         app.keys.list = vec![key("alpha")];
-        handle_keys(&mut app, k(KeyCode::Char('/')));
-        handle_keys(&mut app, k(KeyCode::Backspace));
+        handle_key(&mut app, k(KeyCode::Char('/')));
+        handle_key(&mut app, k(KeyCode::Backspace));
         assert_eq!(app.search.query.as_deref(), Some(""));
         // Cursor must remain on a valid match index when filtered list is non-empty.
         assert_eq!(app.keys.list_state.selected(), Some(0));
@@ -566,7 +566,7 @@ mod tests {
         let mut app = make_app();
         app.top_page = crate::app::TopPage::Keys;
         app.search.query = None;
-        handle_keys(&mut app, k(KeyCode::Tab));
+        handle_key(&mut app, k(KeyCode::Tab));
         assert!(!matches!(app.top_page, crate::app::TopPage::Keys));
     }
 
@@ -575,8 +575,8 @@ mod tests {
         let mut app = make_app();
         app.top_page = crate::app::TopPage::Keys;
         app.keys.list = vec![key("alpha")];
-        handle_keys(&mut app, k(KeyCode::Char('/')));
-        handle_keys(&mut app, k(KeyCode::Tab));
+        handle_key(&mut app, k(KeyCode::Char('/')));
+        handle_key(&mut app, k(KeyCode::Tab));
         assert!(app.search.query.is_none());
         assert!(!matches!(app.top_page, crate::app::TopPage::Keys));
     }
@@ -585,7 +585,7 @@ mod tests {
     fn q_quits_the_app() {
         let mut app = make_app();
         assert!(app.running);
-        handle_keys(&mut app, k(KeyCode::Char('q')));
+        handle_key(&mut app, k(KeyCode::Char('q')));
         assert!(!app.running);
     }
 
@@ -596,7 +596,7 @@ mod tests {
         let mut app = make_app();
         app.keys.list.clear();
         app.keys.list_state.select(None);
-        handle_keys(&mut app, k(KeyCode::Enter));
+        handle_key(&mut app, k(KeyCode::Enter));
         // The presence of any toast is fine; the invariant is "no panic".
     }
 
@@ -604,7 +604,7 @@ mod tests {
     fn n_opens_whats_new_overlay() {
         let mut app = make_app();
         app.keys.list = vec![key("a")];
-        handle_keys(&mut app, k(KeyCode::Char('n')));
+        handle_key(&mut app, k(KeyCode::Char('n')));
         assert!(matches!(app.screen, Screen::WhatsNew(_)));
     }
 }

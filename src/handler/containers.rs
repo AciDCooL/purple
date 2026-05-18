@@ -6,7 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::app::{App, Screen};
 use crate::event::AppEvent;
 
-/// Build `ContainerState` from cache, switch to `Screen::Containers`, and
+/// Build `ContainerSession` from cache, switch to `Screen::Containers`, and
 /// (unless in demo mode) spawn the background SSH listing thread. Shared
 /// by every entry point that opens the per-host containers overlay
 /// (`C` on the host list, `Enter` on the containers overview tab) so the
@@ -19,16 +19,17 @@ pub(super) fn open_overlay_for_host(
     askpass: Option<String>,
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
-    let (cached_runtime, cached_containers) = if let Some(entry) = app.container_cache.get(&alias) {
-        (Some(entry.runtime), entry.containers.clone())
-    } else {
-        (None, Vec::new())
-    };
+    let (cached_runtime, cached_containers) =
+        if let Some(entry) = app.container_state.cache.get(&alias) {
+            (Some(entry.runtime), entry.containers.clone())
+        } else {
+            (None, Vec::new())
+        };
     let mut list_state = ratatui::widgets::ListState::default();
     if !cached_containers.is_empty() {
         list_state.select(Some(0));
     }
-    app.container_state = Some(crate::app::ContainerState {
+    app.container_session = Some(crate::app::ContainerSession {
         alias: alias.clone(),
         askpass: askpass.clone(),
         runtime: cached_runtime,
@@ -64,7 +65,7 @@ pub(super) fn open_overlay_for_host(
     }
 }
 
-pub(super) fn handle_containers(
+pub(super) fn handle_key(
     app: &mut App,
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
@@ -73,7 +74,7 @@ pub(super) fn handle_containers(
     // `?` (help) when a confirmation is pending. Uniform with every other
     // confirm dialog in purple. `q` is intentionally NOT in the allowlist:
     // it belongs to browse-context cancel, not confirm-context.
-    if let Some(ref state) = app.container_state {
+    if let Some(ref state) = app.container_session {
         if state.confirm_action.is_some() {
             match key.code {
                 KeyCode::Char('y')
@@ -90,7 +91,7 @@ pub(super) fn handle_containers(
     // When a confirm is pending, n/N/Esc all cancel it (uniform with other
     // confirm dialogs). `q` was deliberately removed from the confirm-context
     // allowlist above, so it can never reach this point during a confirm.
-    if let Some(ref mut state) = app.container_state {
+    if let Some(ref mut state) = app.container_session {
         if state.confirm_action.is_some()
             && matches!(
                 key.code,
@@ -106,11 +107,11 @@ pub(super) fn handle_containers(
         KeyCode::Esc | KeyCode::Char('q') => {
             // No confirm pending (the early-return above handles that case):
             // close the overlay.
-            app.container_state = None;
+            app.container_session = None;
             app.set_screen(Screen::HostList);
         }
         KeyCode::Up | KeyCode::Char('k') => {
-            if let Some(ref mut state) = app.container_state {
+            if let Some(ref mut state) = app.container_session {
                 let len = state.containers.len();
                 if len > 0 {
                     let i = state.list_state.selected().unwrap_or(0);
@@ -121,7 +122,7 @@ pub(super) fn handle_containers(
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
-            if let Some(ref mut state) = app.container_state {
+            if let Some(ref mut state) = app.container_session {
                 let len = state.containers.len();
                 if len > 0 {
                     let i = state.list_state.selected().unwrap_or(0);
@@ -132,7 +133,7 @@ pub(super) fn handle_containers(
             }
         }
         KeyCode::PageDown => {
-            if let Some(ref mut state) = app.container_state {
+            if let Some(ref mut state) = app.container_session {
                 let len = state.containers.len();
                 if len > 0 {
                     let i = state.list_state.selected().unwrap_or(0);
@@ -141,7 +142,7 @@ pub(super) fn handle_containers(
             }
         }
         KeyCode::PageUp => {
-            if let Some(ref mut state) = app.container_state {
+            if let Some(ref mut state) = app.container_session {
                 let len = state.containers.len();
                 if len > 0 {
                     let i = state.list_state.selected().unwrap_or(0);
@@ -154,7 +155,7 @@ pub(super) fn handle_containers(
         }
         KeyCode::Char('x') => {
             // Stop requires confirmation
-            if let Some(ref mut state) = app.container_state {
+            if let Some(ref mut state) = app.container_session {
                 if state.action_in_progress.is_some() || state.confirm_action.is_some() {
                     return Ok(());
                 }
@@ -171,7 +172,7 @@ pub(super) fn handle_containers(
         }
         KeyCode::Char('r') => {
             // Restart requires confirmation
-            if let Some(ref mut state) = app.container_state {
+            if let Some(ref mut state) = app.container_session {
                 if state.action_in_progress.is_some() || state.confirm_action.is_some() {
                     return Ok(());
                 }
@@ -188,7 +189,7 @@ pub(super) fn handle_containers(
         }
         KeyCode::Char('y') | KeyCode::Char('Y') => {
             // Confirm pending action
-            if let Some(ref mut state) = app.container_state {
+            if let Some(ref mut state) = app.container_session {
                 if let Some((action, _name, _id)) = state.confirm_action.take() {
                     container_action(app, events_tx, action);
                 }
@@ -200,7 +201,7 @@ pub(super) fn handle_containers(
                 app.notify_warning(crate::messages::DEMO_CONTAINER_REFRESH_DISABLED);
                 return Ok(());
             }
-            if let Some(ref mut state) = app.container_state {
+            if let Some(ref mut state) = app.container_session {
                 if state.action_in_progress.is_some() {
                     return Ok(());
                 }
@@ -241,7 +242,7 @@ fn container_action(
     events_tx: &mpsc::Sender<AppEvent>,
     action: crate::containers::ContainerAction,
 ) {
-    let Some(ref mut state) = app.container_state else {
+    let Some(ref mut state) = app.container_session else {
         return;
     };
     if state.action_in_progress.is_some() {

@@ -14,7 +14,6 @@ pub struct StatusCenter {
 }
 
 impl StatusCenter {
-    #[deprecated(note = "use notify() / notify_error() instead")]
     pub fn set_status(&mut self, text: impl Into<String>, is_error: bool) {
         let class = if is_error {
             MessageClass::Error
@@ -77,7 +76,6 @@ impl StatusCenter {
     }
 
     /// Set an Info-class status message that displays in the footer only.
-    #[deprecated(note = "use notify_info() instead")]
     pub fn set_info_status(&mut self, text: impl Into<String>) {
         let text = text.into();
         log::debug!("footer <- Info: {}", text);
@@ -94,7 +92,6 @@ impl StatusCenter {
     /// Use for background/timer events (ping expiry, sync ticks) that must
     /// not clobber an in-progress or critical sticky message.
     /// Routes to Info (footer) by default, Error toast if is_error.
-    #[deprecated(note = "use notify_background() / notify_background_error() instead")]
     pub fn set_background_status(&mut self, text: impl Into<String>, is_error: bool) {
         if is_error {
             let msg = StatusMessage {
@@ -129,7 +126,6 @@ impl StatusCenter {
     /// class is Error. The `sticky` flag overrides the normal toast routing
     /// because sticky messages (Vault SSH signing summaries, progress spinners)
     /// must remain visible in the footer until explicitly replaced.
-    #[deprecated(note = "use notify_progress() / notify_sticky_error() instead")]
     pub fn set_sticky_status(&mut self, text: impl Into<String>, is_error: bool) {
         let text = text.into();
         let class = if is_error {
@@ -288,7 +284,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_set_status_info_populates_status_field() {
         let mut s = StatusCenter::default();
         // Info class is routed to the footer, not a toast.
@@ -299,7 +294,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_set_status_error_is_routed_to_sticky_toast() {
         let mut s = StatusCenter::default();
         s.set_status("boom", true);
@@ -311,7 +305,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_set_sticky_status_writes_footer_and_marks_sticky() {
         let mut s = StatusCenter::default();
         s.set_sticky_status("signing cert", false);

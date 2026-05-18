@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::{App, BulkTagEditorState, Screen};
 
-pub(super) fn handle_bulk_tag_editor_screen(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     // When the "new tag" input bar is active, route character input there
     // first so users can type tag names without triggering the row-level
     // keybindings (j/k/Space/Enter). Esc cancels the input without closing

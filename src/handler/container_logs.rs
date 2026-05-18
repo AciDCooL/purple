@@ -145,7 +145,7 @@ fn scroll_to_current_match(
     }
 }
 
-pub(super) fn handle_keys(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender<AppEvent>) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender<AppEvent>) {
     let Screen::ContainerLogs {
         body,
         scroll,
@@ -260,7 +260,7 @@ pub(super) fn handle_keys(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sende
 }
 
 fn requeue_logs_fetch(app: &mut App, alias: String, container_id: String, container_name: String) {
-    let Some(entry) = app.container_cache.get(&alias) else {
+    let Some(entry) = app.container_state.cache.get(&alias) else {
         log::debug!(
             "[purple] container_logs: refresh aborted, no cache for alias={}",
             alias
@@ -303,7 +303,7 @@ fn requeue_logs_fetch(app: &mut App, alias: String, container_id: String, contai
         alias,
         container_id
     );
-    app.pending_container_logs = Some(ContainerLogsRequest {
+    app.container_state.pending_logs = Some(ContainerLogsRequest {
         alias,
         askpass,
         runtime,

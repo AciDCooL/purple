@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use crate::fs_util;
+use crate::providers::ProviderKind;
 
 /// Identifier for one provider-config section. Bare slug ("digitalocean") when
 /// it is the only config for that provider; provider+label ("digitalocean:work")
@@ -36,6 +37,11 @@ impl ProviderConfigId {
             provider: provider.into(),
             label: Some(label.into()),
         }
+    }
+
+    /// Typed provider kind, or None if the stored name does not match any known provider.
+    pub fn kind(&self) -> Option<ProviderKind> {
+        self.provider.parse().ok()
     }
 }
 
@@ -98,7 +104,7 @@ pub fn validate_label(label: &str) -> Result<(), String> {
 }
 
 /// A configured provider section from ~/.purple/providers.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ProviderSection {
     pub id: ProviderConfigId,
     pub token: String,
@@ -126,6 +132,38 @@ impl ProviderSection {
     }
 }
 
+/// Manual `Debug` so secret-bearing fields never leak into log lines,
+/// panic messages, or test failure output via `{:?}`. Redacts the API
+/// `token` and the `vault_addr` (which reveals internal Vault topology).
+impl std::fmt::Debug for ProviderSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProviderSection")
+            .field("id", &self.id)
+            .field("token", &redacted(&self.token))
+            .field("alias_prefix", &self.alias_prefix)
+            .field("user", &self.user)
+            .field("identity_file", &self.identity_file)
+            .field("url", &self.url)
+            .field("verify_tls", &self.verify_tls)
+            .field("auto_sync", &self.auto_sync)
+            .field("profile", &self.profile)
+            .field("regions", &self.regions)
+            .field("project", &self.project)
+            .field("compartment", &self.compartment)
+            .field("vault_role", &self.vault_role)
+            .field("vault_addr", &redacted(&self.vault_addr))
+            .finish()
+    }
+}
+
+fn redacted(value: &str) -> &'static str {
+    if value.is_empty() {
+        "<empty>"
+    } else {
+        "<redacted>"
+    }
+}
+
 impl Default for ProviderSection {
     fn default() -> Self {
         Self {
@@ -149,9 +187,13 @@ impl Default for ProviderSection {
     }
 }
 
-/// Default for auto_sync: false for proxmox (N+1 API calls), true for all others.
+/// Default for auto_sync. Delegates to `ProviderKind::default_auto_sync`;
+/// unknown provider names default to true.
 fn default_auto_sync(provider: &str) -> bool {
-    !matches!(provider, "proxmox")
+    provider
+        .parse::<ProviderKind>()
+        .ok()
+        .is_none_or(ProviderKind::default_auto_sync)
 }
 
 /// Parsed provider configuration from ~/.purple/providers.

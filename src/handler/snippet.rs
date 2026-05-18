@@ -21,11 +21,7 @@ pub(super) fn open_snippet_picker(app: &mut App, aliases: Vec<String>) {
     });
 }
 
-pub(super) fn handle_snippet_picker(
-    app: &mut App,
-    key: KeyEvent,
-    events_tx: &mpsc::Sender<AppEvent>,
-) {
+pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     let target_aliases = match &app.screen {
         Screen::SnippetPicker { target_aliases } => target_aliases.clone(),
         _ => return,
@@ -268,7 +264,7 @@ fn snippet_result_lines(r: &crate::app::SnippetHostOutput) -> usize {
     1 + content + 1
 }
 
-pub(super) fn handle_snippet_output(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_output_key(app: &mut App, key: KeyEvent) {
     let total_lines = app
         .snippets
         .output
@@ -464,7 +460,7 @@ pub(super) fn handle_snippet_picker_search(
     }
 }
 
-pub(super) fn handle_snippet_param_form(
+pub(super) fn handle_param_form_key(
     app: &mut App,
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
@@ -564,7 +560,7 @@ pub(super) fn handle_snippet_param_form(
     }
 }
 
-pub(super) fn handle_snippet_form(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_form_key(app: &mut App, key: KeyEvent) {
     let (target_aliases, editing) = match &app.screen {
         Screen::SnippetForm {
             target_aliases,
@@ -707,4 +703,134 @@ fn submit_snippet_form(app: &mut App, target_aliases: &[String], editing: Option
     app.set_screen(Screen::SnippetPicker {
         target_aliases: target_aliases.to_vec(),
     });
+}
+
+#[cfg(test)]
+mod param_form_tests {
+    use super::*;
+    use crate::app::SnippetParamFormState;
+    use crate::ssh_config::model::SshConfigFile;
+    use crossterm::event::KeyModifiers;
+
+    fn make_app() -> App {
+        let scratch = tempfile::tempdir().expect("tempdir").keep();
+        crate::preferences::set_path_override(scratch.join("preferences"));
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content(""),
+            path: scratch.join("test_config"),
+            crlf: false,
+            bom: false,
+        };
+        let mut app = App::new(config);
+        let snippet = crate::snippet::Snippet {
+            name: "test".to_string(),
+            command: "echo hi".to_string(),
+            description: String::new(),
+        };
+        app.screen = Screen::SnippetParamForm {
+            snippet,
+            target_aliases: vec!["h1".to_string()],
+        };
+        app.snippets.param_form = Some(SnippetParamFormState::new(&[]));
+        app
+    }
+
+    fn k(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn esc_on_clean_form_returns_to_snippet_picker() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        let (tx, _rx) = mpsc::channel();
+        handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
+        assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+        assert!(app.snippets.param_form.is_none());
+    }
+
+    #[test]
+    fn typing_a_char_inserts_into_focused_param() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        let params = vec![crate::snippet::SnippetParam {
+            name: "name".to_string(),
+            default: None,
+        }];
+        app.snippets.param_form = Some(SnippetParamFormState::new(&params));
+        if let Screen::SnippetParamForm { snippet, .. } = &mut app.screen {
+            snippet.command = "echo {{name}}".to_string();
+        }
+        let (tx, _rx) = mpsc::channel();
+        handle_param_form_key(&mut app, k(KeyCode::Char('h')), &tx);
+        handle_param_form_key(&mut app, k(KeyCode::Char('i')), &tx);
+        let state = app.snippets.param_form.as_ref().expect("form state");
+        assert_eq!(state.values[0], "hi");
+    }
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+    use crate::app::{SnippetHostOutput, SnippetOutputState};
+    use crate::ssh_config::model::SshConfigFile;
+    use crossterm::event::KeyModifiers;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    fn make_app_on_output(line_count: usize) -> App {
+        let scratch = tempfile::tempdir().expect("tempdir").keep();
+        crate::preferences::set_path_override(scratch.join("preferences"));
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content(""),
+            path: scratch.join("test_config"),
+            crlf: false,
+            bom: false,
+        };
+        let mut app = App::new(config);
+        let results = (0..line_count)
+            .map(|i| SnippetHostOutput {
+                alias: format!("h{i}"),
+                stdout: "ok".to_string(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            })
+            .collect();
+        app.snippets.output = Some(SnippetOutputState {
+            run_id: 1,
+            results,
+            scroll_offset: 0,
+            completed: line_count,
+            total: line_count,
+            all_done: true,
+            cancel: Arc::new(AtomicBool::new(false)),
+        });
+        app.screen = Screen::SnippetOutput {
+            snippet_name: "echo".to_string(),
+            target_aliases: vec!["h0".to_string()],
+        };
+        app
+    }
+
+    fn k(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn j_scrolls_output_down_one_line() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app_on_output(5);
+        handle_output_key(&mut app, k(KeyCode::Char('j')));
+        let state = app.snippets.output.as_ref().expect("output state");
+        assert_eq!(state.scroll_offset, 1);
+    }
+
+    #[test]
+    fn esc_closes_overlay_and_clears_output_state() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app_on_output(3);
+        handle_output_key(&mut app, k(KeyCode::Esc));
+        assert!(matches!(app.screen, Screen::HostList));
+        assert!(app.snippets.output.is_none());
+    }
 }

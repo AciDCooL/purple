@@ -1,5 +1,6 @@
 use super::*;
-use crate::app::{App, FormField, ProviderFormField, ProviderFormFields, Screen};
+use crate::app::{App, FormField, HostForm, ProviderFormField, ProviderFormFields, Screen};
+use crate::handler::host_list::actions::vault_addr_missing;
 use crate::providers::config::{ProviderConfig, ProviderSection};
 use crate::ssh_config::model::SshConfigFile;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -1650,7 +1651,7 @@ fn test_host_list_enter_carries_askpass() {
     app.ui.list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect.as_ref().unwrap();
     assert_eq!(pending.0, "myserver");
     assert_eq!(pending.1, Some("keychain".to_string()));
 }
@@ -1663,7 +1664,7 @@ fn test_host_list_enter_carries_vault_askpass() {
     app.ui.list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect.as_ref().unwrap();
     assert_eq!(pending.1, Some("vault:secret/ssh#pass".to_string()));
 }
 
@@ -1674,7 +1675,7 @@ fn test_host_list_enter_no_askpass() {
     app.ui.list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect.as_ref().unwrap();
     assert_eq!(pending.0, "myserver");
     assert_eq!(pending.1, None);
 }
@@ -1693,7 +1694,7 @@ fn test_search_enter_carries_askpass() {
     app.ui.list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect.as_ref().unwrap();
     assert_eq!(pending.0, "myserver");
     assert_eq!(pending.1, Some("op://V/I/p".to_string()));
     // Search should be cancelled after Enter
@@ -1708,7 +1709,7 @@ fn test_search_enter_no_askpass() {
     app.ui.list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect.as_ref().unwrap();
     assert_eq!(pending.1, None);
 }
 
@@ -2049,7 +2050,7 @@ fn test_search_enter_carries_askpass_op_uri() {
     app.apply_filter();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    if let Some((alias, askpass)) = &app.pending_connect {
+    if let Some((alias, askpass)) = &app.ui.pending_connect {
         assert_eq!(alias, "myserver");
         assert_eq!(askpass.as_deref(), Some("op://V/I/p"));
     } else {
@@ -2183,7 +2184,7 @@ fn test_host_list_enter_no_askpass_is_none() {
     let mut app = make_app("Host plain\n  HostName 10.0.0.1\n");
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    if let Some((alias, askpass)) = &app.pending_connect {
+    if let Some((alias, askpass)) = &app.ui.pending_connect {
         assert_eq!(alias, "plain");
         assert!(askpass.is_none());
     } else {
@@ -2256,14 +2257,14 @@ Host beta
     // Select alpha (first host) and press Enter
     app.ui.list_state.select(Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let (alias, askpass) = app.pending_connect.take().unwrap();
+    let (alias, askpass) = app.ui.pending_connect.take().unwrap();
     assert_eq!(alias, "alpha");
     assert_eq!(askpass, Some("keychain".to_string()));
 
     // Select beta (second host) and press Enter
     app.ui.list_state.select(Some(1));
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let (alias, askpass) = app.pending_connect.take().unwrap();
+    let (alias, askpass) = app.ui.pending_connect.take().unwrap();
     assert_eq!(alias, "beta");
     assert_eq!(askpass, Some("bw:my-item".to_string()));
 }
@@ -2682,7 +2683,7 @@ fn test_included_host_connect_still_carries_askpass() {
     app.ui.list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    if let Some((alias, askpass)) = &app.pending_connect {
+    if let Some((alias, askpass)) = &app.ui.pending_connect {
         assert_eq!(alias, "myserver");
         assert_eq!(askpass.as_deref(), Some("op://V/I/p"));
     }
@@ -2891,7 +2892,7 @@ fn test_submit_form_rename_migrates_per_host_state() {
     // `update_host`. State keyed by alias outside the SSH config does
     // not: connection history, jump-bar recents, and the collapsed-
     // fleet preference must be migrated explicitly by submit_form.
-    let _g = crate::app::jump::tests::PATH_LOCK
+    let _g = crate::app::jump::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let recents_dir = tempfile::tempdir().expect("recents tempdir");
@@ -2971,7 +2972,7 @@ fn test_submit_form_rename_migrates_per_host_state() {
 /// Rename keeps the host at its recency-based position on MostRecent
 /// and Frecency without waiting for a restart.
 fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
-    let _g = crate::app::jump::tests::PATH_LOCK
+    let _g = crate::app::jump::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let recents_dir = tempfile::tempdir().expect("recents tempdir");
@@ -3076,7 +3077,7 @@ fn test_submit_form_rename_keeps_position_on_frecency() {
 fn test_submit_form_rename_carries_ping_and_container_cache() {
     // Rename preserves alias-keyed caches (ping, container_cache,
     // in-flight dedup sets) end-to-end through submit_form.
-    let _g = crate::app::jump::tests::PATH_LOCK
+    let _g = crate::app::jump::tests::ENV_LOCK
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     let recents_dir = tempfile::tempdir().expect("recents tempdir");
@@ -3092,7 +3093,7 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
     app.ping
         .last_checked
         .insert("web-old".to_string(), std::time::Instant::now());
-    app.container_cache.insert(
+    app.container_state.cache.insert(
         "web-old".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 1_700_000_000,
@@ -3138,11 +3139,12 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
 
     // Container cache carried over with payload intact.
     assert!(
-        !app.container_cache.contains_key("web-old"),
+        !app.container_state.cache.contains_key("web-old"),
         "container_cache under old alias must be cleared"
     );
     let entry = app
-        .container_cache
+        .container_state
+        .cache
         .get("web-new")
         .expect("container_cache must move to the new alias");
     assert_eq!(entry.timestamp, 1_700_000_000);
@@ -4395,7 +4397,7 @@ fn test_enter_on_stale_host_shows_warning() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Connection should still be pending
-    assert!(app.pending_connect.is_some());
+    assert!(app.ui.pending_connect.is_some());
     // But toast should show stale warning
     let toast = app
         .status_center
@@ -4415,7 +4417,7 @@ fn test_enter_on_normal_host_no_stale_warning() {
     let mut app = make_app("Host normal\n  HostName 1.2.3.4\n");
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(app.pending_connect.is_some());
+    assert!(app.ui.pending_connect.is_some());
     // No stale warning
     assert!(
         app.status_center.toast.is_none()
@@ -4439,7 +4441,7 @@ fn test_search_enter_on_stale_host_shows_warning() {
     app.apply_filter();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(app.pending_connect.is_some());
+    assert!(app.ui.pending_connect.is_some());
     let toast = app
         .status_center
         .toast
@@ -4585,12 +4587,12 @@ fn test_provider_purge_esc_returns_to_providers() {
 fn make_container_state(
     alias: &str,
     containers: Vec<crate::containers::ContainerInfo>,
-) -> crate::app::ContainerState {
+) -> crate::app::ContainerSession {
     let mut list_state = ratatui::widgets::ListState::default();
     if !containers.is_empty() {
         list_state.select(Some(0));
     }
-    crate::app::ContainerState {
+    crate::app::ContainerSession {
         alias: alias.to_string(),
         askpass: None,
         runtime: Some(crate::containers::ContainerRuntime::Docker),
@@ -4625,7 +4627,7 @@ fn test_shift_c_opens_containers() {
         app.screen
     );
     assert!(
-        app.container_state.is_some(),
+        app.container_session.is_some(),
         "container_state should be Some after Shift+C"
     );
 }
@@ -4640,13 +4642,13 @@ fn test_shift_c_no_host_noop() {
         "expected HostList when no hosts, got: {:?}",
         app.screen
     );
-    assert!(app.container_state.is_none());
+    assert!(app.container_session.is_none());
 }
 
 #[test]
 fn test_shift_c_loads_cache() {
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
-    app.container_cache.insert(
+    app.container_state.cache.insert(
         "web".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -4657,7 +4659,7 @@ fn test_shift_c_loads_cache() {
     );
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('C')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert_eq!(state.containers.len(), 1);
     assert_eq!(state.containers[0].id, "abc");
     assert_eq!(
@@ -4671,7 +4673,7 @@ fn test_shift_c_no_cache_empty() {
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('C')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert!(state.containers.is_empty());
     assert!(state.runtime.is_none());
 }
@@ -4682,11 +4684,11 @@ fn test_containers_esc_closes() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state("web", vec![]));
+    app.container_session = Some(make_container_state("web", vec![]));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert!(app.container_state.is_none());
+    assert!(app.container_session.is_none());
 }
 
 #[test]
@@ -4695,11 +4697,11 @@ fn test_containers_q_closes() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state("web", vec![]));
+    app.container_session = Some(make_container_state("web", vec![]));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert!(app.container_state.is_none());
+    assert!(app.container_session.is_none());
 }
 
 #[test]
@@ -4713,10 +4715,15 @@ fn test_containers_j_moves_down() {
         make_container("b", "db", "running"),
         make_container("c", "cache", "exited"),
     ];
-    app.container_state = Some(make_container_state("web", containers));
+    app.container_session = Some(make_container_state("web", containers));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    let sel = app.container_state.as_ref().unwrap().list_state.selected();
+    let sel = app
+        .container_session
+        .as_ref()
+        .unwrap()
+        .list_state
+        .selected();
     assert_eq!(sel, Some(1));
 }
 
@@ -4732,10 +4739,15 @@ fn test_containers_k_moves_up() {
     ];
     let mut state = make_container_state("web", containers);
     state.list_state.select(Some(1));
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('k')), &tx);
-    let sel = app.container_state.as_ref().unwrap().list_state.selected();
+    let sel = app
+        .container_session
+        .as_ref()
+        .unwrap()
+        .list_state
+        .selected();
     assert_eq!(sel, Some(0));
 }
 
@@ -4751,10 +4763,15 @@ fn test_containers_j_wraps() {
     ];
     let mut state = make_container_state("web", containers);
     state.list_state.select(Some(1)); // at last
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    let sel = app.container_state.as_ref().unwrap().list_state.selected();
+    let sel = app
+        .container_session
+        .as_ref()
+        .unwrap()
+        .list_state
+        .selected();
     assert_eq!(sel, Some(0), "j at last item should wrap to 0");
 }
 
@@ -4768,11 +4785,16 @@ fn test_containers_k_wraps() {
         make_container("a", "web", "running"),
         make_container("b", "db", "running"),
     ];
-    app.container_state = Some(make_container_state("web", containers));
+    app.container_session = Some(make_container_state("web", containers));
     // selection starts at 0
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('k')), &tx);
-    let sel = app.container_state.as_ref().unwrap().list_state.selected();
+    let sel = app
+        .container_session
+        .as_ref()
+        .unwrap()
+        .list_state
+        .selected();
     assert_eq!(sel, Some(1), "k at first item should wrap to last");
 }
 
@@ -4782,10 +4804,15 @@ fn test_containers_j_empty_noop() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state("web", vec![]));
+    app.container_session = Some(make_container_state("web", vec![]));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    let sel = app.container_state.as_ref().unwrap().list_state.selected();
+    let sel = app
+        .container_session
+        .as_ref()
+        .unwrap()
+        .list_state
+        .selected();
     assert_eq!(sel, None);
 }
 
@@ -4795,10 +4822,15 @@ fn test_containers_k_empty_noop() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state("web", vec![]));
+    app.container_session = Some(make_container_state("web", vec![]));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('k')), &tx);
-    let sel = app.container_state.as_ref().unwrap().list_state.selected();
+    let sel = app
+        .container_session
+        .as_ref()
+        .unwrap()
+        .list_state
+        .selected();
     assert_eq!(sel, None);
 }
 
@@ -4811,10 +4843,15 @@ fn test_containers_page_down() {
     let containers: Vec<_> = (0..20)
         .map(|i| make_container(&format!("c{i}"), &format!("svc{i}"), "running"))
         .collect();
-    app.container_state = Some(make_container_state("web", containers));
+    app.container_session = Some(make_container_state("web", containers));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::PageDown), &tx);
-    let sel = app.container_state.as_ref().unwrap().list_state.selected();
+    let sel = app
+        .container_session
+        .as_ref()
+        .unwrap()
+        .list_state
+        .selected();
     assert_eq!(sel, Some(10));
 }
 
@@ -4829,10 +4866,15 @@ fn test_containers_page_up() {
         .collect();
     let mut state = make_container_state("web", containers);
     state.list_state.select(Some(15));
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::PageUp), &tx);
-    let sel = app.container_state.as_ref().unwrap().list_state.selected();
+    let sel = app
+        .container_session
+        .as_ref()
+        .unwrap()
+        .list_state
+        .selected();
     assert_eq!(sel, Some(5));
 }
 
@@ -4842,13 +4884,13 @@ fn test_containers_s_sets_action_in_progress() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state(
+    app.container_session = Some(make_container_state(
         "web",
         vec![make_container("abc123", "nginx", "exited")],
     ));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert!(
         state.action_in_progress.is_some(),
         "action_in_progress should be set after s"
@@ -4865,13 +4907,13 @@ fn test_containers_x_shows_confirmation() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state(
+    app.container_session = Some(make_container_state(
         "web",
         vec![make_container("abc123", "nginx", "running")],
     ));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert!(state.confirm_action.is_some());
     let (action, name, _id) = state.confirm_action.as_ref().unwrap();
     assert_eq!(*action, crate::containers::ContainerAction::Stop);
@@ -4884,13 +4926,13 @@ fn test_containers_r_shows_confirmation() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state(
+    app.container_session = Some(make_container_state(
         "web",
         vec![make_container("abc123", "nginx", "running")],
     ));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert!(state.confirm_action.is_some());
     let (action, name, _id) = state.confirm_action.as_ref().unwrap();
     assert_eq!(*action, crate::containers::ContainerAction::Restart);
@@ -4909,10 +4951,10 @@ fn test_containers_y_confirms_action() {
         "nginx".to_string(),
         "abc123".to_string(),
     ));
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert!(state.confirm_action.is_none());
     assert!(state.action_in_progress.is_some());
 }
@@ -4929,13 +4971,13 @@ fn test_containers_esc_cancels_confirmation() {
         "nginx".to_string(),
         "abc123".to_string(),
     ));
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     // Should cancel confirmation but stay in overlay
-    assert!(app.container_state.is_some());
+    assert!(app.container_session.is_some());
     assert!(
-        app.container_state
+        app.container_session
             .as_ref()
             .unwrap()
             .confirm_action
@@ -4952,11 +4994,11 @@ fn test_containers_action_blocked_when_in_progress() {
     };
     let mut state = make_container_state("web", vec![make_container("abc123", "nginx", "running")]);
     state.action_in_progress = Some("stop nginx...".to_string());
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     // action_in_progress should remain the same (not changed to start)
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert_eq!(state.action_in_progress.as_deref(), Some("stop nginx..."));
 }
 
@@ -4968,11 +5010,11 @@ fn test_containers_action_no_selection_noop() {
     };
     let mut state = make_container_state("web", vec![]);
     state.list_state.select(None);
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert!(
-        app.container_state
+        app.container_session
             .as_ref()
             .unwrap()
             .action_in_progress
@@ -4989,11 +5031,11 @@ fn test_containers_action_no_runtime_noop() {
     };
     let mut state = make_container_state("web", vec![make_container("abc123", "nginx", "running")]);
     state.runtime = None;
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert!(
-        app.container_state
+        app.container_session
             .as_ref()
             .unwrap()
             .action_in_progress
@@ -5008,14 +5050,14 @@ fn test_containers_r_uppercase_refreshes() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state(
+    app.container_session = Some(make_container_state(
         "web",
         vec![make_container("abc123", "nginx", "running")],
     ));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
     assert!(
-        app.container_state.as_ref().unwrap().loading,
+        app.container_session.as_ref().unwrap().loading,
         "loading should be true after R"
     );
 }
@@ -5028,11 +5070,11 @@ fn test_containers_r_uppercase_blocked_when_in_progress() {
     };
     let mut state = make_container_state("web", vec![make_container("abc123", "nginx", "running")]);
     state.action_in_progress = Some("restart nginx...".to_string());
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
     assert!(
-        !app.container_state.as_ref().unwrap().loading,
+        !app.container_session.as_ref().unwrap().loading,
         "loading should remain false when action is in progress"
     );
 }
@@ -5044,11 +5086,11 @@ fn test_containers_unknown_key_noop() {
         alias: "web".to_string(),
     };
     let containers = vec![make_container("abc123", "nginx", "running")];
-    app.container_state = Some(make_container_state("web", containers.clone()));
+    app.container_session = Some(make_container_state("web", containers.clone()));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('z')), &tx);
     assert!(matches!(app.screen, Screen::Containers { .. }));
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert_eq!(state.list_state.selected(), Some(0));
     assert!(state.action_in_progress.is_none());
     assert!(!state.loading);
@@ -5060,13 +5102,13 @@ fn test_containers_y_noop_without_pending() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state(
+    app.container_session = Some(make_container_state(
         "web",
         vec![make_container("abc123", "nginx", "running")],
     ));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert!(
         state.action_in_progress.is_none(),
         "no action should start when confirm_action is None"
@@ -5085,10 +5127,10 @@ fn test_containers_x_blocked_when_action_in_progress() {
     };
     let mut state = make_container_state("web", vec![make_container("abc123", "nginx", "running")]);
     state.action_in_progress = Some("stop nginx...".to_string());
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert!(
         state.confirm_action.is_none(),
         "x should not open confirmation when action is in progress"
@@ -5103,10 +5145,10 @@ fn test_containers_r_blocked_when_action_in_progress() {
     };
     let mut state = make_container_state("web", vec![make_container("abc123", "nginx", "running")]);
     state.action_in_progress = Some("stop nginx...".to_string());
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert!(
         state.confirm_action.is_none(),
         "r should not open confirmation when action is in progress"
@@ -5125,10 +5167,10 @@ fn test_containers_x_blocked_when_confirm_pending() {
         "nginx".to_string(),
         "abc123".to_string(),
     ));
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     let (action, name, _id) = state.confirm_action.as_ref().unwrap();
     assert_eq!(
         *action,
@@ -5150,10 +5192,10 @@ fn test_containers_r_blocked_when_confirm_pending() {
         "nginx".to_string(),
         "abc123".to_string(),
     ));
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     let (action, name, _id) = state.confirm_action.as_ref().unwrap();
     assert_eq!(
         *action,
@@ -5171,7 +5213,7 @@ fn test_file_browser_question_opens_help() {
     app.screen = Screen::FileBrowser {
         alias: "web".to_string(),
     };
-    app.file_browser = Some(crate::file_browser::FileBrowserState {
+    app.file_browser_session = Some(crate::file_browser::FileBrowserSession {
         alias: "web".to_string(),
         askpass: None,
         active_pane: crate::file_browser::BrowserPane::Local,
@@ -5280,7 +5322,7 @@ fn test_containers_question_opens_help() {
     app.screen = Screen::Containers {
         alias: "web".to_string(),
     };
-    app.container_state = Some(make_container_state("web", vec![]));
+    app.container_session = Some(make_container_state("web", vec![]));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('?')), &tx);
     match &app.screen {
@@ -5384,7 +5426,7 @@ fn test_container_confirm_action_question_opens_help() {
         "nginx".to_string(),
         "abc123".to_string(),
     ));
-    app.container_state = Some(state);
+    app.container_session = Some(state);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('?')), &tx);
     match &app.screen {
@@ -5956,14 +5998,14 @@ fn esc_does_not_quit_first_press_shows_hint_toast() {
     assert!(app.hosts_state.group_filter.is_none());
     assert!(app.hosts_state.multi_select.is_empty());
     assert!(app.running);
-    assert!(!app.esc_quit_hint_shown);
+    assert!(!app.ui.esc_quit_hint_shown);
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
 
     assert!(app.running, "Esc on idle host list must not quit");
     assert!(
-        app.esc_quit_hint_shown,
+        app.ui.esc_quit_hint_shown,
         "first idle Esc must arm the one-shot hint flag"
     );
     let toast = app
@@ -6003,7 +6045,7 @@ fn q_still_quits_after_esc_hint() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.running);
-    assert!(app.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown);
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
     assert!(
@@ -6217,7 +6259,7 @@ fn host_list_down_triggers_stale_refresh_for_new_selection() {
     let mut app = stage_two_hosts_first_stale();
     // Initial selection is web1; press Down to land on web2 (stale because no record).
     let (tx, _rx) = std::sync::mpsc::channel();
-    super::host_list::handle_host_list(&mut app, key(KeyCode::Down), &tx);
+    super::host_list::handle_main_key(&mut app, key(KeyCode::Down), &tx);
     assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web2"));
     assert!(matches!(
         app.ping.status.get("web2"),
@@ -6229,7 +6271,7 @@ fn host_list_down_triggers_stale_refresh_for_new_selection() {
 fn host_list_j_triggers_stale_refresh_for_new_selection() {
     let mut app = stage_two_hosts_first_stale();
     let (tx, _rx) = std::sync::mpsc::channel();
-    super::host_list::handle_host_list(&mut app, key(KeyCode::Char('j')), &tx);
+    super::host_list::handle_main_key(&mut app, key(KeyCode::Char('j')), &tx);
     assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web2"));
     assert!(matches!(
         app.ping.status.get("web2"),
@@ -6242,10 +6284,10 @@ fn host_list_up_triggers_stale_refresh_when_selection_is_stale() {
     // Land on web2 first, then press k to go back to web1 (which is stale).
     let mut app = stage_two_hosts_first_stale();
     let (tx, _rx) = std::sync::mpsc::channel();
-    super::host_list::handle_host_list(&mut app, key(KeyCode::Down), &tx);
+    super::host_list::handle_main_key(&mut app, key(KeyCode::Down), &tx);
     // Clear web2's checking marker so we can observe a fresh transition.
     app.ping.status.remove("web2");
-    super::host_list::handle_host_list(&mut app, key(KeyCode::Char('k')), &tx);
+    super::host_list::handle_main_key(&mut app, key(KeyCode::Char('k')), &tx);
     assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web1"));
     // web1 was Reachable + stale; after k it should now be Checking.
     assert!(matches!(
@@ -6258,7 +6300,7 @@ fn host_list_up_triggers_stale_refresh_when_selection_is_stale() {
 fn host_list_pagedown_triggers_stale_refresh_for_new_selection() {
     let mut app = stage_two_hosts_first_stale();
     let (tx, _rx) = std::sync::mpsc::channel();
-    super::host_list::handle_host_list(&mut app, key(KeyCode::PageDown), &tx);
+    super::host_list::handle_main_key(&mut app, key(KeyCode::PageDown), &tx);
     assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web2"));
     assert!(matches!(
         app.ping.status.get("web2"),
@@ -6271,7 +6313,7 @@ fn host_list_navigation_does_not_refire_when_auto_ping_off() {
     let mut app = stage_two_hosts_first_stale();
     app.ping.auto_ping = false;
     let (tx, _rx) = std::sync::mpsc::channel();
-    super::host_list::handle_host_list(&mut app, key(KeyCode::Down), &tx);
+    super::host_list::handle_main_key(&mut app, key(KeyCode::Down), &tx);
     assert_eq!(app.selected_host().map(|h| h.alias.as_str()), Some("web2"));
     // auto_ping=off short-circuits the refresh: web2 should remain unmarked.
     assert!(!app.ping.status.contains_key("web2"));
@@ -6704,18 +6746,18 @@ fn remove_in_flight_preserves_other_aliases_on_poison() {
 
 #[test]
 fn vault_addr_missing_reports_when_env_and_host_both_empty() {
-    assert!(super::vault_addr_missing(&[None], None));
+    assert!(vault_addr_missing(&[None], None));
 }
 
 #[test]
 fn vault_addr_missing_reports_when_env_is_invalid_and_host_empty() {
     // Whitespace-only is rejected by is_valid_vault_addr; treat as unset.
-    assert!(super::vault_addr_missing(&[None], Some("  ")));
+    assert!(vault_addr_missing(&[None], Some("  ")));
 }
 
 #[test]
 fn vault_addr_missing_false_when_env_is_set() {
-    assert!(!super::vault_addr_missing(
+    assert!(!vault_addr_missing(
         &[None, None],
         Some("https://vault.example.com:8200")
     ));
@@ -6723,7 +6765,7 @@ fn vault_addr_missing_false_when_env_is_set() {
 
 #[test]
 fn vault_addr_missing_false_when_every_host_has_addr() {
-    assert!(!super::vault_addr_missing(
+    assert!(!vault_addr_missing(
         &[Some("https://a"), Some("https://b")],
         None
     ));
@@ -6732,23 +6774,23 @@ fn vault_addr_missing_false_when_every_host_has_addr() {
 #[test]
 fn vault_addr_missing_false_when_mixed_hosts_and_env_empty() {
     // Some hosts have an addr, some don't. Only block when ALL lack an addr.
-    assert!(!super::vault_addr_missing(&[Some("https://a"), None], None));
+    assert!(!vault_addr_missing(&[Some("https://a"), None], None));
 }
 
 #[test]
 fn vault_addr_missing_false_when_no_hosts() {
     // Empty slice: nothing to sign, no prompt needed.
-    assert!(!super::vault_addr_missing(&[], None));
+    assert!(!vault_addr_missing(&[], None));
 }
 
 #[test]
 fn vault_addr_missing_true_when_env_is_empty_string() {
-    assert!(super::vault_addr_missing(&[None], Some("")));
+    assert!(vault_addr_missing(&[None], Some("")));
 }
 
 #[test]
 fn vault_addr_missing_false_when_mixed_hosts_and_env_valid() {
-    assert!(!super::vault_addr_missing(
+    assert!(!vault_addr_missing(
         &[Some("https://a"), None],
         Some("https://vault.example.com:8200")
     ));
@@ -6999,7 +7041,7 @@ fn jump_enter_on_container_hit_lands_on_global_containers_tab() {
     let mut app = make_app("Host beta\n  HostName beta.example\n");
     // Seed a cached container for `beta` so collect_jump_candidates
     // surfaces it; Enter then dispatches the matching hit.
-    app.container_cache.insert(
+    app.container_state.cache.insert(
         "beta".into(),
         crate::containers::ContainerCacheEntry {
             timestamp: 0,
@@ -7928,13 +7970,13 @@ fn vault_sign_confirm_app() -> App {
         .expect("tempdir")
         .keep()
         .join("test-cert");
-    let signable = vec![(
-        "vaulthost".to_string(),
-        "ssh-client/sign/role".to_string(),
-        String::new(),
-        path,
-        None,
-    )];
+    let signable = vec![crate::vault_ssh::VaultSignTarget {
+        alias: "vaulthost".to_string(),
+        role: "ssh-client/sign/role".to_string(),
+        certificate_file: String::new(),
+        pubkey: path,
+        vault_addr: None,
+    }];
     app.screen = Screen::ConfirmVaultSign { signable };
     app
 }
@@ -8113,7 +8155,7 @@ fn container_confirm_app() -> App {
     app.screen = Screen::Containers {
         alias: "srv".to_string(),
     };
-    app.container_state = Some(crate::app::ContainerState {
+    app.container_session = Some(crate::app::ContainerSession {
         alias: "srv".to_string(),
         askpass: None,
         runtime: Some(crate::containers::ContainerRuntime::Docker),
@@ -8135,7 +8177,7 @@ fn container_confirm_app() -> App {
             "abc123".to_string(),
         )),
     });
-    app.container_state
+    app.container_session
         .as_mut()
         .unwrap()
         .list_state
@@ -8148,7 +8190,7 @@ fn container_confirm_n_cancels_pending_action() {
     let mut app = container_confirm_app();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
-    let state = app.container_state.as_ref().unwrap();
+    let state = app.container_session.as_ref().unwrap();
     assert!(
         state.confirm_action.is_none(),
         "n must cancel the pending container action"
@@ -8162,7 +8204,7 @@ fn container_confirm_capital_n_cancels_pending_action() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('N')), &tx);
     assert!(
-        app.container_state
+        app.container_session
             .as_ref()
             .unwrap()
             .confirm_action
@@ -8176,7 +8218,7 @@ fn container_confirm_stray_key_ignored() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('t')), &tx);
     assert!(
-        app.container_state
+        app.container_session
             .as_ref()
             .unwrap()
             .confirm_action
@@ -8939,13 +8981,13 @@ fn tunnels_overview_delete_after_sort_targets_visible_row() {
 fn esc_on_tunnels_overview_does_not_quit_first_press_shows_hint() {
     let mut app = make_tunnels_overview_app();
     assert!(app.running);
-    assert!(!app.esc_quit_hint_shown);
+    assert!(!app.ui.esc_quit_hint_shown);
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
 
     assert!(app.running, "Esc on idle tunnels overview must not quit");
-    assert!(app.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown);
     let toast = app
         .status_center
         .toast
@@ -9001,7 +9043,7 @@ fn esc_hint_does_not_displace_active_sticky_error_toast() {
 
     assert!(app.running, "Esc must not quit");
     assert!(
-        !app.esc_quit_hint_shown,
+        !app.ui.esc_quit_hint_shown,
         "flag must stay unset when the hint was suppressed by a sticky toast"
     );
     assert_eq!(
@@ -9018,7 +9060,7 @@ fn esc_hint_does_not_displace_active_sticky_error_toast() {
     // designed and arms the one-shot flag.
     app.status_center.toast = None;
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(app.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown);
     assert_eq!(
         app.status_center.toast.as_ref().map(|t| t.text.as_str()),
         Some(crate::messages::ESC_QUIT_HINT)
@@ -9033,8 +9075,8 @@ fn make_containers_overview_app() -> App {
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n\nHost db\n  HostName 2.2.2.2\n");
     // App::new loads ~/.purple/container_cache.jsonl from disk. Clear so
     // host-environment cache state cannot leak into the test set.
-    app.container_cache.clear();
-    app.container_cache.insert(
+    app.container_state.cache.clear();
+    app.container_state.cache.insert(
         "web".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -9046,7 +9088,7 @@ fn make_containers_overview_app() -> App {
             ],
         },
     );
-    app.container_cache.insert(
+    app.container_state.cache.insert(
         "db".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -9273,7 +9315,7 @@ fn containers_overview_search_enter_on_header_is_noop() {
         "Enter on header during search must not toggle fold"
     );
     assert!(
-        app.pending_container_exec.is_none(),
+        app.container_state.pending_exec.is_none(),
         "Enter on header during search must not queue an exec"
     );
 }
@@ -9313,7 +9355,7 @@ fn containers_overview_enter_on_host_header_is_noop() {
         "Enter on host header must not toggle fold"
     );
     assert!(
-        app.pending_container_exec.is_none(),
+        app.container_state.pending_exec.is_none(),
         "Enter on host header must not queue an exec"
     );
 }
@@ -9325,7 +9367,8 @@ fn containers_overview_enter_queues_exec_for_running_container() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     let req = app
-        .pending_container_exec
+        .container_state
+        .pending_exec
         .as_ref()
         .expect("Enter must queue a container-exec request");
     assert_eq!(req.alias, "db");
@@ -9356,7 +9399,7 @@ fn containers_overview_enter_on_stopped_container_warns_and_does_nothing() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
-    assert!(app.pending_container_exec.is_none());
+    assert!(app.container_state.pending_exec.is_none());
     let toast = app
         .status_center
         .toast
@@ -9372,8 +9415,8 @@ fn containers_overview_enter_rejects_unsafe_container_id() {
     // theory inject shell metacharacters into row.id. The handler
     // must validate before queueing the exec request.
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
-    app.container_cache.clear();
-    app.container_cache.insert(
+    app.container_state.cache.clear();
+    app.container_state.cache.insert(
         "web".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -9399,7 +9442,7 @@ fn containers_overview_enter_rejects_unsafe_container_id() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     assert!(
-        app.pending_container_exec.is_none(),
+        app.container_state.pending_exec.is_none(),
         "exec must not queue for an ID that fails validate_container_id"
     );
     assert!(
@@ -9414,7 +9457,7 @@ fn containers_overview_enter_in_demo_mode_shows_disabled_toast() {
     app.demo_mode = true;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(app.pending_container_exec.is_none());
+    assert!(app.container_state.pending_exec.is_none());
     let toast = app.status_center.toast.as_ref().expect("toast");
     assert!(toast.text.contains("Demo mode"));
     // Demo guards report a blocked action, so the toast must carry the
@@ -9451,7 +9494,7 @@ fn containers_overview_l_in_demo_mode_opens_logs_view() {
         app.screen
     );
     assert!(
-        app.pending_container_logs.is_some(),
+        app.container_state.pending_logs.is_some(),
         "logs fetch must be queued in demo mode (handler then short-circuits to demo_log_lines)"
     );
     if let Some(toast) = app.status_center.toast.as_ref() {
@@ -9730,7 +9773,7 @@ fn containers_overview_first_esc_arms_quit_hint() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.running);
-    assert!(app.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown);
     let toast = app.status_center.toast.as_ref().expect("hint toast");
     assert!(toast.text.contains("q"));
 }
@@ -9760,9 +9803,9 @@ fn containers_overview_refresh_all_starts_capped_batch() {
 fn containers_overview_refresh_all_caps_in_flight_at_max_parallel() {
     // Build 10-host cache; R should leave 4 in flight and 6 queued.
     let mut app = make_containers_overview_app();
-    app.container_cache.clear();
+    app.container_state.cache.clear();
     for i in 0..10 {
-        app.container_cache.insert(
+        app.container_state.cache.insert(
             format!("h{}", i),
             crate::containers::ContainerCacheEntry {
                 timestamp: 100,
@@ -9811,7 +9854,7 @@ fn containers_overview_refresh_all_in_demo_mode_starts_synthetic_batch() {
 #[test]
 fn containers_overview_refresh_all_on_empty_cache_warns() {
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
-    app.container_cache.clear();
+    app.container_state.cache.clear();
     app.top_page = crate::app::TopPage::Containers;
     app.screen = Screen::HostList;
     let (tx, _rx) = mpsc::channel();
@@ -9867,8 +9910,8 @@ fn container_host_picker_filters_to_uncached_only() {
     let mut app = make_app(
         "Host web\n  HostName 1.2.3.4\n\nHost db\n  HostName 2.2.2.2\n\nHost api\n  HostName 3.3.3.3\n",
     );
-    app.container_cache.clear();
-    app.container_cache.insert(
+    app.container_state.cache.clear();
+    app.container_state.cache.insert(
         "web".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -9915,7 +9958,7 @@ fn container_action_complete_emits_success_toast() {
     // surface as a Success toast — not the Info footer (which is for
     // background events the user did not explicitly trigger).
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
-    app.container_state = Some(make_container_state(
+    app.container_session = Some(make_container_state(
         "web",
         vec![make_container("abc123", "nginx", "running")],
     ));
@@ -10034,7 +10077,7 @@ fn container_listing_dropped_for_alias_no_longer_in_config() {
     // listing handler must drop the result instead of resurrecting
     // the orphan in the cache.
     let mut app = make_app(""); // empty config — alias "ghost" is NOT in hosts_state.list
-    app.container_cache.clear();
+    app.container_state.cache.clear();
     let result: Result<crate::containers::ContainerListing, crate::containers::ContainerError> =
         Ok(crate::containers::ContainerListing {
             runtime: crate::containers::ContainerRuntime::Docker,
@@ -10049,7 +10092,7 @@ fn container_listing_dropped_for_alias_no_longer_in_config() {
         &tx,
     );
     assert!(
-        !app.container_cache.contains_key("ghost"),
+        !app.container_state.cache.contains_key("ghost"),
         "late listing for a removed host must not repopulate the cache"
     );
 }
@@ -10057,7 +10100,7 @@ fn container_listing_dropped_for_alias_no_longer_in_config() {
 #[test]
 fn container_inspect_complete_dropped_for_alias_no_longer_in_config() {
     let mut app = make_app("");
-    app.container_cache.clear();
+    app.container_state.cache.clear();
     let inspect = crate::containers::ContainerInspect {
         exit_code: 0,
         oom_killed: false,
@@ -10106,8 +10149,8 @@ fn reload_hosts_drops_orphan_container_cache_entries() {
     // hosts_state.list must lose its container_cache entry so
     // ~/.purple/container_cache.jsonl does not accumulate orphans.
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
-    app.container_cache.clear();
-    app.container_cache.insert(
+    app.container_state.cache.clear();
+    app.container_state.cache.insert(
         "alive".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -10116,7 +10159,7 @@ fn reload_hosts_drops_orphan_container_cache_entries() {
             containers: vec![],
         },
     );
-    app.container_cache.insert(
+    app.container_state.cache.insert(
         "ghost".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -10128,9 +10171,9 @@ fn reload_hosts_drops_orphan_container_cache_entries() {
 
     app.reload_hosts();
 
-    assert!(app.container_cache.contains_key("alive"));
+    assert!(app.container_state.cache.contains_key("alive"));
     assert!(
-        !app.container_cache.contains_key("ghost"),
+        !app.container_state.cache.contains_key("ghost"),
         "orphan host must be pruned"
     );
 }
@@ -10138,8 +10181,8 @@ fn reload_hosts_drops_orphan_container_cache_entries() {
 #[test]
 fn reload_hosts_drops_orphan_inspect_cache_entries() {
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
-    app.container_cache.clear();
-    app.container_cache.insert(
+    app.container_state.cache.clear();
+    app.container_state.cache.insert(
         "alive".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -10216,8 +10259,9 @@ fn auto_fetch_new_hosts_only_fetches_queued_aliases() {
     // when sync confirmed an inventory of pre-existing hosts on
     // first run.
     let mut app = make_app("Host queued\n  HostName 1.1.1.1\n\nHost ignored\n  HostName 2.2.2.2\n");
-    app.container_cache.clear();
-    app.pending_container_fetch_aliases
+    app.container_state.cache.clear();
+    app.container_state
+        .pending_fetch_aliases
         .push("queued".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
@@ -10234,7 +10278,7 @@ fn auto_fetch_new_hosts_only_fetches_queued_aliases() {
         vec!["queued".to_string()]
     );
     assert!(
-        app.pending_container_fetch_aliases.is_empty(),
+        app.container_state.pending_fetch_aliases.is_empty(),
         "queue must be drained"
     );
 }
@@ -10245,8 +10289,8 @@ fn auto_fetch_new_hosts_dedupes_aliases() {
     // alias before the next drain; the helper must dedupe so we do
     // not spawn parallel SSH for the same host.
     let mut app = make_app("Host dup\n  HostName 1.1.1.1\n");
-    app.container_cache.clear();
-    app.pending_container_fetch_aliases.extend([
+    app.container_state.cache.clear();
+    app.container_state.pending_fetch_aliases.extend([
         "dup".to_string(),
         "dup".to_string(),
         "dup".to_string(),
@@ -10268,8 +10312,8 @@ fn auto_fetch_new_hosts_skips_alias_with_existing_cache() {
     // A parallel `C` press (or earlier auto-fetch) may have
     // populated the cache between push and drain. Skip it.
     let mut app = make_app("Host already\n  HostName 1.1.1.1\n");
-    app.container_cache.clear();
-    app.container_cache.insert(
+    app.container_state.cache.clear();
+    app.container_state.cache.insert(
         "already".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -10278,7 +10322,8 @@ fn auto_fetch_new_hosts_skips_alias_with_existing_cache() {
             containers: vec![],
         },
     );
-    app.pending_container_fetch_aliases
+    app.container_state
+        .pending_fetch_aliases
         .push("already".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
@@ -10290,8 +10335,9 @@ fn auto_fetch_new_hosts_skips_unknown_alias() {
     // Race guard: the alias may have been deleted between push and
     // drain (manual delete, stale purge, external edit).
     let mut app = make_app("Host real\n  HostName 1.1.1.1\n");
-    app.container_cache.clear();
-    app.pending_container_fetch_aliases
+    app.container_state.cache.clear();
+    app.container_state
+        .pending_fetch_aliases
         .push("ghost".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
@@ -10302,8 +10348,9 @@ fn auto_fetch_new_hosts_skips_unknown_alias() {
 fn auto_fetch_new_hosts_skips_host_without_hostname() {
     // Placeholder entries (Host with no HostName) cannot be SSH'd.
     let mut app = make_app("Host placeholder\n  User root\n");
-    app.container_cache.clear();
-    app.pending_container_fetch_aliases
+    app.container_state.cache.clear();
+    app.container_state
+        .pending_fetch_aliases
         .push("placeholder".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
@@ -10313,14 +10360,16 @@ fn auto_fetch_new_hosts_skips_host_without_hostname() {
 #[test]
 fn auto_fetch_new_hosts_no_op_in_demo_mode() {
     let mut app = make_app("Host a\n  HostName 1.1.1.1\n");
-    app.container_cache.clear();
+    app.container_state.cache.clear();
     app.demo_mode = true;
-    app.pending_container_fetch_aliases.push("a".to_string());
+    app.container_state
+        .pending_fetch_aliases
+        .push("a".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     assert!(app.containers_overview.refresh_batch.is_none());
     // Queue is still drained (cleared) so a second tick does not retry.
-    assert!(app.pending_container_fetch_aliases.is_empty());
+    assert!(app.container_state.pending_fetch_aliases.is_empty());
 }
 
 #[test]
@@ -10329,7 +10378,7 @@ fn auto_fetch_new_hosts_no_op_when_queue_empty() {
     // is empty for every host. This is the regression guard for the
     // first-run askpass storm.
     let mut app = make_app("Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n");
-    app.container_cache.clear();
+    app.container_state.cache.clear();
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     assert!(app.containers_overview.refresh_batch.is_none());
@@ -10341,9 +10390,12 @@ fn auto_fetch_new_hosts_dedupes_mixed_queue() {
     // accidentally double-emitted. Both unique aliases must end up
     // in the batch exactly once.
     let mut app = make_app("Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n");
-    app.container_cache.clear();
-    app.pending_container_fetch_aliases
-        .extend(["a".to_string(), "a".to_string(), "b".to_string()]);
+    app.container_state.cache.clear();
+    app.container_state.pending_fetch_aliases.extend([
+        "a".to_string(),
+        "a".to_string(),
+        "b".to_string(),
+    ]);
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     let batch = app
@@ -10372,7 +10424,7 @@ fn queue_new_aliases_since_pushes_only_new() {
         });
     app.queue_new_aliases_since(&before);
     assert_eq!(
-        app.pending_container_fetch_aliases,
+        app.container_state.pending_fetch_aliases,
         vec!["fresh".to_string()]
     );
 }
@@ -10385,7 +10437,7 @@ fn queue_new_aliases_since_no_op_when_unchanged() {
     let mut app = make_app("Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n");
     let before = app.snapshot_alias_set();
     app.queue_new_aliases_since(&before);
-    assert!(app.pending_container_fetch_aliases.is_empty());
+    assert!(app.container_state.pending_fetch_aliases.is_empty());
 }
 
 #[test]
@@ -10429,7 +10481,7 @@ fn ensure_list_for_selected_host_skips_when_fresh() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    if let Some(entry) = app.container_cache.get_mut("db") {
+    if let Some(entry) = app.container_state.cache.get_mut("db") {
         entry.timestamp = now;
     }
     let (tx, _rx) = mpsc::channel();
@@ -10582,7 +10634,7 @@ fn ensure_list_for_selected_host_refreshes_when_cursor_on_header() {
     // Force the cache for `db` stale enough that the helper wants to
     // re-fetch (TTL is 30s; timestamp 100 in the fixture is far in
     // the past).
-    let _ = app.container_cache.get("db");
+    let _ = app.container_state.cache.get("db");
     // Items[0] is HostHeader(db) in the fixture's AlphaHost layout.
     app.ui.containers_overview_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
@@ -10671,7 +10723,7 @@ fn esc_hint_flag_is_shared_between_host_list_and_tunnels_overview() {
 
     // First idle Esc on host list arms the hint flag.
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(app.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown);
     app.status_center.toast = None;
 
     // Switch to tunnels overview and press Esc again. The shared flag means
@@ -10836,7 +10888,7 @@ fn containers_overview_v_toggles_view_mode_and_arms_animation() {
         crate::app::ViewMode::Compact
     );
     assert!(
-        app.detail_toggle_pending,
+        app.ui.detail_toggle_pending,
         "v must arm the detail-panel animation so the next render eases the panel out"
     );
 
@@ -10855,7 +10907,7 @@ fn containers_overview_l_queues_logs_fetch_and_opens_overlay() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('l')), &tx);
     assert!(matches!(app.screen, Screen::ContainerLogs { .. }));
     assert!(
-        app.pending_container_logs.is_some(),
+        app.container_state.pending_logs.is_some(),
         "expected pending fetch request"
     );
 }
@@ -10957,8 +11009,8 @@ fn confirm_container_restart_y_enqueues_action_and_returns() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert_eq!(app.pending_container_actions.len(), 1);
-    let req = &app.pending_container_actions[0];
+    assert_eq!(app.container_state.pending_actions.len(), 1);
+    let req = &app.container_state.pending_actions[0];
     assert_eq!(req.alias, "db");
     assert_eq!(req.container_id, "c3");
     assert_eq!(req.action, crate::containers::ContainerAction::Restart);
@@ -10977,7 +11029,7 @@ fn confirm_container_restart_n_cancels_without_enqueue() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert!(app.pending_container_actions.is_empty());
+    assert!(app.container_state.pending_actions.is_empty());
 }
 
 #[test]
@@ -10999,7 +11051,7 @@ fn confirm_container_restart_stray_key_ignored() {
         "stray key must not transition; got {:?}",
         app.screen
     );
-    assert!(app.pending_container_actions.is_empty());
+    assert!(app.container_state.pending_actions.is_empty());
 }
 
 // --- Container stop confirm dialog -----------------------------------
@@ -11017,9 +11069,9 @@ fn confirm_container_stop_y_enqueues_stop_action() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert_eq!(app.pending_container_actions.len(), 1);
+    assert_eq!(app.container_state.pending_actions.len(), 1);
     assert_eq!(
-        app.pending_container_actions[0].action,
+        app.container_state.pending_actions[0].action,
         crate::containers::ContainerAction::Stop
     );
 }
@@ -11065,9 +11117,12 @@ fn confirm_stack_restart_y_enqueues_one_action_per_member() {
     assert!(matches!(app.screen, Screen::HostList));
     // Both members were running on alias "web" which exists in the
     // fixture cache; both are enqueued.
-    assert_eq!(app.pending_container_actions.len(), 2);
-    assert_eq!(app.pending_container_actions[0].container_id, "c1");
-    assert_eq!(app.pending_container_actions[1].container_id, "cextra");
+    assert_eq!(app.container_state.pending_actions.len(), 2);
+    assert_eq!(app.container_state.pending_actions[0].container_id, "c1");
+    assert_eq!(
+        app.container_state.pending_actions[1].container_id,
+        "cextra"
+    );
 }
 
 #[test]
@@ -11098,7 +11153,8 @@ fn exec_prompt_enter_with_command_queues_exec_and_returns() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(matches!(app.screen, Screen::HostList));
     let queued = app
-        .pending_container_exec
+        .container_state
+        .pending_exec
         .as_ref()
         .expect("exec request queued");
     assert_eq!(queued.command.as_deref(), Some("ls -la"));
@@ -11116,7 +11172,7 @@ fn exec_prompt_enter_empty_query_is_no_op() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(matches!(app.screen, Screen::ContainerExecPrompt { .. }));
-    assert!(app.pending_container_exec.is_none());
+    assert!(app.container_state.pending_exec.is_none());
 }
 
 #[test]
@@ -11132,7 +11188,7 @@ fn exec_prompt_enter_with_control_char_warns_and_does_not_queue() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Embedded newline is a control char; the prompt rejects it.
     assert!(matches!(app.screen, Screen::ContainerExecPrompt { .. }));
-    assert!(app.pending_container_exec.is_none());
+    assert!(app.container_state.pending_exec.is_none());
     assert!(app.status_center.toast.is_some());
 }
 

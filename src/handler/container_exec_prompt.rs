@@ -8,7 +8,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::app::{App, ContainerExecRequest, Screen};
 
-pub(super) fn handle_keys(app: &mut App, key: KeyEvent) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     let Screen::ContainerExecPrompt {
         alias,
         container_id,
@@ -63,7 +63,7 @@ fn queue_exec_with_command(
     container_name: String,
     command: String,
 ) {
-    let Some(entry) = app.container_cache.get(&alias) else {
+    let Some(entry) = app.container_state.cache.get(&alias) else {
         log::debug!(
             "[purple] container_exec_prompt: submit aborted, no cache for alias={}",
             alias
@@ -85,7 +85,7 @@ fn queue_exec_with_command(
         container_id,
         command.len()
     );
-    app.pending_container_exec = Some(ContainerExecRequest {
+    app.container_state.pending_exec = Some(ContainerExecRequest {
         alias,
         askpass,
         runtime,

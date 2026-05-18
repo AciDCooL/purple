@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use crate::providers::ProviderKind;
 use crate::ssh_config::model::{HostEntry, PatternEntry};
 use crate::tunnel::{TunnelRule, TunnelType};
 
@@ -631,15 +632,26 @@ impl ProviderFormField {
     ];
 
     pub fn fields_for(provider: &str) -> &'static [ProviderFormField] {
-        match provider {
-            "proxmox" => Self::PROXMOX_FIELDS,
-            "aws" => Self::AWS_FIELDS,
-            "scaleway" => Self::SCALEWAY_FIELDS,
-            "gcp" => Self::GCP_FIELDS,
-            "azure" => Self::AZURE_FIELDS,
-            "oracle" => Self::ORACLE_FIELDS,
-            "ovh" => Self::OVH_FIELDS,
-            _ => Self::CLOUD_FIELDS,
+        let Ok(kind) = provider.parse::<ProviderKind>() else {
+            return Self::CLOUD_FIELDS;
+        };
+        match kind {
+            ProviderKind::Proxmox => Self::PROXMOX_FIELDS,
+            ProviderKind::Aws => Self::AWS_FIELDS,
+            ProviderKind::Scaleway => Self::SCALEWAY_FIELDS,
+            ProviderKind::Gcp => Self::GCP_FIELDS,
+            ProviderKind::Azure => Self::AZURE_FIELDS,
+            ProviderKind::Oracle => Self::ORACLE_FIELDS,
+            ProviderKind::Ovh => Self::OVH_FIELDS,
+            ProviderKind::DigitalOcean
+            | ProviderKind::Hetzner
+            | ProviderKind::I3d
+            | ProviderKind::Leaseweb
+            | ProviderKind::Linode
+            | ProviderKind::Tailscale
+            | ProviderKind::Transip
+            | ProviderKind::UpCloud
+            | ProviderKind::Vultr => Self::CLOUD_FIELDS,
         }
     }
 
@@ -674,14 +686,15 @@ impl ProviderFormField {
     /// OVH: Regions (= Endpoint) is mandatory (unlike GCP/Oracle where it has
     /// a meaningful default).
     pub fn is_mandatory_field(field: ProviderFormField, provider: &str) -> bool {
+        let kind = provider.parse::<ProviderKind>().ok();
         match field {
             ProviderFormField::Url => true,
-            ProviderFormField::Token => provider != "tailscale",
-            ProviderFormField::Profile => provider == "aws",
-            ProviderFormField::Project => matches!(provider, "gcp" | "ovh"),
-            ProviderFormField::Compartment => provider == "oracle",
+            ProviderFormField::Token => kind != Some(ProviderKind::Tailscale),
+            ProviderFormField::Profile => kind == Some(ProviderKind::Aws),
+            ProviderFormField::Project => kind.is_some_and(ProviderKind::has_project_field),
+            ProviderFormField::Compartment => kind == Some(ProviderKind::Oracle),
             ProviderFormField::Regions => {
-                matches!(provider, "aws" | "scaleway" | "azure" | "ovh")
+                kind.is_some_and(ProviderKind::regions_field_is_mandatory)
             }
             _ => false,
         }
@@ -689,18 +702,14 @@ impl ProviderFormField {
 
     /// Whether a field is shown in collapsed mode (progressive disclosure).
     pub fn is_required_field(field: ProviderFormField, provider: &str) -> bool {
+        let kind = provider.parse::<ProviderKind>().ok();
         match field {
             ProviderFormField::Token => true,
-            ProviderFormField::Url => provider == "proxmox",
-            ProviderFormField::Profile => provider == "aws",
-            ProviderFormField::Project => matches!(provider, "gcp" | "ovh"),
-            ProviderFormField::Compartment => provider == "oracle",
-            ProviderFormField::Regions => {
-                matches!(
-                    provider,
-                    "aws" | "scaleway" | "gcp" | "azure" | "oracle" | "ovh"
-                )
-            }
+            ProviderFormField::Url => kind.is_some_and(ProviderKind::requires_url),
+            ProviderFormField::Profile => kind == Some(ProviderKind::Aws),
+            ProviderFormField::Project => kind.is_some_and(ProviderKind::has_project_field),
+            ProviderFormField::Compartment => kind == Some(ProviderKind::Oracle),
+            ProviderFormField::Regions => kind.is_some_and(ProviderKind::has_regions_field),
             _ => false,
         }
     }
@@ -760,9 +769,10 @@ impl ProviderFormField {
     pub fn is_picker(self, provider: &str) -> bool {
         match self {
             ProviderFormField::IdentityFile => true,
-            ProviderFormField::Regions => {
-                matches!(provider, "aws" | "scaleway" | "gcp" | "oracle" | "ovh")
-            }
+            ProviderFormField::Regions => provider
+                .parse::<ProviderKind>()
+                .ok()
+                .is_some_and(ProviderKind::regions_field_is_picker),
             _ => false,
         }
     }

@@ -93,11 +93,6 @@ struct LiveView {
     /// Currently-open channels at snapshot time. Each entry is
     /// `(channel_id, open_age_secs_f64, kind)`.
     currently_open: Vec<(u32, f64, ChannelKind)>,
-    /// Snapshot of the peak concurrent count. Held even though the
-    /// title no longer surfaces it — it stays a candidate for a
-    /// future health-summary line.
-    #[allow(dead_code)]
-    peak_concurrent: u32,
 }
 
 impl LiveView {
@@ -126,7 +121,6 @@ impl LiveView {
             last_exit: snap.last_exit.clone(),
             closed_events_smooth,
             currently_open,
-            peak_concurrent: snap.peak_concurrent,
         }
     }
 
@@ -208,7 +202,6 @@ impl LiveView {
             last_exit: tunnel.live.last_exit.clone(),
             closed_events_smooth,
             currently_open,
-            peak_concurrent: tunnel.live.peak_concurrent,
         })
     }
 }
@@ -1124,7 +1117,6 @@ mod tests {
             last_exit: None,
             closed_events_smooth: vec![(5, ChannelKind::Dynamic, 30.0, 10.0)],
             currently_open: vec![(7, 4.0, ChannelKind::Direct)],
-            peak_concurrent: 2,
         };
         let lanes = build_lanes(&live);
         assert_eq!(lanes.len(), 2);

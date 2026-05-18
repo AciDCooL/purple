@@ -5,6 +5,7 @@ mod digitalocean;
 pub mod gcp;
 mod hetzner;
 mod i3d;
+pub mod kind;
 mod leaseweb;
 mod linode;
 pub mod oracle;
@@ -16,6 +17,8 @@ mod tailscale;
 mod transip;
 mod upcloud;
 mod vultr;
+
+pub use kind::ProviderKind;
 
 use std::sync::atomic::AtomicBool;
 

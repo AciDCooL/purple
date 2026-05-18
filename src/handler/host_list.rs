@@ -10,6 +10,14 @@ use crate::ssh_config::model::ConfigElement;
 
 pub(crate) mod actions;
 
+/// Build a provider hint clause for stale host messages, e.g. "Gone from DigitalOcean".
+pub(super) fn stale_provider_hint(host: &crate::ssh_config::model::HostEntry) -> String {
+    host.provider
+        .as_ref()
+        .map(|p| format!("Gone from {}", crate::providers::provider_display_name(p)))
+        .unwrap_or_default()
+}
+
 fn serialize_host_block(elements: &[ConfigElement], alias: &str, crlf: bool) -> Option<String> {
     let line_ending = if crlf { "\r\n" } else { "\n" };
     for element in elements {
@@ -35,7 +43,34 @@ fn serialize_host_block(elements: &[ConfigElement], alias: &str, crlf: bool) -> 
     None
 }
 
-pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
+pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
+    match app.top_page {
+        crate::app::TopPage::Tunnels => super::tunnels_overview::handle_key(app, key),
+        crate::app::TopPage::Containers => {
+            super::containers_overview::handle_key(app, key, events_tx);
+        }
+        crate::app::TopPage::Keys => super::keys_overview::handle_key(app, key),
+        crate::app::TopPage::Hosts => {
+            if app.search.query.is_some() {
+                handle_search_key(app, key, events_tx);
+            } else {
+                handle_main_key(app, key, events_tx);
+            }
+        }
+    }
+    // Containers tab data load: lazy refresh on every key event in the
+    // Containers tab. 30s TTL per resource; respects demo mode internally.
+    if matches!(app.top_page, crate::app::TopPage::Containers)
+        && matches!(app.screen, Screen::HostList)
+    {
+        super::containers_overview::ensure_inspect_for_selected(app, events_tx);
+        super::containers_overview::ensure_logs_for_selected(app, events_tx);
+        super::containers_overview::ensure_list_for_selected_host(app, events_tx);
+        super::containers_overview::ensure_inspect_for_host_header(app, events_tx);
+    }
+}
+
+pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     // Handle tag input mode
     if app.tags.input.is_some() {
         super::host_detail::handle_tag_input(app, key);
@@ -54,7 +89,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                 app.clear_group_filter();
             } else if !app.hosts_state.multi_select.is_empty() {
                 app.hosts_state.multi_select.clear();
-            } else if !app.esc_quit_hint_shown
+            } else if !app.ui.esc_quit_hint_shown
                 && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky)
             {
                 // Esc never quits the app. The first time a user presses Esc
@@ -66,7 +101,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                 // surface on a later Esc once the sticky toast is dismissed.
                 log::debug!("[purple] esc on idle host list, showing quit hint toast");
                 app.notify(crate::messages::ESC_QUIT_HINT);
-                app.esc_quit_hint_shown = true;
+                app.ui.esc_quit_hint_shown = true;
             }
         }
         KeyCode::Char('j') | KeyCode::Down => {
@@ -103,7 +138,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                 let alias = host.alias.clone();
                 let askpass = host.askpass.clone();
                 let stale_hint = if host.stale.is_some() {
-                    Some(super::stale_provider_hint(host))
+                    Some(stale_provider_hint(host))
                 } else {
                     None
                 };
@@ -114,7 +149,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                     app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
                     return;
                 }
-                app.pending_connect = Some((alias, askpass));
+                app.ui.pending_connect = Some((alias, askpass));
             }
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -164,7 +199,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                 app.capture_form_mtime();
                 app.capture_form_baseline();
             } else if let Some(host) = app.selected_host().cloned() {
-                super::open_edit_form(app, host);
+                super::host_form::open_edit_form(app, host);
             }
         }
         KeyCode::Char('d') => {
@@ -183,7 +218,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                     return;
                 }
                 let stale_hint = if host.stale.is_some() {
-                    Some(super::stale_provider_hint(host))
+                    Some(stale_provider_hint(host))
                 } else {
                     None
                 };
@@ -446,7 +481,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
             } else {
                 ViewMode::Compact
             };
-            app.detail_toggle_pending = true;
+            app.ui.detail_toggle_pending = true;
             app.ui.detail_scroll = 0;
             if let Err(e) = preferences::save_view_mode(app.hosts_state.view_mode) {
                 log::warn!("[config] Failed to persist view mode: {e}");
@@ -502,7 +537,9 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                     app.reload_hosts();
                     // Restored host has no container_cache entry —
                     // queue an initial fetch for THIS alias only.
-                    app.pending_container_fetch_aliases.push(alias.clone());
+                    app.container_state
+                        .pending_fetch_aliases
+                        .push(alias.clone());
                     app.notify(crate::messages::host_restored(&alias));
                 }
             } else {
@@ -544,7 +581,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
             }
             if let Some(host) = app.selected_host() {
                 let stale_hint = if host.stale.is_some() {
-                    Some(super::stale_provider_hint(host))
+                    Some(stale_provider_hint(host))
                 } else {
                     None
                 };
@@ -627,7 +664,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
                 if app.hosts_state.multi_select.is_empty() {
                     if let Some(host) = app.selected_host() {
                         let hint = if host.stale.is_some() {
-                            Some(super::stale_provider_hint(host))
+                            Some(stale_provider_hint(host))
                         } else {
                             None
                         };
@@ -708,11 +745,7 @@ pub(super) fn handle_host_list(app: &mut App, key: KeyEvent, events_tx: &mpsc::S
     }
 }
 
-pub(super) fn handle_host_list_search(
-    app: &mut App,
-    key: KeyEvent,
-    events_tx: &mpsc::Sender<AppEvent>,
-) {
+pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     match key.code {
         KeyCode::Esc => {
             app.cancel_search();
@@ -722,7 +755,7 @@ pub(super) fn handle_host_list_search(
                 let alias = host.alias.clone();
                 let askpass = host.askpass.clone();
                 let stale_hint = if host.stale.is_some() {
-                    Some(super::stale_provider_hint(host))
+                    Some(stale_provider_hint(host))
                 } else {
                     None
                 };
@@ -734,7 +767,7 @@ pub(super) fn handle_host_list_search(
                     app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
                     return;
                 }
-                app.pending_connect = Some((alias, askpass));
+                app.ui.pending_connect = Some((alias, askpass));
             }
         }
         KeyCode::Down | KeyCode::Tab => {
@@ -798,7 +831,7 @@ pub(super) fn handle_host_list_search(
         }
         KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Some(host) = app.selected_host().cloned() {
-                super::open_edit_form(app, host);
+                super::host_form::open_edit_form(app, host);
             }
         }
         KeyCode::Char('!') if app.ping.filter_down_only => {

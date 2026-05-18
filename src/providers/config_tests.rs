@@ -1530,3 +1530,59 @@ fn parse_rejects_mix_labeled_first_then_bare() {
     assert_eq!(config.sections.len(), 1);
     assert_eq!(config.sections[0].id.label.as_deref(), Some("work"));
 }
+
+#[test]
+fn config_id_exposes_kind() {
+    let id = ProviderConfigId::bare("hetzner");
+    assert_eq!(id.kind(), Some(crate::providers::ProviderKind::Hetzner));
+}
+
+#[test]
+fn config_id_unknown_kind_is_none() {
+    let id = ProviderConfigId::bare("not-a-provider");
+    assert_eq!(id.kind(), None);
+}
+
+#[test]
+fn provider_section_debug_redacts_token() {
+    let section = ProviderSection {
+        token: "super-secret-token-value".to_string(),
+        ..Default::default()
+    };
+    let dbg = format!("{:?}", section);
+    assert!(
+        !dbg.contains("super-secret-token-value"),
+        "token leaked: {dbg}"
+    );
+    assert!(
+        dbg.contains("<redacted>"),
+        "missing redaction marker: {dbg}"
+    );
+}
+
+#[test]
+fn provider_section_debug_marks_empty_token() {
+    let section = ProviderSection::default();
+    let dbg = format!("{:?}", section);
+    assert!(dbg.contains("<empty>"), "empty marker missing: {dbg}");
+    assert!(!dbg.contains("<redacted>"));
+}
+
+#[test]
+fn provider_section_debug_redacts_vault_addr() {
+    let section = ProviderSection {
+        token: "tok".to_string(),
+        vault_addr: "https://vault.internal.example.com:8200".to_string(),
+        ..Default::default()
+    };
+    let dbg = format!("{:?}", section);
+    assert!(
+        !dbg.contains("vault.internal.example.com"),
+        "vault_addr leaked: {dbg}"
+    );
+    let redacted_count = dbg.matches("<redacted>").count();
+    assert_eq!(
+        redacted_count, 2,
+        "expected token and vault_addr both redacted: {dbg}"
+    );
+}
