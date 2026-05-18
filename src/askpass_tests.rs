@@ -1553,12 +1553,18 @@ fn keychain_has_password_returns_bool() {
 
 // retrieve_from_command shell escaping
 
+// These tests spawn `sh -c "echo ..."` which resolves `sh` and `echo` via
+// $PATH. Other tests in the binary acquire ENV_LOCK and temporarily set
+// $PATH to a non-existent path (see `with_empty_path` above), which causes
+// the shell lookup here to fail when scheduled in parallel. Acquiring
+// ENV_LOCK here serialises against those PATH mutators.
+
 #[test]
 fn retrieve_from_command_escapes_alias_metacharacters() {
-    // The command itself will fail but we verify the expansion is safe
-    // by using echo which shows the escaped values
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let result = retrieve_from_command("echo %a", "$(whoami)", "host.com");
-    // echo prints the shell-escaped alias literally, not the result of $(whoami)
     assert!(result.is_ok());
     let output = result.unwrap();
     assert_eq!(output, "$(whoami)");
@@ -1566,6 +1572,9 @@ fn retrieve_from_command_escapes_alias_metacharacters() {
 
 #[test]
 fn retrieve_from_command_escapes_hostname_metacharacters() {
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let result = retrieve_from_command("echo %h", "myalias", "$(id)");
     assert!(result.is_ok());
     let output = result.unwrap();
@@ -1574,6 +1583,9 @@ fn retrieve_from_command_escapes_hostname_metacharacters() {
 
 #[test]
 fn retrieve_from_command_escapes_backtick_injection() {
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let result = retrieve_from_command("echo %a", "`uname`", "host");
     assert!(result.is_ok());
     let output = result.unwrap();
@@ -1582,6 +1594,9 @@ fn retrieve_from_command_escapes_backtick_injection() {
 
 #[test]
 fn retrieve_from_command_escapes_semicolon() {
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let result = retrieve_from_command("echo %a", "foo;id", "host");
     assert!(result.is_ok());
     let output = result.unwrap();
@@ -1590,6 +1605,9 @@ fn retrieve_from_command_escapes_semicolon() {
 
 #[test]
 fn retrieve_from_command_normal_values_unchanged() {
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let result = retrieve_from_command("echo %a %h", "myserver", "10.0.0.1");
     assert!(result.is_ok());
     let output = result.unwrap();
