@@ -483,10 +483,22 @@ fn normalize_vault_addr_full_https_url() {
 }
 
 #[test]
-fn normalize_vault_addr_https_without_port() {
+fn normalize_vault_addr_https_without_port_passes_through() {
+    // HAProxy and similar proxies match the HTTP `Host` header strictly. An
+    // explicit `:443` ends up in the header (Go's net/http writes `Host:
+    // host:443`) and breaks ACLs that match on the bare hostname. Preserve
+    // the user's scheme default instead of injecting the redundant port.
     assert_eq!(
         normalize_vault_addr("https://vault.example.com"),
-        "https://vault.example.com:443"
+        "https://vault.example.com"
+    );
+}
+
+#[test]
+fn normalize_vault_addr_http_without_port_passes_through() {
+    assert_eq!(
+        normalize_vault_addr("http://vault.example.com"),
+        "http://vault.example.com"
     );
 }
 
@@ -512,7 +524,7 @@ fn normalize_vault_addr_ipv6_with_port() {
 fn normalize_vault_addr_url_with_path_no_port() {
     assert_eq!(
         normalize_vault_addr("http://vault.host/v1"),
-        "http://vault.host:80/v1"
+        "http://vault.host/v1"
     );
 }
 
@@ -520,7 +532,7 @@ fn normalize_vault_addr_url_with_path_no_port() {
 fn normalize_vault_addr_trailing_slash() {
     assert_eq!(
         normalize_vault_addr("http://vault.host/"),
-        "http://vault.host:80/"
+        "http://vault.host/"
     );
 }
 
@@ -528,7 +540,7 @@ fn normalize_vault_addr_trailing_slash() {
 fn normalize_vault_addr_uppercase_scheme() {
     assert_eq!(
         normalize_vault_addr("HTTP://vault.host"),
-        "HTTP://vault.host:80"
+        "HTTP://vault.host"
     );
 }
 
@@ -538,8 +550,8 @@ fn normalize_vault_addr_unknown_scheme_passthrough() {
 }
 
 #[test]
-fn normalize_vault_addr_ipv6_https_without_port() {
-    assert_eq!(normalize_vault_addr("https://[::1]"), "https://[::1]:443");
+fn normalize_vault_addr_ipv6_https_without_port_passes_through() {
+    assert_eq!(normalize_vault_addr("https://[::1]"), "https://[::1]");
 }
 
 #[test]
@@ -547,6 +559,62 @@ fn normalize_vault_addr_https_custom_port() {
     assert_eq!(
         normalize_vault_addr("https://vault.host:9200"),
         "https://vault.host:9200"
+    );
+}
+
+#[test]
+fn normalize_vault_addr_explicit_443_preserved() {
+    // Symmetric half of the HAProxy invariant: an explicit `:443` is the
+    // user's choice and must round-trip untouched. Stripping it would be
+    // the inverse of the original bug.
+    assert_eq!(
+        normalize_vault_addr("https://vault.corp.com:443"),
+        "https://vault.corp.com:443"
+    );
+}
+
+#[test]
+fn normalize_vault_addr_https_with_path_no_port() {
+    // Path-bearing URL on the https branch: pass through, no port injection
+    // before the path.
+    assert_eq!(
+        normalize_vault_addr("https://vault.corp.com/v1/sys"),
+        "https://vault.corp.com/v1/sys"
+    );
+}
+
+#[test]
+fn normalize_vault_addr_bare_host_non_default_port() {
+    // A bare-host fallback path that does NOT happen to land on 8200 or 443.
+    // Guards against a future "always set :8200" simplification.
+    assert_eq!(
+        normalize_vault_addr("vault.host:9200"),
+        "https://vault.host:9200"
+    );
+}
+
+#[test]
+fn normalize_vault_addr_bare_ipv6_non_default_port() {
+    // Exercises the bracket-scan port-detection on IPv6 with a port that is
+    // neither 8200 nor 443, so an off-by-one in `rfind(']')` cannot pass by
+    // coincidence.
+    assert_eq!(normalize_vault_addr("[::1]:9200"), "https://[::1]:9200");
+}
+
+#[test]
+fn normalize_vault_addr_bare_host_with_path() {
+    // Bare host plus path: scheme prepended, :8200 injected, path preserved.
+    assert_eq!(
+        normalize_vault_addr("vault.local/v1"),
+        "https://vault.local:8200/v1"
+    );
+}
+
+#[test]
+fn normalize_vault_addr_bare_host_trailing_slash() {
+    assert_eq!(
+        normalize_vault_addr("vault.host/"),
+        "https://vault.host:8200/"
     );
 }
 

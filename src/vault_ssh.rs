@@ -94,30 +94,31 @@ pub fn is_valid_vault_addr(s: &str) -> bool {
 }
 
 /// Normalize a vault address so bare IPs and hostnames work.
-/// Prepends `https://` when no scheme is present and appends a default
-/// port when none is specified: `:80` for `http://`, `:443` for
-/// `https://`, `:8200` for bare hostnames (Vault's default). The
-/// default scheme is `https://` because production Vault always uses
-/// TLS. Dev-mode users can set `http://` explicitly.
+///
+/// Inputs with an explicit `http://` or `https://` scheme pass through
+/// unchanged: the user's port choice (including its absence) is honoured
+/// so the HTTP client follows the scheme default. Adding a redundant
+/// `:443` breaks strict `Host`-header ACLs on HAProxy and similar
+/// proxies once they drop to HTTP/1.1.
+///
+/// Bare hosts (no scheme) get `https://` prepended. A bare host without
+/// a port falls back to Vault's `:8200` default, matching the local dev
+/// pattern where `vault.local` or `192.168.1.10` is meant to point at a
+/// stock Vault server. With an explicit port (`host:9200`) the user's
+/// port wins.
 pub fn normalize_vault_addr(s: &str) -> String {
     let trimmed = s.trim();
-    // Case-insensitive scheme detection.
     let lower = trimmed.to_ascii_lowercase();
-    let (with_scheme, scheme_len) = if lower.starts_with("http://") || lower.starts_with("https://")
-    {
-        let len = if lower.starts_with("https://") { 8 } else { 7 };
-        (trimmed.to_string(), len)
-    } else if trimmed.contains("://") {
-        // Unknown scheme (ftp://, etc.) — return as-is, let the CLI error.
+    if lower.starts_with("http://") || lower.starts_with("https://") {
         return trimmed.to_string();
-    } else {
-        (format!("https://{}", trimmed), 8)
-    };
-    // Extract the authority (host[:port]) portion, ignoring any path/query.
+    }
+    if trimmed.contains("://") {
+        return trimmed.to_string();
+    }
+    let scheme_len = 8;
+    let with_scheme = format!("https://{}", trimmed);
     let after_scheme = &with_scheme[scheme_len..];
     let authority = after_scheme.split('/').next().unwrap_or(after_scheme);
-    // IPv6 addresses use [::1]:port syntax. A colon inside brackets is not a
-    // port separator.
     let has_port = if let Some(bracket_end) = authority.rfind(']') {
         authority[bracket_end..].contains(':')
     } else {
@@ -126,20 +127,10 @@ pub fn normalize_vault_addr(s: &str) -> String {
     if has_port {
         with_scheme
     } else {
-        // Use the scheme's standard port when the user typed an explicit scheme,
-        // otherwise fall back to Vault's default port (8200).
-        let default_port = if lower.starts_with("http://") {
-            80
-        } else if lower.starts_with("https://") {
-            443
-        } else {
-            8200
-        };
         let path_start = scheme_len + authority.len();
         format!(
-            "{}:{}{}",
+            "{}:8200{}",
             &with_scheme[..path_start],
-            default_port,
             &with_scheme[path_start..]
         )
     }

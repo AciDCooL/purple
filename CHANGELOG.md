@@ -1,3 +1,8 @@
+## 3.14.5 - 2026-05-18
+
+- feat: Vault SSH signs through HAProxy and other HTTPS proxies.
+- fix: Typing `https://vault.corp.example.com` reaches your server on the standard HTTPS port without a stray `:443` ending up in the `Host` header, so strict ACLs on HAProxy, nginx and other HTTP/1.1 proxies route the signing request to the right backend.
+
 ## 3.14.4 - 2026-05-18
 
 - feat: Safer logs and sturdier internals, with no UI changes.
