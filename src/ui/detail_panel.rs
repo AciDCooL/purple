@@ -416,7 +416,8 @@ fn render_connection(
     section_close(lines, box_width);
 }
 
-/// Renders the ACTIVITY section with connection history and optional sparkline.
+/// Renders the ACTIVITY section with connection history and a sparkline
+/// auto-scaled to the oldest recorded timestamp within the chart window.
 fn render_activity(
     lines: &mut Vec<Line<'static>>,
     app: &App,
@@ -424,84 +425,48 @@ fn render_activity(
     box_width: usize,
     max_value_width: usize,
 ) {
-    let history_entry = app.history.entries.get(&host.alias);
+    let Some(entry) = app.history.entries.get(&host.alias) else {
+        return;
+    };
 
-    if history_entry.is_some() {
-        // The sparkline chart width is the inner box content width: box_width - 4
-        // ("│ " prefix = 2, " │" suffix = 2)
-        let chart_width = box_width.saturating_sub(4);
-        section_open(lines, "ACTIVITY", box_width);
+    // The sparkline chart width is the inner box content width: box_width - 4
+    // ("│ " prefix = 2, " │" suffix = 2)
+    let chart_width = box_width.saturating_sub(4);
+    section_open(lines, "ACTIVITY", box_width);
 
-        if let Some(entry) = history_entry {
-            let ago = ConnectionHistory::format_time_ago(entry.last_connected);
-            if !ago.is_empty() {
-                section_field(
-                    lines,
-                    "Last SSH",
-                    &format!("{} ago", ago),
-                    max_value_width,
-                    box_width,
-                );
-            }
-            section_field(
-                lines,
-                "Connections",
-                &entry.count.to_string(),
-                max_value_width,
-                box_width,
-            );
+    let ago = ConnectionHistory::format_time_ago(entry.last_connected);
+    if !ago.is_empty() {
+        section_field(
+            lines,
+            "Last SSH",
+            &format!("{} ago", ago),
+            max_value_width,
+            box_width,
+        );
+    }
+    section_field(
+        lines,
+        "Connections",
+        &entry.count.to_string(),
+        max_value_width,
+        box_width,
+    );
 
-            if !entry.timestamps.is_empty() && chart_width >= 10 {
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-                // Fewer than 3 connections: show a compact text list instead of sparkline
-                let recent: Vec<u64> = entry
-                    .timestamps
-                    .iter()
-                    .copied()
-                    .filter(|&t| t <= now)
-                    .collect();
-                if recent.len() < SPARKLINE_MIN_CONNECTIONS {
-                    let labels: Vec<String> = recent
-                        .iter()
-                        .rev()
-                        .take(4)
-                        .map(|&t| {
-                            let ago = ConnectionHistory::format_time_ago(t);
-                            if ago.is_empty() {
-                                "now".to_string()
-                            } else {
-                                format!("{} ago", ago)
-                            }
-                        })
-                        .collect();
-                    if !labels.is_empty() {
-                        let text = labels.join(", ");
-                        let truncated = super::truncate(&text, chart_width);
-                        section_line(
-                            lines,
-                            vec![Span::styled(truncated, theme::muted())],
-                            box_width,
-                        );
-                    }
-                } else {
-                    let chart_lines =
-                        super::activity_chart::render(&entry.timestamps, chart_width, now);
-                    if !chart_lines.is_empty() {
-                        // Empty separator row inside the box
-                        section_line(lines, vec![], box_width);
-                        for chart_line in chart_lines {
-                            section_line(lines, chart_line.spans.into_iter().collect(), box_width);
-                        }
-                    }
-                }
+    if !entry.timestamps.is_empty() && chart_width >= 10 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let chart_lines = super::activity_chart::render(&entry.timestamps, chart_width, now);
+        if !chart_lines.is_empty() {
+            section_line(lines, vec![], box_width);
+            for chart_line in chart_lines {
+                section_line(lines, chart_line.spans.into_iter().collect(), box_width);
             }
         }
-
-        section_close(lines, box_width);
     }
+
+    section_close(lines, box_width);
 }
 
 /// Renders the ROUTE section showing the ProxyJump chain (or loop error).
@@ -1146,10 +1111,6 @@ fn resolve_proxy_chain(
     }
     chain
 }
-
-/// Minimum number of connections before showing a sparkline chart.
-/// Below this threshold, a compact text list is shown instead.
-const SPARKLINE_MIN_CONNECTIONS: usize = 3;
 
 /// Map metadata keys to human-readable labels.
 fn meta_label(key: &str) -> String {

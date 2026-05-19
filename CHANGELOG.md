@@ -1,3 +1,9 @@
+## 3.15.3 - 2026-05-19
+
+- feat: Activity chart shows from your first connect.
+
+The host detail panel sparkline used to wait for three recorded connections before appearing. Now a single recorded SSH is enough to start drawing your activity timeline.
+
 ## 3.15.2 - 2026-05-19
 
 - feat: Rename or delete a host without leaving stale views.

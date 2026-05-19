@@ -862,6 +862,11 @@ fn parse_proxy_jump_host_bare_alias() {
 /// containing only itself.
 #[test]
 fn resolve_proxy_chain_no_proxy_returns_target_only() {
+    // `resolve_proxy_chain` spawns `ssh -G`, which reads PATH. Hold ENV_LOCK
+    // so parallel tests that mutate PATH cannot make the ssh binary
+    // momentarily unfindable, which would silently degrade the chain to
+    // `[target]` only.
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -877,6 +882,7 @@ fn resolve_proxy_chain_no_proxy_returns_target_only() {
 /// proxy listed before the target so callers can sign in dependency order.
 #[test]
 fn resolve_proxy_chain_explicit_proxy_jump() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -894,6 +900,7 @@ fn resolve_proxy_chain_explicit_proxy_jump() {
 /// invisible because the target's own host block has no ProxyJump line.
 #[test]
 fn resolve_proxy_chain_wildcard_inherited_proxy() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -913,6 +920,7 @@ fn resolve_proxy_chain_wildcard_inherited_proxy() {
 /// A ProxyJump cycle (a→b→a) must terminate. Visited set guarantees this.
 #[test]
 fn resolve_proxy_chain_breaks_cycles() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -935,6 +943,7 @@ fn resolve_proxy_chain_breaks_cycles() {
 /// own dependency bastion.
 #[test]
 fn resolve_proxy_chain_multi_hop() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -963,6 +972,7 @@ fn resolve_proxy_chain_multi_hop() {
 /// were processed.
 #[test]
 fn resolve_proxy_chain_comma_separated_proxies() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(

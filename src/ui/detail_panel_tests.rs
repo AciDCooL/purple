@@ -172,26 +172,45 @@ fn sparkline_auto_scales_to_data_range() {
     assert!(axis_100d.contains("6mo"));
 }
 
-#[test]
-fn sparkline_shown_at_threshold() {
-    // 3 connections (= SPARKLINE_MIN_CONNECTIONS) → sparkline should render
-    let n = now();
-    let ts = vec![n - 86400, n - 2 * 86400, n - 3 * 86400];
-    let lines = activity_sparkline(&ts, 30);
+/// Asserts the output is a real sparkline. Checks the axis ends in "now" and
+/// the bottom row contains a baseline dot or block glyph, distinguishing chart
+/// output from any plain-text fallback.
+fn assert_renders_sparkline(lines: &[Line<'static>]) {
+    assert!(lines.len() >= 2, "sparkline needs at least body + axis");
+    let axis: String = lines
+        .last()
+        .unwrap()
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect();
     assert!(
-        !lines.is_empty(),
-        "sparkline must render at {} connections",
-        SPARKLINE_MIN_CONNECTIONS
+        axis.ends_with("now"),
+        "axis must end with 'now', got: {axis}"
+    );
+    let body: String = lines[lines.len() - 2]
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect();
+    assert!(
+        body.chars()
+            .any(|c| c == '\u{00B7}' || ('\u{2581}'..='\u{2588}').contains(&c)),
+        "bottom row must contain a dotted baseline or block glyph, got: {body}"
     );
 }
 
 #[test]
-fn sparkline_shown_above_threshold() {
-    // 4 connections (above threshold) → sparkline should render
+fn sparkline_renders_with_one_connection() {
+    let lines = activity_sparkline(&[now() - 3600], 30);
+    assert_renders_sparkline(&lines);
+}
+
+#[test]
+fn sparkline_renders_with_two_connections() {
     let n = now();
-    let ts = vec![n - 3600, n - 86400, n - 2 * 86400, n - 3 * 86400];
-    let lines = activity_sparkline(&ts, 30);
-    assert!(!lines.is_empty(), "sparkline must render at 4 connections");
+    let lines = activity_sparkline(&[n - 3600, n - 7200], 30);
+    assert_renders_sparkline(&lines);
 }
 
 #[test]
