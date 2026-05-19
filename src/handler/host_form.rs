@@ -34,10 +34,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
                 app.forms.pending_discard_confirm = false;
-                app.clear_form_mtime();
-                app.forms.host_baseline = None;
-                app.set_screen(Screen::HostList);
-                app.flush_pending_vault_write();
+                app.close_host_form();
             }
             super::ConfirmAction::No => {
                 app.forms.pending_discard_confirm = false;
@@ -52,10 +49,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             if app.host_form_is_dirty() {
                 app.forms.pending_discard_confirm = true;
             } else {
-                app.clear_form_mtime();
-                app.forms.host_baseline = None;
-                app.set_screen(Screen::HostList);
-                app.flush_pending_vault_write();
+                app.close_host_form();
             }
         }
         KeyCode::Tab | KeyCode::Down => {
@@ -370,11 +364,7 @@ pub(super) fn submit_form(app: &mut App) {
             let _ = app.hosts_state.ssh_config.clear_host_stale(&target_alias);
         }
     }
-    app.clear_form_mtime();
-    app.forms.host_baseline = None;
-    app.set_screen(Screen::HostList);
-    app.select_host_by_alias(&target_alias);
-    app.flush_pending_vault_write();
+    app.close_host_form_after_save(&target_alias);
     // Form save may have introduced a new host (Add) or renamed an
     // existing one (Edit). Queue exactly the saved alias for the
     // initial container-cache fetch. Drained next tick by the main

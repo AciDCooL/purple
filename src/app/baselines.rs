@@ -3,6 +3,7 @@
 //! provider) plus the mtime helpers that detect external config changes.
 
 use crate::app::App;
+use crate::app::Screen;
 use crate::app::reload_state::{get_mtime, snapshot_include_dir_mtimes, snapshot_include_mtimes};
 
 /// Baseline snapshot of host form content for dirty-check on Esc.
@@ -112,6 +113,29 @@ impl App {
             }
             None => false,
         }
+    }
+
+    /// Tear down host form state and return to the host list. Flush runs
+    /// last because `flush_pending_vault_write` no-ops while a form is open.
+    pub fn close_host_form(&mut self) {
+        self.close_host_form_inner(None);
+    }
+
+    /// Close the host form and select the just-saved host. Use after a
+    /// successful submit.
+    pub fn close_host_form_after_save(&mut self, target_alias: &str) {
+        self.close_host_form_inner(Some(target_alias));
+    }
+
+    fn close_host_form_inner(&mut self, select: Option<&str>) {
+        log::debug!("[purple] close_host_form select={:?}", select);
+        self.clear_form_mtime();
+        self.forms.host_baseline = None;
+        self.set_screen(Screen::HostList);
+        if let Some(alias) = select {
+            self.select_host_by_alias(alias);
+        }
+        self.flush_pending_vault_write();
     }
 
     /// Capture a baseline snapshot of the tunnel form for dirty-check on Esc.

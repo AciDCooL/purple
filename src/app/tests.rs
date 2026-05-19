@@ -115,6 +115,60 @@ fn host_form_is_dirty_detects_vault_addr_change() {
 }
 
 #[test]
+fn close_host_form_clears_state_and_returns_to_list() {
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
+    app.capture_form_baseline();
+    app.conflict.form_mtime = Some(SystemTime::UNIX_EPOCH);
+    app.set_screen(Screen::EditHost {
+        alias: "a".to_string(),
+    });
+    // Pin the flush invariant: set_screen must precede flush_pending_vault_write
+    // because flush no-ops while a form is open. Setting pending_config_write and
+    // asserting it clears proves the flush actually ran past the form-open guard.
+    app.vault.pending_config_write = true;
+    assert!(app.forms.host_baseline.is_some());
+    assert!(app.conflict.form_mtime.is_some());
+
+    app.close_host_form();
+
+    assert!(
+        app.forms.host_baseline.is_none(),
+        "baseline must be cleared"
+    );
+    assert!(app.conflict.form_mtime.is_none(), "mtime must be cleared");
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(
+        !app.vault.pending_config_write,
+        "flush must have run after set_screen"
+    );
+}
+
+#[test]
+fn close_host_form_after_save_selects_target_alias() {
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\nHost b\n  HostName 2.3.4.5\n");
+    app.capture_form_baseline();
+    app.conflict.form_mtime = Some(SystemTime::UNIX_EPOCH);
+    app.set_screen(Screen::EditHost {
+        alias: "a".to_string(),
+    });
+    app.vault.pending_config_write = true;
+
+    app.close_host_form_after_save("b");
+
+    assert!(app.forms.host_baseline.is_none());
+    assert!(app.conflict.form_mtime.is_none(), "mtime must be cleared");
+    assert!(matches!(app.screen, Screen::HostList));
+    assert_eq!(
+        app.selected_host().expect("a host must be selected").alias,
+        "b"
+    );
+    assert!(
+        !app.vault.pending_config_write,
+        "flush must have run after set_screen and select"
+    );
+}
+
+#[test]
 fn edit_host_from_form_does_not_write_vault_addr_for_pattern() {
     // set_host_vault_addr refuses wildcards. The edit_host_from_form path
     // must skip the call entirely for pattern forms so the debug_assert
