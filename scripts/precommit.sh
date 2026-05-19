@@ -99,6 +99,10 @@ step "./scripts/check-conventions.sh"
 ./scripts/check-conventions.sh
 pass
 
+step "./scripts/check-aur-pkgbuild-drift.sh"
+./scripts/check-aur-pkgbuild-drift.sh
+pass
+
 step "cargo test --bin purple visual_regression"
 cargo test --bin purple visual_regression
 pass
