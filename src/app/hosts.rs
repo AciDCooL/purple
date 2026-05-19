@@ -376,16 +376,6 @@ impl App {
                     log::warn!("[config] failed to save recents after rename: {e}");
                 }
             }
-            if self.containers_overview.collapsed_hosts.remove(old_alias) {
-                self.containers_overview
-                    .collapsed_hosts
-                    .insert(new_alias.clone());
-                if let Err(e) = crate::preferences::save_containers_collapsed_hosts(
-                    &self.containers_overview.collapsed_hosts,
-                ) {
-                    log::warn!("[config] failed to save collapsed_hosts after rename: {e}");
-                }
-            }
         }
         if applied {
             self.apply_sort();
@@ -401,6 +391,7 @@ impl App {
     /// `pub(crate)` only to keep whitebox unit tests possible.
     pub(crate) fn migrate_alias_keyed_caches(&mut self, renames: &[(String, String)]) {
         let mut container_cache_changed = false;
+        let mut collapsed_hosts_changed = false;
         for (old_alias, new_alias) in renames {
             if old_alias == new_alias {
                 continue;
@@ -431,9 +422,48 @@ impl App {
             if let Some(t) = self.tunnels.active.remove(old_alias) {
                 self.tunnels.active.insert(new_alias.clone(), t);
             }
+            if let Some(v) = self.file_browser_state.host_paths.remove(old_alias) {
+                self.file_browser_state
+                    .host_paths
+                    .insert(new_alias.clone(), v);
+            }
+            if let Some(batch) = self.containers_overview.refresh_batch.as_mut() {
+                if batch.in_flight_aliases.remove(old_alias) {
+                    batch.in_flight_aliases.insert(new_alias.clone());
+                }
+            }
+            // Sign worker holds the same Arc<Mutex<...>>. Recover on poison
+            // so a panicked worker does not block migration. Migration only
+            // moves the alias key; the worker's per-iteration state is in
+            // its own captured `signable` slice and is unaffected.
+            {
+                let mut sign = match self.vault.sign_in_flight.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                if sign.remove(old_alias) {
+                    sign.insert(new_alias.clone());
+                }
+            }
+            // collapsed_hosts is persistent (preferences). Migrate here so
+            // reload_hosts' prune step sees the new alias as live and does
+            // not strip the user's collapsed-fleet state on rename.
+            if self.containers_overview.collapsed_hosts.remove(old_alias) {
+                self.containers_overview
+                    .collapsed_hosts
+                    .insert(new_alias.clone());
+                collapsed_hosts_changed = true;
+            }
         }
         if container_cache_changed {
             crate::containers::save_container_cache(&self.container_state.cache);
+        }
+        if collapsed_hosts_changed {
+            if let Err(e) = crate::preferences::save_containers_collapsed_hosts(
+                &self.containers_overview.collapsed_hosts,
+            ) {
+                log::warn!("[config] failed to save collapsed_hosts after rename: {e}");
+            }
         }
     }
 

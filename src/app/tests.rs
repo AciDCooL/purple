@@ -8297,7 +8297,11 @@ fn post_init_invokes_scan_keys() {
 }
 
 #[test]
-fn apply_alias_renames_migrates_history_recents_and_collapsed_in_batch() {
+fn apply_alias_renames_migrates_history_and_recents_in_batch() {
+    // `apply_alias_renames` covers persistent state that lives outside
+    // the in-memory cache layer: connection history and jump recents.
+    // collapsed_hosts migrates earlier via `migrate_alias_keyed_caches`
+    // so its prune in `reload_hosts` sees the new alias as live.
     let dir = tempfile::tempdir().expect("tempdir");
     crate::app::jump::test_path::set(dir.path().join("recents.json"));
     crate::preferences::set_path_override(dir.path().join("preferences"));
@@ -8322,9 +8326,6 @@ fn apply_alias_renames_migrates_history_recents_and_collapsed_in_batch() {
             timestamps: vec![1_700_000_500],
         },
     );
-    app.containers_overview
-        .collapsed_hosts
-        .insert("a".to_string());
 
     let mut seeded = crate::app::jump::RecentsFile::default();
     seeded.entries.push(crate::app::jump::RecentEntry {
@@ -8361,9 +8362,6 @@ fn apply_alias_renames_migrates_history_recents_and_collapsed_in_batch() {
     );
     assert_eq!(app.history.entries.get("b").unwrap().count, 3);
     assert_eq!(app.history.entries.get("c").unwrap().count, 7);
-
-    assert!(app.containers_overview.collapsed_hosts.contains("b"));
-    assert!(!app.containers_overview.collapsed_hosts.contains("a"));
 
     let reloaded = crate::app::jump::load_recents();
     let mut host_keys: Vec<String> = reloaded
@@ -8443,6 +8441,52 @@ fn migrate_alias_keyed_caches_moves_ping_container_and_in_flight_sets() {
     // new alias, which checks the disk-side cert path.
     assert!(app.vault.cert_cache.contains_key("a"));
     assert!(!app.vault.cert_cache.contains_key("b"));
+
+    crate::containers::clear_path_override();
+}
+
+#[test]
+fn migrate_alias_keyed_caches_moves_host_paths_refresh_batch_and_sign_in_flight() {
+    // file_browser host_paths, refresh_batch in_flight_aliases, and the
+    // vault sign_in_flight set are all alias-keyed. Without migration a
+    // rename would silently drop in-flight state and leak preferences.
+    let dir = tempfile::tempdir().expect("tempdir");
+    crate::containers::set_path_override(dir.path().join("container_cache.jsonl"));
+
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
+
+    app.file_browser_state.host_paths.insert(
+        "a".to_string(),
+        (std::path::PathBuf::from("/var/log"), "/var/log".to_string()),
+    );
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue: std::collections::VecDeque::new(),
+        in_flight: 1,
+        total: 1,
+        completed: 0,
+        in_flight_aliases: ["a".to_string()].into_iter().collect(),
+    });
+    {
+        let mut sign = app.vault.sign_in_flight.lock().expect("lock");
+        sign.insert("a".to_string());
+    }
+
+    app.migrate_alias_keyed_caches(&[("a".to_string(), "b".to_string())]);
+
+    assert!(!app.file_browser_state.host_paths.contains_key("a"));
+    assert!(app.file_browser_state.host_paths.contains_key("b"));
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("batch must still exist");
+    assert!(!batch.in_flight_aliases.contains("a"));
+    assert!(batch.in_flight_aliases.contains("b"));
+    {
+        let sign = app.vault.sign_in_flight.lock().expect("lock");
+        assert!(!sign.contains("a"));
+        assert!(sign.contains("b"));
+    }
 
     crate::containers::clear_path_override();
 }

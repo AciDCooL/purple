@@ -443,6 +443,88 @@ impl App {
         self.containers_overview
             .auto_list_in_flight
             .retain(|alias| valid_aliases.contains(alias.as_str()));
+        // Container-overview refresh batch (R). Tracks in-flight aliases to
+        // gate counter updates against non-batch listings. Prune so that a
+        // host removed mid-batch cannot linger.
+        if let Some(batch) = self.containers_overview.refresh_batch.as_mut() {
+            let pre = batch.in_flight_aliases.len();
+            batch
+                .in_flight_aliases
+                .retain(|alias| valid_aliases.contains(alias.as_str()));
+            let dropped = pre.saturating_sub(batch.in_flight_aliases.len());
+            if dropped > 0 {
+                log::debug!(
+                    "[purple] reload_hosts: dropped {} orphan refresh_batch in_flight alias(es)",
+                    dropped
+                );
+            }
+        }
+        // Bulk vault-sign tracker. Worker self-prunes its own entries via
+        // `remove_in_flight`, but a host removed mid-sign would linger. On
+        // poison recover via `into_inner` instead of dropping the work. A
+        // poisoned worker still owns live aliases that must not be cleared.
+        {
+            let mut sign = match self.vault.sign_in_flight.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            let pre = sign.len();
+            sign.retain(|alias| valid_aliases.contains(alias.as_str()));
+            let dropped = pre.saturating_sub(sign.len());
+            if dropped > 0 {
+                log::debug!(
+                    "[purple] reload_hosts: dropped {} orphan sign_in_flight alias(es)",
+                    dropped
+                );
+            }
+        }
+        // Per-host last-visited file-browser path. Pure host-keyed state
+        // with no self-pruning, so a rename leaves the old alias behind.
+        let pre_paths = self.file_browser_state.host_paths.len();
+        self.file_browser_state
+            .host_paths
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        let dropped_paths = pre_paths.saturating_sub(self.file_browser_state.host_paths.len());
+        if dropped_paths > 0 {
+            log::debug!(
+                "[purple] reload_hosts: dropped {} orphan file_browser host_paths entrie(s)",
+                dropped_paths
+            );
+        }
+        // Demo-mode tunnel snapshot seed. The detail panel reads from this
+        // map when `demo_mode == true`. Outside demo it stays empty, but a
+        // demo workflow that renames or deletes a host should not leak.
+        let pre_demo = self.tunnels.demo_live_snapshots.len();
+        self.tunnels
+            .demo_live_snapshots
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        let dropped_demo = pre_demo.saturating_sub(self.tunnels.demo_live_snapshots.len());
+        if dropped_demo > 0 {
+            log::debug!(
+                "[purple] reload_hosts: dropped {} orphan demo_live_snapshots entrie(s)",
+                dropped_demo
+            );
+        }
+        // Containers-overview collapsed groups. Persisted to disk via
+        // preferences, so leftover aliases survive restart. Rename is
+        // already handled by `apply_alias_renames`; this covers delete.
+        let pre_collapsed = self.containers_overview.collapsed_hosts.len();
+        self.containers_overview
+            .collapsed_hosts
+            .retain(|alias| valid_aliases.contains(alias.as_str()));
+        let dropped_collapsed =
+            pre_collapsed.saturating_sub(self.containers_overview.collapsed_hosts.len());
+        if dropped_collapsed > 0 {
+            log::debug!(
+                "[purple] reload_hosts: dropped {} orphan collapsed_hosts entrie(s)",
+                dropped_collapsed
+            );
+            if let Err(e) = crate::preferences::save_containers_collapsed_hosts(
+                &self.containers_overview.collapsed_hosts,
+            ) {
+                log::warn!("[config] failed to save collapsed_hosts after prune: {e}");
+            }
+        }
         let dropped_inspect =
             pre_inspect.saturating_sub(self.containers_overview.inspect_cache.entries.len());
         if dropped_inspect > 0 {

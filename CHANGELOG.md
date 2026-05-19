@@ -1,3 +1,11 @@
+## 3.15.2 - 2026-05-19
+
+- feat: Rename or delete a host without leaving stale views.
+- feat: File Browser opens at your last folder on a host, even after a rename.
+- feat: Container-overview group folds survive renames and deletions.
+- fix: Container refresh batches keep accurate counts when you remove a host mid-run.
+- fix: Vault bulk sign tracks aliases cleanly through a rename.
+
 ## 3.15.1 - 2026-05-19
 
 - fix: Multiple cloud accounts on one provider work end to end.

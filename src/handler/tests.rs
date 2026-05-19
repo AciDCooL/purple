@@ -10266,6 +10266,272 @@ fn reload_hosts_drops_orphan_inspect_cache_entries() {
 }
 
 #[test]
+fn reload_hosts_drops_orphan_file_browser_host_paths() {
+    // host_paths persists the last-visited remote dir per alias. It has
+    // no self-pruning, so reload_hosts must strip aliases that no longer
+    // exist or a rename leaves a ghost entry behind forever.
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    app.file_browser_state.host_paths.insert(
+        "alive".to_string(),
+        (std::path::PathBuf::from("/var/log"), "/var/log".to_string()),
+    );
+    app.file_browser_state.host_paths.insert(
+        "ghost".to_string(),
+        (std::path::PathBuf::from("/etc"), "/etc".to_string()),
+    );
+
+    app.reload_hosts();
+
+    assert!(app.file_browser_state.host_paths.contains_key("alive"));
+    assert!(
+        !app.file_browser_state.host_paths.contains_key("ghost"),
+        "host_paths entry for a removed host must be pruned"
+    );
+}
+
+#[test]
+fn reload_hosts_drops_orphan_refresh_batch_in_flight_aliases() {
+    // The R batch tracks in-flight aliases to gate counter updates against
+    // non-batch listings. A host removed mid-batch must not linger in the
+    // set, even if the listing thread is still on its way back.
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    let mut in_flight = std::collections::HashSet::new();
+    in_flight.insert("alive".to_string());
+    in_flight.insert("ghost".to_string());
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue: std::collections::VecDeque::new(),
+        in_flight: 2,
+        total: 2,
+        completed: 0,
+        in_flight_aliases: in_flight,
+    });
+
+    app.reload_hosts();
+
+    let batch = app
+        .containers_overview
+        .refresh_batch
+        .as_ref()
+        .expect("batch must still exist after reload");
+    assert!(batch.in_flight_aliases.contains("alive"));
+    assert!(
+        !batch.in_flight_aliases.contains("ghost"),
+        "removed host must be dropped from refresh_batch in_flight_aliases"
+    );
+}
+
+fn empty_tunnel_live_snapshot() -> crate::tunnel_live::TunnelLiveSnapshot {
+    crate::tunnel_live::TunnelLiveSnapshot {
+        uptime_secs: 0,
+        active_channels: 0,
+        peak_concurrent: 0,
+        total_opens: 0,
+        idle_secs: 0,
+        rx_history: [0; crate::tunnel_live::HISTORY_BUCKETS],
+        tx_history: [0; crate::tunnel_live::HISTORY_BUCKETS],
+        current_rx_bps: 0,
+        current_tx_bps: 0,
+        peak_rx_bps: 0,
+        peak_tx_bps: 0,
+        throughput_ready: false,
+        clients: Vec::new(),
+        events: Vec::new(),
+        currently_open: Vec::new(),
+        conflict: None,
+        last_exit: None,
+    }
+}
+
+#[test]
+fn reload_hosts_drops_orphan_demo_live_snapshots() {
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    app.tunnels
+        .demo_live_snapshots
+        .insert("alive".to_string(), empty_tunnel_live_snapshot());
+    app.tunnels
+        .demo_live_snapshots
+        .insert("ghost".to_string(), empty_tunnel_live_snapshot());
+
+    app.reload_hosts();
+
+    assert!(app.tunnels.demo_live_snapshots.contains_key("alive"));
+    assert!(
+        !app.tunnels.demo_live_snapshots.contains_key("ghost"),
+        "demo_live_snapshots entry for a removed host must be pruned"
+    );
+}
+
+#[test]
+fn reload_hosts_drops_orphan_collapsed_hosts_and_persists() {
+    // collapsed_hosts is persisted to preferences. A delete must prune
+    // the runtime set AND rewrite preferences so the orphan does not
+    // come back on restart.
+    let pref_dir = tempfile::tempdir().expect("tempdir");
+    crate::preferences::set_path_override(pref_dir.path().join("preferences"));
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    app.containers_overview
+        .collapsed_hosts
+        .insert("alive".to_string());
+    app.containers_overview
+        .collapsed_hosts
+        .insert("ghost".to_string());
+    crate::preferences::save_containers_collapsed_hosts(&app.containers_overview.collapsed_hosts)
+        .expect("seed");
+
+    app.reload_hosts();
+
+    assert!(app.containers_overview.collapsed_hosts.contains("alive"));
+    assert!(
+        !app.containers_overview.collapsed_hosts.contains("ghost"),
+        "collapsed_hosts entry for a removed host must be pruned"
+    );
+    let on_disk = crate::preferences::load_containers_collapsed_hosts();
+    assert!(on_disk.contains("alive"));
+    assert!(
+        !on_disk.contains("ghost"),
+        "pruned collapsed_hosts must be persisted, otherwise the orphan returns on restart"
+    );
+}
+
+#[test]
+fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
+    // Single contract test that seeds EVERY known alias-keyed collection
+    // with a ghost entry, runs reload_hosts, and asserts each one is
+    // ghost-free. When a contributor adds a new alias-keyed cache without
+    // wiring it into reload_hosts, this test pins the omission down. To
+    // add a new collection: seed it below and add a matching assertion.
+    let pref_dir = tempfile::tempdir().expect("tempdir");
+    crate::preferences::set_path_override(pref_dir.path().join("preferences"));
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    let ghost = "ghost".to_string();
+
+    app.tunnels
+        .summaries_cache
+        .insert(ghost.clone(), String::new());
+    app.vault.cert_cache.insert(
+        ghost.clone(),
+        (
+            std::time::Instant::now(),
+            crate::vault_ssh::CertStatus::Missing,
+            None,
+        ),
+    );
+    app.vault.cert_checks_in_flight.insert(ghost.clone());
+    {
+        let mut sign = app.vault.sign_in_flight.lock().expect("lock");
+        sign.insert(ghost.clone());
+    }
+    app.container_state.cache.insert(
+        ghost.clone(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 0,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![],
+        },
+    );
+    app.containers_overview
+        .auto_list_in_flight
+        .insert(ghost.clone());
+    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
+        queue: std::collections::VecDeque::new(),
+        in_flight: 1,
+        total: 1,
+        completed: 0,
+        in_flight_aliases: [ghost.clone()].into_iter().collect(),
+    });
+    app.containers_overview
+        .collapsed_hosts
+        .insert(ghost.clone());
+    app.file_browser_state.host_paths.insert(
+        ghost.clone(),
+        (std::path::PathBuf::from("/etc"), "/etc".to_string()),
+    );
+    app.ping.status.insert(
+        ghost.clone(),
+        crate::app::PingStatus::Reachable { rtt_ms: 1 },
+    );
+    app.ping
+        .last_checked
+        .insert(ghost.clone(), std::time::Instant::now());
+    app.tunnels
+        .demo_live_snapshots
+        .insert(ghost.clone(), empty_tunnel_live_snapshot());
+
+    app.reload_hosts();
+
+    assert!(
+        !app.tunnels.summaries_cache.contains_key(&ghost),
+        "tunnels.summaries_cache"
+    );
+    assert!(
+        !app.vault.cert_cache.contains_key(&ghost),
+        "vault.cert_cache"
+    );
+    assert!(
+        !app.vault.cert_checks_in_flight.contains(&ghost),
+        "vault.cert_checks_in_flight"
+    );
+    {
+        let sign = app.vault.sign_in_flight.lock().expect("lock");
+        assert!(!sign.contains(&ghost), "vault.sign_in_flight");
+    }
+    assert!(
+        !app.container_state.cache.contains_key(&ghost),
+        "container_state.cache"
+    );
+    assert!(
+        !app.containers_overview.auto_list_in_flight.contains(&ghost),
+        "containers_overview.auto_list_in_flight"
+    );
+    if let Some(batch) = app.containers_overview.refresh_batch.as_ref() {
+        assert!(
+            !batch.in_flight_aliases.contains(&ghost),
+            "containers_overview.refresh_batch.in_flight_aliases"
+        );
+    }
+    assert!(
+        !app.containers_overview.collapsed_hosts.contains(&ghost),
+        "containers_overview.collapsed_hosts"
+    );
+    assert!(
+        !app.file_browser_state.host_paths.contains_key(&ghost),
+        "file_browser_state.host_paths"
+    );
+    assert!(!app.ping.status.contains_key(&ghost), "ping.status");
+    assert!(
+        !app.ping.last_checked.contains_key(&ghost),
+        "ping.last_checked"
+    );
+    assert!(
+        !app.tunnels.demo_live_snapshots.contains_key(&ghost),
+        "tunnels.demo_live_snapshots"
+    );
+}
+
+#[test]
+fn reload_hosts_drops_orphan_sign_in_flight() {
+    // sign_in_flight is the bulk-V sign tracker. Worker thread self-prunes
+    // on completion, but a host removed mid-sign would linger until the
+    // worker fires. reload_hosts must take the lock and prune.
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    {
+        let mut sign = app.vault.sign_in_flight.lock().expect("lock");
+        sign.insert("alive".to_string());
+        sign.insert("ghost".to_string());
+    }
+
+    app.reload_hosts();
+
+    let sign = app.vault.sign_in_flight.lock().expect("lock");
+    assert!(sign.contains("alive"));
+    assert!(
+        !sign.contains("ghost"),
+        "removed host must be dropped from vault.sign_in_flight"
+    );
+}
+
+#[test]
 fn auto_fetch_new_hosts_only_fetches_queued_aliases() {
     // Only the alias that was explicitly pushed to the queue must be
     // fetched. Pre-existing cache-missing hosts must be left alone —

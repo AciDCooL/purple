@@ -103,6 +103,10 @@ step "./scripts/check-aur-pkgbuild-drift.sh"
 ./scripts/check-aur-pkgbuild-drift.sh
 pass
 
+step "./scripts/check-alias-caches.sh"
+./scripts/check-alias-caches.sh
+pass
+
 step "cargo test --bin purple visual_regression"
 cargo test --bin purple visual_regression
 pass
