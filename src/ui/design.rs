@@ -630,8 +630,16 @@ pub fn render_body<'a>(
 
 /// Render the block, then render `lines` into [`body_area`] of that
 /// block with word-wrapping enabled. Long prose wraps to additional
-/// rows; `trim: false` preserves leading indentation on continuation
-/// lines so multi-paragraph bodies keep their "  " prefix.
+/// rows.
+///
+/// Hanging indent: when a single-span input line starts with ASCII
+/// spaces, those spaces are reused as the indent on every continuation
+/// row produced by the wrap. Ratatui's `Wrap { trim: false }` only
+/// preserves trailing whitespace on wrapped rows, not leading indent
+/// on continuations, so we pre-wrap via [`wrap_indented`] instead. The
+/// difference is visible whenever a confirm dialog's body sentence is
+/// long enough to wrap (e.g. provider remove labelled detail) and the
+/// second row would otherwise collapse to column 0.
 ///
 /// Use for confirm dialogs, help body text, and any block whose content
 /// includes full sentences. The 2-char right margin guarantees wrapped
@@ -644,10 +652,109 @@ pub fn render_body_wrapped<'a>(
 ) {
     use ratatui::widgets::Wrap;
     frame.render_widget(block, block_area);
-    frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }),
-        body_area(block_area),
-    );
+    let body = body_area(block_area);
+    let max_w = body.width as usize;
+    let out = wrap_block_lines(lines, max_w);
+    frame.render_widget(Paragraph::new(out).wrap(Wrap { trim: false }), body);
+}
+
+/// Pre-wrap dialog body lines for a fixed inner width, preserving the
+/// hanging indent of every continuation row.
+///
+/// The function recognises three input shapes:
+/// - `Line::from(Span::styled("  text", style))` (single span with
+///   leading whitespace). Wrapped with the leading spaces as hanging
+///   indent on every continuation row.
+/// - `Line::from(vec![Span::raw("  "), Span::styled(text, style)])`
+///   (whitespace-only prefix spans followed by exactly one styled
+///   body span). Same hanging-indent treatment.
+/// - Any other line shape (blank, aligned, or composite multi-span).
+///   Emitted verbatim, with `Span` content moved to `'static`.
+///
+/// Lines that already fit in `max_w` are emitted verbatim so trailing
+/// spaces used for manual centering (welcome banners) survive. Lines
+/// with an explicit `alignment` bypass indent detection entirely so the
+/// caller's `Alignment::Center` / `Alignment::Right` keeps working.
+pub fn wrap_block_lines<'a>(lines: Vec<Line<'a>>, max_w: usize) -> Vec<Line<'static>> {
+    use unicode_width::UnicodeWidthStr;
+    let mut out: Vec<Line<'static>> = Vec::with_capacity(lines.len());
+    for line in lines {
+        // Lines with an explicit alignment (Center/Right for banners,
+        // logo rows, typewriter subtitles) bypass indent detection so
+        // the caller's alignment keeps applying.
+        if line.alignment.is_some() {
+            let alignment = line.alignment;
+            let owned: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|s| Span::styled(s.content.into_owned(), s.style))
+                .collect();
+            let mut new_line = Line::from(owned);
+            if let Some(a) = alignment {
+                new_line = new_line.alignment(a);
+            }
+            out.push(new_line);
+            continue;
+        }
+
+        // Detect "whitespace-only prefix spans + one styled body span".
+        let mut indent_w = 0usize;
+        let mut body_span: Option<Span<'a>> = None;
+        let mut leading_only = true;
+        let total_spans = line.spans.len();
+        for (i, span) in line.spans.iter().enumerate() {
+            let content: &str = span.content.as_ref();
+            if content.chars().all(|c| c == ' ') {
+                indent_w += content.len();
+                continue;
+            }
+            if i == total_spans - 1 {
+                body_span = Some(span.clone());
+            } else {
+                leading_only = false;
+            }
+            break;
+        }
+
+        if leading_only {
+            if let Some(span) = body_span {
+                let content = span.content.into_owned();
+                let trimmed = content.trim_start_matches(' ');
+                let extra_indent = content.len() - trimmed.len();
+                let total_indent = indent_w + extra_indent;
+                let full_width = indent_w + content.width();
+                let needs_wrap = full_width > max_w;
+                if total_indent > 0 && !trimmed.is_empty() && needs_wrap {
+                    let indent = " ".repeat(total_indent);
+                    let body_text = trimmed.to_string();
+                    for wrapped in wrap_indented(&body_text, &indent, max_w) {
+                        out.push(Line::from(Span::styled(wrapped, span.style)));
+                    }
+                    continue;
+                }
+                let mut spans: Vec<Span<'static>> = Vec::new();
+                if indent_w > 0 {
+                    spans.push(Span::raw(" ".repeat(indent_w)));
+                }
+                spans.push(Span::styled(content, span.style));
+                out.push(Line::from(spans));
+                continue;
+            }
+            out.push(Line::from(""));
+            continue;
+        }
+
+        // Composite multi-span line (header rows, glyph rows). Keep as-is;
+        // ratatui's Wrap { trim: false } below handles overflow without
+        // losing the span styles. Indent on continuation is best-effort.
+        let owned: Vec<Span<'static>> = line
+            .spans
+            .into_iter()
+            .map(|s| Span::styled(s.content.into_owned(), s.style))
+            .collect();
+        out.push(Line::from(owned));
+    }
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -858,23 +965,6 @@ pub fn wrap_indented(text: &str, indent: &str, max_width: usize) -> Vec<String> 
     out
 }
 
-/// Build a `Vec<Line>` from `text` wrapped to `max_width` with `indent`
-/// applied to every continuation row. Each line carries `style`. Use
-/// instead of building a single long `Line::from(Span::styled(text,
-/// style))` and relying on `Wrap { trim: false }`, which only indents
-/// the first row.
-pub fn wrap_body_lines(
-    text: &str,
-    indent: &str,
-    max_width: usize,
-    style: ratatui::style::Style,
-) -> Vec<Line<'static>> {
-    wrap_indented(text, indent, max_width)
-        .into_iter()
-        .map(|s| Line::from(Span::styled(s, style)))
-        .collect()
-}
-
 /// Truncate `text` to at most `max_width` display columns. If the text
 /// is longer, the last column is replaced with `…` so the reader can
 /// tell that data was cut. `max_width` must be ≥ 1; the helper is a
@@ -1045,19 +1135,93 @@ pub fn discard_footer() -> Footer {
     confirm_footer_destructive("discard", "keep")
 }
 
-/// Render a centred destructive-confirm popup over whatever is on
-/// screen. Use for inline `pending_delete`-style confirms (deleting a
-/// tunnel rule from the tunnels overlay, removing a snippet from the
-/// picker, dropping a provider config) so the affordance reads as a
-/// modal popup with the rest of the design-system confirms (host
-/// delete, vault sign, container restart) instead of a footer-line
-/// prompt under the parent overlay. Footer renders the action-verb
-/// pair below the popup's bottom border.
+/// Kind of confirm popup. Selects block styling (destructive = red
+/// border, neutral = muted border) and lets the caller communicate
+/// intent without having to construct the block themselves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PopupKind {
+    /// Red danger border. Used for delete/discard/sign/purge confirms.
+    Destructive,
+    /// Muted overlay border. Used for non-destructive confirms (import,
+    /// info dialogs, neutral yes/no).
+    Neutral,
+}
+
+/// Render a centred confirm popup over whatever is on screen.
+///
+/// Single source of truth for every confirm-style modal in the TUI:
+/// destructive deletes, sign confirmations, import dialogs, container
+/// action prompts, tunnel removal, provider remove, etc. Replaces ad
+/// hoc combinations of `centered_rect_fixed` + `Clear` + `block` +
+/// `render_body_wrapped` + `render_overlay_footer` that were drifting
+/// per caller.
+///
+/// Guarantees the caller does NOT have to think about:
+/// - hanging indent on wrapped continuation rows (via [`wrap_block_lines`])
+/// - the trailing blank row between the last content row and the
+///   bottom border (height is computed from the wrapped row count so
+///   long prose never pushes the last content line against the border)
+/// - footer placement (rendered below the bottom border via
+///   [`render_overlay_footer`], not inside the block)
+///
+/// The caller supplies the body as a `Vec<Line>` of content rows. The
+/// helper adds the top blank and trailing blank itself; embed any
+/// inter-section blanks (e.g. between a question and its detail
+/// paragraph) directly in `content_lines`.
+///
+/// Height is clamped to the frame so very tall content does not exceed
+/// the available screen; in that case ratatui truncates from the
+/// bottom. Pick a `popup_w` that fits the longest unwrapped word; the
+/// wrap-with-indent helper handles the rest.
+pub fn render_confirm_popup<'a>(
+    frame: &mut Frame,
+    popup_w: u16,
+    kind: PopupKind,
+    title: &str,
+    content_lines: Vec<Line<'a>>,
+    footer_spans: Vec<Span<'static>>,
+    app: &App,
+) {
+    // Probe rect with a baseline height to derive inner width. Inner
+    // width is independent of height for centered_rect_fixed.
+    let probe = super::centered_rect_fixed(popup_w, 7, frame.area());
+    let inner_w = body_area(probe).width as usize;
+
+    let wrapped = wrap_block_lines(content_lines, inner_w);
+    let body_rows = wrapped.len() as u16;
+
+    // borders (2) + top blank (1) + body (N) + trailing blank (1)
+    let frame_h = frame.area().height;
+    let max_h = frame_h.saturating_sub(2); // leave room for footer + status bar
+    let height = (2 + 1 + body_rows + 1).min(max_h);
+
+    let area = super::centered_rect_fixed(popup_w, height, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = match kind {
+        PopupKind::Destructive => danger_block(title),
+        PopupKind::Neutral => overlay_block(title),
+    };
+
+    let mut text: Vec<Line<'static>> = Vec::with_capacity(wrapped.len() + 1);
+    text.push(Line::from(""));
+    text.extend(wrapped);
+    // No trailing blank line here: the `+ 1` in the height formula leaves
+    // an empty row in the body_area that ratatui paints blank by default,
+    // which is the trailing blank we want.
+    render_body(frame, area, block, text);
+
+    let footer_area = render_overlay_footer(frame, area);
+    super::render_footer_with_status(frame, footer_area, footer_spans, app);
+}
+
+/// Render a centred destructive-confirm popup. Thin wrapper around
+/// [`render_confirm_popup`] for callers that have the simple
+/// "question + optional detail + yes/no verbs" shape.
 ///
 /// `title` appears in the danger block's top border.
-/// `body_question` is the single-line question rendered with `theme::bold()`.
-/// `body_detail` is an optional muted second-row sentence; pass `""` to
-/// skip and let the popup collapse to a 5-row dialog.
+/// `body_question` is the bold first row.
+/// `body_detail` is a muted second-row sentence; pass `""` to skip.
 pub fn render_destructive_popup(
     frame: &mut Frame,
     title: &str,
@@ -1067,32 +1231,29 @@ pub fn render_destructive_popup(
     no_verb: &str,
     app: &App,
 ) {
-    let has_detail = !body_detail.is_empty();
-    // 52-col wide matches confirm_dialog (single-alias host delete).
-    // Height: border (2) + blank + question + (blank + detail) + blank = 6 or 8.
-    let height: u16 = if has_detail { 7 } else { 5 };
-    let area = super::centered_rect_fixed(56, height, frame.area());
-    frame.render_widget(Clear, area);
-
-    let block = danger_block(title);
-    let mut text: Vec<Line<'static>> = vec![
-        Line::from(""),
-        Line::from(Span::styled(format!("  {}", body_question), theme::bold())),
-    ];
-    if has_detail {
-        text.push(Line::from(""));
-        text.push(Line::from(Span::styled(
+    let mut content: Vec<Line<'static>> = vec![Line::from(Span::styled(
+        format!("  {}", body_question),
+        theme::bold(),
+    ))];
+    if !body_detail.is_empty() {
+        content.push(Line::from(""));
+        content.push(Line::from(Span::styled(
             format!("  {}", body_detail),
             theme::muted(),
         )));
     }
-    render_body_wrapped(frame, area, block, text);
-
-    let footer_area = render_overlay_footer(frame, area);
-    let footer = confirm_footer_destructive(yes_verb, no_verb).to_line();
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.extend(footer.spans);
-    super::render_footer_with_status(frame, footer_area, spans, app);
+    let footer_spans = confirm_footer_destructive(yes_verb, no_verb)
+        .to_line()
+        .spans;
+    render_confirm_popup(
+        frame,
+        56,
+        PopupKind::Destructive,
+        title,
+        content,
+        footer_spans,
+        app,
+    );
 }
 
 /// Render the standard "Discard changes?" footer with prompt prefix.
@@ -1809,6 +1970,313 @@ mod tests {
     fn wrap_indented_returns_empty_for_zero_inputs() {
         assert!(wrap_indented("", "  ", 10).is_empty());
         assert!(wrap_indented("hi", "  ", 0).is_empty());
+    }
+
+    #[test]
+    fn render_body_wrapped_preserves_hanging_indent_on_continuation() {
+        // Regression: confirm-dialog body text wrapped without keeping the
+        // "  " prefix on the continuation row. Ratatui's Wrap { trim: false }
+        // does not preserve leading indent, so the helper pre-wraps with a
+        // hanging indent. The Linode provider-remove confirm screenshot
+        // surfaced this; every long-prose dialog body needs the same
+        // alignment.
+        let backend = TestBackend::new(20, 6);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 20, 6);
+                let block = Block::default().borders(Borders::ALL);
+                let text = vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  alpha beta gamma delta epsilon".to_string(),
+                        theme::muted(),
+                    )),
+                ];
+                render_body_wrapped(frame, area, block, text);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        // Collect every non-blank row inside the inner area.
+        let mut content_rows: Vec<String> = Vec::new();
+        for y in 1..(buf.area.height - 1) {
+            let mut row = String::new();
+            for x in 1..(buf.area.width - 1) {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            if !row.trim().is_empty() {
+                content_rows.push(row);
+            }
+        }
+        assert!(
+            content_rows.len() >= 2,
+            "the body must wrap to at least two rows: {content_rows:?}"
+        );
+        for row in &content_rows {
+            assert!(
+                row.starts_with("  "),
+                "every wrapped row keeps the 2-space hanging indent: {row:?}"
+            );
+        }
+    }
+
+    /// Helper: locate the inner row directly above the bottom border and
+    /// return its content (excluding the side borders). Returns None when
+    /// the popup has no body rows or no detectable borders.
+    fn trailing_inner_row(buf: &ratatui::buffer::Buffer) -> Option<String> {
+        let mut top_y: Option<u16> = None;
+        let mut bottom_y: Option<u16> = None;
+        for y in 0..buf.area.height {
+            let mut row = String::new();
+            for x in 0..buf.area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            if top_y.is_none() && row.contains('\u{256D}') {
+                top_y = Some(y);
+            }
+            if row.contains('\u{2570}') {
+                bottom_y = Some(y);
+            }
+        }
+        let (top, bottom) = (top_y?, bottom_y?);
+        if bottom <= top + 1 {
+            return None;
+        }
+        let trailing_y = bottom - 1;
+        let mut left_border_x: Option<u16> = None;
+        for x in 0..buf.area.width {
+            if buf[(x, trailing_y)].symbol() == "\u{2502}" {
+                left_border_x = Some(x);
+                break;
+            }
+        }
+        let left = left_border_x?;
+        let mut row = String::new();
+        for x in (left + 1)..buf.area.width {
+            let sym = buf[(x, trailing_y)].symbol();
+            if sym == "\u{2502}" {
+                break;
+            }
+            row.push_str(sym);
+        }
+        Some(row)
+    }
+
+    #[test]
+    fn render_confirm_popup_keeps_trailing_blank_when_body_wraps() {
+        // Design system invariant: a confirm popup's last inner row is
+        // always blank, regardless of how many wrapped rows the body
+        // produces. Regression for the Linode "Remove provider?" dialog
+        // where a long detail sentence used to push its second wrap row
+        // up against the bottom border because the popup height was
+        // hard-coded and the wrap continuation overwrote the trailing
+        // blank.
+        let backend = TestBackend::new(70, 14);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let (app, _dir) = make_app();
+        terminal
+            .draw(|frame| {
+                render_destructive_popup(
+                    frame,
+                    "Remove provider?",
+                    "Remove the \"Linode\" config labelled \"default\"?",
+                    "Synced hosts stay in ~/.ssh/config. The integration is gone after save.",
+                    "remove",
+                    "keep",
+                    &app,
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+
+        // Scan rows for the popup's top and bottom borders.
+        let mut top_y: Option<u16> = None;
+        let mut bottom_y: Option<u16> = None;
+        for y in 0..buf.area.height {
+            let mut row = String::new();
+            for x in 0..buf.area.width {
+                row.push_str(buf[(x, y)].symbol());
+            }
+            if top_y.is_none() && row.contains('\u{256D}') {
+                top_y = Some(y);
+            }
+            if row.contains('\u{2570}') {
+                bottom_y = Some(y);
+            }
+        }
+        let top = top_y.expect("popup must render a top border");
+        let bottom = bottom_y.expect("popup must render a bottom border");
+        assert!(bottom > top + 2, "popup must have at least one body row");
+
+        // The inner row immediately above the bottom border is the trailing
+        // blank. Read the body span (skip the left/right border columns).
+        let trailing_y = bottom - 1;
+        let mut left_border_x: Option<u16> = None;
+        for x in 0..buf.area.width {
+            if buf[(x, trailing_y)].symbol() == "\u{2502}" {
+                left_border_x = Some(x);
+                break;
+            }
+        }
+        let left = left_border_x.expect("trailing row must have a left side border");
+        let mut trailing = String::new();
+        for x in (left + 1)..buf.area.width {
+            let sym = buf[(x, trailing_y)].symbol();
+            if sym == "\u{2502}" {
+                break;
+            }
+            trailing.push_str(sym);
+        }
+        assert!(
+            trailing.chars().all(|c| c == ' '),
+            "trailing inner row above bottom border must be blank, got {trailing:?}"
+        );
+    }
+
+    #[test]
+    fn render_confirm_popup_keeps_trailing_blank_when_body_fits_on_one_row() {
+        // The trailing-blank invariant must hold for short bodies that
+        // do not wrap, not only for the wrap case. Single-line "Delete
+        // foo?" confirms used to be 5 rows tall; the helper now sizes
+        // them to keep an explicit blank above the bottom border.
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let (app, _dir) = make_app();
+        terminal
+            .draw(|frame| {
+                render_destructive_popup(
+                    frame,
+                    "Confirm Delete",
+                    "Delete \"foo\"?",
+                    "",
+                    "delete",
+                    "keep",
+                    &app,
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let trailing = trailing_inner_row(&buf).expect("popup must have a trailing row");
+        assert!(
+            trailing.chars().all(|c| c == ' '),
+            "trailing inner row above bottom border must be blank, got {trailing:?}"
+        );
+    }
+
+    #[test]
+    fn render_confirm_popup_neutral_kind_keeps_trailing_blank() {
+        // PopupKind::Neutral (import, push key) shares the trailing-blank
+        // invariant with Destructive. One test pins both code paths so a
+        // future divergence between PopupKind arms shows up here.
+        let backend = TestBackend::new(60, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let (app, _dir) = make_app();
+        terminal
+            .draw(|frame| {
+                let content = vec![Line::from(Span::styled(
+                    "  Import 12 hosts from known_hosts?".to_string(),
+                    theme::bold(),
+                ))];
+                let footer_spans = confirm_footer_destructive("import", "skip").to_line().spans;
+                render_confirm_popup(
+                    frame,
+                    52,
+                    PopupKind::Neutral,
+                    "Import",
+                    content,
+                    footer_spans,
+                    &app,
+                );
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let trailing = trailing_inner_row(&buf).expect("popup must have a trailing row");
+        assert!(
+            trailing.chars().all(|c| c == ' '),
+            "neutral popup trailing row must be blank, got {trailing:?}"
+        );
+    }
+
+    #[test]
+    fn wrap_block_lines_preserves_hanging_indent_on_multi_span_pattern() {
+        // Container action confirms compose body rows as
+        // `[Span::raw("  "), Span::styled(text, style)]`. The wrap helper
+        // must treat that two-span shape the same as a single-span
+        // `Line::from(Span::styled("  text", style))`: leading whitespace
+        // becomes a hanging indent on every continuation row.
+        let input = vec![Line::from(vec![
+            Span::raw("  "),
+            Span::styled(
+                "Sends SIGTERM, waits 10s, then SIGKILL. Live connections will drop.".to_string(),
+                theme::muted(),
+            ),
+        ])];
+        let out = wrap_block_lines(input, 32);
+        assert!(
+            out.len() >= 2,
+            "long body must wrap, got {} rows",
+            out.len()
+        );
+        for line in &out {
+            let rendered: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+            assert!(
+                rendered.starts_with("  "),
+                "every wrapped row keeps the 2-space hanging indent: {rendered:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn wrap_block_lines_bypasses_aligned_lines_verbatim() {
+        // Welcome screen uses Line::alignment(Center) for banners and
+        // typewriter subtitles. wrap_block_lines must NOT extract leading
+        // whitespace as a hanging indent on aligned lines; ratatui's
+        // alignment handles the centering and the spans should round-trip
+        // unchanged (content, style, alignment).
+        use ratatui::layout::Alignment;
+        let aligned = Line::from(Span::styled(
+            "Your SSH config, supercharged.".to_string(),
+            theme::muted(),
+        ))
+        .alignment(Alignment::Center);
+        let out = wrap_block_lines(vec![aligned], 60);
+        assert_eq!(out.len(), 1, "aligned line stays a single row");
+        assert_eq!(out[0].alignment, Some(Alignment::Center));
+        let rendered: String = out[0].spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(rendered, "Your SSH config, supercharged.");
+    }
+
+    #[test]
+    fn render_body_wrapped_passes_blank_lines_through_unchanged() {
+        // Blank input lines must stay blank rows so the dialog vertical
+        // rhythm (top blank, question, blank, detail) is preserved.
+        let backend = TestBackend::new(20, 6);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = Rect::new(0, 0, 20, 6);
+                let block = Block::default().borders(Borders::ALL);
+                let text = vec![
+                    Line::from(""),
+                    Line::from(Span::styled("  hello".to_string(), theme::bold())),
+                    Line::from(""),
+                    Line::from(Span::styled("  world".to_string(), theme::muted())),
+                ];
+                render_body_wrapped(frame, area, block, text);
+            })
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let row = |y: u16| -> String {
+            let mut s = String::new();
+            for x in 1..(buf.area.width - 1) {
+                s.push_str(buf[(x, y)].symbol());
+            }
+            s
+        };
+        assert!(row(1).trim().is_empty(), "row 1 stays blank");
+        assert!(row(2).contains("hello"), "row 2 holds question");
+        assert!(row(3).trim().is_empty(), "row 3 stays blank");
+        assert!(row(4).contains("world"), "row 4 holds detail");
     }
 
     #[test]

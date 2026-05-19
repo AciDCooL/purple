@@ -206,24 +206,25 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         if let Some((ref action, ref name, _)) = confirm_state.confirm_action {
             let verb = action.as_str();
             let display_name = truncate_str(name, 30);
-            let dialog_area = super::centered_rect_fixed(52, 5, frame.area());
-            frame.render_widget(Clear, dialog_area);
-            let block = design::danger_block(&format!("Confirm {}", verb));
-            let text = vec![
-                Line::from(""),
-                Line::from(Span::styled(
-                    format!("  {} \"{}\"?", verb, display_name),
-                    theme::bold(),
-                )),
-            ];
-            design::render_body_wrapped(frame, dialog_area, block, text);
-
+            let content: Vec<Line<'static>> = vec![Line::from(Span::styled(
+                format!("  {} \"{}\"?", verb, display_name),
+                theme::bold(),
+            ))];
             // Stakes test: stop/restart take effect on the remote
             // immediately, so use destructive action verbs (stop/restart
             // vs keep) instead of generic yes/no.
-            let footer_area = design::render_overlay_footer(frame, dialog_area);
-            let footer = design::confirm_footer_destructive(verb, "keep").to_line();
-            frame.render_widget(Paragraph::new(footer), footer_area);
+            let footer_spans = design::confirm_footer_destructive(verb, "keep")
+                .to_line()
+                .spans;
+            design::render_confirm_popup(
+                frame,
+                52,
+                design::PopupKind::Destructive,
+                &format!("Confirm {}", verb),
+                content,
+                footer_spans,
+                app,
+            );
         }
     }
 }

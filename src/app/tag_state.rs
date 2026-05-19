@@ -12,6 +12,10 @@ pub struct DisplayTag {
 
 /// Select up to 3 tags for display based on view mode and grouping.
 /// Returns a Vec of up to 3 DisplayTags (user tags first, then provider tags).
+///
+/// In grouped views the tag matching the group criterion is suppressed
+/// (it lives in the group header). Non-matching provider tags and the
+/// provider name itself stay visible.
 pub fn select_display_tags(
     host: &HostEntry,
     group_by: &GroupBy,
@@ -23,45 +27,33 @@ pub fn select_display_tags(
         GroupBy::None => None,
     };
 
-    let not_group = |t: &&str| {
+    let not_group = |t: &str| {
         group_name
             .as_ref()
             .is_none_or(|g| !t.eq_ignore_ascii_case(g))
     };
 
-    // Collect user tags, filtering out the group name
-    let user_tags: Vec<DisplayTag> = host
+    let user_tags = host
         .tags
         .iter()
-        .map(|t| t.as_str())
-        .filter(not_group)
+        .filter(|t| not_group(t))
         .map(|t| DisplayTag {
             name: t.to_string(),
             is_user: true,
-        })
-        .collect();
+        });
+
+    let provider_tags = host
+        .provider_tags
+        .iter()
+        .filter(|t| not_group(t))
+        .chain(host.provider.iter().filter(|p| not_group(p)))
+        .map(|t| DisplayTag {
+            name: t.to_string(),
+            is_user: false,
+        });
 
     let limit = if detail_mode { 1 } else { 3 };
-    let is_grouped = !matches!(group_by, GroupBy::None);
-
-    // Grouped view: user tags only. Flat view: user tags + provider tags.
-    if is_grouped {
-        user_tags.into_iter().take(limit).collect()
-    } else {
-        let provider_tags = host
-            .provider_tags
-            .iter()
-            .chain(host.provider.iter())
-            .map(|t| DisplayTag {
-                name: t.to_string(),
-                is_user: false,
-            });
-        user_tags
-            .into_iter()
-            .chain(provider_tags)
-            .take(limit)
-            .collect()
-    }
+    user_tags.chain(provider_tags).take(limit).collect()
 }
 
 /// Tag editor state.

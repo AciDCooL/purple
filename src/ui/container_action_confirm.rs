@@ -6,7 +6,6 @@
 
 use ratatui::Frame;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
 
 use super::design;
 use super::theme;
@@ -29,6 +28,7 @@ pub fn render_restart(frame: &mut Frame, app: &mut App) {
     };
     render_dialog(
         frame,
+        app,
         " Restart container? ",
         container_name,
         alias,
@@ -61,6 +61,7 @@ pub fn render_stack(frame: &mut Frame, app: &mut App) {
     ]);
     render_bulk_dialog(
         frame,
+        app,
         " Restart stack? ",
         identity,
         members,
@@ -84,6 +85,7 @@ pub fn render_host_restart_all(frame: &mut Frame, app: &mut App) {
     ]);
     render_bulk_dialog(
         frame,
+        app,
         " Restart all containers on host? ",
         identity,
         members,
@@ -105,6 +107,7 @@ pub fn render_host_stop_all(frame: &mut Frame, app: &mut App) {
     ]);
     render_bulk_dialog(
         frame,
+        app,
         " Stop all containers on host? ",
         identity,
         members,
@@ -122,21 +125,17 @@ pub fn render_host_stop_all(frame: &mut Frame, app: &mut App) {
 /// body so a one- or two-line wrap stays inside the box.
 fn render_bulk_dialog(
     frame: &mut Frame,
+    app: &App,
     title: &str,
-    identity: Line<'_>,
+    identity: Line<'static>,
     members: &[crate::app::StackMember],
     body: &str,
     verbs: (&str, &str),
 ) {
-    let height = (5 + members.len() as u16 + 5).min(22);
-    let area = super::centered_rect_fixed(64, height, frame.area());
-    frame.render_widget(Clear, area);
-    let block = design::danger_block(title);
-
-    let mut text: Vec<Line> = vec![Line::from(""), identity, Line::from("")];
+    let mut content: Vec<Line<'static>> = vec![identity, Line::from("")];
     for m in members {
         let uptime = m.uptime.clone().unwrap_or_else(|| "-".to_string());
-        text.push(Line::from(vec![
+        content.push(Line::from(vec![
             Span::raw("   "),
             Span::raw(design::ICON_ONLINE),
             Span::raw(" "),
@@ -145,17 +144,24 @@ fn render_bulk_dialog(
             Span::styled(uptime, theme::muted()),
         ]));
     }
-    text.push(Line::from(""));
-    text.push(Line::from(vec![
+    content.push(Line::from(""));
+    content.push(Line::from(vec![
         Span::raw("  "),
         Span::styled(body.to_string(), theme::muted()),
     ]));
 
-    design::render_body_wrapped(frame, area, block, text);
-
-    let footer_area = design::render_overlay_footer(frame, area);
-    let footer = design::confirm_footer_destructive(verbs.0, verbs.1).to_line();
-    frame.render_widget(Paragraph::new(footer), footer_area);
+    let footer_spans = design::confirm_footer_destructive(verbs.0, verbs.1)
+        .to_line()
+        .spans;
+    design::render_confirm_popup(
+        frame,
+        64,
+        design::PopupKind::Destructive,
+        title,
+        content,
+        footer_spans,
+        app,
+    );
 }
 
 /// Render the stop confirm dialog. Same shape as `render_restart`.
@@ -172,6 +178,7 @@ pub fn render_stop(frame: &mut Frame, app: &mut App) {
     };
     render_dialog(
         frame,
+        app,
         " Stop container? ",
         container_name,
         alias,
@@ -185,6 +192,7 @@ pub fn render_stop(frame: &mut Frame, app: &mut App) {
 #[allow(clippy::too_many_arguments)]
 fn render_dialog(
     frame: &mut Frame,
+    app: &App,
     title: &str,
     name: &str,
     alias: &str,
@@ -193,14 +201,6 @@ fn render_dialog(
     body: &str,
     verbs: (&str, &str),
 ) {
-    // Body lines describe the destructive mechanics in full sentences
-    // and easily exceed the 60-col interior width. Reserve an extra
-    // row so a wrapped body still fits inside the box. `Wrap` on the
-    // Paragraph itself respects `Span::raw("  ")` indentation.
-    let area = super::centered_rect_fixed(60, 10, frame.area());
-    frame.render_widget(Clear, area);
-    let block = design::danger_block(title);
-
     let identity_line = Line::from(vec![
         Span::raw("  "),
         Span::styled(name.to_string(), theme::bold()),
@@ -224,20 +224,24 @@ fn render_dialog(
         ])
     };
 
-    let body_line = Line::from(vec![Span::raw("  "), Span::styled(body, theme::muted())]);
+    let body_line = Line::from(vec![
+        Span::raw("  "),
+        Span::styled(body.to_string(), theme::muted()),
+    ]);
 
-    let text = vec![
-        Line::from(""),
-        identity_line,
-        meta_line,
-        Line::from(""),
-        body_line,
-    ];
-
-    design::render_body_wrapped(frame, area, block, text);
+    let content: Vec<Line<'static>> = vec![identity_line, meta_line, Line::from(""), body_line];
 
     // Stakes test: destructive action, action verbs both sides.
-    let footer_area = design::render_overlay_footer(frame, area);
-    let footer = design::confirm_footer_destructive(verbs.0, verbs.1).to_line();
-    frame.render_widget(Paragraph::new(footer), footer_area);
+    let footer_spans = design::confirm_footer_destructive(verbs.0, verbs.1)
+        .to_line()
+        .spans;
+    design::render_confirm_popup(
+        frame,
+        60,
+        design::PopupKind::Destructive,
+        title,
+        content,
+        footer_spans,
+        app,
+    );
 }

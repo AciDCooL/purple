@@ -1,3 +1,11 @@
+## 3.15.0 - 2026-05-19
+
+- feat: Provider tags follow your hosts in every view.
+- feat: Proxmox PVE tags and other provider-synced tags stay visible whether you group by provider, by tag or not at all. The group header no longer eats them.
+- feat: Confirm dialogs hold their shape at every prose length, with the blank row above the bottom border preserved even when long sentences wrap.
+- feat: Wrapped lines in dialogs share the leading indent of the line above, so multi-line explanations read as one paragraph instead of jumping flush-left.
+- change: One design system helper now backs every confirm popup, so future dialogs inherit the same rhythm without per-screen tuning.
+
 ## 3.14.5 - 2026-05-18
 
 - feat: Vault SSH signs through HAProxy and other HTTPS proxies.

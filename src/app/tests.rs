@@ -5759,10 +5759,11 @@ fn select_display_tags_grouped_by_provider_suppresses_name() {
         provider: Some("aws".into()),
         ..Default::default()
     };
-    // Grouped: only user tags shown
+    // GroupBy::Provider with provider="aws": "aws" itself is suppressed,
+    // but the non-matching provider tag "web" stays visible.
     let tags = select_display_tags(&host, &GroupBy::Provider, false);
-    assert_eq!(tag_names(&tags), vec!["prod"]);
-    assert_eq!(tag_sources(&tags), vec![true]);
+    assert_eq!(tag_names(&tags), vec!["prod", "web"]);
+    assert_eq!(tag_sources(&tags), vec![true, false]);
 }
 
 #[test]
@@ -5817,10 +5818,11 @@ fn select_display_tags_group_by_tag_shows_remaining() {
         provider: Some("aws".into()),
         ..Default::default()
     };
-    // Group by "prod" -> "prod" suppressed, remaining user tags: us-east, api
+    // Group by "prod": "prod" suppressed, remaining user tags shown,
+    // and the provider name "aws" (which does not match "prod") stays.
     let tags = select_display_tags(&host, &GroupBy::Tag("prod".into()), false);
-    assert_eq!(tag_names(&tags), vec!["us-east", "api"]);
-    assert_eq!(tag_sources(&tags), vec![true, true]);
+    assert_eq!(tag_names(&tags), vec!["us-east", "api", "aws"]);
+    assert_eq!(tag_sources(&tags), vec![true, true, false]);
 }
 
 #[test]
@@ -5860,30 +5862,33 @@ fn select_display_tags_duplicate_provider_name_in_provider_tags() {
 }
 
 #[test]
-fn select_display_tags_grouped_user_tags_only() {
+fn select_display_tags_grouped_suppresses_matching_provider_tag() {
     let host = HostEntry {
         tags: vec!["prod".into()],
         provider_tags: vec!["aws".into()],
         provider: Some("aws".into()),
         ..Default::default()
     };
-    // Grouped: only user tags, provider tags excluded entirely
+    // Both provider_tags["aws"] and host.provider="aws" match the group name
+    // and are suppressed; the non-matching user tag stays.
     let tags = select_display_tags(&host, &GroupBy::Provider, false);
     assert_eq!(tag_names(&tags), vec!["prod"]);
     assert_eq!(tag_sources(&tags), vec![true]);
 }
 
 #[test]
-fn select_display_tags_grouped_excludes_all_provider_tags() {
+fn select_display_tags_grouped_keeps_non_matching_provider_tags() {
     let host = HostEntry {
         tags: vec![],
         provider_tags: vec!["web".into(), "cache".into()],
         provider: Some("aws".into()),
         ..Default::default()
     };
-    // Grouped: no user tags, provider tags excluded entirely
+    // GroupBy::Provider with provider="aws": "aws" itself is suppressed,
+    // but non-matching provider tags stay visible.
     let tags = select_display_tags(&host, &GroupBy::Provider, false);
-    assert!(tags.is_empty());
+    assert_eq!(tag_names(&tags), vec!["web", "cache"]);
+    assert_eq!(tag_sources(&tags), vec![false, false]);
 }
 
 #[test]
@@ -5914,14 +5919,15 @@ fn select_display_tags_flat_one_user_tag_with_provider_tags() {
 }
 
 #[test]
-fn select_display_tags_grouped_tertiary_user_only() {
+fn select_display_tags_grouped_user_tags_fill_limit() {
     let host = HostEntry {
         tags: vec!["prod".into(), "us-east".into(), "api".into(), "db".into()],
         provider_tags: vec!["web".into()],
         provider: Some("aws".into()),
         ..Default::default()
     };
-    // Group by "prod" -> suppressed; only user tags: us-east, api, db (max 3)
+    // Group by "prod" -> suppressed; user tags fill the limit of 3 before
+    // any provider tags get a chance.
     let tags = select_display_tags(&host, &GroupBy::Tag("prod".into()), false);
     assert_eq!(tag_names(&tags), vec!["us-east", "api", "db"]);
     assert_eq!(tag_sources(&tags), vec![true, true, true]);
@@ -5937,6 +5943,69 @@ fn select_display_tags_detail_mode_grouped() {
     let tags = select_display_tags(&host, &GroupBy::Provider, true);
     assert_eq!(tag_names(&tags), vec!["prod"]);
     assert_eq!(tag_sources(&tags), vec![true]);
+}
+
+#[test]
+fn select_display_tags_proxmox_pve_tag_visible_in_provider_group() {
+    // Reproducer for the real-world Proxmox case: a VM with one PVE tag
+    // (opentofu) and no user tags. In GroupBy::Provider with provider="proxmox"
+    // the provider name is suppressed but the PVE tag stays visible.
+    let host = HostEntry {
+        tags: vec![],
+        provider_tags: vec!["opentofu".into()],
+        provider: Some("proxmox".into()),
+        ..Default::default()
+    };
+    let tags = select_display_tags(&host, &GroupBy::Provider, false);
+    assert_eq!(tag_names(&tags), vec!["opentofu"]);
+    assert_eq!(tag_sources(&tags), vec![false]);
+}
+
+#[test]
+fn select_display_tags_group_by_tag_keeps_provider_name() {
+    // When grouping by a tag, the host's provider name (not matching the
+    // group tag) still surfaces so the user can see which cloud the host
+    // belongs to even within a tag-grouped section.
+    let host = HostEntry {
+        tags: vec!["opentofu".into()],
+        provider_tags: vec![],
+        provider: Some("proxmox".into()),
+        ..Default::default()
+    };
+    let tags = select_display_tags(&host, &GroupBy::Tag("opentofu".into()), false);
+    assert_eq!(tag_names(&tags), vec!["proxmox"]);
+    assert_eq!(tag_sources(&tags), vec![false]);
+}
+
+#[test]
+fn select_display_tags_group_by_tag_suppresses_matching_provider_tag() {
+    // GroupBy::Tag("web") matches a provider_tag of the same name and that
+    // tag must be suppressed (it lives in the group header). The other
+    // provider_tag stays.
+    let host = HostEntry {
+        tags: vec![],
+        provider_tags: vec!["web".into(), "cache".into()],
+        provider: Some("aws".into()),
+        ..Default::default()
+    };
+    let tags = select_display_tags(&host, &GroupBy::Tag("web".into()), false);
+    assert_eq!(tag_names(&tags), vec!["cache", "aws"]);
+    assert_eq!(tag_sources(&tags), vec![false, false]);
+}
+
+#[test]
+fn select_display_tags_case_insensitive_provider_tag_suppression() {
+    // Provider tags match the group name case-insensitively, the same way
+    // user tags do.
+    let host = HostEntry {
+        tags: vec!["prod".into()],
+        provider_tags: vec!["AWS".into(), "web".into()],
+        provider: Some("aws".into()),
+        ..Default::default()
+    };
+    let tags = select_display_tags(&host, &GroupBy::Provider, false);
+    assert_eq!(tag_names(&tags), vec!["prod", "web"]);
+    assert_eq!(tag_sources(&tags), vec![true, false]);
 }
 
 #[test]

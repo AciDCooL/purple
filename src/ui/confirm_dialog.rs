@@ -1,7 +1,7 @@
 use ratatui::Frame;
 use ratatui::layout::Alignment;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::Clear;
 use unicode_width::UnicodeWidthStr;
 
 use super::design;
@@ -16,34 +16,18 @@ pub fn render(frame: &mut Frame, app: &App, alias: &str) {
     // Multi-alias awareness: if this alias shares its `Host` block with
     // sibling tokens, spell them out so the user understands what will
     // happen (only the selected alias is stripped; siblings keep the
-    // shared config). Single-alias hosts render the original compact
-    // 5-row dialog, unchanged, so visual regression goldens for the
-    // common case stay stable.
+    // shared config).
     let siblings = app.hosts_state.ssh_config.siblings_of(alias);
     let has_siblings = !siblings.is_empty();
 
-    // Geometry is preserved bit-for-bit when no siblings exist so the
-    // visual regression golden for single-alias deletes stays stable. Only
-    // the multi-alias case widens the dialog (to fit a readable siblings
-    // list) and adds two extra rows (blank + note).
-    let (width, height): (u16, u16) = if has_siblings { (60, 7) } else { (52, 5) };
-    let area = super::centered_rect_fixed(width, height, frame.area());
-
-    frame.render_widget(Clear, area);
-
-    let block = design::danger_block("Confirm Delete");
-
-    let mut text = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            format!("  Delete \"{}\"?", alias),
-            theme::bold(),
-        )),
-    ];
-
+    let popup_w: u16 = if has_siblings { 60 } else { 52 };
+    let mut content: Vec<Line<'static>> = vec![Line::from(Span::styled(
+        format!("  Delete \"{}\"?", alias),
+        theme::bold(),
+    ))];
     if has_siblings {
-        text.push(Line::from(""));
-        text.push(Line::from(Span::styled(
+        content.push(Line::from(""));
+        content.push(Line::from(Span::styled(
             format!(
                 "  {}",
                 crate::messages::confirm_delete_siblings_note(&siblings)
@@ -52,26 +36,26 @@ pub fn render(frame: &mut Frame, app: &App, alias: &str) {
         )));
     }
 
-    design::render_body_wrapped(frame, area, block, text);
-
     // Stakes test: deleting a host is destructive (config write, undo only
     // briefly via stack). Use action verbs both sides instead of generic
     // yes/no.
-    let footer_area = design::render_overlay_footer(frame, area);
-    let footer = design::confirm_footer_destructive("delete", "keep").to_line();
-    frame.render_widget(Paragraph::new(footer), footer_area);
+    let footer_spans = design::confirm_footer_destructive("delete", "keep")
+        .to_line()
+        .spans;
+    design::render_confirm_popup(
+        frame,
+        popup_w,
+        design::PopupKind::Destructive,
+        "Confirm Delete",
+        content,
+        footer_spans,
+        app,
+    );
 }
 
-pub fn render_host_key_reset(frame: &mut Frame, _app: &App, hostname: &str) {
+pub fn render_host_key_reset(frame: &mut Frame, app: &App, hostname: &str) {
     let display = super::truncate(hostname, 40);
-    let area = super::centered_rect_fixed(52, 7, frame.area());
-
-    frame.render_widget(Clear, area);
-
-    let block = design::danger_block("Host Key Changed");
-
-    let text = vec![
-        Line::from(""),
+    let content: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
             format!("  Host key for {} changed.", display),
             theme::bold(),
@@ -86,52 +70,57 @@ pub fn render_host_key_reset(frame: &mut Frame, _app: &App, hostname: &str) {
         )),
     ];
 
-    design::render_body_wrapped(frame, area, block, text);
-
     // Stakes test: removing the host key invalidates trust. Use action verbs.
-    let footer_area = design::render_overlay_footer(frame, area);
-    let footer = design::confirm_footer_destructive("reset", "keep").to_line();
-    frame.render_widget(Paragraph::new(footer), footer_area);
+    let footer_spans = design::confirm_footer_destructive("reset", "keep")
+        .to_line()
+        .spans;
+    design::render_confirm_popup(
+        frame,
+        52,
+        design::PopupKind::Destructive,
+        "Host Key Changed",
+        content,
+        footer_spans,
+        app,
+    );
 }
 
-pub fn render_confirm_import(frame: &mut Frame, _app: &App, count: usize) {
-    let area = super::centered_rect_fixed(52, 5, frame.area());
+pub fn render_confirm_import(frame: &mut Frame, app: &App, count: usize) {
+    let content: Vec<Line<'static>> = vec![Line::from(Span::styled(
+        format!(
+            "  Import {} host{} from known_hosts?",
+            count,
+            if count == 1 { "" } else { "s" },
+        ),
+        theme::bold(),
+    ))];
 
-    frame.render_widget(Clear, area);
-
-    let block = design::overlay_block("Import");
-
-    let text = vec![
-        Line::from(""),
-        Line::from(Span::styled(
-            format!(
-                "  Import {} host{} from known_hosts?",
-                count,
-                if count == 1 { "" } else { "s" },
-            ),
-            theme::bold(),
-        )),
-    ];
-
-    design::render_body_wrapped(frame, area, block, text);
-
-    // Stakes test: importing is benign-but-material — adds hosts to config.
-    // Action verbs make the choice clearer than generic yes/no.
-    let footer_area = design::render_overlay_footer(frame, area);
-    let footer = design::confirm_footer_destructive("import", "skip").to_line();
-    frame.render_widget(Paragraph::new(footer), footer_area);
+    // Stakes test: importing is benign-but-material. Neutral kind with
+    // action verbs makes the choice clearer than generic yes/no.
+    let footer_spans = design::confirm_footer_destructive("import", "skip")
+        .to_line()
+        .spans;
+    design::render_confirm_popup(
+        frame,
+        52,
+        design::PopupKind::Neutral,
+        "Import",
+        content,
+        footer_spans,
+        app,
+    );
 }
 
 pub fn render_confirm_purge_stale(
     frame: &mut Frame,
-    _app: &App,
+    app: &App,
     aliases: &[String],
     provider: &Option<String>,
 ) {
     let count = aliases.len();
     // Show up to 6 host names, then "+N more hosts" (only when N >= 1)
     let max_shown = 6;
-    let mut host_lines: Vec<Line> = aliases
+    let mut host_lines: Vec<Line<'static>> = aliases
         .iter()
         .take(max_shown)
         .map(|a| {
@@ -151,16 +140,6 @@ pub fn render_confirm_purge_stale(
         )));
     }
 
-    // height: 2 border + 1 blank + 1 question + host_lines.
-    // Footer renders below the block.
-    let inner_height = 2 + host_lines.len();
-    let height = (inner_height + 2) as u16;
-    let area = super::centered_rect_fixed(52, height, frame.area());
-
-    frame.render_widget(Clear, area);
-
-    let block = design::danger_block("Purge Stale");
-
     let main_line = if let Some(prov) = provider {
         let display = crate::providers::provider_display_name(prov);
         format!(
@@ -177,19 +156,23 @@ pub fn render_confirm_purge_stale(
         )
     };
 
-    let mut text = vec![
-        Line::from(""),
-        Line::from(Span::styled(main_line, theme::bold())),
-    ];
-    text.extend(host_lines);
-
-    design::render_body_wrapped(frame, area, block, text);
+    let mut content: Vec<Line<'static>> = vec![Line::from(Span::styled(main_line, theme::bold()))];
+    content.extend(host_lines);
 
     // Stakes test: purge is destructive — removes stale hosts from config
     // (only undoable through the per-session undo stack). Action verbs.
-    let footer_area = design::render_overlay_footer(frame, area);
-    let footer = design::confirm_footer_destructive("purge", "keep").to_line();
-    frame.render_widget(Paragraph::new(footer), footer_area);
+    let footer_spans = design::confirm_footer_destructive("purge", "keep")
+        .to_line()
+        .spans;
+    design::render_confirm_popup(
+        frame,
+        52,
+        design::PopupKind::Destructive,
+        "Purge Stale",
+        content,
+        footer_spans,
+        app,
+    );
 }
 
 /// Destructive confirm: append `<key>.pub` to `authorized_keys` on every
@@ -206,19 +189,19 @@ pub fn render_key_push(frame: &mut Frame, app: &App, key_index: usize, aliases: 
     let count = aliases.len();
 
     let max_shown = 6;
-    let mut host_lines: Vec<Line> = aliases
+    let mut host_lines: Vec<Line<'static>> = aliases
         .iter()
         .take(max_shown)
         .map(|a| {
             let truncated = super::truncate(a, 46);
-            Line::from(Span::styled(truncated, theme::muted()))
+            Line::from(Span::styled(format!("  {}", truncated), theme::muted()))
         })
         .collect();
     if count > max_shown {
         let remaining = count - max_shown;
         host_lines.push(Line::from(Span::styled(
             format!(
-                "+{} more host{}",
+                "  +{} more host{}",
                 remaining,
                 if remaining == 1 { "" } else { "s" }
             ),
@@ -226,38 +209,36 @@ pub fn render_key_push(frame: &mut Frame, app: &App, key_index: usize, aliases: 
         )));
     }
 
-    // Block chrome: 2 border rows + 1 row top padding + 1 row bottom
-    // padding = 4 rows around the body. Body = blank + question +
-    // host_lines.
-    let inner_height = 2 + host_lines.len();
-    let height = (inner_height + 4) as u16;
-    let area = super::centered_rect_fixed(56, height, frame.area());
+    // Push is idempotent (appends a public key), not destructive like
+    // delete or stop, so use Neutral kind (muted border).
+    let mut content: Vec<Line<'static>> = vec![
+        Line::from(Span::styled(
+            format!(
+                "  {}",
+                crate::messages::key_push_confirm_body(&key_name, count)
+            ),
+            theme::bold(),
+        )),
+        Line::from(""),
+    ];
+    content.extend(host_lines);
 
-    frame.render_widget(Clear, area);
-
-    // Push is idempotent (it appends a public key) — not a destructive
-    // action like delete or stop, so use the standard overlay block
-    // instead of the red `danger_block`. Padding matches the rhythm of
-    // the other confirm dialogs (host detail, snippet picker).
-    let block =
-        design::overlay_block("Push Key").padding(ratatui::widgets::Padding::new(1, 1, 1, 1));
-    let question = Line::from(Span::styled(
-        crate::messages::key_push_confirm_body(&key_name, count),
-        theme::bold(),
-    ));
-    let mut text = vec![question, Line::from("")];
-    text.extend(host_lines);
-
-    design::render_body_wrapped(frame, area, block, text);
-
-    let footer_area = design::render_overlay_footer(frame, area);
-    let footer = design::confirm_footer_destructive("push", "keep").to_line();
-    frame.render_widget(Paragraph::new(footer), footer_area);
+    let footer_spans = design::confirm_footer_destructive("push", "keep")
+        .to_line()
+        .spans;
+    design::render_confirm_popup(
+        frame,
+        56,
+        design::PopupKind::Neutral,
+        "Push Key",
+        content,
+        footer_spans,
+        app,
+    );
 }
 
-pub fn render_confirm_vault_sign(frame: &mut Frame, _app: &App, signable: &[String]) {
+pub fn render_confirm_vault_sign(frame: &mut Frame, app: &App, signable: &[String]) {
     let count = signable.len();
-    // Preview first 5 aliases, append "...and N more" when truncated.
     let preview_limit = 5;
     let shown: Vec<&str> = signable
         .iter()
@@ -272,27 +253,7 @@ pub fn render_confirm_vault_sign(frame: &mut Frame, _app: &App, signable: &[Stri
         String::new()
     };
 
-    // Height grows with the wrapped preview row count so long host lists
-    // get their continuation rows visible inside the block. Fixed parts:
-    // top blank + question + blank + (preview rows) + blank + note = 5
-    // plus border (2) = 7 baseline; preview adds N-1 extra rows.
-    let area_base = super::centered_rect_fixed(72, 9, frame.area());
-    let preview_width = design::body_area(area_base).width as usize;
-    let preview_lines = if preview_text.is_empty() {
-        vec![Line::from("")]
-    } else {
-        design::wrap_body_lines(&preview_text, "  ", preview_width, theme::muted())
-    };
-    let extra_preview_rows = preview_lines.len().saturating_sub(1) as u16;
-    let height = 9u16 + extra_preview_rows;
-    let area = super::centered_rect_fixed(72, height, frame.area());
-
-    frame.render_widget(Clear, area);
-
-    let block = design::overlay_block("Sign Vault SSH Certificates");
-
-    let mut text = vec![
-        Line::from(""),
+    let mut content: Vec<Line<'static>> = vec![
         Line::from(Span::styled(
             format!(
                 "  Sign {} SSH certificate{} via the Vault SSH secrets engine?",
@@ -303,24 +264,35 @@ pub fn render_confirm_vault_sign(frame: &mut Frame, _app: &App, signable: &[Stri
         )),
         Line::from(""),
     ];
-    text.extend(preview_lines);
-    text.push(Line::from(""));
-    text.push(Line::from(Span::styled(
+    if preview_text.is_empty() {
+        content.push(Line::from(""));
+    } else {
+        content.push(Line::from(Span::styled(
+            format!("  {}", preview_text),
+            theme::muted(),
+        )));
+    }
+    content.push(Line::from(""));
+    content.push(Line::from(Span::styled(
         "  Hosts with a still-valid certificate are skipped.".to_string(),
         theme::muted(),
     )));
 
-    // No wrap on the body — we pre-wrapped the preview row ourselves
-    // with consistent indent on every continuation row. Wrap-on would
-    // also work but would split the question line at the right edge.
-    design::render_body(frame, area, block, text);
-
     // Stakes test: bulk vault signing hits HashiCorp Vault, may take time
     // and is the canonical destructive/material confirm in purple. Use
     // action verbs (sign/skip) instead of generic yes/no.
-    let footer_area = design::render_overlay_footer(frame, area);
-    let footer = design::confirm_footer_destructive("sign", "skip").to_line();
-    frame.render_widget(Paragraph::new(footer), footer_area);
+    let footer_spans = design::confirm_footer_destructive("sign", "skip")
+        .to_line()
+        .spans;
+    design::render_confirm_popup(
+        frame,
+        72,
+        design::PopupKind::Neutral,
+        "Sign Vault SSH Certificates",
+        content,
+        footer_spans,
+        app,
+    );
 }
 
 // Welcome logo now pulled from `design::LOGO` (single source of truth).

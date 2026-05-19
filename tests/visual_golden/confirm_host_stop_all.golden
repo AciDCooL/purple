@@ -15,8 +15,8 @@
 │   ○ certbot     │   ● datadog-agent   2d                                       │              -  │
 │   ● grafana     │                                                              │             5d  │
 │   ● nginx-proxy │  Stops every running container on the host one by one.       │            12d  │
-│   ● postgres    │Exited containers are not touched. Restart policies may       │            12d  │
-│   ● prometheus  │reschedule them.                                              │             5d  │
+│   ● postgres    │  Exited containers are not touched. Restart policies may     │            12d  │
+│   ● prometheus  │  reschedule them.                                            │             5d  │
 │   ● redis       │                                                              │            12d  │
 │  ── db-primary ─╰──────────────────────────────────────────────────────────────╯───────────────  │
 │   ● pg-exporter  y  stop    n/Esc  keep                                                     30d  │
@@ -1322,6 +1322,8 @@
 (16,16) fg=DarkGray bg=Reset mod=BOLD|DIM
 (17,16) fg=DarkGray bg=Reset mod=BOLD|DIM
 (18,16) fg=Red bg=Reset mod=BOLD
+(19,16) fg=Reset bg=Reset mod=DIM
+(20,16) fg=Reset bg=Reset mod=DIM
 (21,16) fg=Reset bg=Reset mod=DIM
 (22,16) fg=Reset bg=Reset mod=DIM
 (23,16) fg=Reset bg=Reset mod=DIM
@@ -1468,6 +1470,8 @@
 (71,17) fg=Reset bg=Reset mod=DIM
 (72,17) fg=Reset bg=Reset mod=DIM
 (73,17) fg=Reset bg=Reset mod=DIM
+(74,17) fg=Reset bg=Reset mod=DIM
+(75,17) fg=Reset bg=Reset mod=DIM
 (81,17) fg=Red bg=Reset mod=BOLD
 (82,17) fg=DarkGray bg=Reset mod=DIM
 (83,17) fg=DarkGray bg=Reset mod=DIM
@@ -1522,6 +1526,8 @@
 (32,18) fg=Reset bg=Reset mod=DIM
 (33,18) fg=Reset bg=Reset mod=DIM
 (34,18) fg=Reset bg=Reset mod=DIM
+(35,18) fg=Reset bg=Reset mod=DIM
+(36,18) fg=Reset bg=Reset mod=DIM
 (81,18) fg=Red bg=Reset mod=BOLD
 (82,18) fg=DarkGray bg=Reset mod=DIM
 (83,18) fg=DarkGray bg=Reset mod=DIM
