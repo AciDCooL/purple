@@ -149,6 +149,40 @@ pub enum AppEvent {
     PollError,
 }
 
+impl AppEvent {
+    /// True for variants produced by background workers (sync, ping,
+    /// container ops, Vault, etc.). False for variants produced by the
+    /// crossterm poll thread (`Key`, `Tick`, `PollError`). Exhaustive
+    /// match forces a deliberate choice when adding a new variant.
+    fn is_background_result(&self) -> bool {
+        match self {
+            AppEvent::Key(_) | AppEvent::Tick | AppEvent::PollError => false,
+            AppEvent::PingResult { .. }
+            | AppEvent::SyncComplete { .. }
+            | AppEvent::SyncPartial { .. }
+            | AppEvent::SyncError { .. }
+            | AppEvent::SyncProgress { .. }
+            | AppEvent::UpdateAvailable { .. }
+            | AppEvent::FileBrowserListing { .. }
+            | AppEvent::ScpComplete { .. }
+            | AppEvent::SnippetHostDone { .. }
+            | AppEvent::SnippetAllDone { .. }
+            | AppEvent::SnippetProgress { .. }
+            | AppEvent::KeyPushResult { .. }
+            | AppEvent::ContainerListing { .. }
+            | AppEvent::ContainerActionComplete { .. }
+            | AppEvent::ContainerInspectComplete { .. }
+            | AppEvent::ContainerLogsComplete { .. }
+            | AppEvent::ContainerLogsTailComplete { .. }
+            | AppEvent::VaultSignResult { .. }
+            | AppEvent::VaultSignProgress { .. }
+            | AppEvent::VaultSignAllDone { .. }
+            | AppEvent::CertCheckResult { .. }
+            | AppEvent::CertCheckError { .. } => true,
+        }
+    }
+}
+
 /// Polls crossterm events in a background thread.
 pub struct EventHandler {
     tx: mpsc::Sender<AppEvent>,
@@ -255,39 +289,190 @@ impl EventHandler {
 
     /// Resume event polling (call after SSH exits).
     pub fn resume(&self) {
-        // Drain stale events, but keep background result events
         let mut preserved = Vec::new();
         while let Ok(event) = self.rx.try_recv() {
-            match event {
-                AppEvent::PingResult { .. }
-                | AppEvent::SyncComplete { .. }
-                | AppEvent::SyncPartial { .. }
-                | AppEvent::SyncError { .. }
-                | AppEvent::SyncProgress { .. }
-                | AppEvent::UpdateAvailable { .. }
-                | AppEvent::FileBrowserListing { .. }
-                | AppEvent::ScpComplete { .. }
-                | AppEvent::SnippetHostDone { .. }
-                | AppEvent::SnippetAllDone { .. }
-                | AppEvent::SnippetProgress { .. }
-                | AppEvent::KeyPushResult { .. }
-                | AppEvent::ContainerListing { .. }
-                | AppEvent::ContainerActionComplete { .. }
-                | AppEvent::ContainerInspectComplete { .. }
-                | AppEvent::ContainerLogsComplete { .. }
-                | AppEvent::ContainerLogsTailComplete { .. }
-                | AppEvent::VaultSignResult { .. }
-                | AppEvent::VaultSignProgress { .. }
-                | AppEvent::VaultSignAllDone { .. }
-                | AppEvent::CertCheckResult { .. }
-                | AppEvent::CertCheckError { .. } => preserved.push(event),
-                _ => {}
+            if event.is_background_result() {
+                preserved.push(event);
             }
         }
-        // Re-send preserved events
         for event in preserved {
             let _ = self.tx.send(event);
         }
         self.paused.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn poll_thread_events_are_not_background_results() {
+        let k = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+        assert!(!AppEvent::Key(k).is_background_result());
+        assert!(!AppEvent::Tick.is_background_result());
+        assert!(!AppEvent::PollError.is_background_result());
+    }
+
+    #[test]
+    fn worker_events_are_background_results() {
+        assert!(
+            AppEvent::PingResult {
+                alias: "h".into(),
+                rtt_ms: None,
+                generation: 0,
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::SyncComplete {
+                provider: "p".into(),
+                hosts: vec![],
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::SyncPartial {
+                provider: "p".into(),
+                hosts: vec![],
+                failures: 0,
+                total: 0,
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::SyncError {
+                provider: "p".into(),
+                message: "x".into(),
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::SyncProgress {
+                provider: "p".into(),
+                message: "x".into(),
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::UpdateAvailable {
+                version: "1.0.0".into(),
+                headline: None,
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::FileBrowserListing {
+                alias: "h".into(),
+                path: "/".into(),
+                entries: Ok(vec![]),
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::ScpComplete {
+                alias: "h".into(),
+                success: true,
+                message: String::new(),
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::SnippetHostDone {
+                run_id: 0,
+                alias: "h".into(),
+                stdout: String::new(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            }
+            .is_background_result()
+        );
+        assert!(AppEvent::SnippetAllDone { run_id: 0 }.is_background_result());
+        assert!(
+            AppEvent::SnippetProgress {
+                run_id: 0,
+                completed: 0,
+                total: 0,
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::VaultSignProgress {
+                alias: "h".into(),
+                done: 0,
+                total: 0,
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::VaultSignAllDone {
+                signed: 0,
+                failed: 0,
+                skipped: 0,
+                cancelled: false,
+                aborted_message: None,
+                first_error: None,
+            }
+            .is_background_result()
+        );
+        assert!(
+            AppEvent::CertCheckError {
+                alias: "h".into(),
+                message: "x".into(),
+            }
+            .is_background_result()
+        );
+    }
+
+    /// End-to-end: pause, drop a mix of events into the channel, resume,
+    /// and verify the drain rule. `Key`, `Tick`, `PollError` must be gone
+    /// and the background results must reappear on the receiving end.
+    /// Filters out any `Tick`/`Key` that the poll thread could in theory
+    /// inject between `EventHandler::new()` and `pause()` (small race
+    /// window) so the assertion stays deterministic in CI.
+    #[test]
+    fn resume_drains_input_and_keeps_background_results() {
+        let handler = EventHandler::new(60_000);
+        handler.pause();
+
+        let k = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+        handler.tx.send(AppEvent::Key(k)).unwrap();
+        handler.tx.send(AppEvent::Tick).unwrap();
+        handler.tx.send(AppEvent::PollError).unwrap();
+        handler
+            .tx
+            .send(AppEvent::SyncProgress {
+                provider: "p".into(),
+                message: "x".into(),
+            })
+            .unwrap();
+        handler
+            .tx
+            .send(AppEvent::PingResult {
+                alias: "h".into(),
+                rtt_ms: Some(12),
+                generation: 1,
+            })
+            .unwrap();
+
+        handler.resume();
+
+        let mut received = Vec::new();
+        while let Ok(Some(ev)) = handler.next_timeout(Duration::from_millis(50)) {
+            received.push(ev);
+        }
+        let background: Vec<_> = received
+            .into_iter()
+            .filter(AppEvent::is_background_result)
+            .collect();
+
+        assert_eq!(
+            background.len(),
+            2,
+            "exactly two background events survive resume()"
+        );
+        assert!(matches!(background[0], AppEvent::SyncProgress { .. }));
+        assert!(matches!(background[1], AppEvent::PingResult { .. }));
     }
 }

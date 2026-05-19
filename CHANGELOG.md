@@ -1,3 +1,9 @@
+## 3.15.4 - 2026-05-19
+
+- change: Sturdier event handling, with no UI changes.
+- change: Adding a new background-job event now fails to compile until you declare whether it survives an SSH launch. No silent fall-through to a dropped result.
+- change: Sync, ping, Vault and container results follow the same replay rule, expressed once on the event type itself instead of a hand-maintained whitelist.
+
 ## 3.15.3 - 2026-05-19
 
 - feat: Activity chart shows from your first connect.
