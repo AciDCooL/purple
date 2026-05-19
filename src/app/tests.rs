@@ -169,6 +169,102 @@ fn close_host_form_after_save_selects_target_alias() {
 }
 
 #[test]
+fn close_provider_form_clears_state_and_returns_to_providers() {
+    let mut app = make_app("");
+    app.capture_provider_form_baseline();
+    app.conflict.form_mtime = Some(SystemTime::UNIX_EPOCH);
+    app.set_screen(Screen::ProviderForm {
+        id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
+    });
+    app.vault.pending_config_write = true;
+    assert!(app.providers.form_baseline.is_some());
+
+    app.close_provider_form();
+
+    assert!(
+        app.providers.form_baseline.is_none(),
+        "baseline must be cleared"
+    );
+    assert!(app.conflict.form_mtime.is_none(), "mtime must be cleared");
+    assert!(matches!(app.screen, Screen::Providers));
+    assert!(
+        !app.vault.pending_config_write,
+        "flush must have run after set_screen"
+    );
+}
+
+#[test]
+fn close_tunnel_form_clears_state_and_returns_to_passed_screen() {
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
+    app.capture_tunnel_form_baseline();
+    app.conflict.form_mtime = Some(SystemTime::UNIX_EPOCH);
+    app.set_screen(Screen::TunnelForm {
+        alias: "a".to_string(),
+        editing: None,
+    });
+    // Pin the divergence from host/provider close: tunnel close must NOT
+    // flush_pending_vault_write. A future "consistency" refactor that adds
+    // flush here would silently start writing vault config on tunnel edits.
+    app.vault.pending_config_write = true;
+    assert!(app.tunnels.form_baseline.is_some());
+
+    let return_to = Screen::TunnelList {
+        alias: "a".to_string(),
+    };
+    app.close_tunnel_form(return_to);
+
+    assert!(
+        app.tunnels.form_baseline.is_none(),
+        "baseline must be cleared"
+    );
+    assert!(app.conflict.form_mtime.is_none(), "mtime must be cleared");
+    match &app.screen {
+        Screen::TunnelList { alias } => assert_eq!(alias, "a"),
+        other => panic!("expected TunnelList, got {:?}", other),
+    }
+    assert!(
+        app.vault.pending_config_write,
+        "tunnel close must NOT flush (tunnels are not vault-related)"
+    );
+}
+
+#[test]
+fn close_snippet_form_clears_state_and_returns_to_picker_with_aliases() {
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
+    app.capture_snippet_form_baseline();
+    app.set_screen(Screen::SnippetForm {
+        target_aliases: vec!["a".to_string()],
+        editing: None,
+    });
+    // Pin the two divergences: snippet close must NOT flush vault, and
+    // must NOT clear form_mtime (no mtime is captured on snippet form open).
+    app.vault.pending_config_write = true;
+    app.conflict.form_mtime = Some(SystemTime::UNIX_EPOCH);
+    assert!(app.snippets.form_baseline.is_some());
+
+    app.close_snippet_form(vec!["a".to_string(), "b".to_string()]);
+
+    assert!(
+        app.snippets.form_baseline.is_none(),
+        "baseline must be cleared"
+    );
+    match &app.screen {
+        Screen::SnippetPicker { target_aliases } => {
+            assert_eq!(target_aliases, &vec!["a".to_string(), "b".to_string()]);
+        }
+        other => panic!("expected SnippetPicker, got {:?}", other),
+    }
+    assert!(
+        app.vault.pending_config_write,
+        "snippet close must NOT flush"
+    );
+    assert!(
+        app.conflict.form_mtime.is_some(),
+        "snippet close must NOT clear mtime (none was captured on open)"
+    );
+}
+
+#[test]
 fn edit_host_from_form_does_not_write_vault_addr_for_pattern() {
     // set_host_vault_addr refuses wildcards. The edit_host_from_form path
     // must skip the call entirely for pattern forms so the debug_assert

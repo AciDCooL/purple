@@ -574,10 +574,7 @@ pub(super) fn handle_form_key(app: &mut App, key: KeyEvent) {
         match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
                 app.forms.pending_discard_confirm = false;
-                app.snippets.form_baseline = None;
-                app.set_screen(Screen::SnippetPicker {
-                    target_aliases: target_aliases.clone(),
-                });
+                app.close_snippet_form(target_aliases.clone());
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 app.forms.pending_discard_confirm = false;
@@ -592,10 +589,7 @@ pub(super) fn handle_form_key(app: &mut App, key: KeyEvent) {
             if app.snippet_form_is_dirty() {
                 app.forms.pending_discard_confirm = true;
             } else {
-                app.snippets.form_baseline = None;
-                app.set_screen(Screen::SnippetPicker {
-                    target_aliases: target_aliases.clone(),
-                });
+                app.close_snippet_form(target_aliases.clone());
             }
         }
         KeyCode::Tab | KeyCode::Down => {
@@ -694,15 +688,12 @@ fn submit_snippet_form(app: &mut App, target_aliases: &[String], editing: Option
         .position(|s| s.name == name);
     app.ui.snippet_picker_state.select(new_idx);
 
-    app.snippets.form_baseline = None;
     if is_new {
         app.notify(crate::messages::snippet_added(&name));
     } else {
         app.notify(crate::messages::snippet_updated(&name));
     }
-    app.set_screen(Screen::SnippetPicker {
-        target_aliases: target_aliases.to_vec(),
-    });
+    app.close_snippet_form(target_aliases.to_vec());
 }
 
 #[cfg(test)]

@@ -668,10 +668,7 @@ pub(super) fn handle_provider_form_key(
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
                 app.forms.pending_discard_confirm = false;
-                app.clear_form_mtime();
-                app.providers.form_baseline = None;
-                app.set_screen(Screen::Providers);
-                app.flush_pending_vault_write();
+                app.close_provider_form();
             }
             super::ConfirmAction::No => {
                 app.forms.pending_discard_confirm = false;
@@ -686,10 +683,7 @@ pub(super) fn handle_provider_form_key(
             if app.provider_form_is_dirty() {
                 app.forms.pending_discard_confirm = true;
             } else {
-                app.clear_form_mtime();
-                app.providers.form_baseline = None;
-                app.set_screen(Screen::Providers);
-                app.flush_pending_vault_write();
+                app.close_provider_form();
             }
         }
         KeyCode::Tab | KeyCode::Down => {
@@ -1152,10 +1146,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     } else {
         app.notify(crate::messages::provider_saved(display_name));
     }
-    app.clear_form_mtime();
-    app.providers.form_baseline = None;
-    app.set_screen(Screen::Providers);
-    app.flush_pending_vault_write();
+    app.close_provider_form();
 }
 
 #[cfg(test)]

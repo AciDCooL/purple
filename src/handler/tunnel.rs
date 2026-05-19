@@ -219,10 +219,8 @@ pub(super) fn handle_tunnel_form_key(app: &mut App, key: KeyEvent) {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
                 app.forms.pending_discard_confirm = false;
-                app.clear_form_mtime();
-                app.tunnels.form_baseline = None;
                 let return_to = tunnel_form_return_screen(app, &alias);
-                app.set_screen(return_to);
+                app.close_tunnel_form(return_to);
             }
             super::ConfirmAction::No => {
                 app.forms.pending_discard_confirm = false;
@@ -237,10 +235,8 @@ pub(super) fn handle_tunnel_form_key(app: &mut App, key: KeyEvent) {
             if app.tunnel_form_is_dirty() {
                 app.forms.pending_discard_confirm = true;
             } else {
-                app.clear_form_mtime();
-                app.tunnels.form_baseline = None;
                 let return_to = tunnel_form_return_screen(app, &alias);
-                app.set_screen(return_to);
+                app.close_tunnel_form(return_to);
             }
         }
         KeyCode::Tab | KeyCode::Down => {
@@ -373,9 +369,7 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
         // First tunnel added to empty list — initialize selection
         app.ui.tunnel_list_state.select(Some(0));
     }
-    app.clear_form_mtime();
-    app.tunnels.form_baseline = None;
     app.notify(crate::messages::TUNNEL_SAVED);
     let return_to = tunnel_form_return_screen(app, alias);
-    app.set_screen(return_to);
+    app.close_tunnel_form(return_to);
 }

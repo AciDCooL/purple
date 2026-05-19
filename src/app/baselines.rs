@@ -138,6 +138,41 @@ impl App {
         self.flush_pending_vault_write();
     }
 
+    /// Tear down provider form state and return to the providers list. Same
+    /// shape as `close_host_form`; provider forms have no per-save selection.
+    pub fn close_provider_form(&mut self) {
+        log::debug!("[purple] close_provider_form");
+        self.clear_form_mtime();
+        self.providers.form_baseline = None;
+        self.set_screen(Screen::Providers);
+        self.flush_pending_vault_write();
+    }
+
+    /// Tear down tunnel form state and return to the caller's screen. The
+    /// return target varies (host detail overlay, tunnels overview, picker),
+    /// so the caller passes it.
+    pub fn close_tunnel_form(&mut self, return_to: Screen) {
+        log::debug!(
+            "[purple] close_tunnel_form return_to={:?}",
+            std::mem::discriminant(&return_to)
+        );
+        self.clear_form_mtime();
+        self.tunnels.form_baseline = None;
+        self.set_screen(return_to);
+    }
+
+    /// Tear down snippet form state and return to the snippet picker for the
+    /// given targets. Snippet forms intentionally skip clear_form_mtime; no
+    /// mtime is captured on snippet form open.
+    pub fn close_snippet_form(&mut self, target_aliases: Vec<String>) {
+        log::debug!(
+            "[purple] close_snippet_form aliases={}",
+            target_aliases.len()
+        );
+        self.snippets.form_baseline = None;
+        self.set_screen(Screen::SnippetPicker { target_aliases });
+    }
+
     /// Capture a baseline snapshot of the tunnel form for dirty-check on Esc.
     pub fn capture_tunnel_form_baseline(&mut self) {
         self.tunnels.form_baseline = Some(TunnelFormBaseline {
