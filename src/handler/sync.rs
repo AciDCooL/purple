@@ -23,7 +23,7 @@ pub fn spawn_provider_sync(
     if let Err(e) = std::thread::Builder::new()
         .name(format!("sync-{}", name))
         .spawn(move || {
-            let provider = match crate::providers::get_provider_with_config(&name, &section_clone) {
+            let provider = match crate::providers::get_provider_with_config(&section_clone) {
                 Some(p) => p,
                 None => {
                     warn!("[config] Unknown provider requested for sync: {name}");

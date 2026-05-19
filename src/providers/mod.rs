@@ -262,9 +262,19 @@ pub const PROVIDERS: &[ProviderDescriptor] = &[
     },
 ];
 
-/// Look up a descriptor by name.
+/// Look up a descriptor by bare provider name. Internal helper; public wrappers
+/// below strip any `:label` suffix before calling this, so callers cannot
+/// accidentally pass a labeled id (`proxmox:server1`) and silently miss.
 fn descriptor(name: &str) -> Option<&'static ProviderDescriptor> {
     PROVIDERS.iter().find(|p| p.name == name)
+}
+
+/// Return the bare provider name, stripping an optional `:label` suffix.
+/// `ProviderConfigId` is the canonical home for this split; this helper keeps
+/// `&str`-only public APIs label-tolerant without forcing every caller to
+/// parse first.
+fn bare_provider_name(name: &str) -> &str {
+    name.split_once(':').map(|(p, _)| p).unwrap_or(name)
 }
 
 /// All known provider names, in registration order.
@@ -295,22 +305,27 @@ const _: () = {
     );
 };
 
-/// Get a provider implementation by name with default configuration.
+/// Get a provider implementation by name with default configuration. Accepts
+/// either a bare provider name (`"proxmox"`) or a labeled id (`"proxmox:server1"`).
 pub fn get_provider(name: &str) -> Option<Box<dyn Provider>> {
-    descriptor(name).map(|d| (d.build)(None))
+    descriptor(bare_provider_name(name)).map(|d| (d.build)(None))
 }
 
-/// Get a provider implementation configured from a provider section.
-pub fn get_provider_with_config(
-    name: &str,
-    section: &config::ProviderSection,
-) -> Option<Box<dyn Provider>> {
-    descriptor(name).map(|d| (d.build)(Some(section)))
+/// Get a provider implementation configured from a provider section. The bare
+/// provider name comes from `section.id.provider`, so labeled configs resolve
+/// the right descriptor by construction; passing a separate `name` was
+/// historically a foot-gun (issue #51) where callers handed in the labeled id
+/// string and the lookup missed the registry.
+pub fn get_provider_with_config(section: &config::ProviderSection) -> Option<Box<dyn Provider>> {
+    descriptor(section.provider()).map(|d| (d.build)(Some(section)))
 }
 
-/// Display name for a provider (e.g. "digitalocean" -> "DigitalOcean").
+/// Display name for a provider (e.g. "digitalocean" -> "DigitalOcean"). Accepts
+/// either a bare name or a labeled id; unknown names fall back to the input.
 pub fn provider_display_name(name: &str) -> &str {
-    descriptor(name).map(|d| d.display).unwrap_or(name)
+    descriptor(bare_provider_name(name))
+        .map(|d| d.display)
+        .unwrap_or(name)
 }
 
 /// Create an HTTP agent with explicit timeouts.

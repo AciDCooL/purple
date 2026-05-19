@@ -1792,6 +1792,39 @@ fn test_apply_sync_result_unknown_provider() {
 }
 
 #[test]
+fn test_apply_sync_result_labeled_provider_resolves() {
+    // Regression for issue #51: apply_sync_result must look up the provider
+    // by the section's bare name, not by the labeled id string `do:work`. The
+    // pre-fix path called `get_provider_with_config(provider, &section)` where
+    // `provider == "do:work"`, which missed the descriptor table and returned
+    // "Unknown provider." to the user.
+    let mut app = make_app("Host test\n  HostName test.com\n");
+    app.providers.config = crate::providers::config::ProviderConfig::default();
+    app.providers
+        .config
+        .set_section(crate::providers::config::ProviderSection {
+            id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "work"),
+            token: "tok".to_string(),
+            alias_prefix: "do-work".to_string(),
+            user: "root".to_string(),
+            identity_file: String::new(),
+            url: String::new(),
+            verify_tls: true,
+            auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
+            project: String::new(),
+            compartment: String::new(),
+            vault_role: String::new(),
+            vault_addr: String::new(),
+        });
+    let (msg, is_err, total, _, _, _) = app.apply_sync_result("digitalocean:work", vec![], false);
+    assert!(!is_err, "labeled provider lookup must not error: {msg}");
+    assert_eq!(total, 0);
+    assert!(!msg.contains("Unknown provider"));
+}
+
+#[test]
 fn test_sync_history_cleared_on_provider_remove() {
     let mut app = make_provider_app();
     // Simulate a completed sync

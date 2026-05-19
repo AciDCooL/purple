@@ -187,6 +187,8 @@ fn make_form_app_focused_on(provider: &str, field: ProviderFormField) -> App {
         id: crate::providers::config::ProviderConfigId::bare(provider),
     };
     app.providers.form = ProviderFormFields {
+        label: String::new(),
+        label_entry: false,
         url: String::new(),
         token: "tok".to_string(),
         profile: String::new(),
@@ -322,6 +324,8 @@ fn test_submit_provider_form_persists_auto_sync_false() {
     };
     app.providers.config = test_provider_config();
     app.providers.form = ProviderFormFields {
+        label: String::new(),
+        label_entry: false,
         url: String::new(),
         token: "tok".to_string(),
         profile: String::new(),
@@ -364,6 +368,8 @@ fn test_submit_provider_form_persists_auto_sync_true() {
     };
     app.providers.config = test_provider_config();
     app.providers.form = ProviderFormFields {
+        label: String::new(),
+        label_entry: false,
         url: String::new(),
         token: "tok".to_string(),
         profile: String::new(),
@@ -405,6 +411,8 @@ fn test_submit_provider_form_persists_vault_role() {
     };
     app.providers.config = test_provider_config();
     app.providers.form = ProviderFormFields {
+        label: String::new(),
+        label_entry: false,
         url: String::new(),
         token: "tok".to_string(),
         profile: String::new(),
@@ -599,6 +607,8 @@ fn make_gcp_form_app() -> App {
         id: crate::providers::config::ProviderConfigId::bare("gcp"),
     };
     app.providers.form = ProviderFormFields {
+        label: String::new(),
+        label_entry: false,
         url: String::new(),
         token: "/path/to/sa.json".to_string(),
         profile: String::new(),
@@ -692,6 +702,8 @@ fn make_azure_form_app() -> App {
     };
     app.providers.config = test_provider_config();
     app.providers.form = ProviderFormFields {
+        label: String::new(),
+        label_entry: false,
         url: String::new(),
         token: "fake-token".to_string(),
         profile: String::new(),
@@ -770,6 +782,8 @@ fn make_ovh_form_app() -> App {
         id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
     app.providers.form = ProviderFormFields {
+        label: String::new(),
+        label_entry: false,
         url: String::new(),
         token: "ak:as:ck".to_string(),
         profile: String::new(),

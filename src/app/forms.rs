@@ -521,8 +521,15 @@ impl HostForm {
 }
 
 /// Which provider form field is focused.
+///
+/// `Label` is dynamic. The static per-provider arrays (`PROXMOX_FIELDS` etc.)
+/// never list it; `ProviderFormFields::visible_fields()` prepends it when the
+/// form was opened to collect a label for a new labeled config. This keeps
+/// `fields_for(provider)` provider-pure and prevents Label from leaking into
+/// bare-add or edit flows where the label is fixed.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProviderFormField {
+    Label,
     Url,
     Token,
     Profile,
@@ -680,14 +687,17 @@ impl ProviderFormField {
     /// Whether a field is mandatory for form submission (asterisk in renderer).
     /// Distinct from `is_required_field` which controls progressive disclosure.
     ///
-    /// AWS: Token and Profile both get an asterisk — at least one must be filled
+    /// AWS: Token and Profile both get an asterisk. At least one must be filled
     /// (Token for inline keys, Profile for ~/.aws/credentials).
     /// Tailscale: Token is optional (empty = local CLI mode).
     /// OVH: Regions (= Endpoint) is mandatory (unlike GCP/Oracle where it has
     /// a meaningful default).
+    /// Label: only rendered when the form is in label-entry mode, and always
+    /// mandatory there. `validate_label("")` rejects empties at save time.
     pub fn is_mandatory_field(field: ProviderFormField, provider: &str) -> bool {
         let kind = provider.parse::<ProviderKind>().ok();
         match field {
+            ProviderFormField::Label => true,
             ProviderFormField::Url => true,
             ProviderFormField::Token => kind != Some(ProviderKind::Tailscale),
             ProviderFormField::Profile => kind == Some(ProviderKind::Aws),
@@ -701,9 +711,12 @@ impl ProviderFormField {
     }
 
     /// Whether a field is shown in collapsed mode (progressive disclosure).
+    /// Label is always required when present so the user is forced to fill it
+    /// before reaching the optional tail.
     pub fn is_required_field(field: ProviderFormField, provider: &str) -> bool {
         let kind = provider.parse::<ProviderKind>().ok();
         match field {
+            ProviderFormField::Label => true,
             ProviderFormField::Token => true,
             ProviderFormField::Url => kind.is_some_and(ProviderKind::requires_url),
             ProviderFormField::Profile => kind == Some(ProviderKind::Aws),
@@ -736,6 +749,7 @@ impl ProviderFormField {
 
     pub fn label(self) -> &'static str {
         match self {
+            ProviderFormField::Label => "Name",
             ProviderFormField::Url => "URL",
             ProviderFormField::Token => "Token",
             ProviderFormField::Profile => "Profile",
@@ -793,6 +807,15 @@ impl ProviderFormField {
 /// Form state for configuring a provider.
 #[derive(Debug, Clone)]
 pub struct ProviderFormFields {
+    /// Label being entered for a new labeled config. Only visible in the form
+    /// when `label_entry` is true (the `_ =>` branch of `open_add_config_flow`).
+    /// Migration, bare add, and edit flows keep this empty and `label_entry`
+    /// false so the field stays hidden and the label is sourced from `form_id`.
+    pub label: String,
+    /// Whether the form was opened to collect a label from the user. Drives
+    /// `visible_fields` prepending `Label`, the initial focus, and the
+    /// submit-time write of `label` back into `form_id.label`.
+    pub label_entry: bool,
     pub url: String,
     pub token: String,
     pub profile: String,
@@ -819,6 +842,8 @@ pub struct ProviderFormFields {
 impl ProviderFormFields {
     pub fn new() -> Self {
         Self {
+            label: String::new(),
+            label_entry: false,
             url: String::new(),
             token: String::new(),
             profile: String::new(),
@@ -840,6 +865,7 @@ impl ProviderFormFields {
 
     pub fn focused_value(&self) -> &str {
         match self.focused_field {
+            ProviderFormField::Label => &self.label,
             ProviderFormField::Url => &self.url,
             ProviderFormField::Token => &self.token,
             ProviderFormField::Profile => &self.profile,
@@ -857,6 +883,7 @@ impl ProviderFormFields {
 
     pub fn focused_value_mut(&mut self) -> Option<&mut String> {
         match self.focused_field {
+            ProviderFormField::Label => Some(&mut self.label),
             ProviderFormField::Url => Some(&mut self.url),
             ProviderFormField::Token => Some(&mut self.token),
             ProviderFormField::Profile => Some(&mut self.profile),
@@ -873,15 +900,24 @@ impl ProviderFormFields {
     }
 
     /// Filter `fields_for(provider)` to the fields that should actually be
-    /// rendered and receive focus. Progressive disclosure: `VaultAddr` is
-    /// only visible when `vault_role` is non-empty, mirroring the host form.
+    /// rendered and receive focus. Two dynamic adjustments:
+    /// 1. `Label` is prepended when `label_entry` is true so the user is asked
+    ///    for a new config name on the third-and-onward add (issue #51).
+    /// 2. `VaultAddr` is only visible when `vault_role` is non-empty,
+    ///    mirroring the host form's progressive disclosure.
     pub fn visible_fields(&self, provider: &str) -> Vec<ProviderFormField> {
         let role_set = !self.vault_role.trim().is_empty();
-        ProviderFormField::fields_for(provider)
+        let base = ProviderFormField::fields_for(provider)
             .iter()
             .copied()
-            .filter(|f| *f != ProviderFormField::VaultAddr || role_set)
-            .collect()
+            .filter(|f| *f != ProviderFormField::VaultAddr || role_set);
+        if self.label_entry {
+            std::iter::once(ProviderFormField::Label)
+                .chain(base)
+                .collect()
+        } else {
+            base.collect()
+        }
     }
 
     pub fn insert_char(&mut self, c: char) {

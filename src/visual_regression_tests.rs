@@ -1429,6 +1429,44 @@ fn visual_provider_form() {
 }
 
 #[test]
+fn visual_provider_form_label_entry() {
+    // Issue #51: when the user adds an N-th labeled config (with at least one
+    // labeled section already present), the form opens with a `Label` input
+    // prepended. The golden locks in the visual placement so a future field
+    // reshuffle or omission of the prepend in visible_fields is caught.
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    app.screen = Screen::ProviderForm {
+        id: crate::providers::config::ProviderConfigId::labeled("aws", ""),
+    };
+    // Replicate what open_add_config_flow's `_ =>` branch would do, without
+    // depending on demo data layout. Label is the focused field; the form
+    // sits in collapsed mode like a freshly opened add flow.
+    app.providers.form = crate::app::ProviderFormFields {
+        label: String::new(),
+        label_entry: true,
+        url: String::new(),
+        token: String::new(),
+        profile: String::new(),
+        project: String::new(),
+        compartment: String::new(),
+        regions: String::new(),
+        alias_prefix: "aws".to_string(),
+        user: "root".to_string(),
+        identity_file: String::new(),
+        verify_tls: true,
+        auto_sync: true,
+        vault_role: String::new(),
+        vault_addr: String::new(),
+        focused_field: crate::app::ProviderFormField::Label,
+        cursor_pos: 0,
+        expanded: false,
+    };
+    let actual = render_screen(&mut app);
+    assert_golden("provider_form_label_entry", &actual);
+}
+
+#[test]
 fn visual_provider_label_migration() {
     let _g = setup();
     let mut app = demo::build_demo_app();

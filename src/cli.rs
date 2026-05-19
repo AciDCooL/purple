@@ -210,7 +210,7 @@ pub(super) fn handle_sync(
     let mut all_renames: Vec<(String, String)> = Vec::new();
 
     for section in &sections {
-        let provider = match providers::get_provider_with_config(section.provider(), section) {
+        let provider = match providers::get_provider_with_config(section) {
             Some(p) => p,
             None => {
                 log::warn!(

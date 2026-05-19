@@ -342,21 +342,38 @@ pub(super) fn handle_provider_list_key(
 /// Pre-fill the provider form for the given config and switch to it.
 /// If the id matches an existing section, the form starts in edit mode;
 /// otherwise it starts blank with provider-appropriate defaults.
+///
+/// Label-entry mode (issue #51) activates when `id.label` is `Some("")` AND
+/// no section exists at `id`. That state is reached only from the
+/// `open_add_config_flow` "1+ labeled already" branch, where the user has not
+/// yet chosen a label for the new config. The form prepends the `Label` field,
+/// focuses it, and on submit writes the typed value into `form_id.label`
+/// before persisting. Migration (label already chosen), bare add, and edits
+/// all keep `label_entry` false so the label is sourced from the screen id.
 fn open_provider_form(app: &mut App, id: crate::providers::config::ProviderConfigId) {
     let provider_impl = providers::get_provider(id.provider.as_str());
     let short_label = provider_impl
         .as_ref()
         .map(|p| p.short_label().to_string())
         .unwrap_or_else(|| id.provider.clone());
-    let first_field = crate::app::ProviderFormField::fields_for(id.provider.as_str())[0];
+    let existing_section = app.providers.config.section_by_id(&id).cloned();
+    let label_entry = existing_section.is_none() && id.label.as_deref() == Some("");
+    let provider_first_field = crate::app::ProviderFormField::fields_for(id.provider.as_str())[0];
+    let first_field = if label_entry {
+        crate::app::ProviderFormField::Label
+    } else {
+        provider_first_field
+    };
 
-    app.providers.form = if let Some(section) = app.providers.config.section_by_id(&id) {
+    app.providers.form = if let Some(section) = existing_section {
         let cursor_pos = match first_field {
             crate::app::ProviderFormField::Url => section.url.chars().count(),
             crate::app::ProviderFormField::Token => section.token.chars().count(),
             _ => 0,
         };
         ProviderFormFields {
+            label: String::new(),
+            label_entry: false,
             url: section.url.clone(),
             token: section.token.clone(),
             profile: section.profile.clone(),
@@ -376,13 +393,16 @@ fn open_provider_form(app: &mut App, id: crate::providers::config::ProviderConfi
         }
     } else {
         // New config: derive a sensible default alias_prefix. For a labeled
-        // config, suggest `<short>-<label>` (e.g. `do-work`); for bare,
-        // just the short label (existing behavior).
-        let default_prefix = match &id.label {
+        // config with a known label, suggest `<short>-<label>` (e.g. `do-work`);
+        // when the label is still empty (label-entry mode), fall back to the
+        // bare short prefix so the field has a stable value the user can edit.
+        let default_prefix = match id.label.as_deref() {
+            Some("") | None => short_label.clone(),
             Some(l) => format!("{}-{}", short_label, l),
-            None => short_label.clone(),
         };
         ProviderFormFields {
+            label: String::new(),
+            label_entry,
             url: String::new(),
             token: String::new(),
             profile: String::new(),
@@ -675,7 +695,12 @@ pub(super) fn handle_provider_form_key(
         KeyCode::Tab | KeyCode::Down => {
             warn_aws_token_format(app, &provider_name);
             if !app.providers.form.expanded {
-                let all = crate::app::ProviderFormField::fields_for(&provider_name);
+                // Use visible_fields so the dynamic Label (issue #51) joins the
+                // navigation cycle alongside provider-static fields. Required
+                // fields are always first in the per-provider arrays, and the
+                // prepended Label is required when present, so the same prefix
+                // slice rule holds.
+                let all = &visible;
                 let req_count = all
                     .iter()
                     .filter(|f| {
@@ -715,7 +740,7 @@ pub(super) fn handle_provider_form_key(
         KeyCode::BackTab | KeyCode::Up => {
             warn_aws_token_format(app, &provider_name);
             if !app.providers.form.expanded {
-                let all = crate::app::ProviderFormField::fields_for(&provider_name);
+                let all = &visible;
                 let req_count = all
                     .iter()
                     .filter(|f| {
@@ -800,11 +825,22 @@ pub(super) fn handle_provider_form_key(
         }
         KeyCode::Char(c) => {
             // Toggle fields (VerifyTls/AutoSync) have no text value to mutate;
-            // every other field — including picker fields — accepts free-text
+            // every other field, including picker fields, accepts free-text
             // typing so users can supply custom paths or region values not
             // surfaced by the picker. Matches the host form's Char arm.
             let f = app.providers.form.focused_field;
-            if !is_toggle(f) {
+            if is_toggle(f) {
+                // Nothing to do.
+            } else if f == crate::app::ProviderFormField::Label {
+                // Label charset and length must mirror validate_label so a
+                // value typed into this field always survives save-time
+                // validation. Reject silently like the migration screen
+                // (handler/provider.rs:502) does for the same constraints.
+                let allowed = c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
+                if allowed && app.providers.form.label.len() < 32 {
+                    app.providers.form.insert_char(c);
+                }
+            } else {
                 app.providers.form.insert_char(c);
             }
         }
@@ -824,12 +860,49 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         app.set_screen(Screen::Providers);
         return;
     }
-    let form_id = match &app.screen {
+    let mut form_id = match &app.screen {
         Screen::ProviderForm { id } => id.clone(),
         _ => return,
     };
     let provider_name = form_id.provider.clone();
     let kind = provider_name.parse::<ProviderKind>().ok();
+
+    // Label-entry mode (issue #51): seal the typed label into form_id before
+    // any further validation or persistence. Without this the section would
+    // serialize with the empty label still embedded in the screen id and the
+    // save would fail downstream in validate_label. Reject early with a
+    // pointed message so the user is not surprised by a "label is empty"
+    // toast at the end of a long form.
+    if app.providers.form.label_entry {
+        let typed = app.providers.form.label.trim().to_string();
+        if let Err(e) = providers::config::validate_label(&typed) {
+            app.notify_error(crate::messages::label_invalid(&e));
+            app.providers.form.focused_field = crate::app::ProviderFormField::Label;
+            return;
+        }
+        // Reject collisions explicitly so the user understands why the save
+        // would have been rejected by the dedup pass in validate().
+        let candidate =
+            providers::config::ProviderConfigId::labeled(provider_name.clone(), typed.clone());
+        if app.providers.config.section_by_id(&candidate).is_some() {
+            app.notify_error(crate::messages::label_already_in_use(&typed));
+            app.providers.form.focused_field = crate::app::ProviderFormField::Label;
+            return;
+        }
+        // The form opened with `alias_prefix = <short_label>` because we did
+        // not know the label yet. Now that the user has typed one, suffix it
+        // so the new section does not collide with a pre-existing bare-style
+        // prefix on a sibling labeled config (validate() rejects duplicates).
+        // Mirrors the migration helper at lines below that suffixes the
+        // existing bare section's prefix when it equals the short label.
+        let short = providers::get_provider(provider_name.as_str())
+            .map(|p| p.short_label().to_string())
+            .unwrap_or_else(|| provider_name.clone());
+        if app.providers.form.alias_prefix.trim() == short {
+            app.providers.form.alias_prefix = format!("{}-{}", short, typed);
+        }
+        form_id = candidate;
+    }
 
     // Check for external provider config changes since form was opened
     if app.provider_config_changed_since_form_open() {
@@ -1137,5 +1210,368 @@ mod label_migration_tests {
         handle_label_migration_key(&mut app, k(KeyCode::Tab), &tx);
         let p = app.providers.pending_label_migration.as_ref().unwrap();
         assert!(matches!(p.focused, LabelMigrationField::Existing));
+    }
+}
+
+/// Regression tests for issue #51. The TUI add-another-config flow used to
+/// open the provider form with `label: Some("")` and no input field for the
+/// label itself, which left the section unsavable. The fixes:
+/// 1. `open_provider_form` flips `label_entry` on for the `_ =>` add branch
+///    so `visible_fields()` prepends a `Label` input.
+/// 2. `submit_provider_form` seals the typed label into `form_id` before
+///    persisting (and rejects empty / duplicate labels with explicit toasts).
+/// 3. Char input on `Label` restricts to the `[a-z0-9-]` charset to mirror
+///    `validate_label` so the user cannot type something save would reject.
+#[cfg(test)]
+mod labeled_add_tests {
+    use super::*;
+    use crate::providers::config::{ProviderConfigId, ProviderSection};
+    use crate::ssh_config::model::SshConfigFile;
+    use crossterm::event::KeyModifiers;
+
+    fn make_app() -> App {
+        let scratch = tempfile::tempdir().expect("tempdir").keep();
+        crate::preferences::set_path_override(scratch.join("preferences"));
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content(""),
+            path: scratch.join("test_config"),
+            crlf: false,
+            bom: false,
+        };
+        let mut app = App::new(config);
+        let providers_path = scratch.join("providers");
+        app.providers.config = crate::providers::config::ProviderConfig {
+            sections: Vec::new(),
+            path_override: Some(providers_path),
+        };
+        app
+    }
+
+    fn k(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn proxmox_section(label: Option<&str>) -> ProviderSection {
+        ProviderSection {
+            id: match label {
+                Some(l) => ProviderConfigId::labeled("proxmox", l),
+                None => ProviderConfigId::bare("proxmox"),
+            },
+            token: "user@pam!t=secret".to_string(),
+            alias_prefix: "pve".to_string(),
+            user: "root".to_string(),
+            identity_file: String::new(),
+            url: "https://pve.example.com:8006".to_string(),
+            verify_tls: false,
+            auto_sync: false,
+            profile: String::new(),
+            regions: String::new(),
+            project: String::new(),
+            compartment: String::new(),
+            vault_role: String::new(),
+            vault_addr: String::new(),
+        }
+    }
+
+    #[test]
+    fn open_add_flow_with_existing_labeled_enters_label_mode() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        app.providers
+            .config
+            .set_section(proxmox_section(Some("server1")));
+        open_add_config_flow(&mut app, "proxmox");
+        assert!(matches!(app.screen, Screen::ProviderForm { ref id }
+                if id.provider == "proxmox" && id.label.as_deref() == Some("")));
+        assert!(app.providers.form.label_entry);
+        assert_eq!(
+            app.providers.form.focused_field,
+            crate::app::ProviderFormField::Label
+        );
+        assert_eq!(app.providers.form.label, "");
+    }
+
+    #[test]
+    fn open_add_flow_with_bare_only_goes_to_migration_not_label_mode() {
+        // The migration screen handles label collection for the bare-to-labeled
+        // transition. Label-entry on the form must stay off so the two flows
+        // don't double-prompt for a name.
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        app.providers.config.set_section(proxmox_section(None));
+        open_add_config_flow(&mut app, "proxmox");
+        assert!(matches!(
+            app.screen,
+            Screen::ProviderLabelMigration { ref provider } if provider == "proxmox"
+        ));
+        // No ProviderFormFields::label_entry assertion here; the form is not
+        // open at this point (migration screen is up).
+    }
+
+    #[test]
+    fn open_add_flow_with_zero_existing_opens_bare_form() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        open_add_config_flow(&mut app, "proxmox");
+        assert!(matches!(app.screen, Screen::ProviderForm { ref id }
+                if id.provider == "proxmox" && id.label.is_none()));
+        assert!(!app.providers.form.label_entry);
+    }
+
+    #[test]
+    fn open_form_for_existing_labeled_does_not_enable_label_entry() {
+        // Editing an already-named labeled config must not surface the label
+        // input. Rename is out of scope here; the user changes other fields.
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        app.providers
+            .config
+            .set_section(proxmox_section(Some("server1")));
+        open_provider_form(&mut app, ProviderConfigId::labeled("proxmox", "server1"));
+        assert!(!app.providers.form.label_entry);
+        assert_ne!(
+            app.providers.form.focused_field,
+            crate::app::ProviderFormField::Label
+        );
+    }
+
+    #[test]
+    fn visible_fields_prepends_label_when_label_entry_is_on() {
+        let mut form = crate::app::ProviderFormFields::new();
+        form.label_entry = true;
+        let visible = form.visible_fields("proxmox");
+        assert_eq!(visible.first(), Some(&crate::app::ProviderFormField::Label));
+    }
+
+    #[test]
+    fn visible_fields_omits_label_when_label_entry_is_off() {
+        let mut form = crate::app::ProviderFormFields::new();
+        form.label_entry = false;
+        let visible = form.visible_fields("proxmox");
+        assert!(!visible.contains(&crate::app::ProviderFormField::Label));
+    }
+
+    #[test]
+    fn char_input_on_label_field_rejects_illegal_chars() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        app.providers
+            .config
+            .set_section(proxmox_section(Some("server1")));
+        open_add_config_flow(&mut app, "proxmox");
+        let (tx, _rx) = mpsc::channel();
+        // Allowed
+        handle_provider_form_key(&mut app, k(KeyCode::Char('w')), &tx);
+        handle_provider_form_key(&mut app, k(KeyCode::Char('o')), &tx);
+        handle_provider_form_key(&mut app, k(KeyCode::Char('r')), &tx);
+        handle_provider_form_key(&mut app, k(KeyCode::Char('k')), &tx);
+        // Rejected: uppercase, space, special
+        handle_provider_form_key(&mut app, k(KeyCode::Char('A')), &tx);
+        handle_provider_form_key(&mut app, k(KeyCode::Char(' ')), &tx);
+        handle_provider_form_key(&mut app, k(KeyCode::Char('@')), &tx);
+        assert_eq!(app.providers.form.label, "work");
+    }
+
+    #[test]
+    fn char_input_on_label_field_caps_at_32_chars() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        app.providers
+            .config
+            .set_section(proxmox_section(Some("server1")));
+        open_add_config_flow(&mut app, "proxmox");
+        let (tx, _rx) = mpsc::channel();
+        for _ in 0..40 {
+            handle_provider_form_key(&mut app, k(KeyCode::Char('a')), &tx);
+        }
+        assert_eq!(app.providers.form.label.len(), 32);
+    }
+
+    #[test]
+    fn submit_with_empty_label_keeps_form_open_and_focuses_label() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        app.providers
+            .config
+            .set_section(proxmox_section(Some("server1")));
+        open_add_config_flow(&mut app, "proxmox");
+        let (tx, _rx) = mpsc::channel();
+        // Enter without typing anything.
+        handle_provider_form_key(&mut app, k(KeyCode::Enter), &tx);
+        assert!(matches!(app.screen, Screen::ProviderForm { .. }));
+        assert_eq!(
+            app.providers.form.focused_field,
+            crate::app::ProviderFormField::Label
+        );
+        // Original section still alone in the config.
+        assert_eq!(
+            app.providers.config.sections_for_provider("proxmox").len(),
+            1
+        );
+    }
+
+    #[test]
+    fn submit_third_labeled_config_persists_with_typed_label() {
+        // Issue #51 happy path: provider already has one labeled config. The
+        // user presses `a`, fills in the new label, then the required Proxmox
+        // fields, and presses Enter. The new section must land in the config
+        // under the typed label (not under an empty-string label that
+        // validate() would reject) and the form must close.
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        app.providers
+            .config
+            .set_section(proxmox_section(Some("server1")));
+        open_add_config_flow(&mut app, "proxmox");
+        let (tx, _rx) = mpsc::channel();
+        for c in "server2".chars() {
+            handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
+        }
+        // Drive focus through the form rather than relying on Tab navigation
+        // semantics so the test verifies persistence, not collapsed-mode key
+        // routing (covered separately).
+        app.providers.form.expanded = true;
+        app.providers.form.focused_field = crate::app::ProviderFormField::Url;
+        app.providers.form.sync_cursor_to_end();
+        for c in "https://pve2.example.com:8006".chars() {
+            handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
+        }
+        app.providers.form.focused_field = crate::app::ProviderFormField::Token;
+        app.providers.form.sync_cursor_to_end();
+        for c in "user@pam!t=secret".chars() {
+            handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
+        }
+        handle_provider_form_key(&mut app, k(KeyCode::Enter), &tx);
+        // Both labeled sections must coexist after submit.
+        let names: Vec<String> = app
+            .providers
+            .config
+            .sections_for_provider("proxmox")
+            .iter()
+            .map(|s| s.id.to_string())
+            .collect();
+        assert!(
+            names.contains(&"proxmox:server1".to_string()),
+            "got {names:?} (label={:?} url={:?} token_len={})",
+            app.providers.form.label,
+            app.providers.form.url,
+            app.providers.form.token.len()
+        );
+        assert!(
+            names.contains(&"proxmox:server2".to_string()),
+            "got {names:?} (label={:?} url={:?} token_len={})",
+            app.providers.form.label,
+            app.providers.form.url,
+            app.providers.form.token.len()
+        );
+    }
+
+    #[test]
+    fn delete_then_readd_same_label_persists_through_label_entry() {
+        // Issue #51 workaround scenario: the user has two labeled configs,
+        // deletes one, then tries to add it back. The previously-deleted
+        // label must no longer count as a collision, the label-entry flow
+        // must accept it, and the new section must land in the config under
+        // the same id with full provider data.
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        app.providers.config.set_section(ProviderSection {
+            alias_prefix: "pve-server1".to_string(),
+            ..proxmox_section(Some("server1"))
+        });
+        app.providers.config.set_section(ProviderSection {
+            alias_prefix: "pve-server2".to_string(),
+            ..proxmox_section(Some("server2"))
+        });
+        assert_eq!(
+            app.providers.config.sections_for_provider("proxmox").len(),
+            2
+        );
+
+        // Delete server2 directly via the config API. The handler flow does
+        // the same after the confirm step; routing it through the keystroke
+        // sequence would not exercise additional code relevant here.
+        app.providers
+            .config
+            .remove_section_by_id(&ProviderConfigId::labeled("proxmox", "server2"));
+        assert_eq!(
+            app.providers.config.sections_for_provider("proxmox").len(),
+            1
+        );
+
+        // Press `a` and re-add `server2`. With one labeled config remaining,
+        // the `_ =>` branch fires and label-entry mode opens.
+        open_add_config_flow(&mut app, "proxmox");
+        assert!(app.providers.form.label_entry);
+        let (tx, _rx) = mpsc::channel();
+        for c in "server2".chars() {
+            handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
+        }
+        app.providers.form.expanded = true;
+        app.providers.form.focused_field = crate::app::ProviderFormField::Url;
+        app.providers.form.sync_cursor_to_end();
+        for c in "https://pve-readd.example.com:8006".chars() {
+            handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
+        }
+        app.providers.form.focused_field = crate::app::ProviderFormField::Token;
+        app.providers.form.sync_cursor_to_end();
+        for c in "user@pam!t=secret".chars() {
+            handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
+        }
+        handle_provider_form_key(&mut app, k(KeyCode::Enter), &tx);
+
+        let names: Vec<String> = app
+            .providers
+            .config
+            .sections_for_provider("proxmox")
+            .iter()
+            .map(|s| s.id.to_string())
+            .collect();
+        assert!(
+            names.contains(&"proxmox:server1".to_string()),
+            "got {names:?}"
+        );
+        assert!(
+            names.contains(&"proxmox:server2".to_string()),
+            "got {names:?}"
+        );
+        let readded = app
+            .providers
+            .config
+            .section_by_id(&ProviderConfigId::labeled("proxmox", "server2"))
+            .expect("readded section must be present");
+        assert_eq!(readded.url, "https://pve-readd.example.com:8006");
+    }
+
+    #[test]
+    fn submit_with_duplicate_label_keeps_form_open() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app();
+        app.providers
+            .config
+            .set_section(proxmox_section(Some("server1")));
+        open_add_config_flow(&mut app, "proxmox");
+        let (tx, _rx) = mpsc::channel();
+        // Type the SAME label as the existing config.
+        for c in "server1".chars() {
+            handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
+        }
+        // Tab to Token and type something so URL/Token validation doesn't
+        // shadow the duplicate-label check.
+        handle_provider_form_key(&mut app, k(KeyCode::Tab), &tx);
+        for c in "fake-url-fake".chars() {
+            handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
+        }
+        handle_provider_form_key(&mut app, k(KeyCode::Enter), &tx);
+        assert!(matches!(app.screen, Screen::ProviderForm { .. }));
+        assert_eq!(
+            app.providers.form.focused_field,
+            crate::app::ProviderFormField::Label
+        );
+        // No duplicate inserted.
+        assert_eq!(
+            app.providers.config.sections_for_provider("proxmox").len(),
+            1
+        );
     }
 }

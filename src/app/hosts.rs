@@ -528,7 +528,7 @@ impl App {
                 );
             }
         };
-        let provider_impl = match crate::providers::get_provider_with_config(provider, &section) {
+        let provider_impl = match crate::providers::get_provider_with_config(&section) {
             Some(p) => p,
             None => {
                 return (

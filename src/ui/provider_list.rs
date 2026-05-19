@@ -548,6 +548,7 @@ fn placeholder_for(field: ProviderFormField, provider_name: &str) -> &'static st
     use crate::messages::hints;
     let kind = provider_name.parse::<ProviderKind>().ok();
     match field {
+        ProviderFormField::Label => hints::PROVIDER_LABEL,
         ProviderFormField::Url => hints::PROVIDER_URL,
         ProviderFormField::Token => match kind {
             None => hints::PROVIDER_TOKEN_DEFAULT,
@@ -676,6 +677,7 @@ fn render_field_content(
     }
 
     let value = match field {
+        ProviderFormField::Label => &form.label,
         ProviderFormField::Url => &form.url,
         ProviderFormField::Token => &form.token,
         ProviderFormField::Profile => &form.profile,
@@ -929,6 +931,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
 
         let all: &[ProviderFormField] = &[
+            ProviderFormField::Label,
             ProviderFormField::Url,
             ProviderFormField::Token,
             ProviderFormField::Profile,
@@ -949,7 +952,8 @@ mod tests {
         // to ProviderFormField.
         for variant in all {
             match variant {
-                ProviderFormField::Url
+                ProviderFormField::Label
+                | ProviderFormField::Url
                 | ProviderFormField::Token
                 | ProviderFormField::Profile
                 | ProviderFormField::Project

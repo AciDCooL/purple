@@ -1,3 +1,11 @@
+## 3.15.1 - 2026-05-19
+
+- fix: Multiple cloud accounts on one provider work end to end.
+- fix: Cloud sync now finds the right provider when an account has a name suffix like `digitalocean:work` or `proxmox:server2`. Its hosts land in your SSH config instead of triggering an "Unknown provider" toast.
+- fix: Adding a third account on a provider opens the form with a Name field at the top. Type a short label using lowercase letters, digits and hyphens (max 32 characters). Empty or already-used names are caught while you type.
+- fix: Removing one named account leaves the rest in place. Press `a` afterwards to add any account back, including with the same name as the one you removed.
+- Reported by @AndreyOkh (#51).
+
 ## 3.15.0 - 2026-05-19
 
 - feat: Provider tags follow your hosts in every view.

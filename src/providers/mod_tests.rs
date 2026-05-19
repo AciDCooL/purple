@@ -184,7 +184,7 @@ fn test_get_provider_with_config_proxmox_uses_url() {
         vault_role: String::new(),
         vault_addr: String::new(),
     };
-    let p = get_provider_with_config("proxmox", &section).unwrap();
+    let p = get_provider_with_config(&section).unwrap();
     assert_eq!(p.name(), "proxmox");
 }
 
@@ -206,7 +206,7 @@ fn test_get_provider_with_config_non_proxmox_delegates() {
         vault_role: String::new(),
         vault_addr: String::new(),
     };
-    let p = get_provider_with_config("digitalocean", &section).unwrap();
+    let p = get_provider_with_config(&section).unwrap();
     assert_eq!(p.name(), "digitalocean");
 }
 
@@ -228,7 +228,7 @@ fn test_get_provider_with_config_gcp_uses_project_and_zones() {
         vault_role: String::new(),
         vault_addr: String::new(),
     };
-    let p = get_provider_with_config("gcp", &section).unwrap();
+    let p = get_provider_with_config(&section).unwrap();
     assert_eq!(p.name(), "gcp");
 }
 
@@ -250,7 +250,92 @@ fn test_get_provider_with_config_unknown_returns_none() {
         vault_role: String::new(),
         vault_addr: String::new(),
     };
-    assert!(get_provider_with_config("unknown_provider", &section).is_none());
+    assert!(get_provider_with_config(&section).is_none());
+}
+
+// =========================================================================
+// Regression tests for issue #51: labeled-id lookups must not silently miss.
+// `get_provider_with_config` now accepts only `&ProviderSection`, sourcing the
+// bare provider name from `section.id.provider`. The label-tolerant wrappers
+// `get_provider` and `provider_display_name` strip an optional `:label` suffix
+// so a labeled id string from any caller resolves to the same descriptor as
+// the bare form.
+// =========================================================================
+
+#[test]
+fn test_get_provider_with_config_labeled_section() {
+    let section = config::ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("proxmox", "server1"),
+        token: "user@pam!token=secret".to_string(),
+        alias_prefix: "pve-server1".to_string(),
+        user: String::new(),
+        identity_file: String::new(),
+        url: "https://pve.example.com:8006".to_string(),
+        verify_tls: false,
+        auto_sync: false,
+        profile: String::new(),
+        regions: String::new(),
+        project: String::new(),
+        compartment: String::new(),
+        vault_role: String::new(),
+        vault_addr: String::new(),
+    };
+    // Pre-fix this missed because the now-removed `name` parameter received
+    // `section.id.to_string()` (= `"proxmox:server1"`) and the descriptor table
+    // only carries bare names. The new signature forces section-derived lookup.
+    let p = get_provider_with_config(&section).expect("labeled section must resolve");
+    assert_eq!(p.name(), "proxmox");
+    assert_eq!(section.id.to_string(), "proxmox:server1");
+}
+
+#[test]
+fn test_get_provider_with_config_labeled_unknown_returns_none() {
+    let section = config::ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("unknown_provider", "any"),
+        token: String::new(),
+        alias_prefix: String::new(),
+        user: String::new(),
+        identity_file: String::new(),
+        url: String::new(),
+        verify_tls: true,
+        auto_sync: true,
+        profile: String::new(),
+        regions: String::new(),
+        project: String::new(),
+        compartment: String::new(),
+        vault_role: String::new(),
+        vault_addr: String::new(),
+    };
+    assert!(get_provider_with_config(&section).is_none());
+}
+
+#[test]
+fn test_get_provider_accepts_labeled_id_string() {
+    // Regression: any caller that forwards a labeled id string (e.g. an event
+    // payload like `"proxmox:server1"`) must still resolve the descriptor.
+    let p = get_provider("proxmox:server1").expect("labeled id must resolve");
+    assert_eq!(p.name(), "proxmox");
+    assert!(get_provider("digitalocean:work").is_some());
+    assert!(get_provider("aws:prod").is_some());
+}
+
+#[test]
+fn test_get_provider_labeled_id_unknown_provider_returns_none() {
+    assert!(get_provider("unknown:foo").is_none());
+}
+
+#[test]
+fn test_provider_display_name_accepts_labeled_id() {
+    assert_eq!(provider_display_name("proxmox:server1"), "Proxmox VE");
+    assert_eq!(provider_display_name("digitalocean:work"), "DigitalOcean");
+    assert_eq!(provider_display_name("aws:prod"), "AWS EC2");
+}
+
+#[test]
+fn test_provider_display_name_labeled_unknown_returns_input() {
+    // Falls back to the caller's input verbatim, not the stripped form,
+    // so error messages can show the exact identifier the user typed.
+    assert_eq!(provider_display_name("unknown:foo"), "unknown:foo");
 }
 
 // =========================================================================
@@ -502,7 +587,7 @@ fn test_get_provider_with_config_all_providers() {
             vault_role: String::new(),
             vault_addr: String::new(),
         };
-        let p = get_provider_with_config(name, &section);
+        let p = get_provider_with_config(&section);
         assert!(
             p.is_some(),
             "get_provider_with_config({}) should return Some",

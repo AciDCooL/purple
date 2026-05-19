@@ -335,6 +335,13 @@ pub fn label_invalid(reason: &str) -> String {
 
 pub const LABEL_MUST_DIFFER: &str = "The two names must be different.";
 
+pub fn label_already_in_use(label: &str) -> String {
+    format!(
+        "A config named '{}' already exists for this provider.",
+        label
+    )
+}
+
 pub const LABEL_MIGRATION_FIELD_CURRENT: &str = " Name for your current config ";
 pub const LABEL_MIGRATION_FIELD_NEW: &str = " Name for the new config ";
 
@@ -1702,6 +1709,7 @@ pub mod hints {
         "e.g. ssh-client-signer/sign/my-role (vault login; inherited)";
     pub const PROVIDER_VAULT_ADDR: &str = "e.g. http://127.0.0.1:8200 (inherited by all hosts)";
     pub const PROVIDER_ALIAS_PREFIX_DEFAULT: &str = "prefix";
+    pub const PROVIDER_LABEL: &str = "short name, e.g. server1 or work";
 }
 
 #[cfg(test)]
