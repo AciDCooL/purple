@@ -1,3 +1,10 @@
+## 3.15.7 - 2026-05-20
+
+- change: Tighter confirm and routing internals, with no UI changes.
+- change: Container actions and SCP file copies confirm through the same y/n/Esc router as every other prompt in purple, so a stray key during a destructive confirm is reliably ignored.
+- change: Background event handling, from ticks and pings through snippet runs and Vault signing, lives in focused domain modules. New event types land in a clear home.
+- change: User-facing copy lives next to the feature it serves, so wording fixes touch one short file instead of scrolling through everything.
+
 ## 3.15.6 - 2026-05-20
 
 - change: Sturdier picker and confirm internals, with no UI changes.
