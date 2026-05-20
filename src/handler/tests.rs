@@ -5101,6 +5101,72 @@ fn test_containers_esc_cancels_confirmation() {
     assert!(matches!(app.screen, Screen::Containers { .. }));
 }
 
+// Pins the handler's `?`-bypass gate: in browse context `q` closes the
+// overlay, but during a pending confirm it must be treated as Ignored.
+// A future edit that whitelisted `q` alongside `?` would silently
+// dismiss destructive confirms by closing the overlay; this test
+// catches that regression.
+#[test]
+fn test_containers_q_during_confirm_is_ignored() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::Containers {
+        alias: "web".to_string(),
+    };
+    let mut state = make_container_state("web", vec![make_container("abc123", "nginx", "running")]);
+    state.confirm_action = Some((
+        crate::containers::ContainerAction::Stop,
+        "nginx".to_string(),
+        "abc123".to_string(),
+    ));
+    app.container_session = Some(state);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+    assert!(
+        app.container_session.is_some(),
+        "q must NOT close overlay while confirm is pending"
+    );
+    let state = app.container_session.as_ref().unwrap();
+    assert!(
+        state.confirm_action.is_some(),
+        "q must NOT clear pending confirm"
+    );
+    assert!(
+        state.action_in_progress.is_none(),
+        "q must NOT execute pending action"
+    );
+    assert!(matches!(app.screen, Screen::Containers { .. }));
+}
+
+// Pins the route_confirm_key Ignored contract: a stray key during a pending
+// container-action confirm must NOT cancel the confirm or fire the action.
+// Guards against a regression where the early-return is replaced by a
+// catch-all that silently dismisses destructive confirms.
+#[test]
+fn test_containers_stray_key_during_confirm_is_ignored() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::Containers {
+        alias: "web".to_string(),
+    };
+    let mut state = make_container_state("web", vec![make_container("abc123", "nginx", "running")]);
+    state.confirm_action = Some((
+        crate::containers::ContainerAction::Stop,
+        "nginx".to_string(),
+        "abc123".to_string(),
+    ));
+    app.container_session = Some(state);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('z')), &tx);
+    let state = app.container_session.as_ref().unwrap();
+    assert!(
+        state.confirm_action.is_some(),
+        "stray key must NOT clear pending confirm"
+    );
+    assert!(
+        state.action_in_progress.is_none(),
+        "stray key must NOT execute pending action"
+    );
+}
+
 #[test]
 fn test_containers_action_blocked_when_in_progress() {
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
@@ -5371,6 +5437,90 @@ fn test_file_browser_help_esc_returns() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::FileBrowser { .. }));
+}
+
+fn make_file_browser_session_with_confirm() -> crate::file_browser::FileBrowserSession {
+    crate::file_browser::FileBrowserSession {
+        alias: "web".to_string(),
+        askpass: None,
+        active_pane: crate::file_browser::BrowserPane::Local,
+        local_path: std::path::PathBuf::from("/tmp"),
+        local_entries: Vec::new(),
+        local_list_state: ratatui::widgets::ListState::default(),
+        local_selected: std::collections::HashSet::new(),
+        local_error: None,
+        remote_path: "/home".to_string(),
+        remote_entries: Vec::new(),
+        remote_list_state: ratatui::widgets::ListState::default(),
+        remote_selected: std::collections::HashSet::new(),
+        remote_error: None,
+        remote_loading: false,
+        show_hidden: false,
+        sort: crate::file_browser::BrowserSort::Name,
+        confirm_copy: Some(crate::file_browser::CopyRequest {
+            sources: vec!["readme.txt".to_string()],
+            source_pane: crate::file_browser::BrowserPane::Local,
+            has_dirs: false,
+        }),
+        transferring: None,
+        transfer_error: None,
+        connection_recorded: false,
+    }
+}
+
+#[test]
+fn test_file_browser_confirm_yes_starts_transfer() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::FileBrowser {
+        alias: "web".to_string(),
+    };
+    app.file_browser_session = Some(make_file_browser_session_with_confirm());
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    assert!(fb.confirm_copy.is_none(), "y must consume confirm_copy");
+    assert!(
+        fb.transferring.is_some(),
+        "y must set transferring to lock input while scp runs"
+    );
+}
+
+#[test]
+fn test_file_browser_confirm_no_clears_request() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::FileBrowser {
+        alias: "web".to_string(),
+    };
+    app.file_browser_session = Some(make_file_browser_session_with_confirm());
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    assert!(fb.confirm_copy.is_none(), "n must clear confirm_copy");
+    assert!(fb.transferring.is_none(), "n must not start a transfer");
+}
+
+// Pins the route_confirm_key Ignored contract for the SCP confirm dialog:
+// a stray key during pending confirm must NOT cancel the dialog or kick
+// off the transfer. Guards against a regression where the inner match
+// gets a catch-all that silently dismisses confirm_copy.
+#[test]
+fn test_file_browser_confirm_stray_key_is_ignored() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::FileBrowser {
+        alias: "web".to_string(),
+    };
+    app.file_browser_session = Some(make_file_browser_session_with_confirm());
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('z')), &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    assert!(
+        fb.confirm_copy.is_some(),
+        "stray key must NOT clear pending confirm_copy"
+    );
+    assert!(
+        fb.transferring.is_none(),
+        "stray key must NOT start a transfer"
+    );
 }
 
 #[test]

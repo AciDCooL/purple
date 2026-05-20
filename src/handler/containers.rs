@@ -70,37 +70,35 @@ pub(super) fn handle_key(
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
 ) -> Result<()> {
-    // Block all keys except the confirm-dialog contract (y/Y/n/N/Esc) and
-    // `?` (help) when a confirmation is pending. Uniform with every other
-    // confirm dialog in purple. `q` is intentionally NOT in the allowlist:
-    // it belongs to browse-context cancel, not confirm-context.
-    if let Some(ref state) = app.container_session {
-        if state.confirm_action.is_some() {
-            match key.code {
-                KeyCode::Char('y')
-                | KeyCode::Char('Y')
-                | KeyCode::Char('n')
-                | KeyCode::Char('N')
-                | KeyCode::Esc
-                | KeyCode::Char('?') => {}
-                _ => return Ok(()),
+    // Handle pending container-action confirmation via the shared confirm
+    // router. `?` (help) is the only key allowed to bypass the confirm gate;
+    // every other key routes through route_confirm_key so a misplaced
+    // keypress can never silently cancel or execute a destructive action.
+    // `q` is intentionally not whitelisted here: in confirm-context it must
+    // be Ignored, not treated as cancel.
+    let confirm_pending = app
+        .container_session
+        .as_ref()
+        .is_some_and(|s| s.confirm_action.is_some());
+    if confirm_pending && key.code != KeyCode::Char('?') {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
+                let taken = app
+                    .container_session
+                    .as_mut()
+                    .and_then(|s| s.confirm_action.take());
+                if let Some((action, _name, _id)) = taken {
+                    container_action(app, events_tx, action);
+                }
             }
+            super::ConfirmAction::No => {
+                if let Some(ref mut state) = app.container_session {
+                    state.confirm_action = None;
+                }
+            }
+            super::ConfirmAction::Ignored => {}
         }
-    }
-
-    // When a confirm is pending, n/N/Esc all cancel it (uniform with other
-    // confirm dialogs). `q` was deliberately removed from the confirm-context
-    // allowlist above, so it can never reach this point during a confirm.
-    if let Some(ref mut state) = app.container_session {
-        if state.confirm_action.is_some()
-            && matches!(
-                key.code,
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc
-            )
-        {
-            state.confirm_action = None;
-            return Ok(());
-        }
+        return Ok(());
     }
 
     match key.code {
@@ -184,14 +182,6 @@ pub(super) fn handle_key(
                             container.id.clone(),
                         ));
                     }
-                }
-            }
-        }
-        KeyCode::Char('y') | KeyCode::Char('Y') => {
-            // Confirm pending action
-            if let Some(ref mut state) = app.container_session {
-                if let Some((action, _name, _id)) = state.confirm_action.take() {
-                    container_action(app, events_tx, action);
                 }
             }
         }

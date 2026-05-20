@@ -30,10 +30,13 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
         return;
     }
 
-    // If confirm dialog is showing, handle that first
+    // SCP copy confirm dispatch via the shared confirm router. `?` (help) is
+    // the only key allowed to bypass; everything else routes through
+    // route_confirm_key so a misplaced keypress can never silently kick off
+    // a transfer or dismiss the dialog.
     if fb.confirm_copy.is_some() && key.code != KeyCode::Char('?') {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
                 let Some(req) = fb.confirm_copy.take() else {
                     return;
                 };
@@ -114,10 +117,10 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                     });
                 });
             }
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+            super::ConfirmAction::No => {
                 fb.confirm_copy = None;
             }
-            _ => {}
+            super::ConfirmAction::Ignored => {}
         }
         return;
     }
