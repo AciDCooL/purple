@@ -1405,6 +1405,44 @@ fn test_password_picker_esc_closes() {
     assert_eq!(app.forms.host.askpass, "");
 }
 
+#[test]
+fn test_key_picker_esc_closes() {
+    let mut app = make_form_app();
+    app.ui.key_picker.open_at(0);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(!app.ui.key_picker.open);
+}
+
+#[test]
+fn test_proxyjump_picker_esc_closes() {
+    let mut app = make_form_app();
+    app.ui.proxyjump_picker.open_at(0);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(!app.ui.proxyjump_picker.open);
+}
+
+#[test]
+fn test_vault_role_picker_esc_closes() {
+    let mut app = make_form_app();
+    app.ui.vault_role_picker.open_at(0);
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(!app.ui.vault_role_picker.open);
+}
+
+#[test]
+fn test_region_picker_esc_closes() {
+    let mut app = make_ovh_form_app();
+    app.providers.form.focused_field = ProviderFormField::Regions;
+    app.ui.region_picker.open = true;
+    app.ui.region_picker.cursor = 0;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(!app.ui.region_picker.open);
+}
+
 // --- Navigation j/k ---
 
 #[test]

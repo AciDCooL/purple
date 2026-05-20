@@ -106,7 +106,7 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
         KeyCode::Esc => {
             app.providers.form.regions = rebuild_regions_string(&selected, &provider_name);
             app.providers.form.sync_cursor_to_end();
-            app.ui.region_picker.open = false;
+            app.close_region_picker();
             let count = selected.len();
             if count > 0 {
                 app.notify(crate::messages::regions_selected_count(count, zone_label));
@@ -125,7 +125,7 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
             }
             app.providers.form.regions = rebuild_regions_string(&selected, &provider_name);
             app.providers.form.sync_cursor_to_end();
-            app.ui.region_picker.open = false;
+            app.close_region_picker();
             let count = selected.len();
             if count > 0 {
                 app.notify(crate::messages::regions_selected_count(count, zone_label));

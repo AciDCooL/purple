@@ -48,6 +48,7 @@ pub(crate) use hosts::migrate_renames_persistent_state;
 pub(crate) mod jump;
 mod key_push_state;
 mod keys_state;
+mod pickers;
 pub(crate) mod ping;
 mod provider_state;
 mod reload_state;

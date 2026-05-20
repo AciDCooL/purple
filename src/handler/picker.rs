@@ -23,13 +23,13 @@ pub(super) fn handle_password_picker(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        app.ui.password_picker.open = false;
+        app.close_password_picker();
         return;
     }
 
     match key.code {
         KeyCode::Esc => {
-            app.ui.password_picker.open = false;
+            app.close_password_picker();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             app.select_next_password_source();
@@ -67,7 +67,7 @@ pub(super) fn handle_password_picker(app: &mut App, key: KeyEvent) {
                     }
                 }
             }
-            app.ui.password_picker.open = false;
+            app.close_password_picker();
             if !needs_more_input {
                 try_auto_submit_after_picker(app);
             }
@@ -80,7 +80,7 @@ pub(super) fn handle_password_picker(app: &mut App, key: KeyEvent) {
 pub(super) fn handle_key_picker_shared(app: &mut App, key: KeyEvent, for_provider: bool) {
     match key.code {
         KeyCode::Esc => {
-            app.ui.key_picker.open = false;
+            app.close_key_picker();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             app.select_next_picker_key();
@@ -101,7 +101,7 @@ pub(super) fn handle_key_picker_shared(app: &mut App, key: KeyEvent, for_provide
                     app.notify(crate::messages::key_selected(&key_info.name));
                 }
             }
-            app.ui.key_picker.open = false;
+            app.close_key_picker();
             if !for_provider {
                 try_auto_submit_after_picker(app);
             }
@@ -114,7 +114,7 @@ pub(super) fn handle_key_picker_shared(app: &mut App, key: KeyEvent, for_provide
 pub(super) fn handle_proxyjump_picker(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
-            app.ui.proxyjump_picker.open = false;
+            app.close_proxyjump_picker();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             app.select_next_proxyjump();
@@ -131,7 +131,7 @@ pub(super) fn handle_proxyjump_picker(app: &mut App, key: KeyEvent) {
                     app.forms.host.proxy_jump = alias.clone();
                     app.forms.host.sync_cursor_to_end();
                     app.notify(crate::messages::proxy_jump_set(alias));
-                    app.ui.proxyjump_picker.open = false;
+                    app.close_proxyjump_picker();
                     try_auto_submit_after_picker(app);
                 }
                 // Separator selected: no-op, stay in picker.
@@ -144,7 +144,7 @@ pub(super) fn handle_proxyjump_picker(app: &mut App, key: KeyEvent) {
 pub(super) fn handle_vault_role_picker(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
-            app.ui.vault_role_picker.open = false;
+            app.close_vault_role_picker();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             app.select_next_vault_role();
@@ -161,7 +161,7 @@ pub(super) fn handle_vault_role_picker(app: &mut App, key: KeyEvent) {
                     app.notify(crate::messages::vault_role_set(role));
                 }
             }
-            app.ui.vault_role_picker.open = false;
+            app.close_vault_role_picker();
         }
         _ => {}
     }

@@ -9234,3 +9234,130 @@ fn record_key_use_persists_via_app_boundary() {
         "event timestamp {ts} not in [{before}, {after}]"
     );
 }
+
+// --- Picker close lifecycle ---
+
+#[test]
+fn close_password_picker_clears_open_flag() {
+    let mut app = make_app("");
+    app.ui.password_picker.open = true;
+    app.close_password_picker();
+    assert!(!app.ui.password_picker.open);
+}
+
+#[test]
+fn close_key_picker_clears_open_flag() {
+    let mut app = make_app("");
+    app.ui.key_picker.open = true;
+    app.close_key_picker();
+    assert!(!app.ui.key_picker.open);
+}
+
+#[test]
+fn close_proxyjump_picker_clears_open_flag() {
+    let mut app = make_app("");
+    app.ui.proxyjump_picker.open = true;
+    app.close_proxyjump_picker();
+    assert!(!app.ui.proxyjump_picker.open);
+}
+
+#[test]
+fn close_vault_role_picker_clears_open_flag() {
+    let mut app = make_app("");
+    app.ui.vault_role_picker.open = true;
+    app.close_vault_role_picker();
+    assert!(!app.ui.vault_role_picker.open);
+}
+
+#[test]
+fn close_region_picker_clears_open_flag() {
+    let mut app = make_app("");
+    app.ui.region_picker.open = true;
+    app.close_region_picker();
+    assert!(!app.ui.region_picker.open);
+}
+
+// Catches a copy-paste regression where a close_X_picker body accidentally
+// clears the wrong picker, or clears more than one. Each test opens all five
+// pickers, closes one, and asserts only that picker transitioned. The
+// per-picker tests above prove the target field clears; these prove no other
+// picker state was disturbed.
+#[test]
+fn close_password_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.ui.password_picker.open = true;
+    app.ui.key_picker.open = true;
+    app.ui.proxyjump_picker.open = true;
+    app.ui.vault_role_picker.open = true;
+    app.ui.region_picker.open = true;
+    app.close_password_picker();
+    assert!(!app.ui.password_picker.open);
+    assert!(app.ui.key_picker.open);
+    assert!(app.ui.proxyjump_picker.open);
+    assert!(app.ui.vault_role_picker.open);
+    assert!(app.ui.region_picker.open);
+}
+
+#[test]
+fn close_key_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.ui.password_picker.open = true;
+    app.ui.key_picker.open = true;
+    app.ui.proxyjump_picker.open = true;
+    app.ui.vault_role_picker.open = true;
+    app.ui.region_picker.open = true;
+    app.close_key_picker();
+    assert!(!app.ui.key_picker.open);
+    assert!(app.ui.password_picker.open);
+    assert!(app.ui.proxyjump_picker.open);
+    assert!(app.ui.vault_role_picker.open);
+    assert!(app.ui.region_picker.open);
+}
+
+#[test]
+fn close_proxyjump_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.ui.password_picker.open = true;
+    app.ui.key_picker.open = true;
+    app.ui.proxyjump_picker.open = true;
+    app.ui.vault_role_picker.open = true;
+    app.ui.region_picker.open = true;
+    app.close_proxyjump_picker();
+    assert!(!app.ui.proxyjump_picker.open);
+    assert!(app.ui.password_picker.open);
+    assert!(app.ui.key_picker.open);
+    assert!(app.ui.vault_role_picker.open);
+    assert!(app.ui.region_picker.open);
+}
+
+#[test]
+fn close_vault_role_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.ui.password_picker.open = true;
+    app.ui.key_picker.open = true;
+    app.ui.proxyjump_picker.open = true;
+    app.ui.vault_role_picker.open = true;
+    app.ui.region_picker.open = true;
+    app.close_vault_role_picker();
+    assert!(!app.ui.vault_role_picker.open);
+    assert!(app.ui.password_picker.open);
+    assert!(app.ui.key_picker.open);
+    assert!(app.ui.proxyjump_picker.open);
+    assert!(app.ui.region_picker.open);
+}
+
+#[test]
+fn close_region_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.ui.password_picker.open = true;
+    app.ui.key_picker.open = true;
+    app.ui.proxyjump_picker.open = true;
+    app.ui.vault_role_picker.open = true;
+    app.ui.region_picker.open = true;
+    app.close_region_picker();
+    assert!(!app.ui.region_picker.open);
+    assert!(app.ui.password_picker.open);
+    assert!(app.ui.key_picker.open);
+    assert!(app.ui.proxyjump_picker.open);
+    assert!(app.ui.vault_role_picker.open);
+}
