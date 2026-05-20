@@ -1,3 +1,10 @@
+## 3.15.5 - 2026-05-20
+
+- change: Sturdier form open and close across all edit screens.
+- change: Host, tunnel, snippet and provider forms share a single open and close routine, so a fix to one path benefits all four.
+- change: Vault config writes after a save are reliably persisted before the form closes.
+- change: Per-provider sync defaults (DigitalOcean on, Proxmox off) are pinned by tests so a future refactor cannot silently flip them.
+
 ## 3.15.4 - 2026-05-19
 
 - change: Sturdier event handling, with no UI changes.
