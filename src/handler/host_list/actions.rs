@@ -34,11 +34,7 @@ pub(super) fn clone_selected(app: &mut App) {
             app.notify_warning(crate::messages::included_host_clone_there(&alias, &path));
             return;
         }
-        let stale_hint = if host.stale.is_some() {
-            Some(super::stale_provider_hint(host))
-        } else {
-            None
-        };
+        let stale_hint = super::super::host_form::stale_hint_for(host);
         let copy_alias = format!("{}-copy", host.alias);
         // Clone uses the enriched entry (with inheritance) so the copy is
         // self-contained. from_entry_duplicate clears vault_ssh so the copy
@@ -178,11 +174,7 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
     let Some(host) = app.selected_host() else {
         return;
     };
-    let stale_hint = if host.stale.is_some() {
-        Some(super::stale_provider_hint(host))
-    } else {
-        None
-    };
+    let stale_hint = super::super::host_form::stale_hint_for(host);
     let alias = host.alias.clone();
     let askpass = host.askpass.clone();
     if let Some(hint) = stale_hint {
@@ -290,11 +282,7 @@ pub(super) fn open_container_overlay(app: &mut App, events_tx: &mpsc::Sender<App
     let Some(host) = app.selected_host() else {
         return;
     };
-    let stale_hint = if host.stale.is_some() {
-        Some(super::stale_provider_hint(host))
-    } else {
-        None
-    };
+    let stale_hint = super::super::host_form::stale_hint_for(host);
     let alias = host.alias.clone();
     let askpass = host.askpass.clone();
     if let Some(hint) = stale_hint {

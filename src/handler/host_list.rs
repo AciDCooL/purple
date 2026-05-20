@@ -137,11 +137,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             if let Some(host) = app.selected_host() {
                 let alias = host.alias.clone();
                 let askpass = host.askpass.clone();
-                let stale_hint = if host.stale.is_some() {
-                    Some(stale_provider_hint(host))
-                } else {
-                    None
-                };
+                let stale_hint = super::host_form::stale_hint_for(host);
                 if let Some(hint) = stale_hint {
                     app.notify_warning(crate::messages::stale_host(&hint));
                 }
@@ -207,11 +203,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     app.notify_warning(crate::messages::included_host_lives_in(&alias, &path));
                     return;
                 }
-                let stale_hint = if host.stale.is_some() {
-                    Some(stale_provider_hint(host))
-                } else {
-                    None
-                };
+                let stale_hint = super::host_form::stale_hint_for(host);
                 let alias = host.alias.clone();
                 if let Some(hint) = stale_hint {
                     app.notify_warning(crate::messages::stale_host(&hint));
@@ -570,11 +562,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 return;
             }
             if let Some(host) = app.selected_host() {
-                let stale_hint = if host.stale.is_some() {
-                    Some(stale_provider_hint(host))
-                } else {
-                    None
-                };
+                let stale_hint = super::host_form::stale_hint_for(host);
                 let alias = host.alias.clone();
                 if let Some(hint) = stale_hint {
                     app.notify_warning(crate::messages::stale_host(&hint));
@@ -653,11 +641,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             let (aliases, stale_hint): (Vec<String>, Option<String>) =
                 if app.hosts_state.multi_select.is_empty() {
                     if let Some(host) = app.selected_host() {
-                        let hint = if host.stale.is_some() {
-                            Some(stale_provider_hint(host))
-                        } else {
-                            None
-                        };
+                        let hint = super::host_form::stale_hint_for(host);
                         (vec![host.alias.clone()], hint)
                     } else {
                         (Vec::new(), None)
@@ -744,11 +728,7 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
             if let Some(host) = app.selected_host() {
                 let alias = host.alias.clone();
                 let askpass = host.askpass.clone();
-                let stale_hint = if host.stale.is_some() {
-                    Some(stale_provider_hint(host))
-                } else {
-                    None
-                };
+                let stale_hint = super::host_form::stale_hint_for(host);
                 app.cancel_search();
                 if let Some(hint) = stale_hint {
                     app.notify_warning(crate::messages::stale_host(&hint));

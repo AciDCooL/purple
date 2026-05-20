@@ -380,3 +380,45 @@ pub(super) fn stale_hint_for(host: &HostEntry) -> Option<String> {
         .is_some()
         .then(|| super::host_list::stale_provider_hint(host))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stale_host(provider: Option<&str>) -> HostEntry {
+        HostEntry {
+            alias: "h".to_string(),
+            stale: Some(1_711_900_000),
+            provider: provider.map(str::to_string),
+            ..HostEntry::default()
+        }
+    }
+
+    #[test]
+    fn returns_none_when_host_is_not_stale() {
+        let host = HostEntry {
+            alias: "fresh".to_string(),
+            ..HostEntry::default()
+        };
+        assert_eq!(stale_hint_for(&host), None);
+    }
+
+    #[test]
+    fn returns_provider_label_when_stale_and_provider_known() {
+        let host = stale_host(Some("digitalocean"));
+        let hint = stale_hint_for(&host).expect("stale host yields Some");
+        assert!(
+            hint.contains("DigitalOcean"),
+            "expected display name in hint, got {hint:?}"
+        );
+    }
+
+    // Stale host without a provider yields Some("") (not None). Eleven handler
+    // callsites treat the Option as "warn iff Some", so an empty hint still
+    // surfaces the stale warning; the toast simply omits the provider clause.
+    #[test]
+    fn returns_some_empty_when_stale_but_provider_unset() {
+        let host = stale_host(None);
+        assert_eq!(stale_hint_for(&host), Some(String::new()));
+    }
+}

@@ -95,11 +95,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('T') => {
             if let Some(host) = app.hosts_state.list.get(index) {
-                let stale_hint = if host.stale.is_some() {
-                    Some(super::host_list::stale_provider_hint(host))
-                } else {
-                    None
-                };
+                let stale_hint = super::host_form::stale_hint_for(host);
                 let alias = host.alias.clone();
                 if let Some(hint) = stale_hint {
                     app.notify_warning(crate::messages::stale_host(&hint));
@@ -114,11 +110,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('r') => {
             if let Some(host) = app.hosts_state.list.get(index) {
-                let stale_hint = if host.stale.is_some() {
-                    Some(super::host_list::stale_provider_hint(host))
-                } else {
-                    None
-                };
+                let stale_hint = super::host_form::stale_hint_for(host);
                 let alias = host.alias.clone();
                 if let Some(hint) = stale_hint {
                     app.notify_warning(crate::messages::stale_host(&hint));

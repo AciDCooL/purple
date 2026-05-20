@@ -486,10 +486,7 @@ fn selected_running_row_with_runtime(
         .iter()
         .find(|h| h.alias == row.alias)
         .map(|h| {
-            let hint = h
-                .stale
-                .as_ref()
-                .map(|_| super::host_list::stale_provider_hint(h));
+            let hint = super::host_form::stale_hint_for(h);
             (h.askpass.clone(), hint)
         })
         .unwrap_or((None, None));
