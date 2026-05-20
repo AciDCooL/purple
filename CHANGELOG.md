@@ -1,3 +1,10 @@
+## 3.15.6 - 2026-05-20
+
+- change: Sturdier picker and confirm internals, with no UI changes.
+- change: Every overlay picker (password, key, ProxyJump, Vault role, region) opens and closes through one shared routine, so behaviour stays uniform when handler logic evolves.
+- change: The snippet discard prompt follows the same y/n/Esc contract as every other confirm in the app, dropping the last raw key-match in the handler tree.
+- change: Stale-host hint rendering routes through one helper. Future tweaks to the "Gone from <provider>" wording land in one place instead of twelve.
+
 ## 3.15.5 - 2026-05-20
 
 - change: Sturdier form open and close across all edit screens.
