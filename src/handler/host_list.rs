@@ -188,7 +188,8 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 }
                 app.open_host_pattern_edit_form(&pattern);
             } else if let Some(host) = app.selected_host().cloned() {
-                super::host_form::open_edit_form(app, host);
+                let hint = super::host_form::stale_hint_for(&host);
+                app.open_host_edit_form(host, hint);
             }
         }
         KeyCode::Char('d') => {
@@ -820,7 +821,8 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
         }
         KeyCode::Char('e') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Some(host) = app.selected_host().cloned() {
-                super::host_form::open_edit_form(app, host);
+                let hint = super::host_form::stale_hint_for(&host);
+                app.open_host_edit_form(host, hint);
             }
         }
         KeyCode::Char('!') if app.ping.filter_down_only => {

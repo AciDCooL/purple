@@ -89,7 +89,8 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('e') => {
             if let Some(host) = app.hosts_state.list.get(index).cloned() {
-                super::host_form::open_edit_form(app, host);
+                let hint = super::host_form::stale_hint_for(&host);
+                app.open_host_edit_form(host, hint);
             }
         }
         KeyCode::Char('T') => {

@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, FormField, HostForm, Screen};
+use crate::app::{App, FormField, Screen};
 use crate::quick_add;
 use crate::ssh_config::model::HostEntry;
 
@@ -374,36 +374,9 @@ pub(super) fn submit_form(app: &mut App) {
     app.container_state.pending_fetch_aliases.push(target_alias);
 }
 
-/// Open the edit form for `host`. Returns `true` if opened, `false` if the
-/// host lives in an include file (status message set instead).
-pub(super) fn open_edit_form(app: &mut App, host: HostEntry) -> bool {
-    if let Some(ref source) = host.source_file {
-        app.notify_error(crate::messages::included_host_lives_in(
-            &host.alias,
-            &source.display(),
-        ));
-        return false;
-    }
-    let stale_hint = host
-        .stale
+/// Compute the stale-hint that App::open_host_edit_form expects.
+pub(super) fn stale_hint_for(host: &HostEntry) -> Option<String> {
+    host.stale
         .is_some()
-        .then(|| super::host_list::stale_provider_hint(&host));
-    // Load raw entry (without pattern inheritance) so inherited values are not
-    // shown as editable own values.
-    let raw = match app.hosts_state.ssh_config.raw_host_entry(&host.alias) {
-        Some(entry) => entry,
-        None => {
-            app.notify_warning(crate::messages::HOST_NOT_FOUND_IN_CONFIG);
-            return false;
-        }
-    };
-    let inherited = app.hosts_state.ssh_config.inherited_hints(&host.alias);
-    app.forms.host = HostForm::from_entry(&raw, inherited);
-    if let Some(hint) = stale_hint {
-        app.notify_warning(crate::messages::stale_host(&hint));
-    }
-    app.set_screen(Screen::EditHost { alias: host.alias });
-    app.capture_form_mtime();
-    app.capture_form_baseline();
-    true
+        .then(|| super::host_list::stale_provider_hint(host))
 }

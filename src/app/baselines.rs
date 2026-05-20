@@ -196,6 +196,43 @@ impl App {
         self.capture_form_baseline();
     }
 
+    /// Open the host edit form for `host`. Returns false (without changing
+    /// screen) if the host lives in an Include file or its raw entry cannot
+    /// be located. The caller computes `stale_hint` because it is derived
+    /// from handler-local provider-display logic.
+    pub fn open_host_edit_form(
+        &mut self,
+        host: crate::ssh_config::model::HostEntry,
+        stale_hint: Option<String>,
+    ) -> bool {
+        if let Some(ref source) = host.source_file {
+            self.notify_error(crate::messages::included_host_lives_in(
+                &host.alias,
+                &source.display(),
+            ));
+            return false;
+        }
+        // Load raw entry (no pattern inheritance) so inherited values do not
+        // appear as editable own values.
+        let raw = match self.hosts_state.ssh_config.raw_host_entry(&host.alias) {
+            Some(entry) => entry,
+            None => {
+                self.notify_warning(crate::messages::HOST_NOT_FOUND_IN_CONFIG);
+                return false;
+            }
+        };
+        let inherited = self.hosts_state.ssh_config.inherited_hints(&host.alias);
+        log::debug!("[purple] open_host_edit_form alias={}", host.alias);
+        self.forms.host = HostForm::from_entry(&raw, inherited);
+        if let Some(hint) = stale_hint {
+            self.notify_warning(crate::messages::stale_host(&hint));
+        }
+        self.set_screen(Screen::EditHost { alias: host.alias });
+        self.capture_form_mtime();
+        self.capture_form_baseline();
+        true
+    }
+
     /// Open an edit form for an existing pattern entry.
     pub fn open_host_pattern_edit_form(&mut self, pattern: &PatternEntry) {
         log::debug!(

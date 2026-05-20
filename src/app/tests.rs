@@ -315,6 +315,90 @@ fn open_tunnel_forms_initialize_state() {
 }
 
 #[test]
+fn open_host_edit_form_success_and_failure_paths() {
+    let content = "Host a\n  HostName 1.2.3.4\n";
+
+    // Success: existing host, no Include source, raw entry found, form populated.
+    let mut app = make_app(content);
+    std::fs::write(&app.hosts_state.ssh_config.path, content).expect("write config");
+    let host = app.hosts_state.list[0].clone();
+    let ok = app.open_host_edit_form(host, None);
+    assert!(ok, "open_host_edit_form must return true on the happy path");
+    match &app.screen {
+        Screen::EditHost { alias } => assert_eq!(alias, "a"),
+        other => panic!("expected EditHost, got {:?}", other),
+    }
+    assert!(app.forms.host_baseline.is_some());
+    assert!(app.conflict.form_mtime.is_some());
+    // Pin that HostForm::from_entry actually flowed entry data into the form.
+    assert_eq!(
+        app.forms.host.hostname, "1.2.3.4",
+        "form hostname must be populated from raw entry"
+    );
+
+    // Include source fails: returns false, screen unchanged, Error toast (sticky).
+    let mut app = make_app(content);
+    let mut host = app.hosts_state.list[0].clone();
+    host.source_file = Some(std::path::PathBuf::from("/etc/ssh/ssh_config"));
+    let ok = app.open_host_edit_form(host, None);
+    assert!(!ok, "Include source must return false");
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(app.forms.host_baseline.is_none(), "form not opened");
+    let toast = app
+        .status_center
+        .toast
+        .as_ref()
+        .expect("error toast queued");
+    assert_eq!(
+        toast.class,
+        crate::app::MessageClass::Error,
+        "Include-source guard must use notify_error (sticky)"
+    );
+
+    // Missing entry fails: alias not in config returns false, Warning toast.
+    let mut app = make_app(content);
+    let mut host = app.hosts_state.list[0].clone();
+    host.alias = "nonexistent".to_string();
+    let ok = app.open_host_edit_form(host, None);
+    assert!(!ok, "missing alias must return false");
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(app.forms.host_baseline.is_none());
+    let toast = app
+        .status_center
+        .toast
+        .as_ref()
+        .expect("warning toast queued");
+    assert_eq!(
+        toast.class,
+        crate::app::MessageClass::Warning,
+        "missing-alias guard must use notify_warning"
+    );
+}
+
+#[test]
+fn open_host_edit_form_emits_stale_warning_when_hint_provided() {
+    let content = "Host a\n  HostName 1.2.3.4\n";
+    let mut app = make_app(content);
+    std::fs::write(&app.hosts_state.ssh_config.path, content).expect("write config");
+    let host = app.hosts_state.list[0].clone();
+
+    let ok = app.open_host_edit_form(host, Some("Gone from DigitalOcean".to_string()));
+
+    assert!(ok);
+    // Stale hint surfaces as a Warning (not Error) toast even on success open.
+    let toast = app
+        .status_center
+        .toast
+        .as_ref()
+        .expect("stale warning must be queued");
+    assert_eq!(
+        toast.class,
+        crate::app::MessageClass::Warning,
+        "stale hint must be a Warning, not an Error"
+    );
+}
+
+#[test]
 fn open_provider_form_initializes_state_for_all_modes() {
     use crate::providers::config::ProviderConfigId;
 
