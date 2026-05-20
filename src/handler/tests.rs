@@ -1392,6 +1392,49 @@ fn test_space_on_askpass_opens_password_picker() {
     assert_eq!(app.ui.password_picker.list.selected(), Some(0));
 }
 
+#[test]
+fn test_space_on_identityfile_opens_key_picker() {
+    let mut app = make_form_app();
+    app.forms.host.focused_field = FormField::IdentityFile;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
+    assert!(app.ui.key_picker.open);
+}
+
+#[test]
+fn test_space_on_proxyjump_opens_proxyjump_picker() {
+    let mut app = make_form_app();
+    app.forms.host.focused_field = FormField::ProxyJump;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
+    assert!(app.ui.proxyjump_picker.open);
+}
+
+// VaultSsh has two Space branches. With no role candidates Space inserts a
+// literal space and the picker stays closed. With candidates the picker
+// opens and selects the first role. Both branches are pinned because the
+// guard is the place where a refactor is most likely to drift.
+#[test]
+fn test_space_on_vaultssh_with_no_candidates_inserts_literal_space() {
+    let mut app = make_form_app();
+    app.forms.host.focused_field = FormField::VaultSsh;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
+    assert!(!app.ui.vault_role_picker.open);
+    assert_eq!(app.forms.host.vault_ssh, " ");
+}
+
+#[test]
+fn test_space_on_vaultssh_with_candidates_opens_picker() {
+    let mut app = make_form_app();
+    app.hosts_state.list[0].vault_ssh = Some("admin".to_string());
+    app.forms.host.focused_field = FormField::VaultSsh;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
+    assert!(app.ui.vault_role_picker.open);
+    assert_eq!(app.ui.vault_role_picker.list.selected(), Some(0));
+}
+
 // --- Esc closes picker ---
 
 #[test]

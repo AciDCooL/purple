@@ -221,22 +221,12 @@ fn maybe_smart_paste(app: &mut App) {
 /// literal space so the user can type the role manually. Other picker
 /// fields always open their picker.
 fn open_picker_for_focused_field(app: &mut App) {
-    use ratatui::widgets::ListState;
     match app.forms.host.focused_field {
         FormField::IdentityFile => {
-            app.scan_keys();
-            app.ui.key_picker.open = true;
-            app.ui.key_picker.list = ListState::default();
-            if !app.keys.list.is_empty() {
-                app.ui.key_picker.list.select(Some(0));
-            }
+            app.open_key_picker();
         }
         FormField::ProxyJump => {
-            app.ui.proxyjump_picker.open = true;
-            app.ui.proxyjump_picker.list = ListState::default();
-            if let Some(idx) = app.proxyjump_first_host_index() {
-                app.ui.proxyjump_picker.list.select(Some(idx));
-            }
+            app.open_proxyjump_picker();
         }
         FormField::VaultSsh => {
             let candidates = app.vault_role_candidates();
@@ -247,15 +237,11 @@ fn open_picker_for_focused_field(app: &mut App) {
                 app.forms.host.insert_char(' ');
                 app.forms.host.update_hint();
             } else {
-                app.ui.vault_role_picker.open = true;
-                app.ui.vault_role_picker.list = ListState::default();
-                app.ui.vault_role_picker.list.select(Some(0));
+                app.open_vault_role_picker();
             }
         }
         FormField::AskPass => {
-            app.ui.password_picker.open = true;
-            app.ui.password_picker.list = ListState::default();
-            app.ui.password_picker.list.select(Some(0));
+            app.open_password_picker();
         }
         // Defensive: only reached if `FormField::is_picker()` grows a new
         // variant without a matching arm here. Insert a literal space so

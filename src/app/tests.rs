@@ -9361,3 +9361,148 @@ fn close_region_picker_does_not_touch_other_pickers() {
     assert!(app.ui.proxyjump_picker.open);
     assert!(app.ui.vault_role_picker.open);
 }
+
+// --- Picker open lifecycle ---
+
+#[test]
+fn open_password_picker_sets_flag_and_selects_first() {
+    let mut app = make_app("");
+    app.ui.password_picker.open = false;
+    app.ui.password_picker.list.select(Some(99));
+    app.open_password_picker();
+    assert!(app.ui.password_picker.open);
+    assert_eq!(app.ui.password_picker.list.selected(), Some(0));
+}
+
+// scan_keys reads from $HOME/.ssh so the resulting list and selection are
+// environment-dependent. The test pins the flag transition and the list
+// reset (prior cursor 99 must be gone) without asserting on the post-scan
+// selection.
+#[test]
+fn open_key_picker_sets_flag_and_resets_list() {
+    let mut app = make_app("");
+    app.ui.key_picker.open = false;
+    app.ui.key_picker.list.select(Some(99));
+    app.open_key_picker();
+    assert!(app.ui.key_picker.open);
+    assert_ne!(app.ui.key_picker.list.selected(), Some(99));
+}
+
+// Pins the conditional `if !keys.list.is_empty() { select(Some(0)) }` in
+// open_key_picker against either possible scan_keys outcome. On any
+// environment that discovers at least one key the test catches a deletion
+// of the select line; on a clean environment with no .ssh both sides are
+// None and the test still passes.
+#[test]
+fn open_key_picker_selection_matches_keys_present() {
+    let mut app = make_app("");
+    app.open_key_picker();
+    let expected = if app.keys.list.is_empty() {
+        None
+    } else {
+        Some(0)
+    };
+    assert_eq!(app.ui.key_picker.list.selected(), expected);
+}
+
+#[test]
+fn open_proxyjump_picker_sets_flag_and_resets_list() {
+    let mut app = make_app("");
+    app.ui.proxyjump_picker.open = false;
+    app.ui.proxyjump_picker.list.select(Some(99));
+    app.open_proxyjump_picker();
+    assert!(app.ui.proxyjump_picker.open);
+    assert_ne!(app.ui.proxyjump_picker.list.selected(), Some(99));
+}
+
+// Pins the `select(Some(idx))` branch of open_proxyjump_picker. The empty
+// test above covers the "no hosts → no selection" path; this one covers
+// "one host → cursor lands on it" via the canonical proxyjump_first_host
+// _index helper.
+#[test]
+fn open_proxyjump_picker_with_hosts_selects_first_host_index() {
+    let mut app = make_app("Host jump\n  HostName jump.example.com\n");
+    let expected = app.proxyjump_first_host_index();
+    assert!(expected.is_some(), "fixture must yield a host index");
+    app.open_proxyjump_picker();
+    assert!(app.ui.proxyjump_picker.open);
+    assert_eq!(app.ui.proxyjump_picker.list.selected(), expected);
+}
+
+#[test]
+fn open_vault_role_picker_sets_flag_and_selects_first() {
+    let mut app = make_app("");
+    app.ui.vault_role_picker.open = false;
+    app.ui.vault_role_picker.list.select(Some(99));
+    app.open_vault_role_picker();
+    assert!(app.ui.vault_role_picker.open);
+    assert_eq!(app.ui.vault_role_picker.list.selected(), Some(0));
+}
+
+#[test]
+fn open_region_picker_sets_flag_and_resets_cursor() {
+    let mut app = make_app("");
+    app.ui.region_picker.open = false;
+    app.ui.region_picker.cursor = 99;
+    app.open_region_picker();
+    assert!(app.ui.region_picker.open);
+    assert_eq!(app.ui.region_picker.cursor, 0);
+}
+
+// Catches a copy-paste regression where an open_X_picker body accidentally
+// opens the wrong picker, or opens more than one. Each test starts with all
+// five pickers closed, opens one, and asserts only that picker transitioned.
+#[test]
+fn open_password_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.open_password_picker();
+    assert!(app.ui.password_picker.open);
+    assert!(!app.ui.key_picker.open);
+    assert!(!app.ui.proxyjump_picker.open);
+    assert!(!app.ui.vault_role_picker.open);
+    assert!(!app.ui.region_picker.open);
+}
+
+#[test]
+fn open_key_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.open_key_picker();
+    assert!(app.ui.key_picker.open);
+    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.proxyjump_picker.open);
+    assert!(!app.ui.vault_role_picker.open);
+    assert!(!app.ui.region_picker.open);
+}
+
+#[test]
+fn open_proxyjump_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.open_proxyjump_picker();
+    assert!(app.ui.proxyjump_picker.open);
+    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.key_picker.open);
+    assert!(!app.ui.vault_role_picker.open);
+    assert!(!app.ui.region_picker.open);
+}
+
+#[test]
+fn open_vault_role_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.open_vault_role_picker();
+    assert!(app.ui.vault_role_picker.open);
+    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.key_picker.open);
+    assert!(!app.ui.proxyjump_picker.open);
+    assert!(!app.ui.region_picker.open);
+}
+
+#[test]
+fn open_region_picker_does_not_touch_other_pickers() {
+    let mut app = make_app("");
+    app.open_region_picker();
+    assert!(app.ui.region_picker.open);
+    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.key_picker.open);
+    assert!(!app.ui.proxyjump_picker.open);
+    assert!(!app.ui.vault_role_picker.open);
+}

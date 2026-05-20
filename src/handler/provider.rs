@@ -715,15 +715,9 @@ pub(super) fn handle_provider_form_key(
         {
             let f = app.providers.form.focused_field;
             if f == crate::app::ProviderFormField::IdentityFile {
-                app.scan_keys();
-                app.ui.key_picker.open = true;
-                app.ui.key_picker.list = ratatui::widgets::ListState::default();
-                if !app.keys.list.is_empty() {
-                    app.ui.key_picker.list.select(Some(0));
-                }
+                app.open_key_picker();
             } else if f == crate::app::ProviderFormField::Regions {
-                app.ui.region_picker.open = true;
-                app.ui.region_picker.cursor = 0;
+                app.open_region_picker();
             }
         }
         KeyCode::Char(c) => {
