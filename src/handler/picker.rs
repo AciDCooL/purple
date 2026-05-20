@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, FormField};
+use crate::app::App;
 
 pub(super) fn handle_password_picker(app: &mut App, key: KeyEvent) {
     // Ctrl+D sets selected source as global default
@@ -45,24 +45,22 @@ pub(super) fn handle_password_picker(app: &mut App, key: KeyEvent) {
                     let is_custom_cmd = source.label == "Custom command";
                     let is_prefix = source.value.ends_with(':') || source.value.ends_with("//");
                     if is_none {
-                        app.forms.host.askpass = String::new();
-                        app.forms.host.sync_cursor_to_end();
+                        app.forms.host.apply_password_source(String::new(), false);
                         app.notify(crate::messages::PASSWORD_SOURCE_CLEARED);
                     } else if is_custom_cmd {
-                        app.forms.host.askpass = String::new();
-                        app.forms.host.focused_field = FormField::AskPass;
-                        app.forms.host.sync_cursor_to_end();
+                        app.forms.host.apply_password_source(String::new(), true);
                         app.notify(crate::messages::ASKPASS_CUSTOM_COMMAND_HINT);
                         needs_more_input = true;
                     } else if is_prefix {
-                        app.forms.host.askpass = source.value.to_string();
-                        app.forms.host.focused_field = FormField::AskPass;
-                        app.forms.host.sync_cursor_to_end();
+                        app.forms
+                            .host
+                            .apply_password_source(source.value.to_string(), true);
                         app.notify(crate::messages::complete_path(source.label));
                         needs_more_input = true;
                     } else {
-                        app.forms.host.askpass = source.value.to_string();
-                        app.forms.host.sync_cursor_to_end();
+                        app.forms
+                            .host
+                            .apply_password_source(source.value.to_string(), false);
                         app.notify(crate::messages::password_source_set(source.label));
                     }
                 }

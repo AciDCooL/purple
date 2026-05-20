@@ -160,7 +160,7 @@ pub struct App {
     pub tags: TagState,
 
     /// Host form and bulk tag editor scratch state.
-    pub forms: FormState,
+    pub(crate) forms: FormState,
 
     /// Connection history persisted to ~/.purple/history.
     pub history: ConnectionHistory,

@@ -146,7 +146,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // form_save_footer helper. Build manually but follow the same shape.
     let footer_area = design::render_overlay_footer(frame, block_area);
     if footer_area.y < form_area.y + form_area.height {
-        if app.forms.pending_discard_confirm {
+        if app.forms.is_discard_pending() {
             design::render_discard_prompt(frame, footer_area, app);
         } else {
             use crate::messages::footer as fl;

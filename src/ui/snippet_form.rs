@@ -63,7 +63,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // Footer below the block. Snippet form has only text fields, so the
     // dynamic save footer maps to FieldKind::Text (no Space hint).
     let footer_area = design::render_overlay_footer(frame, block_area);
-    if app.forms.pending_discard_confirm {
+    if app.forms.is_discard_pending() {
         design::render_discard_prompt(frame, footer_area, app);
     } else {
         design::form_save_footer(design::FormFooterMode::Expanded(design::FieldKind::Text))

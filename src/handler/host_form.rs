@@ -30,14 +30,14 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     }
 
     // Handle discard confirmation dialog via the shared confirm router.
-    if app.forms.pending_discard_confirm {
+    if app.forms.is_discard_pending() {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                app.forms.pending_discard_confirm = false;
+                app.forms.dismiss_discard_confirm();
                 app.close_host_form();
             }
             super::ConfirmAction::No => {
-                app.forms.pending_discard_confirm = false;
+                app.forms.dismiss_discard_confirm();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -47,7 +47,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             if app.host_form_is_dirty() {
-                app.forms.pending_discard_confirm = true;
+                app.forms.request_discard_confirm();
             } else {
                 app.close_host_form();
             }
@@ -161,24 +161,13 @@ fn maybe_smart_paste(app: &mut App) {
     let alias_value = app.forms.host.alias.clone();
     if quick_add::looks_like_target(&alias_value) {
         if let Ok(parsed) = quick_add::parse_target(&alias_value) {
-            // Only auto-fill if other fields are still at defaults
-            if app.forms.host.hostname.is_empty() {
-                app.forms.host.hostname = parsed.hostname.clone();
-            }
-            if app.forms.host.user.is_empty() && !parsed.user.is_empty() {
-                app.forms.host.user = parsed.user;
-            }
-            if app.forms.host.port == "22" && parsed.port != 22 {
-                app.forms.host.port = parsed.port.to_string();
-            }
-            // Generate a clean alias from the hostname
             let clean_alias = parsed
                 .hostname
                 .split('.')
                 .next()
                 .unwrap_or(&parsed.hostname)
                 .to_string();
-            app.forms.host.alias = clean_alias;
+            app.forms.host.apply_smart_paste(parsed, clean_alias);
             app.notify(crate::messages::SMART_PARSED);
             log::debug!(
                 "host_form: smart-paste parsed alias={} host={} user={} port={}",

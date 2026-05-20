@@ -123,7 +123,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // uniform confirm behavior.
     let footer_area = design::render_overlay_footer(frame, area);
     use crate::messages::footer as fl;
-    if app.forms.pending_discard_confirm {
+    if app.forms.is_discard_pending() {
         design::render_discard_prompt(frame, footer_area, app);
     } else {
         let f = if input_active {

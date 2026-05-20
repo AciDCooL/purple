@@ -1,3 +1,10 @@
+## 3.15.8 - 2026-05-20
+
+- change: Tighter form internals, sturdier picker handoffs.
+- change: Custom command and prefix selections in the password picker refocus the password field for your follow-up keystrokes.
+- change: Smart paste of `user@host:port` into the host form collapses four field writes into one cohesive update, keeping every value you have already typed intact.
+- change: Discard prompts across host, tunnel, snippet, provider and bulk-tag forms route through one shared lifecycle, so future tweaks land in one place.
+
 ## 3.15.7 - 2026-05-20
 
 - change: Tighter confirm and routing internals, with no UI changes.

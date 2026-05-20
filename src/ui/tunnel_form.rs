@@ -75,7 +75,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // footer maps Type -> Toggle and the rest -> Text. Single source of
     // truth via design::form_save_footer.
     let footer_area = design::render_overlay_footer(frame, block_area);
-    if app.forms.pending_discard_confirm {
+    if app.forms.is_discard_pending() {
         design::render_discard_prompt(frame, footer_area, app);
     } else {
         let kind = if app.tunnels.form.focused_field == TunnelFormField::Type {

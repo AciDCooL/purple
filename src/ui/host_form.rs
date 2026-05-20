@@ -214,7 +214,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // dynamic form-save footer reflects the focused field's kind (text /
     // toggle / picker) so users discover Space-pick on picker fields.
     let footer_area = design::render_overlay_footer(frame, block_area);
-    if app.forms.pending_discard_confirm {
+    if app.forms.is_discard_pending() {
         design::render_discard_prompt(frame, footer_area, app);
     } else {
         let mode = if !expanded {

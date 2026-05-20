@@ -522,7 +522,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
     // dynamic save footer reflects the focused field's kind so users discover
     // Space-toggle (VerifyTls/AutoSync) and Space-pick (IdentityFile/Regions).
     let footer_area = design::render_overlay_footer(frame, block_area);
-    if app.forms.pending_discard_confirm {
+    if app.forms.is_discard_pending() {
         design::render_discard_prompt(frame, footer_area, app);
     } else {
         let mode = if !expanded && visible_fields.len() < all_fields.len() {

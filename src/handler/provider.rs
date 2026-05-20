@@ -573,14 +573,14 @@ pub(super) fn handle_provider_form_key(
     let is_picker = |f: crate::app::ProviderFormField| f.is_picker(&provider_name);
 
     // Handle discard confirmation dialog via the shared confirm router.
-    if app.forms.pending_discard_confirm {
+    if app.forms.is_discard_pending() {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                app.forms.pending_discard_confirm = false;
+                app.forms.dismiss_discard_confirm();
                 app.close_provider_form();
             }
             super::ConfirmAction::No => {
-                app.forms.pending_discard_confirm = false;
+                app.forms.dismiss_discard_confirm();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -590,7 +590,7 @@ pub(super) fn handle_provider_form_key(
     match key.code {
         KeyCode::Esc => {
             if app.provider_form_is_dirty() {
-                app.forms.pending_discard_confirm = true;
+                app.forms.request_discard_confirm();
             } else {
                 app.close_provider_form();
             }

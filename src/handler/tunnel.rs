@@ -203,15 +203,15 @@ pub(super) fn handle_tunnel_form_key(app: &mut App, key: KeyEvent) {
     };
 
     // Handle discard confirmation dialog via the shared confirm router.
-    if app.forms.pending_discard_confirm {
+    if app.forms.is_discard_pending() {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                app.forms.pending_discard_confirm = false;
+                app.forms.dismiss_discard_confirm();
                 let return_to = tunnel_form_return_screen(app, &alias);
                 app.close_tunnel_form(return_to);
             }
             super::ConfirmAction::No => {
-                app.forms.pending_discard_confirm = false;
+                app.forms.dismiss_discard_confirm();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -221,7 +221,7 @@ pub(super) fn handle_tunnel_form_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             if app.tunnel_form_is_dirty() {
-                app.forms.pending_discard_confirm = true;
+                app.forms.request_discard_confirm();
             } else {
                 let return_to = tunnel_form_return_screen(app, &alias);
                 app.close_tunnel_form(return_to);

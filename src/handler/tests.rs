@@ -1661,6 +1661,10 @@ fn test_password_picker_select_custom() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
     assert_eq!(app.forms.host.askpass, "");
+    // Custom-command branch must refocus AskPass so the next keystroke
+    // lands in the askpass input, not whichever field had focus before
+    // the picker opened.
+    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
 }
 
 // --- Enter selects source: None (clears) ---
@@ -3859,7 +3863,7 @@ fn test_host_form_clean_esc_closes_immediately() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
 }
 
 #[test]
@@ -3872,7 +3876,7 @@ fn test_host_form_dirty_esc_shows_confirmation() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::AddHost));
-    assert!(app.forms.pending_discard_confirm);
+    assert!(app.forms.is_discard_pending());
 }
 
 #[test]
@@ -3900,7 +3904,7 @@ fn test_host_form_dirty_esc_n_stays() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert!(matches!(app.screen, Screen::AddHost));
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
 }
 
 #[test]
@@ -3913,7 +3917,7 @@ fn test_host_form_dirty_esc_other_key_ignored() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
-    assert!(app.forms.pending_discard_confirm); // still pending
+    assert!(app.forms.is_discard_pending()); // still pending
 }
 
 #[test]
@@ -3929,7 +3933,7 @@ fn test_tunnel_form_dirty_esc_shows_confirmation() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::TunnelForm { .. }));
-    assert!(app.forms.pending_discard_confirm);
+    assert!(app.forms.is_discard_pending());
 }
 
 #[test]
@@ -4106,7 +4110,7 @@ fn test_provider_form_clean_esc_with_baseline_closes() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::Providers));
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
 }
 
 #[test]
@@ -4117,7 +4121,7 @@ fn test_provider_form_dirty_esc_shows_confirmation() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
-    assert!(app.forms.pending_discard_confirm);
+    assert!(app.forms.is_discard_pending());
 }
 
 #[test]
@@ -4141,7 +4145,7 @@ fn test_provider_form_dirty_esc_n_stays() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
 }
 
 // --- Snippet form: dirty-check on Esc ---
@@ -4158,7 +4162,7 @@ fn test_snippet_form_clean_esc_with_baseline_closes() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
 }
 
 #[test]
@@ -4174,7 +4178,7 @@ fn test_snippet_form_dirty_esc_shows_confirmation() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::SnippetForm { .. }));
-    assert!(app.forms.pending_discard_confirm);
+    assert!(app.forms.is_discard_pending());
 }
 
 #[test]
@@ -4301,10 +4305,10 @@ fn test_snippet_form_dirty_esc_n_stays() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert!(matches!(app.screen, Screen::SnippetForm { .. }));
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
 }
 
-// Stray key on the discard prompt must NOT clear pending_discard_confirm.
+// Stray key on the discard prompt must NOT dismiss the discard confirm.
 // route_confirm_key's Ignored arm forbids a buggy refactor from letting any
 // keypress silently confirm or cancel the discard.
 #[test]
@@ -4321,7 +4325,7 @@ fn test_snippet_form_dirty_esc_other_key_ignored() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
     assert!(matches!(app.screen, Screen::SnippetForm { .. }));
-    assert!(app.forms.pending_discard_confirm);
+    assert!(app.forms.is_discard_pending());
 }
 
 // --- Tunnel form: dirty + y closes, dirty + n stays ---
@@ -4357,7 +4361,7 @@ fn test_tunnel_form_dirty_esc_n_stays() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert!(matches!(app.screen, Screen::TunnelForm { .. }));
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
 }
 
 // --- Tunnel delete: other key ignored ---
@@ -4387,7 +4391,7 @@ fn test_provider_form_dirty_esc_other_key_ignored() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
-    assert!(app.forms.pending_discard_confirm);
+    assert!(app.forms.is_discard_pending());
 }
 
 // --- Stale purge tests ---
@@ -7876,7 +7880,7 @@ fn bulk_editor_esc_with_dirty_shows_discard_then_confirms() {
     // Esc on dirty editor opens the discard prompt; editor stays open.
     handle_key_event(&mut app, key(KeyCode::Esc), &tx).unwrap();
     assert!(
-        app.forms.pending_discard_confirm,
+        app.forms.is_discard_pending(),
         "Esc on dirty editor must show discard prompt"
     );
     assert_eq!(
@@ -7888,7 +7892,7 @@ fn bulk_editor_esc_with_dirty_shows_discard_then_confirms() {
     handle_key_event(&mut app, key(KeyCode::Char('y')), &tx).unwrap();
     assert_eq!(app.screen, Screen::HostList);
     assert!(app.forms.bulk_tag_editor.rows.is_empty());
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
 }
 
 #[test]
@@ -7901,7 +7905,7 @@ fn bulk_editor_esc_when_clean_closes_immediately() {
     assert_eq!(app.screen, Screen::BulkTagEditor);
     handle_key_event(&mut app, key(KeyCode::Esc), &tx).unwrap();
     assert_eq!(app.screen, Screen::HostList);
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
 }
 
 #[test]
@@ -7922,9 +7926,9 @@ fn bulk_editor_esc_dirty_then_no_keeps_editor_open() {
     app.ui.bulk_tag_editor_state.select(Some(prod_row));
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Esc), &tx).unwrap();
-    assert!(app.forms.pending_discard_confirm);
+    assert!(app.forms.is_discard_pending());
     handle_key_event(&mut app, key(KeyCode::Char('n')), &tx).unwrap();
-    assert!(!app.forms.pending_discard_confirm);
+    assert!(!app.forms.is_discard_pending());
     assert_eq!(app.screen, Screen::BulkTagEditor);
     assert!(app.forms.bulk_tag_editor.is_dirty(), "Changes preserved");
 }

@@ -342,6 +342,39 @@ impl HostForm {
         self.cursor_pos = self.focused_value().chars().count();
     }
 
+    /// Absorb a password-source selection from the password picker. Sets
+    /// `askpass` to `value`, optionally moves focus to the AskPass field
+    /// when the user must type extra characters (custom command or prefix
+    /// completion), and parks the cursor at the end of the askpass value
+    /// regardless of which field currently has focus.
+    pub fn apply_password_source(&mut self, value: String, refocus_askpass: bool) {
+        self.askpass = value;
+        if refocus_askpass {
+            self.focused_field = FormField::AskPass;
+        }
+        self.cursor_pos = self.askpass.chars().count();
+    }
+
+    /// Fill parsed `user@host:port` fields into the form, skipping any
+    /// field already at non-default state. Alias is always overwritten
+    /// with the caller-supplied short form.
+    pub fn apply_smart_paste(
+        &mut self,
+        parsed: crate::quick_add::ParsedTarget,
+        clean_alias: String,
+    ) {
+        if self.hostname.is_empty() {
+            self.hostname = parsed.hostname;
+        }
+        if self.user.is_empty() && !parsed.user.is_empty() {
+            self.user = parsed.user;
+        }
+        if self.port == "22" && parsed.port != 22 {
+            self.port = parsed.port.to_string();
+        }
+        self.alias = clean_alias;
+    }
+
     /// Run lightweight validation on the focused field and update `form_hint`.
     pub fn update_hint(&mut self) {
         self.form_hint = match self.focused_field {
@@ -1342,5 +1375,130 @@ impl SnippetParamFormState {
             let default = p.default.as_deref().unwrap_or("");
             self.values[i] != default
         })
+    }
+}
+
+#[cfg(test)]
+mod host_form_method_tests {
+    use super::*;
+    use crate::quick_add::ParsedTarget;
+
+    #[test]
+    fn apply_password_source_sets_value_and_keeps_focus_when_refocus_false() {
+        let mut f = HostForm::new();
+        f.focused_field = FormField::Alias;
+        f.apply_password_source("vault:secret/ssh#pw".to_string(), false);
+        assert_eq!(f.askpass, "vault:secret/ssh#pw");
+        assert_eq!(f.focused_field, FormField::Alias);
+        assert_eq!(f.cursor_pos, "vault:secret/ssh#pw".chars().count());
+    }
+
+    #[test]
+    fn apply_password_source_moves_focus_to_askpass_when_refocus_true() {
+        let mut f = HostForm::new();
+        f.focused_field = FormField::Hostname;
+        f.apply_password_source("op://Vault/Item/pw".to_string(), true);
+        assert_eq!(f.askpass, "op://Vault/Item/pw");
+        assert_eq!(f.focused_field, FormField::AskPass);
+        assert_eq!(f.cursor_pos, "op://Vault/Item/pw".chars().count());
+    }
+
+    #[test]
+    fn apply_password_source_clears_askpass_with_empty_value() {
+        let mut f = HostForm::new();
+        f.askpass = "old".into();
+        f.focused_field = FormField::AskPass;
+        f.apply_password_source(String::new(), false);
+        assert_eq!(f.askpass, "");
+        assert_eq!(f.cursor_pos, 0);
+    }
+
+    #[test]
+    fn apply_smart_paste_fills_empty_fields_and_overwrites_alias() {
+        let mut f = HostForm::new();
+        f.alias = "user@host:2222".into();
+        let parsed = ParsedTarget {
+            user: "alice".into(),
+            hostname: "db.example.com".into(),
+            port: 2222,
+        };
+        f.apply_smart_paste(parsed, "db".into());
+        assert_eq!(f.alias, "db");
+        assert_eq!(f.hostname, "db.example.com");
+        assert_eq!(f.user, "alice");
+        assert_eq!(f.port, "2222");
+    }
+
+    #[test]
+    fn apply_smart_paste_does_not_overwrite_non_empty_hostname() {
+        let mut f = HostForm::new();
+        f.hostname = "existing.com".into();
+        let parsed = ParsedTarget {
+            user: "u".into(),
+            hostname: "parsed.com".into(),
+            port: 22,
+        };
+        f.apply_smart_paste(parsed, "x".into());
+        assert_eq!(f.hostname, "existing.com");
+    }
+
+    #[test]
+    fn apply_smart_paste_does_not_overwrite_non_empty_user() {
+        let mut f = HostForm::new();
+        f.user = "bob".into();
+        let parsed = ParsedTarget {
+            user: "alice".into(),
+            hostname: "host".into(),
+            port: 22,
+        };
+        f.apply_smart_paste(parsed, "x".into());
+        assert_eq!(f.user, "bob");
+    }
+
+    #[test]
+    fn apply_smart_paste_keeps_default_port_when_parsed_port_is_default() {
+        let mut f = HostForm::new();
+        let parsed = ParsedTarget {
+            user: "u".into(),
+            hostname: "h".into(),
+            port: 22,
+        };
+        f.apply_smart_paste(parsed, "x".into());
+        assert_eq!(f.port, "22");
+    }
+
+    #[test]
+    fn apply_smart_paste_does_not_overwrite_user_when_parsed_user_is_empty() {
+        let mut f = HostForm::new();
+        let parsed = ParsedTarget {
+            user: String::new(),
+            hostname: "h".into(),
+            port: 22,
+        };
+        f.apply_smart_paste(parsed, "x".into());
+        assert_eq!(f.user, "");
+    }
+
+    #[test]
+    fn apply_smart_paste_keeps_user_custom_port_even_when_parsed_port_differs() {
+        let mut f = HostForm::new();
+        f.port = "8022".into();
+        let parsed = ParsedTarget {
+            user: "u".into(),
+            hostname: "h".into(),
+            port: 2222,
+        };
+        f.apply_smart_paste(parsed, "x".into());
+        assert_eq!(f.port, "8022");
+    }
+
+    #[test]
+    fn apply_password_source_empty_value_with_refocus_moves_focus_and_zeros_cursor() {
+        let mut f = HostForm::new();
+        f.focused_field = FormField::Hostname;
+        f.apply_password_source(String::new(), true);
+        assert_eq!(f.askpass, "");
+        assert_eq!(f.focused_field, FormField::AskPass);
+        assert_eq!(f.cursor_pos, 0);
     }
 }

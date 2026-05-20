@@ -14,18 +14,18 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     }
 
     // Discard confirmation: when the user pressed Esc on a dirty editor, the
-    // main handler set `pending_discard_confirm` and re-rendered with the
+    // main handler armed the discard-confirm dialog and re-rendered with the
     // discard footer. Route the next keypress through the central confirm
     // router (uniform with form discard prompts elsewhere).
-    if app.forms.pending_discard_confirm {
+    if app.forms.is_discard_pending() {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                app.forms.pending_discard_confirm = false;
+                app.forms.dismiss_discard_confirm();
                 app.set_screen(Screen::HostList);
                 app.forms.bulk_tag_editor = BulkTagEditorState::default();
             }
             super::ConfirmAction::No => {
-                app.forms.pending_discard_confirm = false;
+                app.forms.dismiss_discard_confirm();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -38,7 +38,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             // deciding add/remove per row across N hosts). Warn before
             // discarding.
             if app.forms.bulk_tag_editor.is_dirty() {
-                app.forms.pending_discard_confirm = true;
+                app.forms.request_discard_confirm();
             } else {
                 app.set_screen(Screen::HostList);
                 app.forms.bulk_tag_editor = BulkTagEditorState::default();
