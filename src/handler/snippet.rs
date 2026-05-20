@@ -468,19 +468,19 @@ pub(super) fn handle_param_form_key(
         None => return,
     };
 
-    // Handle discard confirmation dialog
+    // Handle discard confirmation dialog via the shared confirm router.
     if app.forms.pending_discard_confirm {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
                 app.forms.pending_discard_confirm = false;
                 app.snippets.param_form = None;
                 app.snippets.pending_terminal = false;
                 app.set_screen(Screen::SnippetPicker { target_aliases });
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            super::ConfirmAction::No => {
                 app.forms.pending_discard_confirm = false;
             }
-            _ => {}
+            super::ConfirmAction::Ignored => {}
         }
         return;
     }
@@ -559,17 +559,17 @@ pub(super) fn handle_form_key(app: &mut App, key: KeyEvent) {
         _ => return,
     };
 
-    // Handle discard confirmation dialog
+    // Handle discard confirmation dialog via the shared confirm router.
     if app.forms.pending_discard_confirm {
-        match key.code {
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
+        match super::route_confirm_key(key) {
+            super::ConfirmAction::Yes => {
                 app.forms.pending_discard_confirm = false;
                 app.close_snippet_form(target_aliases.clone());
             }
-            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            super::ConfirmAction::No => {
                 app.forms.pending_discard_confirm = false;
             }
-            _ => {}
+            super::ConfirmAction::Ignored => {}
         }
         return;
     }
@@ -747,6 +747,77 @@ mod param_form_tests {
         handle_param_form_key(&mut app, k(KeyCode::Char('i')), &tx);
         let state = app.snippets.param_form.as_ref().expect("form state");
         assert_eq!(state.values[0], "hi");
+    }
+
+    fn make_dirty_app() -> App {
+        let mut app = make_app();
+        let params = vec![crate::snippet::SnippetParam {
+            name: "name".to_string(),
+            default: None,
+        }];
+        app.snippets.param_form = Some(SnippetParamFormState::new(&params));
+        if let Screen::SnippetParamForm { snippet, .. } = &mut app.screen {
+            snippet.command = "echo {{name}}".to_string();
+        }
+        app.snippets
+            .param_form
+            .as_mut()
+            .expect("form state")
+            .insert_char('x');
+        // Pre-set pending_terminal so the y-branch reset is observable;
+        // without this the assertion in discard_confirm_y_... would pass
+        // vacuously against the default false value.
+        app.snippets.pending_terminal = true;
+        app
+    }
+
+    #[test]
+    fn dirty_esc_arms_discard_confirmation() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_dirty_app();
+        let (tx, _rx) = mpsc::channel();
+        handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
+        assert!(app.forms.pending_discard_confirm);
+        assert!(matches!(app.screen, Screen::SnippetParamForm { .. }));
+    }
+
+    #[test]
+    fn discard_confirm_y_closes_form_and_returns_to_picker() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_dirty_app();
+        let (tx, _rx) = mpsc::channel();
+        handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
+        handle_param_form_key(&mut app, k(KeyCode::Char('y')), &tx);
+        assert!(!app.forms.pending_discard_confirm);
+        assert!(app.snippets.param_form.is_none());
+        assert!(!app.snippets.pending_terminal);
+        assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+    }
+
+    #[test]
+    fn discard_confirm_n_clears_pending_and_keeps_form() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_dirty_app();
+        let (tx, _rx) = mpsc::channel();
+        handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
+        handle_param_form_key(&mut app, k(KeyCode::Char('n')), &tx);
+        assert!(!app.forms.pending_discard_confirm);
+        assert!(app.snippets.param_form.is_some());
+        assert!(matches!(app.screen, Screen::SnippetParamForm { .. }));
+    }
+
+    // Pins the route_confirm_key Ignored contract: a stray key must NOT
+    // silently cancel the discard prompt (no false positive on Yes, no
+    // false negative on No that would drop pending_discard_confirm).
+    #[test]
+    fn discard_confirm_unrelated_key_keeps_pending() {
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_dirty_app();
+        let (tx, _rx) = mpsc::channel();
+        handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
+        handle_param_form_key(&mut app, k(KeyCode::Char('x')), &tx);
+        assert!(app.forms.pending_discard_confirm);
+        assert!(app.snippets.param_form.is_some());
     }
 }
 

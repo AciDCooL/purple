@@ -4223,6 +4223,26 @@ fn test_snippet_form_dirty_esc_n_stays() {
     assert!(!app.forms.pending_discard_confirm);
 }
 
+// Stray key on the discard prompt must NOT clear pending_discard_confirm.
+// route_confirm_key's Ignored arm forbids a buggy refactor from letting any
+// keypress silently confirm or cancel the discard.
+#[test]
+fn test_snippet_form_dirty_esc_other_key_ignored() {
+    let mut app = make_snippet_app();
+    app.snippets.form = crate::app::SnippetForm::new();
+    app.screen = Screen::SnippetForm {
+        target_aliases: vec!["myserver".to_string()],
+        editing: None,
+    };
+    app.capture_snippet_form_baseline();
+    app.snippets.form.command = "changed".to_string();
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
+    assert!(matches!(app.screen, Screen::SnippetForm { .. }));
+    assert!(app.forms.pending_discard_confirm);
+}
+
 // --- Tunnel form: dirty + y closes, dirty + n stays ---
 
 #[test]
