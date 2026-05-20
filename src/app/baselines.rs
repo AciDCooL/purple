@@ -5,6 +5,10 @@
 use crate::app::App;
 use crate::app::Screen;
 use crate::app::reload_state::{get_mtime, snapshot_include_dir_mtimes, snapshot_include_mtimes};
+use crate::app::{HostForm, SnippetForm, TunnelForm};
+use crate::snippet::Snippet;
+use crate::ssh_config::model::PatternEntry;
+use crate::tunnel::TunnelRule;
 
 /// Baseline snapshot of host form content for dirty-check on Esc.
 #[derive(Clone)]
@@ -171,6 +175,192 @@ impl App {
         );
         self.snippets.form_baseline = None;
         self.set_screen(Screen::SnippetPicker { target_aliases });
+    }
+
+    /// Open a blank host add form. Mirror is `close_host_form`.
+    pub fn open_host_add_form(&mut self) {
+        log::debug!("[purple] open_host_add_form");
+        self.forms.host = HostForm::new();
+        self.set_screen(Screen::AddHost);
+        self.capture_form_mtime();
+        self.capture_form_baseline();
+    }
+
+    /// Open a blank pattern add form. Shares Screen::AddHost; the form
+    /// constructor distinguishes pattern vs host entries internally.
+    pub fn open_host_pattern_add_form(&mut self) {
+        log::debug!("[purple] open_host_pattern_add_form");
+        self.forms.host = HostForm::new_pattern();
+        self.set_screen(Screen::AddHost);
+        self.capture_form_mtime();
+        self.capture_form_baseline();
+    }
+
+    /// Open an edit form for an existing pattern entry.
+    pub fn open_host_pattern_edit_form(&mut self, pattern: &PatternEntry) {
+        log::debug!(
+            "[purple] open_host_pattern_edit_form pattern={}",
+            pattern.pattern
+        );
+        self.forms.host = HostForm::from_pattern_entry(pattern);
+        self.set_screen(Screen::EditHost {
+            alias: pattern.pattern.clone(),
+        });
+        self.capture_form_mtime();
+        self.capture_form_baseline();
+    }
+
+    /// Open a blank tunnel add form scoped to `alias`. The alias is set on
+    /// the screen variant so submit/cancel return to the right host context.
+    pub fn open_tunnel_add_form(&mut self, alias: String) {
+        log::debug!("[purple] open_tunnel_add_form alias={}", alias);
+        self.tunnels.form = TunnelForm::new();
+        self.set_screen(Screen::TunnelForm {
+            alias,
+            editing: None,
+        });
+        self.capture_form_mtime();
+        self.capture_tunnel_form_baseline();
+    }
+
+    /// Open an edit form for an existing tunnel rule. `editing` is the index
+    /// into `tunnels.list` that the save path mutates.
+    pub fn open_tunnel_edit_form(&mut self, alias: String, rule: &TunnelRule, editing: usize) {
+        log::debug!(
+            "[purple] open_tunnel_edit_form alias={} editing={}",
+            alias,
+            editing
+        );
+        self.tunnels.form = TunnelForm::from_rule(rule);
+        self.set_screen(Screen::TunnelForm {
+            alias,
+            editing: Some(editing),
+        });
+        self.capture_form_mtime();
+        self.capture_tunnel_form_baseline();
+    }
+
+    /// Open a blank snippet add form scoped to the given target aliases.
+    /// No mtime capture (snippet forms have no mtime tracking).
+    pub fn open_snippet_add_form(&mut self, target_aliases: Vec<String>) {
+        log::debug!(
+            "[purple] open_snippet_add_form aliases={}",
+            target_aliases.len()
+        );
+        self.snippets.form = SnippetForm::new();
+        self.set_screen(Screen::SnippetForm {
+            target_aliases,
+            editing: None,
+        });
+        self.capture_snippet_form_baseline();
+    }
+
+    /// Open an edit form for an existing snippet. `editing` is the index
+    /// into the snippet store that the save path mutates.
+    pub fn open_snippet_edit_form(
+        &mut self,
+        snippet: &Snippet,
+        target_aliases: Vec<String>,
+        editing: usize,
+    ) {
+        log::debug!(
+            "[purple] open_snippet_edit_form name={} editing={}",
+            snippet.name,
+            editing
+        );
+        self.snippets.form = SnippetForm::from_snippet(snippet);
+        self.set_screen(Screen::SnippetForm {
+            target_aliases,
+            editing: Some(editing),
+        });
+        self.capture_snippet_form_baseline();
+    }
+
+    /// Open a provider form for `id`, populating defaults for new configs
+    /// or existing data for edits. When `id.label` is `Some("")` the form
+    /// opens in label-entry mode so the user types the label first.
+    pub fn open_provider_form(&mut self, id: crate::providers::config::ProviderConfigId) {
+        let provider_impl = crate::providers::get_provider(id.provider.as_str());
+        let short_label = provider_impl
+            .as_ref()
+            .map(|p| p.short_label().to_string())
+            .unwrap_or_else(|| id.provider.clone());
+        let existing_section = self.providers.config.section_by_id(&id).cloned();
+        let label_entry = existing_section.is_none() && id.label.as_deref() == Some("");
+        let provider_first_field =
+            crate::app::ProviderFormField::fields_for(id.provider.as_str())[0];
+        let first_field = if label_entry {
+            crate::app::ProviderFormField::Label
+        } else {
+            provider_first_field
+        };
+        log::debug!(
+            "[purple] open_provider_form provider={} label_entry={}",
+            id.provider,
+            label_entry
+        );
+
+        self.providers.form = if let Some(section) = existing_section {
+            let cursor_pos = match first_field {
+                crate::app::ProviderFormField::Url => section.url.chars().count(),
+                crate::app::ProviderFormField::Token => section.token.chars().count(),
+                _ => 0,
+            };
+            crate::app::ProviderFormFields {
+                label: String::new(),
+                label_entry: false,
+                url: section.url.clone(),
+                token: section.token.clone(),
+                profile: section.profile.clone(),
+                project: section.project.clone(),
+                compartment: section.compartment.clone(),
+                regions: section.regions.clone(),
+                alias_prefix: section.alias_prefix.clone(),
+                user: section.user.clone(),
+                identity_file: section.identity_file.clone(),
+                verify_tls: section.verify_tls,
+                auto_sync: section.auto_sync,
+                vault_role: section.vault_role.clone(),
+                vault_addr: section.vault_addr.clone(),
+                focused_field: first_field,
+                cursor_pos,
+                expanded: true,
+            }
+        } else {
+            // New config: derive a sensible default alias_prefix. For a labeled
+            // config with a known label, suggest `<short>-<label>` (e.g. `do-work`);
+            // when the label is still empty (label-entry mode), fall back to the
+            // bare short prefix so the field has a stable value the user can edit.
+            let default_prefix = match id.label.as_deref() {
+                Some("") | None => short_label.clone(),
+                Some(l) => format!("{}-{}", short_label, l),
+            };
+            crate::app::ProviderFormFields {
+                label: String::new(),
+                label_entry,
+                url: String::new(),
+                token: String::new(),
+                profile: String::new(),
+                project: String::new(),
+                compartment: String::new(),
+                regions: String::new(),
+                alias_prefix: default_prefix,
+                user: "root".to_string(),
+                identity_file: String::new(),
+                verify_tls: true,
+                auto_sync: id
+                    .kind()
+                    .is_none_or(crate::providers::ProviderKind::default_auto_sync),
+                vault_role: String::new(),
+                vault_addr: String::new(),
+                focused_field: first_field,
+                cursor_pos: 0,
+                expanded: false,
+            }
+        };
+        self.set_screen(Screen::ProviderForm { id });
+        self.capture_provider_form_mtime();
+        self.capture_provider_form_baseline();
     }
 
     /// Capture a baseline snapshot of the tunnel form for dirty-check on Esc.

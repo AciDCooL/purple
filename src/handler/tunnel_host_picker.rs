@@ -67,15 +67,9 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             let Some((alias, _)) = filtered_hosts(app).into_iter().nth(idx) else {
                 return;
             };
-            app.tunnels.form = crate::app::TunnelForm::new();
             app.ui.tunnel_host_picker_state.select(None);
             app.ui.tunnel_host_picker_query.clear();
-            app.set_screen(Screen::TunnelForm {
-                alias,
-                editing: None,
-            });
-            app.capture_form_mtime();
-            app.capture_tunnel_form_baseline();
+            app.open_tunnel_add_form(alias);
         }
         KeyCode::Backspace => {
             // Mirror the jump: Backspace on an empty query

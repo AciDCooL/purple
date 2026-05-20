@@ -305,13 +305,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                 app.notify_warning(crate::messages::TUNNEL_NOT_FOUND);
                 return;
             };
-            app.tunnels.form = crate::app::TunnelForm::from_rule(&rule);
-            app.set_screen(Screen::TunnelForm {
-                alias,
-                editing: Some(idx),
-            });
-            app.capture_form_mtime();
-            app.capture_tunnel_form_baseline();
+            app.open_tunnel_edit_form(alias, &rule, idx);
         }
         KeyCode::Char('d') => {
             let Some(sel) = app.ui.tunnels_overview_state.selected() else {

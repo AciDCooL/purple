@@ -2,7 +2,7 @@ use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, HostForm, Screen, ViewMode};
+use crate::app::{App, Screen, ViewMode};
 use crate::clipboard;
 use crate::event::AppEvent;
 use crate::preferences;
@@ -175,16 +175,10 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             }
         }
         KeyCode::Char('a') => {
-            app.forms.host = HostForm::new();
-            app.set_screen(Screen::AddHost);
-            app.capture_form_mtime();
-            app.capture_form_baseline();
+            app.open_host_add_form();
         }
         KeyCode::Char('A') => {
-            app.forms.host = HostForm::new_pattern();
-            app.set_screen(Screen::AddHost);
-            app.capture_form_mtime();
-            app.capture_form_baseline();
+            app.open_host_pattern_add_form();
         }
         KeyCode::Char('e') => {
             if let Some(pattern) = app.selected_pattern().cloned() {
@@ -192,12 +186,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     app.notify_error(crate::messages::included_file_edit(&pattern.pattern));
                     return;
                 }
-                app.forms.host = HostForm::from_pattern_entry(&pattern);
-                app.set_screen(Screen::EditHost {
-                    alias: pattern.pattern,
-                });
-                app.capture_form_mtime();
-                app.capture_form_baseline();
+                app.open_host_pattern_edit_form(&pattern);
             } else if let Some(host) = app.selected_host().cloned() {
                 super::host_form::open_edit_form(app, host);
             }

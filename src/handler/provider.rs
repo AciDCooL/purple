@@ -4,7 +4,7 @@ use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, ProviderFormFields, Screen};
+use crate::app::{App, Screen};
 use crate::event::AppEvent;
 use crate::providers;
 use crate::providers::ProviderKind;
@@ -175,7 +175,7 @@ pub(super) fn handle_provider_list_key(
                     }
                     crate::app::ProviderRow::Leaf { id } => id.clone(),
                 };
-                open_provider_form(app, target_id);
+                app.open_provider_form(target_id);
             }
         }
         KeyCode::Char('s') => {
@@ -339,93 +339,6 @@ pub(super) fn handle_provider_list_key(
     }
 }
 
-/// Pre-fill the provider form for the given config and switch to it.
-/// If the id matches an existing section, the form starts in edit mode;
-/// otherwise it starts blank with provider-appropriate defaults.
-///
-/// Label-entry mode (issue #51) activates when `id.label` is `Some("")` AND
-/// no section exists at `id`. That state is reached only from the
-/// `open_add_config_flow` "1+ labeled already" branch, where the user has not
-/// yet chosen a label for the new config. The form prepends the `Label` field,
-/// focuses it, and on submit writes the typed value into `form_id.label`
-/// before persisting. Migration (label already chosen), bare add, and edits
-/// all keep `label_entry` false so the label is sourced from the screen id.
-fn open_provider_form(app: &mut App, id: crate::providers::config::ProviderConfigId) {
-    let provider_impl = providers::get_provider(id.provider.as_str());
-    let short_label = provider_impl
-        .as_ref()
-        .map(|p| p.short_label().to_string())
-        .unwrap_or_else(|| id.provider.clone());
-    let existing_section = app.providers.config.section_by_id(&id).cloned();
-    let label_entry = existing_section.is_none() && id.label.as_deref() == Some("");
-    let provider_first_field = crate::app::ProviderFormField::fields_for(id.provider.as_str())[0];
-    let first_field = if label_entry {
-        crate::app::ProviderFormField::Label
-    } else {
-        provider_first_field
-    };
-
-    app.providers.form = if let Some(section) = existing_section {
-        let cursor_pos = match first_field {
-            crate::app::ProviderFormField::Url => section.url.chars().count(),
-            crate::app::ProviderFormField::Token => section.token.chars().count(),
-            _ => 0,
-        };
-        ProviderFormFields {
-            label: String::new(),
-            label_entry: false,
-            url: section.url.clone(),
-            token: section.token.clone(),
-            profile: section.profile.clone(),
-            project: section.project.clone(),
-            compartment: section.compartment.clone(),
-            regions: section.regions.clone(),
-            alias_prefix: section.alias_prefix.clone(),
-            user: section.user.clone(),
-            identity_file: section.identity_file.clone(),
-            verify_tls: section.verify_tls,
-            auto_sync: section.auto_sync,
-            vault_role: section.vault_role.clone(),
-            vault_addr: section.vault_addr.clone(),
-            focused_field: first_field,
-            cursor_pos,
-            expanded: true,
-        }
-    } else {
-        // New config: derive a sensible default alias_prefix. For a labeled
-        // config with a known label, suggest `<short>-<label>` (e.g. `do-work`);
-        // when the label is still empty (label-entry mode), fall back to the
-        // bare short prefix so the field has a stable value the user can edit.
-        let default_prefix = match id.label.as_deref() {
-            Some("") | None => short_label.clone(),
-            Some(l) => format!("{}-{}", short_label, l),
-        };
-        ProviderFormFields {
-            label: String::new(),
-            label_entry,
-            url: String::new(),
-            token: String::new(),
-            profile: String::new(),
-            project: String::new(),
-            compartment: String::new(),
-            regions: String::new(),
-            alias_prefix: default_prefix,
-            user: "root".to_string(),
-            identity_file: String::new(),
-            verify_tls: true,
-            auto_sync: id.kind().is_none_or(ProviderKind::default_auto_sync),
-            vault_role: String::new(),
-            vault_addr: String::new(),
-            focused_field: first_field,
-            cursor_pos: 0,
-            expanded: false,
-        }
-    };
-    app.set_screen(Screen::ProviderForm { id });
-    app.capture_provider_form_mtime();
-    app.capture_provider_form_baseline();
-}
-
 /// Step 1 of the lazy add-second-config flow: pick labels for the existing
 /// (bare) config AND the new one. On Enter, validate both and transition
 /// to step 2 (the standard provider form). On Esc, drop pending state.
@@ -554,10 +467,10 @@ pub fn handle_label_migration_key(
             // Move on to step 2: the standard provider form, pre-keyed to
             // the new labeled id. submit_provider_form will pick up
             // pending_label_migration to also rewrite the existing section.
-            open_provider_form(
-                app,
-                crate::providers::config::ProviderConfigId::labeled(provider.clone(), new),
-            );
+            app.open_provider_form(crate::providers::config::ProviderConfigId::labeled(
+                provider.clone(),
+                new,
+            ));
         }
         _ => {}
     }
@@ -571,10 +484,9 @@ fn open_add_config_flow(app: &mut App, provider_name: &str) {
     let existing = app.providers.config.sections_for_provider(provider_name);
     match existing.len() {
         0 => {
-            open_provider_form(
-                app,
-                crate::providers::config::ProviderConfigId::bare(provider_name),
-            );
+            app.open_provider_form(crate::providers::config::ProviderConfigId::bare(
+                provider_name,
+            ));
         }
         1 if existing[0].id.label.is_none() => {
             // Lazy migration: existing config is bare. Prompt for both
@@ -599,13 +511,10 @@ fn open_add_config_flow(app: &mut App, provider_name: &str) {
         _ => {
             // One or more labeled configs already exist: open the form with
             // an empty label so the user can fill it in.
-            open_provider_form(
-                app,
-                crate::providers::config::ProviderConfigId {
-                    provider: provider_name.to_string(),
-                    label: Some(String::new()),
-                },
-            );
+            app.open_provider_form(crate::providers::config::ProviderConfigId {
+                provider: provider_name.to_string(),
+                label: Some(String::new()),
+            });
         }
     }
 }
@@ -1318,7 +1227,7 @@ mod labeled_add_tests {
         app.providers
             .config
             .set_section(proxmox_section(Some("server1")));
-        open_provider_form(&mut app, ProviderConfigId::labeled("proxmox", "server1"));
+        app.open_provider_form(ProviderConfigId::labeled("proxmox", "server1"));
         assert!(!app.providers.form.label_entry);
         assert_ne!(
             app.providers.form.focused_field,

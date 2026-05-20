@@ -96,13 +96,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                     return;
                 }
             }
-            app.tunnels.form = crate::app::TunnelForm::new();
-            app.set_screen(Screen::TunnelForm {
-                alias: alias.clone(),
-                editing: None,
-            });
-            app.capture_form_mtime();
-            app.capture_tunnel_form_baseline();
+            app.open_tunnel_add_form(alias.clone());
         }
         KeyCode::Char('e') => {
             // Check if host is from an included file (read-only)
@@ -113,14 +107,8 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                 }
             }
             if let Some(sel) = app.ui.tunnel_list_state.selected() {
-                if let Some(rule) = app.tunnels.list.get(sel) {
-                    app.tunnels.form = crate::app::TunnelForm::from_rule(rule);
-                    app.set_screen(Screen::TunnelForm {
-                        alias: alias.clone(),
-                        editing: Some(sel),
-                    });
-                    app.capture_form_mtime();
-                    app.capture_tunnel_form_baseline();
+                if let Some(rule) = app.tunnels.list.get(sel).cloned() {
+                    app.open_tunnel_edit_form(alias.clone(), &rule, sel);
                 }
             }
         }

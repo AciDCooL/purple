@@ -229,6 +229,241 @@ fn close_tunnel_form_clears_state_and_returns_to_passed_screen() {
 }
 
 #[test]
+fn open_host_forms_initialize_state() {
+    // Add host: form is HostForm::new(), screen = AddHost, mtime + baseline captured.
+    let mut app = make_app("");
+    std::fs::write(&app.hosts_state.ssh_config.path, "").expect("write empty config");
+    app.open_host_add_form();
+    assert!(matches!(app.screen, Screen::AddHost));
+    assert!(
+        app.forms.host_baseline.is_some(),
+        "baseline must be captured"
+    );
+    assert!(app.conflict.form_mtime.is_some(), "mtime must be captured");
+
+    // Add pattern: same screen, baseline + mtime still captured.
+    let mut app = make_app("");
+    std::fs::write(&app.hosts_state.ssh_config.path, "").expect("write empty config");
+    app.open_host_pattern_add_form();
+    assert!(matches!(app.screen, Screen::AddHost));
+    assert!(app.forms.host_baseline.is_some());
+    assert!(app.conflict.form_mtime.is_some());
+
+    // Edit pattern: screen = EditHost { alias }, form populated from entry.
+    let content = "Host pat-*\n  User foo\n";
+    let mut app = make_app(content);
+    std::fs::write(&app.hosts_state.ssh_config.path, content).expect("write config");
+    app.hosts_state.patterns = app.hosts_state.ssh_config.pattern_entries();
+    let pattern = app
+        .hosts_state
+        .patterns
+        .first()
+        .cloned()
+        .expect("pattern parsed from content");
+    app.open_host_pattern_edit_form(&pattern);
+    match &app.screen {
+        Screen::EditHost { alias } => assert_eq!(alias, "pat-*"),
+        other => panic!("expected EditHost, got {:?}", other),
+    }
+    assert!(app.forms.host_baseline.is_some());
+    assert!(app.conflict.form_mtime.is_some());
+}
+
+#[test]
+fn open_tunnel_forms_initialize_state() {
+    let content = "Host a\n  HostName 1.2.3.4\n";
+
+    // Add tunnel: screen = TunnelForm { alias, editing: None }, baseline + mtime captured.
+    let mut app = make_app(content);
+    std::fs::write(&app.hosts_state.ssh_config.path, content).expect("write config");
+    app.open_tunnel_add_form("a".to_string());
+    match &app.screen {
+        Screen::TunnelForm { alias, editing } => {
+            assert_eq!(alias, "a");
+            assert!(editing.is_none(), "add: editing must be None");
+        }
+        other => panic!("expected TunnelForm, got {:?}", other),
+    }
+    assert!(app.tunnels.form_baseline.is_some());
+    assert!(app.conflict.form_mtime.is_some());
+
+    // Edit tunnel: editing = Some(index), form populated from rule.
+    let mut app = make_app(content);
+    std::fs::write(&app.hosts_state.ssh_config.path, content).expect("write config");
+    let rule = crate::tunnel::TunnelRule {
+        tunnel_type: TunnelType::Local,
+        bind_address: String::new(),
+        bind_port: 8080,
+        remote_host: "localhost".to_string(),
+        remote_port: 80,
+    };
+    app.open_tunnel_edit_form("a".to_string(), &rule, 3);
+    match &app.screen {
+        Screen::TunnelForm { alias, editing } => {
+            assert_eq!(alias, "a");
+            assert_eq!(*editing, Some(3));
+        }
+        other => panic!("expected TunnelForm, got {:?}", other),
+    }
+    // Pin that rule data actually flows through TunnelForm::from_rule.
+    // Without these, a silent drop in from_rule would not be caught.
+    assert_eq!(app.tunnels.form.bind_port, "8080");
+    assert_eq!(app.tunnels.form.remote_host, "localhost");
+    assert_eq!(app.tunnels.form.remote_port, "80");
+    assert!(app.tunnels.form_baseline.is_some());
+    assert!(app.conflict.form_mtime.is_some());
+}
+
+#[test]
+fn open_provider_form_initializes_state_for_all_modes() {
+    use crate::providers::config::ProviderConfigId;
+
+    // Bare new digitalocean: blank form, short-label alias_prefix, auto_sync
+    // takes the kind default (digitalocean defaults to true).
+    let mut app = make_app("");
+    app.open_provider_form(ProviderConfigId::bare("digitalocean"));
+    match &app.screen {
+        Screen::ProviderForm { id } => assert_eq!(id.provider, "digitalocean"),
+        other => panic!("expected ProviderForm, got {:?}", other),
+    }
+    assert!(app.providers.form_baseline.is_some());
+    assert!(!app.providers.form.label_entry, "bare add: label_entry off");
+    assert!(app.providers.form.url.is_empty(), "bare add: blank url");
+    assert_eq!(
+        app.providers.form.alias_prefix, "do",
+        "bare add: alias_prefix falls back to short_label"
+    );
+    assert!(
+        app.providers.form.auto_sync,
+        "bare digitalocean add: auto_sync default is true"
+    );
+
+    // Bare new proxmox: different auto_sync default to prove the value
+    // comes from ProviderKind::default_auto_sync, not a constant.
+    let mut app = make_app("");
+    app.open_provider_form(ProviderConfigId::bare("proxmox"));
+    assert!(
+        !app.providers.form.auto_sync,
+        "bare proxmox add: auto_sync default is false"
+    );
+
+    // Labeled add with empty label: label_entry mode activates, alias_prefix
+    // still falls back to short_label because the label is empty.
+    let mut app = make_app("");
+    app.open_provider_form(ProviderConfigId {
+        provider: "digitalocean".to_string(),
+        label: Some(String::new()),
+    });
+    assert!(
+        app.providers.form.label_entry,
+        "empty-label add: label_entry must be ON"
+    );
+    assert_eq!(
+        app.providers.form.focused_field,
+        crate::app::ProviderFormField::Label
+    );
+    assert_eq!(
+        app.providers.form.alias_prefix, "do",
+        "empty-label add: alias_prefix uses short_label fallback"
+    );
+    assert!(app.providers.form_baseline.is_some());
+
+    // Labeled add with non-empty label: alias_prefix becomes <short>-<label>.
+    let mut app = make_app("");
+    app.open_provider_form(ProviderConfigId::labeled("digitalocean", "prod"));
+    assert_eq!(
+        app.providers.form.alias_prefix, "do-prod",
+        "labeled add: alias_prefix concatenates short_label and label"
+    );
+    assert!(
+        !app.providers.form.label_entry,
+        "labeled add with value: label_entry stays off"
+    );
+
+    // Edit existing: form populated from section, label_entry stays off.
+    let mut app = make_app("");
+    app.providers
+        .config
+        .set_section(crate::providers::config::ProviderSection {
+            id: ProviderConfigId::bare("digitalocean"),
+            token: "secret-token".to_string(),
+            alias_prefix: "do".to_string(),
+            user: "root".to_string(),
+            identity_file: String::new(),
+            url: String::new(),
+            verify_tls: true,
+            auto_sync: true,
+            profile: String::new(),
+            regions: String::new(),
+            project: String::new(),
+            compartment: String::new(),
+            vault_role: String::new(),
+            vault_addr: String::new(),
+        });
+    app.open_provider_form(ProviderConfigId::bare("digitalocean"));
+    assert_eq!(app.providers.form.token, "secret-token");
+    assert_eq!(app.providers.form.alias_prefix, "do");
+    assert!(
+        app.providers.form.expanded,
+        "edit must open with expanded=true"
+    );
+    assert!(!app.providers.form.label_entry, "edit: label_entry off");
+}
+
+#[test]
+fn open_snippet_forms_initialize_state_without_mtime() {
+    let aliases = vec!["a".to_string(), "b".to_string()];
+
+    // Add snippet: baseline captured, target_aliases preserved, NO mtime.
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
+    app.open_snippet_add_form(aliases.clone());
+    match &app.screen {
+        Screen::SnippetForm {
+            target_aliases,
+            editing,
+        } => {
+            assert_eq!(target_aliases, &aliases);
+            assert!(editing.is_none(), "add: editing must be None");
+        }
+        other => panic!("expected SnippetForm, got {:?}", other),
+    }
+    assert!(app.snippets.form_baseline.is_some());
+    // Pin the divergence: snippet open does NOT capture mtime.
+    assert!(
+        app.conflict.form_mtime.is_none(),
+        "snippet open must NOT capture mtime"
+    );
+
+    // Edit snippet: editing = Some(idx), form populated from snippet.
+    let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
+    let snippet = crate::snippet::Snippet {
+        name: "deploy".to_string(),
+        command: "echo hi".to_string(),
+        description: "test snippet".to_string(),
+    };
+    app.open_snippet_edit_form(&snippet, aliases.clone(), 5);
+    match &app.screen {
+        Screen::SnippetForm {
+            target_aliases,
+            editing,
+        } => {
+            assert_eq!(target_aliases, &aliases);
+            assert_eq!(*editing, Some(5));
+        }
+        other => panic!("expected SnippetForm, got {:?}", other),
+    }
+    // Pin that snippet data flows through SnippetForm::from_snippet.
+    assert_eq!(app.snippets.form.name, "deploy");
+    assert_eq!(app.snippets.form.command, "echo hi");
+    assert_eq!(app.snippets.form.description, "test snippet");
+    assert!(app.snippets.form_baseline.is_some());
+    assert!(
+        app.conflict.form_mtime.is_none(),
+        "snippet open must NOT capture mtime"
+    );
+}
+
+#[test]
 fn close_snippet_form_clears_state_and_returns_to_picker_with_aliases() {
     let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
     app.capture_snippet_form_baseline();

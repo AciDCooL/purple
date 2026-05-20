@@ -104,22 +104,12 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
             );
         }
         KeyCode::Char('a') => {
-            app.snippets.form = crate::app::SnippetForm::new();
-            app.set_screen(Screen::SnippetForm {
-                target_aliases: target_aliases.clone(),
-                editing: None,
-            });
-            app.capture_snippet_form_baseline();
+            app.open_snippet_add_form(target_aliases.clone());
         }
         KeyCode::Char('e') => {
             if let Some(sel) = app.ui.snippet_picker_state.selected() {
-                if let Some(snippet) = app.snippets.store.snippets.get(sel) {
-                    app.snippets.form = crate::app::SnippetForm::from_snippet(snippet);
-                    app.set_screen(Screen::SnippetForm {
-                        target_aliases: target_aliases.clone(),
-                        editing: Some(sel),
-                    });
-                    app.capture_snippet_form_baseline();
+                if let Some(snippet) = app.snippets.store.snippets.get(sel).cloned() {
+                    app.open_snippet_edit_form(&snippet, target_aliases.clone(), sel);
                 }
             }
         }
