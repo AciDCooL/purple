@@ -166,7 +166,7 @@ pub struct App {
     pub history: ConnectionHistory,
 
     /// Provider configs, sync runs, host conflict resolution.
-    pub providers: ProviderState,
+    pub(crate) providers: ProviderState,
 
     /// Ping/health-check state per host.
     pub(crate) ping: PingState,

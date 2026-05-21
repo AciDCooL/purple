@@ -216,6 +216,41 @@ impl ProviderState {
             self.sync_had_errors = false;
         }
     }
+
+    /// Open a delete confirmation for a provider config. `pending_delete`
+    /// carries the bare provider name for the renderer; `pending_delete_id`
+    /// carries the full id (including optional label) used by the confirm
+    /// handler to scope the removal to a single config when the provider
+    /// has multiple labeled configs.
+    pub fn request_delete(&mut self, id: ProviderConfigId) {
+        self.pending_delete = Some(id.provider.clone());
+        self.pending_delete_id = Some(id);
+    }
+
+    /// Dismiss a pending provider delete confirmation. Idempotent.
+    pub fn cancel_delete(&mut self) {
+        self.pending_delete = None;
+        self.pending_delete_id = None;
+    }
+
+    /// Toggle the expanded state of a provider group in the tree-style
+    /// provider list. Returns `true` when the provider is now expanded
+    /// (was added) and `false` when it is now collapsed (was removed)
+    /// so the caller can log the transition without re-reading state.
+    pub fn toggle_expanded(&mut self, name: &str) -> bool {
+        let added = !self.expanded_providers.contains(name);
+        if added {
+            self.expanded_providers.insert(name.to_string());
+        } else {
+            self.expanded_providers.remove(name);
+        }
+        added
+    }
+
+    /// Dismiss an in-progress lazy label-migration. Idempotent.
+    pub fn cancel_label_migration(&mut self) {
+        self.pending_label_migration = None;
+    }
 }
 
 impl Default for ProviderState {
@@ -406,5 +441,95 @@ mod tests {
 
         let names = state.sorted_names();
         assert!(names.iter().any(|n| n == "someday_provider"));
+    }
+
+    #[test]
+    fn request_delete_sets_both_pending_fields() {
+        let mut s = ProviderState::default();
+        let id = crate::providers::config::ProviderConfigId::bare("digitalocean");
+        s.request_delete(id.clone());
+        assert_eq!(s.pending_delete.as_deref(), Some("digitalocean"));
+        assert_eq!(s.pending_delete_id.as_ref(), Some(&id));
+    }
+
+    #[test]
+    fn request_delete_with_labeled_id_keeps_provider_name_in_pending_delete() {
+        let mut s = ProviderState::default();
+        let id = crate::providers::config::ProviderConfigId::labeled("digitalocean", "work");
+        s.request_delete(id.clone());
+        // pending_delete carries only the provider name; the full id with
+        // label is in pending_delete_id.
+        assert_eq!(s.pending_delete.as_deref(), Some("digitalocean"));
+        assert_eq!(s.pending_delete_id.as_ref(), Some(&id));
+    }
+
+    #[test]
+    fn request_delete_overwrites_existing_pending() {
+        let mut s = ProviderState::default();
+        s.request_delete(crate::providers::config::ProviderConfigId::bare("vultr"));
+        let new_id = crate::providers::config::ProviderConfigId::bare("hetzner");
+        s.request_delete(new_id.clone());
+        assert_eq!(s.pending_delete.as_deref(), Some("hetzner"));
+        assert_eq!(s.pending_delete_id.as_ref(), Some(&new_id));
+    }
+
+    #[test]
+    fn cancel_delete_clears_both_pending_fields() {
+        let mut s = ProviderState::default();
+        s.request_delete(crate::providers::config::ProviderConfigId::bare("vultr"));
+        s.cancel_delete();
+        assert!(s.pending_delete.is_none());
+        assert!(s.pending_delete_id.is_none());
+    }
+
+    #[test]
+    fn cancel_delete_is_idempotent() {
+        let mut s = ProviderState::default();
+        s.cancel_delete();
+        s.cancel_delete();
+        assert!(s.pending_delete.is_none());
+        assert!(s.pending_delete_id.is_none());
+    }
+
+    #[test]
+    fn toggle_expanded_adds_when_absent_and_returns_true() {
+        let mut s = ProviderState::default();
+        assert!(!s.expanded_providers.contains("digitalocean"));
+        let added = s.toggle_expanded("digitalocean");
+        assert!(added);
+        assert!(s.expanded_providers.contains("digitalocean"));
+    }
+
+    #[test]
+    fn toggle_expanded_removes_when_present_and_returns_false() {
+        let mut s = ProviderState::default();
+        s.expanded_providers.insert("digitalocean".to_string());
+        let added = s.toggle_expanded("digitalocean");
+        assert!(!added);
+        assert!(!s.expanded_providers.contains("digitalocean"));
+    }
+
+    #[test]
+    fn cancel_label_migration_clears_pending() {
+        let mut s = ProviderState {
+            pending_label_migration: Some(PendingLabelMigration {
+                provider: "digitalocean".to_string(),
+                existing_label: "old".to_string(),
+                new_label: "new".to_string(),
+                focused: LabelMigrationField::Existing,
+                cursor_pos: 0,
+            }),
+            ..Default::default()
+        };
+        s.cancel_label_migration();
+        assert!(s.pending_label_migration.is_none());
+    }
+
+    #[test]
+    fn cancel_label_migration_is_idempotent_when_already_none() {
+        let mut s = ProviderState::default();
+        s.cancel_label_migration();
+        s.cancel_label_migration();
+        assert!(s.pending_label_migration.is_none());
     }
 }

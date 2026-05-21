@@ -75,8 +75,7 @@ pub(super) fn handle_provider_list_key(
                 }
             }
             super::ConfirmAction::No => {
-                app.providers.pending_delete = None;
-                app.providers.pending_delete_id = None;
+                app.providers.cancel_delete();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -115,13 +114,16 @@ pub(super) fn handle_provider_list_key(
                 {
                     if *config_count >= 2 {
                         let n = name.clone();
-                        if app.providers.expanded_providers.contains(&n) {
-                            app.providers.expanded_providers.remove(&n);
-                            log::debug!("provider tree: collapsed '{}'", n);
-                        } else {
-                            log::debug!("provider tree: expanded '{}'", n);
-                            app.providers.expanded_providers.insert(n);
-                        }
+                        let now_expanded = app.providers.toggle_expanded(&n);
+                        log::debug!(
+                            "provider tree: {} '{}'",
+                            if now_expanded {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            },
+                            n
+                        );
                     }
                 }
             }
@@ -147,13 +149,16 @@ pub(super) fn handle_provider_list_key(
                 // Multi-config header: Enter toggles expand/collapse.
                 if let crate::app::ProviderRow::Header { name, config_count } = &row {
                     if *config_count >= 2 {
-                        if app.providers.expanded_providers.contains(name) {
-                            app.providers.expanded_providers.remove(name);
-                            log::debug!("provider tree: collapsed '{}'", name);
-                        } else {
-                            log::debug!("provider tree: expanded '{}'", name);
-                            app.providers.expanded_providers.insert(name.clone());
-                        }
+                        let now_expanded = app.providers.toggle_expanded(name);
+                        log::debug!(
+                            "provider tree: {} '{}'",
+                            if now_expanded {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            },
+                            name
+                        );
                         return;
                     }
                 }
@@ -243,8 +248,7 @@ pub(super) fn handle_provider_list_key(
             match &row {
                 crate::app::ProviderRow::Leaf { id } => {
                     if app.providers.config.section_by_id(id).is_some() {
-                        app.providers.pending_delete_id = Some(id.clone());
-                        app.providers.pending_delete = Some(id.provider.clone());
+                        app.providers.request_delete(id.clone());
                     }
                 }
                 crate::app::ProviderRow::Header { name, config_count } => {
@@ -258,8 +262,7 @@ pub(super) fn handle_provider_list_key(
                     } else {
                         // Single config: scope the confirm to that exact id.
                         if let Some(section) = app.providers.config.section(name) {
-                            app.providers.pending_delete_id = Some(section.id.clone());
-                            app.providers.pending_delete = Some(name.clone());
+                            app.providers.request_delete(section.id.clone());
                         }
                     }
                 }
@@ -353,7 +356,7 @@ pub fn handle_label_migration_key(
     };
     match key.code {
         KeyCode::Esc => {
-            app.providers.pending_label_migration = None;
+            app.providers.cancel_label_migration();
             app.set_screen(Screen::Providers);
         }
         KeyCode::Tab | KeyCode::Down => {
@@ -994,7 +997,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         }
         // Drop pending migration state on failure too, so a retry doesn't
         // pick up half-applied input.
-        app.providers.pending_label_migration = None;
+        app.providers.cancel_label_migration();
         app.notify_error(crate::messages::failed_to_save(&e));
         return;
     }
@@ -1021,7 +1024,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         }
         log::debug!("provider lazy migration: completed for '{}'", provider_name);
     }
-    app.providers.pending_label_migration = None;
+    app.providers.cancel_label_migration();
 
     let display_name = crate::providers::provider_display_name(provider_name.as_str());
 
