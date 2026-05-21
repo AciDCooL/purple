@@ -148,15 +148,9 @@ fn cancel_push_if_running(app: &mut App) {
         done,
         total
     );
-    app.keys.push.results.clear();
-    app.keys.push.expected_count = 0;
-    app.keys.push.cancel = None;
-    app.keys.push.selected.clear();
-    // Bump run_id so any KeyPushResult event still in flight from the
-    // cancelled worker is dropped on arrival (run_id mismatch), instead
-    // of getting silently dropped only because expected_count is zero.
-    // Two layers of defence makes the invariant easier to reason about.
-    app.keys.push.run_id = app.keys.push.run_id.wrapping_add(1);
+    // Clear accumulators and bump run_id so any KeyPushResult event still
+    // in flight from the cancelled worker is dropped on arrival.
+    app.keys.push.cancel_run();
     // Drop the progress toast through the status-center invariant so the
     // cancel message is unambiguously the latest status.
     app.status_center.clear_sticky_status();

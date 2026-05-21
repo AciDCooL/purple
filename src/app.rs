@@ -154,7 +154,7 @@ pub struct App {
     pub conflict: ConflictState,
 
     /// Keys-tab state: discovered keys, push runs, activity log.
-    pub keys: KeysState,
+    pub(crate) keys: KeysState,
 
     /// Tag library and per-host tag mappings.
     pub tags: TagState,

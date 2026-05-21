@@ -66,6 +66,58 @@ impl KeyPushState {
         self.selected.clear();
         self.list_state.select(Some(0));
     }
+
+    /// Begin a new push run. Clears the result accumulator, sets the
+    /// expected host count, bumps the monotonic run_id (so any stale
+    /// KeyPushResult events from a cancelled previous run can be dropped),
+    /// constructs a fresh cancel flag and stores it on state. Returns the
+    /// new run_id together with the cancel handle so the spawned worker
+    /// can share it.
+    pub fn start_run(&mut self, expected: usize) -> (u64, Arc<AtomicBool>) {
+        self.results.clear();
+        self.expected_count = expected;
+        self.run_id = self.run_id.wrapping_add(1);
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.cancel = Some(cancel.clone());
+        (self.run_id, cancel)
+    }
+
+    /// Completion path. The worker loop has finished naturally; clear the
+    /// accumulators and join the worker handle. Safe to call when the
+    /// worker has already exited.
+    pub fn finish_run(&mut self) {
+        self.results.clear();
+        self.expected_count = 0;
+        self.selected.clear();
+        self.cancel = None;
+        if let Some(handle) = self.worker.take() {
+            let _ = handle.join();
+        }
+    }
+
+    /// User-cancel path. The cancel flag is dropped, accumulators are
+    /// cleared, and run_id is bumped so in-flight KeyPushResult events
+    /// from the cancelled worker arrive with a stale run_id and are
+    /// dropped. The worker handle is intentionally NOT joined here so
+    /// the UI does not block while the thread observes the cancel flag.
+    pub fn cancel_run(&mut self) {
+        self.results.clear();
+        self.expected_count = 0;
+        self.cancel = None;
+        self.selected.clear();
+        self.run_id = self.run_id.wrapping_add(1);
+    }
+
+    /// Failure recovery after a failed worker spawn. Drops the cancel
+    /// handle, zeroes the expected count, and clears the worker slot.
+    /// Distinct from `finish_run`: the worker handle is None here (spawn
+    /// failed), and the result accumulator is left intact for any caller
+    /// that may want to surface it in the error path.
+    pub fn clear_inflight_state(&mut self) {
+        self.cancel = None;
+        self.expected_count = 0;
+        self.worker = None;
+    }
 }
 
 #[cfg(test)]
@@ -146,5 +198,173 @@ mod tests {
         // Should not panic when called on an empty state.
         s.shutdown();
         s.shutdown();
+    }
+
+    #[test]
+    fn start_run_clears_results_sets_expected_and_stores_cancel() {
+        let mut s = KeyPushState::default();
+        s.results.push(crate::key_push::KeyPushResult {
+            alias: "old".into(),
+            outcome: crate::key_push::KeyPushOutcome::Appended,
+        });
+
+        let (_run_id, cancel) = s.start_run(4);
+
+        assert!(s.results.is_empty());
+        assert_eq!(s.expected_count, 4);
+        assert!(s.cancel.is_some());
+        // Returned cancel arc points to the same flag stored on state.
+        cancel.store(true, Ordering::Relaxed);
+        assert!(s.cancel.as_ref().unwrap().load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn start_run_bumps_run_id_and_returns_it() {
+        let mut s = KeyPushState {
+            run_id: 41,
+            ..Default::default()
+        };
+        let (run_id, _cancel) = s.start_run(1);
+        assert_eq!(run_id, 42);
+        assert_eq!(s.run_id, 42);
+    }
+
+    #[test]
+    fn start_run_preserves_picker_state_and_committed() {
+        let mut s = KeyPushState::default();
+        s.selected.insert("host-a".into());
+        s.committed = vec!["host-a".into(), "host-b".into()];
+        s.list_state.select(Some(2));
+
+        let _ = s.start_run(2);
+
+        assert!(s.selected.contains("host-a"));
+        assert_eq!(s.committed, vec!["host-a".to_string(), "host-b".into()]);
+        assert_eq!(s.list_state.selected(), Some(2));
+    }
+
+    #[test]
+    fn finish_run_clears_run_accumulators() {
+        let mut s = KeyPushState {
+            expected_count: 5,
+            cancel: Some(Arc::new(AtomicBool::new(false))),
+            ..Default::default()
+        };
+        s.selected.insert("h".into());
+        s.results.push(crate::key_push::KeyPushResult {
+            alias: "h".into(),
+            outcome: crate::key_push::KeyPushOutcome::Appended,
+        });
+
+        s.finish_run();
+
+        assert!(s.results.is_empty());
+        assert_eq!(s.expected_count, 0);
+        assert!(s.selected.is_empty());
+        assert!(s.cancel.is_none());
+    }
+
+    #[test]
+    fn finish_run_joins_worker_and_takes_handle() {
+        let mut s = KeyPushState::default();
+        let handle = std::thread::spawn(|| {});
+        s.worker = Some(handle);
+        s.finish_run();
+        assert!(s.worker.is_none(), "worker handle should be taken");
+    }
+
+    #[test]
+    fn finish_run_preserves_committed_and_list_state() {
+        let mut s = KeyPushState::default();
+        s.committed = vec!["host-a".into()];
+        s.list_state.select(Some(3));
+
+        s.finish_run();
+
+        assert_eq!(s.committed, vec!["host-a".to_string()]);
+        assert_eq!(s.list_state.selected(), Some(3));
+    }
+
+    #[test]
+    fn cancel_run_clears_accumulators_and_bumps_run_id() {
+        let mut s = KeyPushState {
+            expected_count: 3,
+            run_id: 10,
+            cancel: Some(Arc::new(AtomicBool::new(false))),
+            ..Default::default()
+        };
+        s.selected.insert("h".into());
+        s.results.push(crate::key_push::KeyPushResult {
+            alias: "h".into(),
+            outcome: crate::key_push::KeyPushOutcome::Appended,
+        });
+
+        s.cancel_run();
+
+        assert!(s.results.is_empty());
+        assert_eq!(s.expected_count, 0);
+        assert!(s.cancel.is_none());
+        assert!(s.selected.is_empty());
+        assert_eq!(s.run_id, 11);
+    }
+
+    #[test]
+    fn cancel_run_preserves_worker_handle() {
+        // Cancel is async via the cancel flag; the worker thread drains
+        // itself. We must not block the UI on join here.
+        let mut s = KeyPushState::default();
+        let handle = std::thread::spawn(|| {});
+        s.worker = Some(handle);
+        s.cancel_run();
+        assert!(s.worker.is_some(), "cancel must not take the worker handle");
+        // Clean up for the test harness.
+        if let Some(h) = s.worker.take() {
+            let _ = h.join();
+        }
+    }
+
+    #[test]
+    fn clear_inflight_state_drops_cancel_expected_count_worker() {
+        let mut s = KeyPushState {
+            expected_count: 7,
+            cancel: Some(Arc::new(AtomicBool::new(false))),
+            ..Default::default()
+        };
+        // Channel-based blocking thread so clear_inflight_state can drop
+        // the JoinHandle without leaving a detached thread spinning in
+        // the test harness. drop(tx) at the end signals the thread to
+        // exit cleanly via the rx disconnect.
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || {
+            let _ = rx.recv();
+        });
+        s.worker = Some(handle);
+
+        s.clear_inflight_state();
+
+        assert_eq!(s.expected_count, 0);
+        assert!(s.cancel.is_none());
+        assert!(s.worker.is_none());
+
+        drop(tx);
+    }
+
+    #[test]
+    fn clear_inflight_state_preserves_committed_run_id_and_results() {
+        let mut s = KeyPushState {
+            run_id: 9,
+            ..Default::default()
+        };
+        s.committed = vec!["host".into()];
+        s.results.push(crate::key_push::KeyPushResult {
+            alias: "host".into(),
+            outcome: crate::key_push::KeyPushOutcome::Appended,
+        });
+
+        s.clear_inflight_state();
+
+        assert_eq!(s.run_id, 9);
+        assert_eq!(s.committed, vec!["host".to_string()]);
+        assert_eq!(s.results.len(), 1);
     }
 }

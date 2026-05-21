@@ -112,13 +112,7 @@ fn finalize_key_push(app: &mut App) {
     }
 
     // Reset push state for the next run.
-    app.keys.push.results.clear();
-    app.keys.push.expected_count = 0;
-    app.keys.push.selected.clear();
-    app.keys.push.cancel = None;
-    if let Some(handle) = app.keys.push.worker.take() {
-        let _ = handle.join();
-    }
+    app.keys.push.finish_run();
 }
 
 #[cfg(test)]

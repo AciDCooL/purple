@@ -850,14 +850,8 @@ fn start_key_push(
         }
     };
 
-    // Reset accumulators for this run.
-    app.keys.push.results.clear();
-    app.keys.push.expected_count = aliases.len();
-    app.keys.push.run_id = app.keys.push.run_id.wrapping_add(1);
-    let run_id = app.keys.push.run_id;
-
-    let cancel = Arc::new(AtomicBool::new(false));
-    app.keys.push.cancel = Some(cancel.clone());
+    // Reset accumulators and start a new run.
+    let (run_id, cancel) = app.keys.push.start_run(aliases.len());
 
     app.notify_progress(crate::messages::key_push_in_progress(
         &key_info.name,
@@ -893,9 +887,7 @@ fn start_key_push(
             // failure message.
             app.status_center.clear_sticky_status();
             app.notify_error(crate::messages::key_push_thread_spawn_failed());
-            app.keys.push.cancel = None;
-            app.keys.push.expected_count = 0;
-            app.keys.push.worker = None;
+            app.keys.push.clear_inflight_state();
         }
     }
 }
