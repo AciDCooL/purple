@@ -497,7 +497,7 @@ pub(super) fn handle_host_key_reset_key(app: &mut App, key: KeyEvent) {
                     if app.demo_mode {
                         app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
                     } else {
-                        app.ui.pending_connect = Some((alias, askpass));
+                        app.ui.queue_connect(alias, askpass);
                     }
                 }
                 Ok(result) => {

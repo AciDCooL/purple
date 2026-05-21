@@ -145,7 +145,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
                     return;
                 }
-                app.ui.pending_connect = Some((alias, askpass));
+                app.ui.queue_connect(alias, askpass);
             }
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -713,7 +713,7 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
                     app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
                     return;
                 }
-                app.ui.pending_connect = Some((alias, askpass));
+                app.ui.queue_connect(alias, askpass);
             }
         }
         KeyCode::Down | KeyCode::Tab => {

@@ -24,9 +24,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             if let Some(original) = app.ui.theme_picker.original.take() {
                 crate::ui::theme::set_theme(original);
             }
-            app.ui.theme_picker.builtins = Vec::new();
-            app.ui.theme_picker.custom = Vec::new();
-            app.ui.theme_picker.saved_name = String::new();
+            app.ui.theme_picker.reset();
             app.set_screen(Screen::HostList);
         }
         KeyCode::Char('?') => {
@@ -71,9 +69,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                 }
                 crate::ui::theme::set_theme(theme);
             }
-            app.ui.theme_picker.builtins = Vec::new();
-            app.ui.theme_picker.custom = Vec::new();
-            app.ui.theme_picker.saved_name = String::new();
+            app.ui.theme_picker.reset();
             app.ui.theme_picker.original = None;
             app.set_screen(Screen::HostList);
         }

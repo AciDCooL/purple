@@ -145,7 +145,7 @@ pub struct App {
     /// Toast queue, sticky messages, status routing.
     pub status_center: StatusCenter,
     /// Cursor reveal, detail-toggle, welcome timestamps and overlay meta.
-    pub ui: UiSelection,
+    pub(crate) ui: UiSelection,
     /// Host-list incremental search query and matched hits.
     pub search: SearchState,
     /// Reload-from-disk state when ~/.ssh/config changes externally.

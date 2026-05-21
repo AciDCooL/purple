@@ -76,12 +76,12 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
 
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
-            app.ui.snippet_search = None;
+            app.ui.close_snippet_search();
             app.snippets.cancel_delete();
             app.set_screen(Screen::HostList);
         }
         KeyCode::Char('/') => {
-            app.ui.snippet_search = Some(String::new());
+            app.ui.open_snippet_search();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             app.select_next_snippet();
@@ -386,7 +386,7 @@ pub(super) fn handle_snippet_picker_search(
 ) {
     match key.code {
         KeyCode::Esc => {
-            app.ui.snippet_search = None;
+            app.ui.close_snippet_search();
             // Restore selection to full list
             if !app.snippets.store.snippets.is_empty()
                 && app.ui.snippet_picker_state.selected().is_none()
@@ -400,7 +400,7 @@ pub(super) fn handle_snippet_picker_search(
                 if sel < filtered.len() {
                     let real_idx = filtered[sel];
                     if let Some(snippet) = app.snippets.store.snippets.get(real_idx).cloned() {
-                        app.ui.snippet_search = None;
+                        app.ui.close_snippet_search();
                         run_or_prompt_params(
                             app,
                             snippet,
@@ -422,7 +422,7 @@ pub(super) fn handle_snippet_picker_search(
             if let Some(ref mut query) = app.ui.snippet_search {
                 query.pop();
                 if query.is_empty() {
-                    app.ui.snippet_search = None;
+                    app.ui.close_snippet_search();
                     if !app.snippets.store.snippets.is_empty() {
                         app.ui.snippet_picker_state.select(Some(0));
                     }

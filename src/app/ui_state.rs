@@ -100,4 +100,137 @@ impl UiSelection {
         }
         s
     }
+
+    /// Queue an SSH connect for the event loop to pick up via the next
+    /// `pending_connect.take()`. `askpass` carries the resolved per-host
+    /// password source so the event loop can prepare a SSH_ASKPASS env
+    /// before spawning the child.
+    pub fn queue_connect(&mut self, alias: String, askpass: Option<String>) {
+        self.pending_connect = Some((alias, askpass));
+    }
+
+    /// Enter snippet picker search mode with an empty query.
+    pub fn open_snippet_search(&mut self) {
+        self.snippet_search = Some(String::new());
+    }
+
+    /// Exit snippet picker search mode. Idempotent.
+    pub fn close_snippet_search(&mut self) {
+        self.snippet_search = None;
+    }
+}
+
+impl ThemePickerState {
+    /// Clear the catalogue lists and the saved-name input. Used by both
+    /// picker-close paths. The `list` cursor and `original` are
+    /// intentionally NOT touched here. The two callers handle `original`
+    /// differently: the Esc/q path consumes it via `.take()` before
+    /// calling reset (to restore the prior live theme); the Enter-save
+    /// path leaves `original` intact through reset and clears it
+    /// explicitly afterwards. Keeping `reset` orthogonal to `original`
+    /// lets both flows share the same body.
+    pub fn reset(&mut self) {
+        self.builtins = Vec::new();
+        self.custom = Vec::new();
+        self.saved_name = String::new();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queue_connect_sets_pending_connect_to_some() {
+        let mut s = UiSelection::default();
+        s.queue_connect("web1".into(), Some("vault:foo".into()));
+        assert_eq!(
+            s.pending_connect,
+            Some(("web1".to_string(), Some("vault:foo".to_string())))
+        );
+    }
+
+    #[test]
+    fn queue_connect_with_no_askpass_stores_none() {
+        let mut s = UiSelection::default();
+        s.queue_connect("web1".into(), None);
+        assert_eq!(s.pending_connect, Some(("web1".to_string(), None)));
+    }
+
+    #[test]
+    fn queue_connect_overwrites_existing_pending() {
+        let mut s = UiSelection::default();
+        s.queue_connect("first".into(), None);
+        s.queue_connect("second".into(), Some("p".into()));
+        assert_eq!(
+            s.pending_connect,
+            Some(("second".to_string(), Some("p".to_string())))
+        );
+    }
+
+    #[test]
+    fn open_snippet_search_sets_empty_query() {
+        let mut s = UiSelection::default();
+        s.open_snippet_search();
+        assert_eq!(s.snippet_search.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn open_snippet_search_overwrites_existing_query_with_empty() {
+        // The handler currently calls open only when search was inactive,
+        // but the invariant should still hold: open is unconditional and
+        // resets to an empty query. Pin the reset semantic so a future
+        // caller cannot rely on a preserved query.
+        let mut s = UiSelection {
+            snippet_search: Some("old".to_string()),
+            ..Default::default()
+        };
+        s.open_snippet_search();
+        assert_eq!(s.snippet_search.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn close_snippet_search_clears_query() {
+        let mut s = UiSelection {
+            snippet_search: Some("query".to_string()),
+            ..Default::default()
+        };
+        s.close_snippet_search();
+        assert!(s.snippet_search.is_none());
+    }
+
+    #[test]
+    fn close_snippet_search_is_idempotent() {
+        let mut s = UiSelection::default();
+        s.close_snippet_search();
+        s.close_snippet_search();
+        assert!(s.snippet_search.is_none());
+    }
+
+    #[test]
+    fn theme_picker_reset_clears_lists_and_saved_name() {
+        let mut t = ThemePickerState {
+            builtins: vec![ThemeDef::purple_purple()],
+            custom: vec![ThemeDef::purple_purple(), ThemeDef::purple_purple()],
+            saved_name: "Solarized".to_string(),
+            ..Default::default()
+        };
+        t.reset();
+        assert!(t.builtins.is_empty());
+        assert!(t.custom.is_empty());
+        assert!(t.saved_name.is_empty());
+    }
+
+    #[test]
+    fn theme_picker_reset_preserves_original_and_list_cursor() {
+        let mut t = ThemePickerState {
+            builtins: vec![ThemeDef::purple_purple()],
+            original: Some(ThemeDef::purple_purple()),
+            ..Default::default()
+        };
+        t.list.select(Some(2));
+        t.reset();
+        assert!(t.original.is_some(), "original must survive reset()");
+        assert_eq!(t.list.selected(), Some(2));
+    }
 }
