@@ -1,3 +1,11 @@
+## 3.15.9 - 2026-05-21
+
+- feat: Sturdier delete, toggle and picker internals across the app.
+- change: Cancel out of any delete confirmation, on hosts, tunnels, snippets or providers, and the state lands cleanly every time.
+- change: Multi-select, view-mode and group-by toggles stay consistent so your filters and selections never drift mid-action.
+- change: Key push and provider label flows recover from cancel and failure without leaking state into the next attempt.
+- change: Snippet search and theme picker close share the same teardown so a stray Esc no longer leaves stale state behind.
+
 ## 3.15.8 - 2026-05-20
 
 - change: Tighter form internals, sturdier picker handoffs.
