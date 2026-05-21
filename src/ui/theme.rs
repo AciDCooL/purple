@@ -26,7 +26,7 @@ pub struct ColorSlot {
 }
 
 impl ColorSlot {
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             truecolor: None,
             ansi16: None,

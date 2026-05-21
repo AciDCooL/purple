@@ -41,7 +41,7 @@ const UPTIME_W: usize = 8;
 /// handler can resolve cursor-relative actions against the same
 /// sequence the UI renders.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct ContainerRow {
+pub struct ContainerRow {
     /// Full docker/podman container ID. Used by the handler to key the
     /// inspect cache and as the `<id>` argument to `docker inspect`.
     pub id: String,
@@ -99,7 +99,7 @@ fn current_unix_secs() -> u64 {
 /// no headers. Mirrors `HostListItem::GroupHeader` from the hosts
 /// tab so the design conventions stay aligned across surfaces.
 #[derive(Clone, Debug)]
-pub(crate) enum ContainerListItem {
+pub enum ContainerListItem {
     HostHeader {
         alias: String,
         total: usize,

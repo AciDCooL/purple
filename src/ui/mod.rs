@@ -7,7 +7,7 @@ pub(crate) mod container_host_picker;
 pub(crate) mod container_logs;
 pub(crate) mod containers;
 pub(crate) mod containers_overview;
-pub(crate) mod design;
+pub mod design;
 mod detail_panel;
 mod file_browser;
 mod help;

@@ -134,7 +134,7 @@ pub struct HostForm {
 }
 
 impl HostForm {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             alias: String::new(),
             hostname: String::new(),
@@ -873,7 +873,7 @@ pub struct ProviderFormFields {
 }
 
 impl ProviderFormFields {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             label: String::new(),
             label_entry: false,
@@ -1043,7 +1043,7 @@ pub struct TunnelForm {
 }
 
 impl TunnelForm {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             tunnel_type: TunnelType::Local,
             bind_port: String::new(),
@@ -1234,7 +1234,7 @@ pub struct SnippetForm {
 }
 
 impl SnippetForm {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             name: String::new(),
             command: String::new(),

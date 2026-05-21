@@ -107,8 +107,8 @@ step "./scripts/check-alias-caches.sh"
 ./scripts/check-alias-caches.sh
 pass
 
-step "cargo test --bin purple visual_regression"
-cargo test --bin purple visual_regression
+step "cargo test --lib visual_regression"
+cargo test --lib visual_regression
 pass
 
 if [[ "$WITH_DOCKER" == "true" ]]; then

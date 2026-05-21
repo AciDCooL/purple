@@ -17,7 +17,7 @@ use crate::{
     key_activity, ping, preferences, snippet, tui, update, vault_ssh,
 };
 
-pub(crate) fn run_tui(mut app: App) -> Result<()> {
+pub fn run_tui(mut app: App) -> Result<()> {
     // First-launch welcome hint (one-shot: creates .purple/ so it won't show again)
     if app.status_center.status.is_none() && !app.demo_mode {
         if let Some(home) = dirs::home_dir() {

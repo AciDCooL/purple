@@ -16,7 +16,7 @@ use super::cli_args::{
 };
 use super::{askpass, import, logging, preferences, quick_add, should_write_certificate_file, ui};
 
-pub(super) fn handle_quick_add(
+pub fn handle_quick_add(
     mut config: SshConfigFile,
     target: &str,
     alias: Option<&str>,
@@ -98,7 +98,7 @@ pub(super) fn handle_quick_add(
     Ok(())
 }
 
-pub(super) fn handle_import(
+pub fn handle_import(
     mut config: SshConfigFile,
     file: Option<&str>,
     known_hosts: bool,
@@ -158,7 +158,7 @@ pub(super) fn handle_import(
     }
 }
 
-pub(super) fn handle_sync(
+pub fn handle_sync(
     mut config: SshConfigFile,
     provider_name: Option<&str>,
     dry_run: bool,
@@ -359,7 +359,7 @@ pub(super) fn handle_sync(
     Ok(())
 }
 
-pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
+pub fn handle_provider_command(command: ProviderCommands) -> Result<()> {
     log::info!("[purple] cli provider: dispatch");
     match command {
         ProviderCommands::Add {
@@ -758,10 +758,7 @@ pub(super) fn handle_provider_command(command: ProviderCommands) -> Result<()> {
     }
 }
 
-pub(super) fn handle_tunnel_command(
-    mut config: SshConfigFile,
-    command: TunnelCommands,
-) -> Result<()> {
+pub fn handle_tunnel_command(mut config: SshConfigFile, command: TunnelCommands) -> Result<()> {
     log::info!("[purple] cli tunnel: dispatch");
     match command {
         TunnelCommands::List { alias } => {
@@ -910,7 +907,7 @@ pub(super) fn handle_tunnel_command(
 }
 
 /// Read a line of input with echo disabled. Returns None if the user presses Esc.
-pub(super) fn prompt_hidden_input(prompt: &str) -> Result<Option<String>> {
+pub fn prompt_hidden_input(prompt: &str) -> Result<Option<String>> {
     eprint!("{}", prompt);
     crossterm::terminal::enable_raw_mode()?;
     let mut input = String::new();
@@ -944,7 +941,7 @@ pub(super) fn prompt_hidden_input(prompt: &str) -> Result<Option<String>> {
 /// Used by the `CertCheckResult` handler so every cache entry carries a
 /// mtime alongside its status, enabling mtime-based lazy invalidation when
 /// an external actor (CLI, another purple instance) rewrites the cert.
-pub(super) fn handle_password_command(command: PasswordCommands) -> Result<()> {
+pub fn handle_password_command(command: PasswordCommands) -> Result<()> {
     log::info!("[purple] cli password: dispatch");
     match command {
         PasswordCommands::Set { alias } => {
@@ -976,7 +973,7 @@ pub(super) fn handle_password_command(command: PasswordCommands) -> Result<()> {
     }
 }
 
-pub(super) fn handle_snippet_command(
+pub fn handle_snippet_command(
     config: SshConfigFile,
     command: SnippetCommands,
     config_path: &Path,
@@ -1250,7 +1247,7 @@ pub(super) fn handle_snippet_command(
     }
 }
 
-pub(super) fn handle_logs_command(tail: bool, clear: bool) -> Result<()> {
+pub fn handle_logs_command(tail: bool, clear: bool) -> Result<()> {
     let path = logging::log_path().context("Could not determine log path")?;
     if clear {
         if path.exists() {
@@ -1271,7 +1268,7 @@ pub(super) fn handle_logs_command(tail: bool, clear: bool) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn handle_theme_command(command: ThemeCommands) -> Result<()> {
+pub fn handle_theme_command(command: ThemeCommands) -> Result<()> {
     log::info!("[purple] cli theme: dispatch");
     match command {
         ThemeCommands::List => {
@@ -1318,7 +1315,7 @@ pub(super) fn handle_theme_command(command: ThemeCommands) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn handle_vault_sign_command(
+pub fn handle_vault_sign_command(
     mut config: SshConfigFile,
     alias: Option<String>,
     all: bool,
@@ -1489,7 +1486,7 @@ pub(super) fn handle_vault_sign_command(
 /// (per-host override OR the global default), preferring the first `proton:`
 /// value by position in the slice before falling back to the default. Returns
 /// `None` when no host in the batch uses Proton Pass.
-pub(super) fn select_proton_askpass(
+pub fn select_proton_askpass(
     target_askpass: &[Option<String>],
     default: Option<String>,
 ) -> Option<String> {
@@ -1507,7 +1504,7 @@ pub(super) fn select_proton_askpass(
         .or(default)
 }
 
-pub(super) fn run_whats_new(since: Option<&str>) -> Result<String> {
+pub fn run_whats_new(since: Option<&str>) -> Result<String> {
     use crate::changelog::{self, EntryKind};
     use semver::Version;
 

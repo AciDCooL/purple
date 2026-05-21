@@ -236,8 +236,8 @@ mod tests {
     use ratatui::layout::Rect;
 
     use super::design;
-    use crate::SshConfigFile;
     use crate::app::{App, ContainerSession};
+    use crate::ssh_config::model::SshConfigFile;
 
     fn make_app() -> App {
         let config = SshConfigFile {

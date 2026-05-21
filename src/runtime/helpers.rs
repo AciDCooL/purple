@@ -1,0 +1,498 @@
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+use log::{debug, warn};
+
+use crate::app::{self, App};
+use crate::{askpass, cli, providers, ssh_config, vault_ssh};
+
+pub fn resolve_config_path(path: &str) -> Result<PathBuf> {
+    expand_user_path(path)
+}
+
+/// Expand `~/`, `${HOME}/` and `$HOME/` prefixes against the user's home
+/// directory. MCPB clients (e.g. Claude Desktop) do not always substitute
+/// `${HOME}` before passing CLI args, so the binary must handle it.
+pub fn expand_user_path(path: &str) -> Result<PathBuf> {
+    let home_prefixes = ["~/", "${HOME}/", "$HOME/"];
+    for prefix in home_prefixes {
+        if let Some(rest) = path.strip_prefix(prefix) {
+            let home = dirs::home_dir().context("Could not determine home directory")?;
+            return Ok(home.join(rest));
+        }
+    }
+    if path == "~" || path == "${HOME}" || path == "$HOME" {
+        return dirs::home_dir().context("Could not determine home directory");
+    }
+    Ok(PathBuf::from(path))
+}
+
+pub fn resolve_token(explicit: Option<String>, from_stdin: bool) -> Result<String> {
+    if let Some(t) = explicit {
+        return Ok(t);
+    }
+    if from_stdin {
+        let mut buf = String::new();
+        std::io::stdin().read_line(&mut buf)?;
+        return Ok(buf.trim().to_string());
+    }
+    if let Ok(t) = std::env::var("PURPLE_TOKEN") {
+        return Ok(t);
+    }
+    anyhow::bail!("{}", crate::messages::cli::NO_TOKEN)
+}
+
+/// Replace the spinner frame prefix in a status text. Returns None if the
+/// text does not start with a known spinner frame.
+///
+/// Animated statuses MUST start with a character from
+/// [`crate::animation::SPINNER_FRAMES`] followed by a space, otherwise
+/// `event_loop::handle_tick` cannot rotate the frame and the animation
+/// silently stops.
+pub fn replace_spinner_frame(text: &str, new_frame: &str) -> Option<String> {
+    let starts_with_spinner = crate::animation::SPINNER_FRAMES
+        .iter()
+        .any(|f| text.starts_with(f));
+    if !starts_with_spinner {
+        return None;
+    }
+    text.split_once(' ')
+        .map(|(_, rest)| format!("{} {}", new_frame, rest))
+}
+
+/// Thin re-export. The real implementation lives in `crate::messages` so
+/// every user-facing string funnels through one module.
+pub fn format_vault_sign_summary(
+    signed: u32,
+    failed: u32,
+    skipped: u32,
+    first_error: Option<&str>,
+) -> String {
+    crate::messages::vault_sign_summary(signed, failed, skipped, first_error)
+}
+
+pub fn format_sync_diff(added: usize, updated: usize, stale: usize) -> String {
+    let diff_parts: Vec<String> = [(added, "+"), (updated, "~"), (stale, "-")]
+        .iter()
+        .filter(|(n, _)| *n > 0)
+        .map(|(n, prefix)| format!("{}{}", prefix, n))
+        .collect();
+    if diff_parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", diff_parts.join(" "))
+    }
+}
+
+/// Footer status that surfaces in-flight providers as the batch progresses.
+/// While a sync is running the line is `⠋ Syncing AWS, Hetzner · 1/3 (+12 ~3 -1)`,
+/// where the leading char is a braille spinner frame rotated by
+/// `event_loop::handle_tick` and the names are the providers that have not yet
+/// reported back. Once every provider in the batch has resolved the line
+/// becomes `Synced 5/5 · AWS, DO, Vultr, Hetzner, Linode (+12 ~3 -1)` and the
+/// batch state resets. Persists `sync_history.tsv` on completion.
+pub fn set_sync_summary(app: &mut App) {
+    let still_syncing = !app.providers.syncing.is_empty();
+    let done = app.providers.sync_done.len();
+    let total = app
+        .providers
+        .batch_total
+        .max(done + app.providers.syncing.len());
+    let added = app.providers.batch_added;
+    let updated = app.providers.batch_updated;
+    let stale = app.providers.batch_stale;
+    if still_syncing {
+        let mut active: Vec<String> = app
+            .providers
+            .syncing
+            .keys()
+            .map(|name| crate::providers::provider_display_name(name).to_string())
+            .collect();
+        active.sort();
+        let active_names = active.join(", ");
+        let spinner = crate::animation::SPINNER_FRAMES[0];
+        let text = crate::messages::synced_progress(
+            spinner,
+            &active_names,
+            done,
+            total,
+            added,
+            updated,
+            stale,
+        );
+        if app.providers.sync_had_errors {
+            app.notify_background_error(text);
+        } else {
+            app.notify_background(text);
+        }
+    } else {
+        let names = app.providers.sync_done.join(", ");
+        let text = crate::messages::synced_done(done, total, &names, added, updated, stale);
+        if app.providers.sync_had_errors {
+            app.notify_background_error(text);
+        } else {
+            app.notify_background(text);
+        }
+        app.providers.sync_done.clear();
+        app.providers.sync_had_errors = false;
+        app.providers.batch_added = 0;
+        app.providers.batch_updated = 0;
+        app.providers.batch_stale = 0;
+        app.providers.batch_total = 0;
+        app::SyncRecord::save_all(&app.providers.sync_history);
+    }
+}
+
+/// First-launch initialization: create ~/.purple/ and back up the original SSH config.
+/// Returns `Some(has_backup)` if this was a first launch, or `None` if already initialized.
+pub fn first_launch_init(purple_dir: &Path, config_path: &Path) -> Option<bool> {
+    let markers = [
+        "config.original",
+        "preferences",
+        "history.tsv",
+        "container_cache.jsonl",
+        "last_version_check",
+        "providers",
+        "snippets.toml",
+        "themes",
+    ];
+    if markers.iter().any(|m| purple_dir.join(m).exists()) {
+        return None;
+    }
+    if let Err(e) = std::fs::create_dir_all(purple_dir) {
+        warn!("[config] Failed to create ~/.purple directory: {e}");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Err(e) = std::fs::set_permissions(purple_dir, std::fs::Permissions::from_mode(0o700))
+        {
+            warn!("[config] Failed to set ~/.purple directory permissions: {e}");
+        }
+    }
+    let original_backup = purple_dir.join("config.original");
+    if config_path.exists() {
+        if let Err(e) = std::fs::copy(config_path, &original_backup) {
+            warn!(
+                "[config] Failed to backup SSH config to {}: {e}",
+                original_backup.display()
+            );
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(e) =
+                std::fs::set_permissions(&original_backup, std::fs::Permissions::from_mode(0o600))
+            {
+                warn!("[config] Failed to set backup permissions: {e}");
+            }
+        }
+    }
+    Some(original_backup.exists())
+}
+
+/// Check and renew Vault SSH certificate if the host has a vault role configured.
+/// Writes the cert file to ~/.purple/certs/ AND sets CertificateFile on the host
+/// block when it is empty, so `ssh` actually uses the freshly signed cert.
+pub fn ensure_vault_ssh_if_needed(
+    alias: &str,
+    host: &ssh_config::model::HostEntry,
+    provider_config: &providers::config::ProviderConfig,
+    config: &mut ssh_config::model::SshConfigFile,
+) -> Option<(String, bool)> {
+    let role = vault_ssh::resolve_vault_role(
+        host.vault_ssh.as_deref(),
+        host.provider.as_deref(),
+        host.provider_label.as_deref(),
+        provider_config,
+    )?;
+
+    let pubkey = match vault_ssh::resolve_pubkey_path(&host.identity_file) {
+        Ok(p) => p,
+        Err(e) => {
+            return Some((crate::messages::vault_cert_pubkey_resolve_failed(&e), true));
+        }
+    };
+
+    let check_path = vault_ssh::resolve_cert_path(alias, &host.certificate_file).ok()?;
+    let status = vault_ssh::check_cert_validity(&check_path);
+    if !vault_ssh::needs_renewal(&status) {
+        return None;
+    }
+
+    let vault_addr = vault_ssh::resolve_vault_addr(
+        host.vault_addr.as_deref(),
+        host.provider.as_deref(),
+        host.provider_label.as_deref(),
+        provider_config,
+    );
+    match vault_ssh::ensure_cert(
+        &role,
+        &pubkey,
+        alias,
+        &host.certificate_file,
+        vault_addr.as_deref(),
+    ) {
+        Ok(cert_path) => {
+            if should_write_certificate_file(&host.certificate_file) {
+                let cert_str = cert_path.to_string_lossy().to_string();
+                let updated = config.set_host_certificate_file(alias, &cert_str);
+                if !updated {
+                    eprintln!(
+                        "{}",
+                        crate::messages::vault_cert_host_block_missing(alias, &cert_path)
+                    );
+                } else if let Err(e) = config.write() {
+                    eprintln!(
+                        "{}",
+                        crate::messages::vault_cert_config_write_failed(alias, &e)
+                    );
+                }
+            }
+            Some((crate::messages::vault_signed_pre_connect(alias), false))
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            eprintln!(
+                "{}",
+                crate::messages::vault_sign_failed_pre_connect(alias, &msg)
+            );
+            Some((
+                crate::messages::vault_sign_failed_pre_connect(alias, &msg),
+                true,
+            ))
+        }
+    }
+}
+
+/// Resolve the effective ProxyJump chain for `target_alias` and run
+/// `ensure_vault_ssh_if_needed` for every host in it.
+pub fn ensure_vault_ssh_chain_if_needed(
+    target_alias: &str,
+    config_path: &Path,
+    provider_config: &providers::config::ProviderConfig,
+    config: &mut ssh_config::model::SshConfigFile,
+) -> Option<(String, bool)> {
+    let chain = vault_ssh::resolve_proxy_chain(config_path, target_alias);
+    let mut signed_count: usize = 0;
+    let mut last_error: Option<String> = None;
+
+    for hop_alias in &chain {
+        let host_entry = config
+            .host_entries()
+            .into_iter()
+            .find(|h| h.alias == *hop_alias);
+        let Some(host) = host_entry else {
+            continue;
+        };
+        if let Some((msg, is_error)) =
+            ensure_vault_ssh_if_needed(hop_alias, &host, provider_config, config)
+        {
+            if is_error {
+                last_error = Some(msg);
+            } else {
+                signed_count += 1;
+            }
+        }
+    }
+
+    if let Some(err) = last_error {
+        return Some((err, true));
+    }
+    if signed_count == 0 {
+        return None;
+    }
+    Some((
+        crate::messages::vault_signed_pre_connect_chain(target_alias, signed_count),
+        false,
+    ))
+}
+
+/// Decide whether to write a `CertificateFile` directive after a successful
+/// Vault SSH signing. Only write when the host has no existing
+/// `CertificateFile`. A user-set custom path must never be silently
+/// overwritten with purple's default cert path. Whitespace-only values count
+/// as empty.
+pub fn should_write_certificate_file(existing: &str) -> bool {
+    existing.trim().is_empty()
+}
+
+/// Pre-flight check for Bitwarden vault. If the askpass source uses `bw:` and
+/// no session token is cached, prompts the user to unlock the vault.
+pub fn ensure_bw_session(existing: Option<&str>, askpass: Option<&str>) -> Option<String> {
+    let askpass = askpass?;
+    if !askpass.starts_with("bw:") || existing.is_some() {
+        return None;
+    }
+    let status = askpass::bw_vault_status();
+    match status {
+        askpass::BwStatus::Unlocked => None,
+        askpass::BwStatus::NotInstalled => {
+            eprintln!("{}", crate::messages::askpass::BW_NOT_FOUND);
+            None
+        }
+        askpass::BwStatus::NotAuthenticated => {
+            eprintln!("{}", crate::messages::askpass::BW_NOT_LOGGED_IN);
+            None
+        }
+        askpass::BwStatus::Locked => {
+            for attempt in 0..2 {
+                let password = match cli::prompt_hidden_input("Bitwarden master password: ") {
+                    Ok(Some(p)) if !p.is_empty() => p,
+                    Ok(Some(_)) => {
+                        eprintln!("{}", crate::messages::askpass::EMPTY_PASSWORD);
+                        return None;
+                    }
+                    Ok(None) => return None,
+                    Err(e) => {
+                        eprintln!("{}", crate::messages::askpass::read_failed(&e));
+                        return None;
+                    }
+                };
+                match askpass::bw_unlock(&password) {
+                    Ok(token) => return Some(token),
+                    Err(e) => {
+                        if attempt == 0 {
+                            eprintln!("{}", crate::messages::askpass::unlock_failed_retry(&e));
+                        } else {
+                            eprintln!("{}", crate::messages::askpass::unlock_failed_prompt(&e));
+                        }
+                    }
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Pre-flight Proton Pass login. If the askpass source is `proton:` and the
+/// CLI is installed but the user is not authenticated, prompt for a Personal
+/// Access Token on stdin and run `pass-cli login`.
+pub fn ensure_proton_login(askpass: Option<&str>) {
+    ensure_proton_login_with(askpass, askpass::proton_status, || {
+        cli::prompt_hidden_input(crate::messages::askpass::PROTON_LOGIN_PROMPT)
+    });
+}
+
+/// Test seam for `ensure_proton_login`. Inject the status check and the PAT
+/// prompt so the routing logic can be exercised without a real `pass-cli` or a
+/// real stdin tty.
+pub fn ensure_proton_login_with<S, P>(askpass: Option<&str>, status_fn: S, mut prompt_pat: P)
+where
+    S: FnOnce() -> askpass::ProtonStatus,
+    P: FnMut() -> Result<Option<String>>,
+{
+    let Some(askpass) = askpass else {
+        return;
+    };
+    if !askpass.starts_with("proton:") {
+        return;
+    }
+    match status_fn() {
+        askpass::ProtonStatus::Authenticated => {
+            debug!("Proton Pass pre-flight: already authenticated");
+        }
+        askpass::ProtonStatus::NotInstalled => {
+            debug!("Proton Pass pre-flight: pass-cli not installed");
+            eprintln!("{}", crate::messages::askpass::PROTON_NOT_FOUND);
+        }
+        askpass::ProtonStatus::NotAuthenticated => {
+            debug!("Proton Pass pre-flight: not authenticated, prompting for PAT");
+            for attempt in 0..2 {
+                let pat = match prompt_pat() {
+                    Ok(Some(p)) if !p.is_empty() => p,
+                    Ok(Some(_)) => {
+                        debug!("Proton Pass pre-flight: empty PAT, aborting");
+                        eprintln!("{}", crate::messages::askpass::EMPTY_PASSWORD);
+                        return;
+                    }
+                    Ok(None) => {
+                        debug!("Proton Pass pre-flight: PAT prompt dismissed (Esc/EOF)");
+                        return;
+                    }
+                    Err(e) => {
+                        warn!("[config] Proton Pass PAT prompt read failed: {e}");
+                        eprintln!("{}", crate::messages::askpass::read_failed(&e));
+                        return;
+                    }
+                };
+                match askpass::proton_login(&pat) {
+                    Ok(()) => {
+                        debug!("Proton Pass pre-flight: login succeeded on attempt {attempt}");
+                        eprintln!("{}", crate::messages::askpass::PROTON_LOGIN_SUCCESS);
+                        return;
+                    }
+                    Err(e) => {
+                        debug!("Proton Pass pre-flight: login attempt {attempt} failed: {e}");
+                        if attempt == 0 {
+                            eprintln!(
+                                "{}",
+                                crate::messages::askpass::proton_login_failed_retry(&e)
+                            );
+                        } else {
+                            warn!("[external] Proton Pass login failed after retries: {e}");
+                            eprintln!(
+                                "{}",
+                                crate::messages::askpass::proton_login_failed_prompt(&e)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Apply saved sort/group/view preferences to a fresh App. Reads
+/// `~/.purple/preferences`, restores sort/group/view modes, clears stale
+/// group keys, and re-runs `apply_sort` plus `select_first_host` so the
+/// first row visible after startup matches the saved sort order.
+pub fn apply_saved_sort(app: &mut App) {
+    let saved = crate::preferences::load_sort_mode();
+    let group = crate::preferences::load_group_by();
+    app.hosts_state.sort_mode = saved;
+    app.hosts_state.group_by = group;
+    app.hosts_state.view_mode = crate::preferences::load_view_mode();
+    app.containers_overview.view_mode = crate::preferences::load_containers_view_mode();
+    app.containers_overview.sort_mode = crate::preferences::load_containers_sort_mode();
+    app.containers_overview.collapsed_hosts = crate::preferences::load_containers_collapsed_hosts();
+    if app.clear_stale_group_tag() {
+        if let Err(e) = crate::preferences::save_group_by(&app.hosts_state.group_by) {
+            app.notify_error(crate::messages::group_pref_reset_failed(&e));
+        }
+    }
+    if saved != app::SortMode::Original || !matches!(app.hosts_state.group_by, app::GroupBy::None) {
+        app.apply_sort();
+        app.select_first_host();
+    }
+}
+
+/// Pre-flight check for keychain password. If the askpass source is `keychain` and
+/// no password is stored yet, prompts the user to enter one and stores it.
+pub fn ensure_keychain_password(alias: &str, askpass: Option<&str>) {
+    if askpass != Some("keychain") {
+        return;
+    }
+    if askpass::keychain_has_password(alias) {
+        return;
+    }
+    let password = match cli::prompt_hidden_input(
+        &crate::messages::askpass::keychain_password_prompt(alias),
+    ) {
+        Ok(Some(p)) if !p.is_empty() => p,
+        Ok(Some(_)) => {
+            eprintln!("{}", crate::messages::askpass::EMPTY_PASSWORD);
+            return;
+        }
+        Ok(None) => return,
+        Err(_) => return,
+    };
+    match askpass::store_in_keychain(alias, &password) {
+        Ok(()) => eprintln!("{}", crate::messages::askpass::PASSWORD_IN_KEYCHAIN),
+        Err(e) => eprintln!("{}", crate::messages::askpass::keychain_store_failed(&e)),
+    }
+}
+
+#[cfg(test)]
+#[path = "../main_tests.rs"]
+mod tests;
