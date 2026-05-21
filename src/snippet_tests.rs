@@ -285,9 +285,19 @@ fn test_save_roundtrip() {
 
 #[test]
 fn test_save_to_temp_file() {
-    let dir = std::env::temp_dir().join(format!("purple_snippet_test_{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
-    let path = dir.join("snippets");
+    // SnippetStore::save() is a no-op when the global demo flag is set, so
+    // any parallel test that flips the flag could race this one and yield
+    // a NotFound when we read back. Serialise via the cross-crate lock and
+    // explicitly disable demo mode while we run, then restore the prior
+    // value so subsequent tests that depend on demo mode are unaffected.
+    let _guard = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    let prior_demo = crate::demo_flag::is_demo();
+    crate::demo_flag::disable();
+
+    let dir = tempfile::tempdir().expect("create tempdir");
+    let path = dir.path().join("snippets");
 
     let mut store = SnippetStore {
         path_override: Some(path.clone()),
@@ -300,15 +310,15 @@ fn test_save_to_temp_file() {
     });
     store.save().unwrap();
 
-    // Read back
     let content = std::fs::read_to_string(&path).unwrap();
     let reloaded = SnippetStore::parse(&content);
     assert_eq!(reloaded.snippets.len(), 1);
     assert_eq!(reloaded.snippets[0].name, "test");
     assert_eq!(reloaded.snippets[0].command, "echo hello");
 
-    // Cleanup
-    let _ = std::fs::remove_dir_all(&dir);
+    if prior_demo {
+        crate::demo_flag::enable();
+    }
 }
 
 // =========================================================================
