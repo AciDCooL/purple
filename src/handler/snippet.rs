@@ -67,7 +67,7 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
                 }
             }
             super::ConfirmAction::No => {
-                app.snippets.pending_delete = None;
+                app.snippets.cancel_delete();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -77,7 +77,7 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             app.ui.snippet_search = None;
-            app.snippets.pending_delete = None;
+            app.snippets.cancel_delete();
             app.set_screen(Screen::HostList);
         }
         KeyCode::Char('/') => {
@@ -116,7 +116,7 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
         KeyCode::Char('d') => {
             if let Some(sel) = app.ui.snippet_picker_state.selected() {
                 if sel < app.snippets.store.snippets.len() {
-                    app.snippets.pending_delete = Some(sel);
+                    app.snippets.request_delete(sel);
                 }
             }
         }
@@ -473,8 +473,7 @@ pub(super) fn handle_param_form_key(
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
                 app.forms.dismiss_discard_confirm();
-                app.snippets.param_form = None;
-                app.snippets.pending_terminal = false;
+                app.snippets.close_param_form();
                 app.set_screen(Screen::SnippetPicker { target_aliases });
             }
             super::ConfirmAction::No => {
@@ -490,8 +489,7 @@ pub(super) fn handle_param_form_key(
             if form.is_dirty() {
                 app.forms.request_discard_confirm();
             } else {
-                app.snippets.param_form = None;
-                app.snippets.pending_terminal = false;
+                app.snippets.close_param_form();
                 app.set_screen(Screen::SnippetPicker { target_aliases });
             }
         }
@@ -525,8 +523,7 @@ pub(super) fn handle_param_form_key(
             resolved.command = crate::snippet::substitute_params(&snippet.command, &values_map);
 
             let terminal_mode = app.snippets.pending_terminal;
-            app.snippets.param_form = None;
-            app.snippets.pending_terminal = false;
+            app.snippets.close_param_form();
 
             if terminal_mode {
                 app.snippets.pending = Some((resolved, target_aliases));
@@ -583,12 +580,10 @@ pub(super) fn handle_form_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Tab | KeyCode::Down => {
-            app.snippets.form.focused_field = app.snippets.form.focused_field.next();
-            app.snippets.form.sync_cursor_to_end();
+            app.snippets.form.focus_next();
         }
         KeyCode::BackTab | KeyCode::Up => {
-            app.snippets.form.focused_field = app.snippets.form.focused_field.prev();
-            app.snippets.form.sync_cursor_to_end();
+            app.snippets.form.focus_prev();
         }
         KeyCode::Left if app.snippets.form.cursor_pos > 0 => {
             app.snippets.form.cursor_pos -= 1;

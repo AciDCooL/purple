@@ -40,6 +40,26 @@ impl SnippetState {
             ..Self::default()
         }
     }
+
+    /// Open a delete confirmation for the snippet at `idx`. The renderer
+    /// reads `pending_delete` to draw the confirm overlay.
+    pub fn request_delete(&mut self, idx: usize) {
+        self.pending_delete = Some(idx);
+    }
+
+    /// Dismiss a pending delete confirmation. Idempotent.
+    pub fn cancel_delete(&mut self) {
+        self.pending_delete = None;
+    }
+
+    /// Close the parameter substitution form. Clears the form state and
+    /// the terminal-submit flag that decide whether the next Enter sends
+    /// the resolved command to the foreground terminal or to background
+    /// output capture. Idempotent.
+    pub fn close_param_form(&mut self) {
+        self.param_form = None;
+        self.pending_terminal = false;
+    }
 }
 
 #[cfg(test)]
@@ -55,5 +75,79 @@ mod tests {
         assert!(!s.pending_terminal);
         assert!(s.form_baseline.is_none());
         assert!(s.pending_delete.is_none());
+    }
+
+    #[test]
+    fn request_delete_sets_pending_delete_to_some_idx() {
+        let mut s = SnippetState::default();
+        s.request_delete(3);
+        assert_eq!(s.pending_delete, Some(3));
+    }
+
+    #[test]
+    fn cancel_delete_clears_pending_delete() {
+        let mut s = SnippetState {
+            pending_delete: Some(2),
+            ..Default::default()
+        };
+        s.cancel_delete();
+        assert!(s.pending_delete.is_none());
+    }
+
+    #[test]
+    fn request_delete_overwrites_existing_pending() {
+        let mut s = SnippetState {
+            pending_delete: Some(1),
+            ..Default::default()
+        };
+        s.request_delete(7);
+        assert_eq!(s.pending_delete, Some(7));
+    }
+
+    #[test]
+    fn close_param_form_clears_param_form_and_pending_terminal() {
+        let mut s = SnippetState {
+            param_form: Some(SnippetParamFormState::new(&[])),
+            pending_terminal: true,
+            ..Default::default()
+        };
+        s.close_param_form();
+        assert!(s.param_form.is_none());
+        assert!(!s.pending_terminal);
+    }
+
+    #[test]
+    fn close_param_form_preserves_pending_output_and_store() {
+        use crate::snippet::Snippet;
+        let mut s = SnippetState {
+            param_form: Some(SnippetParamFormState::new(&[])),
+            pending_terminal: true,
+            pending: Some((
+                Snippet {
+                    name: "ls".into(),
+                    command: "ls -la".into(),
+                    description: String::new(),
+                },
+                vec!["host-a".into()],
+            )),
+            ..Default::default()
+        };
+
+        s.close_param_form();
+
+        assert!(
+            s.pending.is_some(),
+            "pending stays for the consumer to read"
+        );
+        assert!(s.pending_delete.is_none());
+    }
+
+    #[test]
+    fn close_param_form_is_idempotent_when_already_none() {
+        let mut s = SnippetState::default();
+        s.close_param_form();
+        s.close_param_form();
+        assert!(s.param_form.is_none());
+        assert!(!s.pending_terminal);
     }
 }

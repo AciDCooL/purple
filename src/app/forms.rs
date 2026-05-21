@@ -1254,6 +1254,20 @@ impl SnippetForm {
         }
     }
 
+    /// Advance the focused field to the next one and sync the cursor to
+    /// the end of the new focused value.
+    pub fn focus_next(&mut self) {
+        self.focused_field = self.focused_field.next();
+        self.sync_cursor_to_end();
+    }
+
+    /// Retreat the focused field to the previous one and sync the cursor
+    /// to the end of the new focused value.
+    pub fn focus_prev(&mut self) {
+        self.focused_field = self.focused_field.prev();
+        self.sync_cursor_to_end();
+    }
+
     pub fn focused_value(&self) -> &str {
         match self.focused_field {
             SnippetFormField::Name => &self.name,
@@ -1589,5 +1603,45 @@ mod host_form_method_tests {
         assert_eq!(f.remote_port, "5678");
         assert_eq!(f.bind_address, "127.0.0.1");
         assert_eq!(f.tunnel_type, TunnelType::Local);
+    }
+
+    #[test]
+    fn snippet_form_focus_next_advances_field_and_syncs_cursor_to_target() {
+        let mut f = SnippetForm::new();
+        // Distinct lengths so a wrong-ordering regression (sync before
+        // assignment) would land cursor at 3 instead of the correct 2.
+        f.name = "abc".into();
+        f.command = "de".into();
+        f.focused_field = SnippetFormField::Name;
+        f.cursor_pos = 99;
+        f.focus_next();
+        assert_eq!(f.focused_field, SnippetFormField::Command);
+        assert_eq!(f.cursor_pos, 2);
+    }
+
+    #[test]
+    fn snippet_form_focus_prev_retreats_field_and_syncs_cursor_to_target() {
+        let mut f = SnippetForm::new();
+        // Source and target have distinct lengths: wrong ordering would
+        // yield cursor_pos = 2 (end of source command), correct is 3.
+        f.name = "xyz".into();
+        f.command = "ab".into();
+        f.focused_field = SnippetFormField::Command;
+        f.cursor_pos = 99;
+        f.focus_prev();
+        assert_eq!(f.focused_field, SnippetFormField::Name);
+        assert_eq!(f.cursor_pos, 3);
+    }
+
+    #[test]
+    fn snippet_form_focus_next_preserves_field_values() {
+        let mut f = SnippetForm::new();
+        f.name = "foo".into();
+        f.command = "bar".into();
+        f.description = "baz".into();
+        f.focus_next();
+        assert_eq!(f.name, "foo");
+        assert_eq!(f.command, "bar");
+        assert_eq!(f.description, "baz");
     }
 }

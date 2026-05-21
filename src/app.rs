@@ -178,7 +178,7 @@ pub struct App {
     pub(crate) tunnels: TunnelState,
 
     /// Snippet library, parameter forms, output buffers.
-    pub snippets: SnippetState,
+    pub(crate) snippets: SnippetState,
 
     /// Self-update polling and badge state.
     pub update: UpdateState,
