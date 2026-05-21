@@ -169,7 +169,7 @@ pub struct App {
     pub providers: ProviderState,
 
     /// Ping/health-check state per host.
-    pub ping: PingState,
+    pub(crate) ping: PingState,
 
     /// Vault SSH certificate cache and signing run state.
     pub vault: VaultState,

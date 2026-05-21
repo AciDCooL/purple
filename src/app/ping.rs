@@ -43,6 +43,17 @@ impl PingState {
         }
     }
 
+    /// Clear all ping results and reset the dynamic filter/timestamp state.
+    /// Preserves config (slow_threshold_ms, auto_ping) and `has_pinged`.
+    /// Bumps `generation` so in-flight ping responses can be discarded.
+    pub fn clear_results(&mut self) {
+        self.status.clear();
+        self.last_checked.clear();
+        self.filter_down_only = false;
+        self.checked_at = None;
+        self.generation += 1;
+    }
+
     /// True when no ping result exists for `alias`, or the result is older
     /// than `STALE_REFRESH_AFTER`. Used to decide whether selecting a host
     /// should trigger a background refresh.
@@ -155,5 +166,61 @@ mod tests {
             .status
             .insert("web1".into(), PingStatus::Reachable { rtt_ms: 5 });
         assert!(!state.is_stale("web1"));
+    }
+
+    #[test]
+    fn clear_results_empties_status_and_last_checked_and_resets_filter() {
+        let mut state = PingState::default();
+        state
+            .status
+            .insert("web1".into(), PingStatus::Reachable { rtt_ms: 5 });
+        state.last_checked.insert("web1".into(), Instant::now());
+        state.filter_down_only = true;
+        state.checked_at = Some(Instant::now());
+
+        state.clear_results();
+
+        assert!(state.status.is_empty());
+        assert!(state.last_checked.is_empty());
+        assert!(!state.filter_down_only);
+        assert!(state.checked_at.is_none());
+    }
+
+    #[test]
+    fn clear_results_increments_generation() {
+        let mut state = PingState {
+            generation: 7,
+            ..Default::default()
+        };
+        state.clear_results();
+        assert_eq!(state.generation, 8);
+    }
+
+    #[test]
+    fn clear_results_preserves_config_and_has_pinged() {
+        let mut state = PingState {
+            slow_threshold_ms: 750,
+            auto_ping: true,
+            has_pinged: true,
+            ..Default::default()
+        };
+
+        state.clear_results();
+
+        assert_eq!(state.slow_threshold_ms, 750);
+        assert!(state.auto_ping);
+        assert!(state.has_pinged);
+    }
+
+    #[test]
+    fn clear_results_is_idempotent_on_empty_state() {
+        let mut state = PingState::default();
+        state.clear_results();
+        state.clear_results();
+        assert!(state.status.is_empty());
+        assert!(state.last_checked.is_empty());
+        assert!(!state.filter_down_only);
+        assert!(state.checked_at.is_none());
+        assert_eq!(state.generation, 2);
     }
 }

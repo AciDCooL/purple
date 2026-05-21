@@ -260,11 +260,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     "[purple] p: clearing {} ping result(s) + timestamps",
                     app.ping.status.len()
                 );
-                app.ping.status.clear();
-                app.ping.last_checked.clear();
-                app.ping.filter_down_only = false;
-                app.ping.checked_at = None;
-                app.ping.generation += 1;
+                app.ping.clear_results();
                 app.status_center.status = None;
             } else {
                 super::ping::ping_selected_host(app, events_tx, true);
@@ -276,11 +272,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     "[purple] P: clearing {} ping result(s) + timestamps",
                     app.ping.status.len()
                 );
-                app.ping.status.clear();
-                app.ping.last_checked.clear();
-                app.ping.filter_down_only = false;
-                app.ping.checked_at = None;
-                app.ping.generation += 1;
+                app.ping.clear_results();
                 app.status_center.status = None;
             } else {
                 let hosts_to_ping: Vec<(String, String, u16)> = app
@@ -762,14 +754,10 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
                     "[purple] ctrl+p: clearing {} ping result(s) + timestamps",
                     app.ping.status.len()
                 );
-                app.ping.status.clear();
-                app.ping.last_checked.clear();
-                app.ping.checked_at = None;
-                app.ping.generation += 1;
-                if app.ping.filter_down_only {
+                let was_filtering = app.ping.filter_down_only;
+                app.ping.clear_results();
+                if was_filtering {
                     app.cancel_search();
-                } else {
-                    app.ping.filter_down_only = false;
                 }
                 app.status_center.status = None;
             } else {

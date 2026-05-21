@@ -6324,7 +6324,7 @@ fn q_still_quits_after_esc_hint() {
 }
 
 #[test]
-fn test_p_key_clears_ping_increments_generation() {
+fn test_shift_p_key_clears_ping_increments_generation() {
     let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
     // Pre-populate ping status to simulate completed pings
     app.ping.status.insert(
@@ -6346,6 +6346,74 @@ fn test_p_key_clears_ping_increments_generation() {
     assert_eq!(app.ping.generation, 1);
     assert!(!app.ping.filter_down_only);
     assert!(app.ping.checked_at.is_none());
+}
+
+#[test]
+fn test_p_key_clears_ping_increments_generation() {
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    app.ping.status.insert(
+        "web1".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 10 },
+    );
+    app.ping
+        .last_checked
+        .insert("web1".to_string(), std::time::Instant::now());
+    app.ping.filter_down_only = true;
+    app.ping.checked_at = Some(std::time::Instant::now());
+    assert_eq!(app.ping.generation, 0);
+
+    let (tx, _rx) = std::sync::mpsc::channel();
+    handle_key_event(&mut app, key(KeyCode::Char('p')), &tx).unwrap();
+
+    assert!(app.ping.status.is_empty());
+    assert!(app.ping.last_checked.is_empty());
+    assert_eq!(app.ping.generation, 1);
+    assert!(!app.ping.filter_down_only);
+    assert!(app.ping.checked_at.is_none());
+}
+
+#[test]
+fn test_ctrl_p_with_active_filter_clears_pings_and_cancels_search() {
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    app.ping.status.insert(
+        "web1".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 10 },
+    );
+    app.ping
+        .last_checked
+        .insert("web1".to_string(), std::time::Instant::now());
+    app.ping.filter_down_only = true;
+    app.search.query = Some("we".to_string());
+
+    let (tx, _rx) = std::sync::mpsc::channel();
+    handle_key_event(&mut app, ctrl_key('p'), &tx).unwrap();
+
+    // Ping cleared
+    assert!(app.ping.status.is_empty());
+    assert!(app.ping.last_checked.is_empty());
+    assert!(!app.ping.filter_down_only);
+    // Active filter triggered cancel_search: query is gone
+    assert!(app.search.query.is_none());
+}
+
+#[test]
+fn test_ctrl_p_without_active_filter_clears_pings_and_preserves_search() {
+    let mut app = make_app("Host web1\n  HostName 1.1.1.1\n");
+    app.ping.status.insert(
+        "web1".to_string(),
+        crate::app::PingStatus::Reachable { rtt_ms: 10 },
+    );
+    app.ping.filter_down_only = false;
+    app.search.query = Some("we".to_string());
+
+    let (tx, _rx) = std::sync::mpsc::channel();
+    handle_key_event(&mut app, ctrl_key('p'), &tx).unwrap();
+
+    // Ping cleared
+    assert!(app.ping.status.is_empty());
+    assert!(!app.ping.filter_down_only);
+    // No active filter: search query is preserved (cancel_search not called)
+    assert_eq!(app.search.query.as_deref(), Some("we"));
 }
 
 #[test]
