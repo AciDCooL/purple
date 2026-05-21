@@ -7,10 +7,11 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    crane.url = "github:ipetkov/crane";
   };
 
   outputs =
-    { self, nixpkgs, rust-overlay }:
+    { self, nixpkgs, rust-overlay, crane }:
     let
       supportedSystems = [
         "x86_64-linux"
@@ -60,39 +61,57 @@
             );
       };
 
-      mkPurple = pkgs:
+      mkCraneLib = pkgs:
         let
           rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
         in
-        pkgs.rustPlatform.buildRustPackage {
+        (crane.mkLib pkgs).overrideToolchain rustToolchain;
+
+      # Shared build arguments between the deps-only derivation and the
+      # full package. Splitting them is what makes crane fast: the deps
+      # layer is hashed on Cargo.lock and reused whenever lockfile and
+      # toolchain are unchanged, so source-only pushes skip the 800+
+      # dep recompile.
+      mkCommonArgs = pkgs:
+        let
+          cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+        in {
           pname = "purple-ssh";
           version = cargoToml.package.version;
 
           src = filteredSrc pkgs;
+          strictDeps = true;
 
-          cargoLock.lockFile = ./Cargo.lock;
-
-          nativeBuildInputs = with pkgs; [
-            rustToolchain
-            pkg-config
-          ];
-
+          nativeBuildInputs = with pkgs; [ pkg-config ];
           buildInputs = [ pkgs.openssl ];
 
           # Use system openssl. Cargo.toml only vendors openssl for
           # cfg(target_env = "musl"); Nix builds against glibc/darwin.
           OPENSSL_NO_VENDOR = 1;
 
-          # Skip LTO inside Nix so the link phase parallelises. Release
-          # binaries via cargo publish keep full LTO from Cargo.toml.
-          CARGO_PROFILE_RELEASE_LTO = "false";
-
           # Tests need $HOME, ~/.ssh, a working ssh binary and serialized
           # PATH manipulation (vault_ssh_tests::PATH_LOCK). The Nix
           # sandbox provides none of those, so the test suite runs in CI
           # instead. `nix flake check` still verifies the package builds.
           doCheck = false;
+        };
+
+      mkPurple = pkgs:
+        let
+          craneLib = mkCraneLib pkgs;
+          commonArgs = mkCommonArgs pkgs;
+          cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+
+          # Deps layer hashes on Cargo.toml verbatim; cargo requires
+          # package.version so a release commit invalidates it once.
+          cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        in
+        craneLib.buildPackage (commonArgs // {
+          inherit cargoArtifacts;
+
+          # Skip LTO inside Nix so the link phase parallelises. Release
+          # binaries via cargo publish keep full LTO from Cargo.toml.
+          CARGO_PROFILE_RELEASE_LTO = "false";
 
           meta = with pkgs.lib; {
             description = cargoToml.package.description;
@@ -101,7 +120,7 @@
             mainProgram = "purple";
             platforms = platforms.unix;
           };
-        };
+        });
     in
     {
       packages = forAllSystems (system:
@@ -139,19 +158,14 @@
       checks = forAllSystems (system:
         let
           pkgs = pkgsFor.${system};
-          rustToolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-          src = filteredSrc pkgs;
+          craneLib = mkCraneLib pkgs;
+          commonArgs = mkCommonArgs pkgs;
         in {
           package = self.packages.${system}.default;
 
-          fmt = pkgs.runCommand "purple-fmt-check"
-            { nativeBuildInputs = [ rustToolchain ]; }
-            ''
-              cp -r ${src}/. .
-              chmod -R u+w .
-              cargo fmt --check
-              touch $out
-            '';
+          fmt = craneLib.cargoFmt {
+            inherit (commonArgs) src pname version;
+          };
         });
 
       overlays.default = final: _prev: {
