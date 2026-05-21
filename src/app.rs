@@ -139,7 +139,7 @@ pub struct App {
     /// App lifecycle flag; flip to false to exit the event loop.
     pub running: bool,
     /// All host entries plus selection state.
-    pub hosts_state: HostState,
+    pub(crate) hosts_state: HostState,
 
     // Sub-structs
     /// Toast queue, sticky messages, status routing.

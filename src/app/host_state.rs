@@ -55,6 +55,36 @@ impl HostState {
             group_host_counts: HashMap::new(),
         }
     }
+
+    /// Change the group-by mode and reset any active group filter in
+    /// lockstep. Callers that change `group_by` directly would leave a
+    /// stale `group_filter` referring to a group that no longer exists.
+    pub fn set_group_by(&mut self, by: GroupBy) {
+        self.group_by = by;
+        self.group_filter = None;
+    }
+
+    /// Flip the host list between Compact and Detailed view.
+    pub fn toggle_view_mode(&mut self) {
+        self.view_mode = match self.view_mode {
+            ViewMode::Compact => ViewMode::Detailed,
+            ViewMode::Detailed => ViewMode::Compact,
+        };
+    }
+
+    /// Toggle multi-select membership for the host at `idx`. Returns
+    /// `true` when `idx` is now selected (was inserted) and `false` when
+    /// it is now unselected (was removed) so the caller can react
+    /// without re-reading the set.
+    pub fn toggle_multi_select(&mut self, idx: usize) -> bool {
+        let inserted = !self.multi_select.contains(&idx);
+        if inserted {
+            self.multi_select.insert(idx);
+        } else {
+            self.multi_select.remove(&idx);
+        }
+        inserted
+    }
 }
 
 #[cfg(test)]
@@ -318,5 +348,98 @@ mod tests {
         assert!(s.group_filter.is_none());
         assert!(s.group_tab_order.is_empty());
         assert!(s.group_host_counts.is_empty());
+    }
+
+    #[test]
+    fn set_group_by_provider_clears_filter() {
+        let mut s = HostState {
+            group_filter: Some("acme".to_string()),
+            ..Default::default()
+        };
+        s.set_group_by(GroupBy::Provider);
+        assert!(matches!(s.group_by, GroupBy::Provider));
+        assert!(s.group_filter.is_none());
+    }
+
+    #[test]
+    fn set_group_by_none_clears_filter() {
+        let mut s = HostState {
+            group_by: GroupBy::Provider,
+            group_filter: Some("acme".to_string()),
+            ..Default::default()
+        };
+        s.set_group_by(GroupBy::None);
+        assert!(matches!(s.group_by, GroupBy::None));
+        assert!(s.group_filter.is_none());
+    }
+
+    #[test]
+    fn set_group_by_tag_clears_filter() {
+        let mut s = HostState {
+            group_filter: Some("prod".to_string()),
+            ..Default::default()
+        };
+        s.set_group_by(GroupBy::Tag("staging".to_string()));
+        match &s.group_by {
+            GroupBy::Tag(t) => assert_eq!(t, "staging"),
+            _ => panic!("expected Tag, got {:?}", s.group_by),
+        }
+        assert!(s.group_filter.is_none());
+    }
+
+    #[test]
+    fn set_group_by_overwrites_existing() {
+        let mut s = HostState {
+            group_by: GroupBy::Provider,
+            ..Default::default()
+        };
+        s.set_group_by(GroupBy::None);
+        assert!(matches!(s.group_by, GroupBy::None));
+    }
+
+    #[test]
+    fn toggle_view_mode_compact_to_detailed() {
+        let mut s = HostState::default();
+        assert_eq!(s.view_mode, ViewMode::Compact);
+        s.toggle_view_mode();
+        assert_eq!(s.view_mode, ViewMode::Detailed);
+    }
+
+    #[test]
+    fn toggle_view_mode_detailed_to_compact() {
+        let mut s = HostState {
+            view_mode: ViewMode::Detailed,
+            ..Default::default()
+        };
+        s.toggle_view_mode();
+        assert_eq!(s.view_mode, ViewMode::Compact);
+    }
+
+    #[test]
+    fn toggle_multi_select_inserts_when_absent_and_returns_true() {
+        let mut s = HostState::default();
+        let now_selected = s.toggle_multi_select(3);
+        assert!(now_selected);
+        assert!(s.multi_select.contains(&3));
+    }
+
+    #[test]
+    fn toggle_multi_select_removes_when_present_and_returns_false() {
+        let mut s = HostState::default();
+        s.multi_select.insert(3);
+        let now_selected = s.toggle_multi_select(3);
+        assert!(!now_selected);
+        assert!(!s.multi_select.contains(&3));
+    }
+
+    #[test]
+    fn toggle_multi_select_does_not_touch_other_indices() {
+        let mut s = HostState::default();
+        s.multi_select.insert(1);
+        s.multi_select.insert(2);
+        s.toggle_multi_select(3);
+        assert!(s.multi_select.contains(&1));
+        assert!(s.multi_select.contains(&2));
+        assert!(s.multi_select.contains(&3));
     }
 }

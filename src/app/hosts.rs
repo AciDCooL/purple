@@ -650,8 +650,7 @@ impl App {
                     .iter()
                     .any(|p| p.tags.iter().any(|t| t == tag));
             if !tag_exists {
-                self.hosts_state.group_by = GroupBy::None;
-                self.hosts_state.group_filter = None;
+                self.hosts_state.set_group_by(GroupBy::None);
                 return true;
             }
         }

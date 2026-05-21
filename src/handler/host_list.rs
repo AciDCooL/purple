@@ -379,8 +379,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             use crate::app::GroupBy;
             match &app.hosts_state.group_by {
                 GroupBy::None => {
-                    app.hosts_state.group_by = GroupBy::Provider;
-                    app.hosts_state.group_filter = None;
+                    app.hosts_state.set_group_by(GroupBy::Provider);
                     app.apply_sort();
                     if let Err(e) = preferences::save_group_by(&app.hosts_state.group_by) {
                         app.notify_error(crate::messages::grouped_by_save_failed(
@@ -408,8 +407,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                         tags
                     };
                     if user_tags.is_empty() {
-                        app.hosts_state.group_by = GroupBy::None;
-                        app.hosts_state.group_filter = None;
+                        app.hosts_state.set_group_by(GroupBy::None);
                         app.apply_sort();
                         if let Err(e) = preferences::save_group_by(&app.hosts_state.group_by) {
                             app.notify_error(crate::messages::ungrouped_save_failed(&e));
@@ -419,8 +417,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     } else {
                         // Switch to tag mode directly. The nav bar shows all
                         // tags as tabs, no picker needed.
-                        app.hosts_state.group_by = GroupBy::Tag(String::new());
-                        app.hosts_state.group_filter = None;
+                        app.hosts_state.set_group_by(GroupBy::Tag(String::new()));
                         app.apply_sort();
                         if let Err(e) = preferences::save_group_by(&app.hosts_state.group_by) {
                             app.notify_error(crate::messages::grouped_by_tag_save_failed(&e));
@@ -430,8 +427,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     }
                 }
                 GroupBy::Tag(_) => {
-                    app.hosts_state.group_by = GroupBy::None;
-                    app.hosts_state.group_filter = None;
+                    app.hosts_state.set_group_by(GroupBy::None);
                     app.apply_sort();
                     if let Err(e) = preferences::save_group_by(&app.hosts_state.group_by) {
                         app.notify_error(crate::messages::ungrouped_save_failed(&e));
@@ -450,11 +446,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             }
         }
         KeyCode::Char('v') => {
-            app.hosts_state.view_mode = if app.hosts_state.view_mode == ViewMode::Compact {
-                ViewMode::Detailed
-            } else {
-                ViewMode::Compact
-            };
+            app.hosts_state.toggle_view_mode();
             app.ui.detail_toggle_pending = true;
             app.ui.detail_scroll = 0;
             if let Err(e) = preferences::save_view_mode(app.hosts_state.view_mode) {
@@ -604,11 +596,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 return;
             }
             if let Some(idx) = app.selected_host_index() {
-                if app.hosts_state.multi_select.contains(&idx) {
-                    app.hosts_state.multi_select.remove(&idx);
-                } else {
-                    app.hosts_state.multi_select.insert(idx);
-                }
+                app.hosts_state.toggle_multi_select(idx);
             }
         }
         KeyCode::Char(' ') => {
@@ -619,11 +607,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 return;
             }
             if let Some(idx) = app.selected_host_index() {
-                if app.hosts_state.multi_select.contains(&idx) {
-                    app.hosts_state.multi_select.remove(&idx);
-                } else {
-                    app.hosts_state.multi_select.insert(idx);
-                }
+                app.hosts_state.toggle_multi_select(idx);
             }
         }
         KeyCode::Char('r') => {
@@ -766,11 +750,7 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
         }
         KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             if let Some(idx) = app.selected_host_index() {
-                if app.hosts_state.multi_select.contains(&idx) {
-                    app.hosts_state.multi_select.remove(&idx);
-                } else {
-                    app.hosts_state.multi_select.insert(idx);
-                }
+                app.hosts_state.toggle_multi_select(idx);
             }
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
