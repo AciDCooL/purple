@@ -175,7 +175,7 @@ pub struct App {
     pub vault: VaultState,
 
     /// Tunnel definitions per host and active tunnel processes.
-    pub tunnels: TunnelState,
+    pub(crate) tunnels: TunnelState,
 
     /// Snippet library, parameter forms, output buffers.
     pub snippets: SnippetState,

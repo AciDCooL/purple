@@ -65,7 +65,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                 }
             }
             super::ConfirmAction::No => {
-                app.tunnels.pending_delete = None;
+                app.tunnels.cancel_delete();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -122,7 +122,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
             }
             if let Some(sel) = app.ui.tunnel_list_state.selected() {
                 if sel < app.tunnels.list.len() {
-                    app.tunnels.pending_delete = Some(sel);
+                    app.tunnels.request_delete(sel);
                 }
             }
         }
@@ -228,20 +228,10 @@ pub(super) fn handle_tunnel_form_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Tab | KeyCode::Down => {
-            app.tunnels.form.focused_field = app
-                .tunnels
-                .form
-                .focused_field
-                .next(app.tunnels.form.tunnel_type);
-            app.tunnels.form.sync_cursor_to_end();
+            app.tunnels.form.focus_next();
         }
         KeyCode::BackTab | KeyCode::Up => {
-            app.tunnels.form.focused_field = app
-                .tunnels
-                .form
-                .focused_field
-                .prev(app.tunnels.form.tunnel_type);
-            app.tunnels.form.sync_cursor_to_end();
+            app.tunnels.form.focus_prev();
         }
         KeyCode::Left if app.tunnels.form.cursor_pos > 0 => {
             app.tunnels.form.cursor_pos -= 1;

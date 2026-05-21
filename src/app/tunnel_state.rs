@@ -133,6 +133,17 @@ impl Drop for TunnelState {
 }
 
 impl TunnelState {
+    /// Open a delete confirmation for the tunnel at `idx`. The renderer
+    /// reads `pending_delete` to draw the confirm overlay.
+    pub fn request_delete(&mut self, idx: usize) {
+        self.pending_delete = Some(idx);
+    }
+
+    /// Dismiss a pending delete confirmation. Idempotent.
+    pub fn cancel_delete(&mut self) {
+        self.pending_delete = None;
+    }
+
     /// Ensure the shared lsof poller is running. Idempotent: a second
     /// call after the poller is already up is a noop. Caller is
     /// responsible for updating `bind_ports` afterwards.
@@ -462,5 +473,36 @@ mod tests {
         s.clients.clear();
         s.push_peer_viz(t0 + std::time::Duration::from_secs(2));
         assert!(s.peer_viz.is_empty());
+    }
+
+    #[test]
+    fn request_delete_sets_pending_delete_to_some_idx() {
+        let mut s = TunnelState::default();
+        s.request_delete(3);
+        assert_eq!(s.pending_delete, Some(3));
+    }
+
+    #[test]
+    fn cancel_delete_clears_pending_delete() {
+        let mut s = TunnelState::default();
+        s.pending_delete = Some(2);
+        s.cancel_delete();
+        assert!(s.pending_delete.is_none());
+    }
+
+    #[test]
+    fn request_delete_overwrites_existing_pending() {
+        let mut s = TunnelState::default();
+        s.pending_delete = Some(1);
+        s.request_delete(7);
+        assert_eq!(s.pending_delete, Some(7));
+    }
+
+    #[test]
+    fn cancel_delete_is_idempotent_on_empty_pending() {
+        let mut s = TunnelState::default();
+        s.cancel_delete();
+        s.cancel_delete();
+        assert!(s.pending_delete.is_none());
     }
 }

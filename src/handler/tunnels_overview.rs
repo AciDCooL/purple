@@ -207,7 +207,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => confirm_delete_selected(app),
             super::ConfirmAction::No => {
-                app.tunnels.pending_delete = None;
+                app.tunnels.cancel_delete();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -316,7 +316,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                 return;
             }
             if sel < row_count(app) {
-                app.tunnels.pending_delete = Some(sel);
+                app.tunnels.request_delete(sel);
             }
         }
         KeyCode::Enter => toggle_tunnel(app),

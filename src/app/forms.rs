@@ -1071,6 +1071,22 @@ impl TunnelForm {
         }
     }
 
+    /// Advance the focused field to the next one (skipping remote fields
+    /// when tunnel_type is Dynamic) and sync the cursor to the end of the
+    /// new focused value.
+    pub fn focus_next(&mut self) {
+        self.focused_field = self.focused_field.next(self.tunnel_type);
+        self.sync_cursor_to_end();
+    }
+
+    /// Retreat the focused field to the previous one (skipping remote
+    /// fields when tunnel_type is Dynamic) and sync the cursor to the end
+    /// of the new focused value.
+    pub fn focus_prev(&mut self) {
+        self.focused_field = self.focused_field.prev(self.tunnel_type);
+        self.sync_cursor_to_end();
+    }
+
     /// Validate the form. Returns error message if invalid.
     pub fn validate(&self) -> Result<(), String> {
         // Reject control characters in all fields
@@ -1500,5 +1516,78 @@ mod host_form_method_tests {
         assert_eq!(f.askpass, "");
         assert_eq!(f.focused_field, FormField::AskPass);
         assert_eq!(f.cursor_pos, 0);
+    }
+
+    #[test]
+    fn tunnel_form_focus_next_from_type_goes_to_bind_port_and_resets_cursor() {
+        let mut f = TunnelForm::new();
+        f.bind_port = "8080".into();
+        f.cursor_pos = 99;
+        assert_eq!(f.focused_field, TunnelFormField::Type);
+        f.focus_next();
+        assert_eq!(f.focused_field, TunnelFormField::BindPort);
+        // sync_cursor_to_end moves to end of focused value (chars count).
+        assert_eq!(f.cursor_pos, 4);
+    }
+
+    #[test]
+    fn tunnel_form_focus_next_wraps_from_remote_port_back_to_type() {
+        let mut f = TunnelForm::new();
+        f.focused_field = TunnelFormField::RemotePort;
+        // Non-empty source field so a wrong-ordering regression
+        // (sync_cursor_to_end before the field assignment) would
+        // produce cursor_pos = 3 instead of 0.
+        f.remote_port = "443".into();
+        f.cursor_pos = 99;
+        f.focus_next();
+        assert_eq!(f.focused_field, TunnelFormField::Type);
+        assert_eq!(f.cursor_pos, 0);
+    }
+
+    #[test]
+    fn tunnel_form_focus_next_dynamic_skips_remote_fields() {
+        let mut f = TunnelForm::new();
+        f.tunnel_type = TunnelType::Dynamic;
+        f.focused_field = TunnelFormField::BindPort;
+        // Non-empty source field so a wrong-ordering regression would
+        // yield cursor_pos = 4, distinguishing it from the correct 0.
+        f.bind_port = "8080".into();
+        f.cursor_pos = 99;
+        f.focus_next();
+        // Dynamic skips RemoteHost + RemotePort.
+        assert_eq!(f.focused_field, TunnelFormField::Type);
+        assert_eq!(f.cursor_pos, 0);
+    }
+
+    #[test]
+    fn tunnel_form_focus_prev_from_bind_port_goes_to_type() {
+        let mut f = TunnelForm::new();
+        f.focused_field = TunnelFormField::BindPort;
+        // Non-empty source field so a wrong-ordering regression would
+        // yield cursor_pos = 4, distinguishing it from the correct 0.
+        f.bind_port = "8080".into();
+        f.cursor_pos = 99;
+        f.focus_prev();
+        assert_eq!(f.focused_field, TunnelFormField::Type);
+        assert_eq!(f.cursor_pos, 0);
+    }
+
+    #[test]
+    fn tunnel_form_focus_next_preserves_field_values_and_tunnel_type() {
+        let mut f = TunnelForm {
+            tunnel_type: TunnelType::Local,
+            bind_port: "1234".into(),
+            remote_host: "example.com".into(),
+            remote_port: "5678".into(),
+            bind_address: "127.0.0.1".into(),
+            focused_field: TunnelFormField::Type,
+            cursor_pos: 0,
+        };
+        f.focus_next();
+        assert_eq!(f.bind_port, "1234");
+        assert_eq!(f.remote_host, "example.com");
+        assert_eq!(f.remote_port, "5678");
+        assert_eq!(f.bind_address, "127.0.0.1");
+        assert_eq!(f.tunnel_type, TunnelType::Local);
     }
 }
