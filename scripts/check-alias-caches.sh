@@ -15,7 +15,8 @@
 # Multi-line tolerance: vault::cert_cache declares its type across
 # several lines because the value is a complex tuple. A naive line-grep
 # would miss it. The preprocessor below joins continuation lines of any
-# `pub <name>:` declaration so the regex sees a single line per field.
+# `pub <name>:` or `pub(in crate::app) <name>:` declaration so the regex
+# sees a single line per field.
 #
 # How to resolve a failure:
 #   1. Decide whether the new field is keyed on a host alias. Trace
@@ -102,7 +103,7 @@ function closes_field(s) { s = rtrim(s); return (s ~ /[,;]$/) }
         }
         next
     }
-    if ($0 ~ /^[[:space:]]*pub [a-z_]+:/) {
+    if ($0 ~ /^[[:space:]]*pub(\([^)]*\))?[[:space:]]+[a-z_]+:/) {
         start_nr = FNR
         buf = $0
         depth = delta($0)
@@ -118,12 +119,13 @@ function closes_field(s) { s = rtrim(s); return (s ~ /[,;]$/) }
 FOUND_LIST=$(
     find src/app.rs src/app -type f -name '*.rs' \
         | xargs awk "$PREPROCESS_AWK" \
-        | grep -E 'pub [a-z_]+:.*(HashMap<\s*String\s*,|HashSet<\s*String\s*>|Arc<Mutex<HashSet<\s*String\s*>)' \
+        | grep -E 'pub(\([^)]*\))?[[:space:]]+[a-z_]+:.*(HashMap<\s*String\s*,|HashSet<\s*String\s*>|Arc<Mutex<HashSet<\s*String\s*>)' \
         | awk -F: '{
-            match($0, /pub [a-z_]+/)
-            field = substr($0, RSTART+4, RLENGTH-4)
+            match($0, /pub(\([^)]*\))?[[:space:]]+[a-z_]+/)
+            chunk = substr($0, RSTART, RLENGTH)
+            sub(/^pub(\([^)]*\))?[[:space:]]+/, "", chunk)
             sub(/^src\//, "", $1)
-            print $1 ":" field
+            print $1 ":" chunk
           }' \
         | sort \
         | uniq
