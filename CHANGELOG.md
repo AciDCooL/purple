@@ -1,3 +1,9 @@
+## 3.15.13 - 2026-05-22
+
+- change: Tighter App state seams across more sub-systems.
+- change: Update notice, file browser paths, connection history and Vault SSH state move behind named operations so write paths are inspectable from one spot.
+- change: Vault SSH cert cache, in-flight checks and bulk-sign state share one set of operations, so they cannot drift apart mid-action.
+
 ## 3.15.12 - 2026-05-22
 
 - change: Sturdier overlay, vault and status internals.
