@@ -1580,7 +1580,7 @@ fn inspect_command_uses_runtime_binary() {
     );
 }
 
-// -- parse_container_inspect: audit fields (Phase A) ---------------------
+// -- parse_container_inspect: audit fields -------------------------------
 
 const FIXTURE_FULL_RUNNING: &str = r#"[{
   "Id":"86d03287fdf9aaaa",
@@ -1844,7 +1844,7 @@ fn inspect_parses_health_failing_streak() {
     assert_eq!(i.health_failing_streak, Some(3));
 }
 
-// -- parse_uptime_from_status (Phase A) ----------------------------------
+// -- parse_uptime_from_status --------------------------------------------
 
 #[test]
 fn uptime_weeks() {
@@ -1946,7 +1946,7 @@ fn uptime_non_running_returns_none() {
     assert_eq!(parse_uptime_from_status("not a docker status"), None);
 }
 
-// -- container_logs_command + parse_log_output (Phase B) -----------------
+// -- container_logs_command + parse_log_output ---------------------------
 
 #[test]
 fn logs_command_uses_runtime_and_tail() {
@@ -2009,7 +2009,7 @@ fn parse_log_output_empty_inputs_returns_empty() {
     assert!(parse_log_output("", "").is_empty());
 }
 
-// -- format_uptime_short (Phase A) ---------------------------------------
+// -- format_uptime_short -------------------------------------------------
 
 #[test]
 fn format_uptime_short_buckets() {
@@ -2023,7 +2023,7 @@ fn format_uptime_short_buckets() {
     assert_eq!(format_uptime_short(7 * 86_400), "7d");
 }
 
-// -- demo_log_lines (Phase B: demo short-circuit) ------------------------
+// -- demo_log_lines (demo short-circuit) ---------------------------------
 
 #[test]
 fn demo_log_lines_returns_requested_tail_count() {
