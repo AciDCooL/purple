@@ -261,7 +261,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     app.ping.status.len()
                 );
                 app.ping.clear_results();
-                app.status_center.status = None;
+                app.clear_status();
             } else {
                 super::ping::ping_selected_host(app, events_tx, true);
             }
@@ -273,7 +273,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     app.ping.status.len()
                 );
                 app.ping.clear_results();
-                app.status_center.status = None;
+                app.clear_status();
             } else {
                 let hosts_to_ping: Vec<(String, String, u16)> = app
                     .hosts_state
@@ -324,7 +324,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     } else {
                         app.apply_filter();
                     }
-                    app.status_center.status = None;
+                    app.clear_status();
                 }
             }
         }
@@ -741,7 +741,7 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
                 if was_filtering {
                     app.cancel_search();
                 }
-                app.status_center.status = None;
+                app.clear_status();
             } else {
                 super::ping::ping_selected_host(app, events_tx, false);
             }
@@ -778,7 +778,7 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
             } else {
                 app.apply_filter();
             }
-            app.status_center.status = None;
+            app.clear_status();
         }
         KeyCode::Char(c) => {
             if let Some(ref mut query) = app.search.query {

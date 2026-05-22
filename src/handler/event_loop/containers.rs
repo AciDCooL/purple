@@ -182,7 +182,7 @@ pub(crate) fn drive_refresh_batch(app: &mut App, alias: &str, events_tx: &mpsc::
         app.containers_overview.clear_refresh();
         // Clear the sticky progress footer set by notify_progress so the
         // success toast is the only thing the user sees after the batch.
-        app.status_center.status = None;
+        app.clear_status();
         app.notify(crate::messages::container_refresh_complete(total));
     } else {
         app.notify_progress(crate::messages::container_refresh_progress(

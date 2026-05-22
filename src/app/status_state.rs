@@ -143,6 +143,17 @@ impl StatusCenter {
         });
     }
 
+    /// Clear the footer status unconditionally. Use when a new user action
+    /// makes the prior status stale (e.g. starting a ping run that will
+    /// post its own progress, or entering search mode). The sticky-aware
+    /// variant is `clear_sticky_status`.
+    pub(crate) fn clear_status(&mut self) {
+        if let Some(s) = &self.status {
+            log::debug!("footer <- clear: {}", s.text);
+        }
+        self.status = None;
+    }
+
     /// Drop the sticky footer status (set by `set_sticky_status` /
     /// `notify_progress`). Long-running operations call this when they
     /// finish so the "Pushing X..." line does not linger after the
@@ -355,5 +366,43 @@ mod tests {
         }
         s.tick_toast();
         assert!(s.toast.is_some(), "sticky toast must not expire");
+    }
+
+    #[test]
+    fn clear_status_drops_active_footer_status() {
+        let mut s = StatusCenter::default();
+        s.set_info_status("syncing aws");
+        assert!(s.status.is_some());
+        s.clear_status();
+        assert!(s.status.is_none());
+    }
+
+    #[test]
+    fn clear_status_also_drops_sticky_footer_status() {
+        // Sticky is intentional: callers that want sticky-aware semantics
+        // use `clear_sticky_status`. This variant is the heavy hammer.
+        let mut s = StatusCenter::default();
+        s.set_sticky_status("signing cert", false);
+        assert!(s.status.as_ref().is_some_and(|m| m.sticky));
+        s.clear_status();
+        assert!(s.status.is_none());
+    }
+
+    #[test]
+    fn clear_status_on_empty_is_noop() {
+        let mut s = StatusCenter::default();
+        s.clear_status();
+        assert!(s.status.is_none());
+        assert!(s.toast.is_none());
+    }
+
+    #[test]
+    fn clear_status_does_not_touch_active_toast() {
+        let mut s = StatusCenter::default();
+        s.set_info_status("info");
+        s.push_toast(msg("warn", MessageClass::Warning, false));
+        s.clear_status();
+        assert!(s.status.is_none(), "footer cleared");
+        assert!(s.toast.is_some(), "toast slot untouched");
     }
 }

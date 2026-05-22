@@ -143,7 +143,7 @@ pub struct App {
 
     // Sub-structs
     /// Toast queue, sticky messages, status routing.
-    pub status_center: StatusCenter,
+    pub(crate) status_center: StatusCenter,
     /// Cursor reveal, detail-toggle, welcome timestamps and overlay meta.
     pub(crate) ui: UiSelection,
     /// Host-list incremental search query and matched hits.
@@ -1061,6 +1061,14 @@ impl App {
     /// Explicit info. Footer, 4s timeout, not suppressed by sticky.
     pub fn notify_info(&mut self, text: impl Into<String>) {
         self.status_center.set_info_status(text);
+    }
+
+    /// Drop the footer status unconditionally. Use when a new user action
+    /// makes the prior status stale. Symmetric with the `notify_*` family
+    /// so handlers stay on the App surface instead of reaching into
+    /// `status_center` directly.
+    pub(crate) fn clear_status(&mut self) {
+        self.status_center.clear_status();
     }
 
     /// Tick the footer status message timer. Uses wall-clock time.
