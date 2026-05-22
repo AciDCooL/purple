@@ -188,9 +188,9 @@ pub struct App {
 
     // File browser
     /// Persistent per-host last-visited paths; always present.
-    pub file_browser_state: FileBrowserState,
+    pub(crate) file_browser_state: FileBrowserState,
     /// Per-host overlay session; Some when the file browser is open.
-    pub file_browser_session: Option<crate::file_browser::FileBrowserSession>,
+    pub(crate) file_browser_session: Option<crate::file_browser::FileBrowserSession>,
 
     // Containers
     /// Cache and cross-host pending operations; always present.
@@ -945,6 +945,27 @@ impl App {
         if let Err(e) = jump::save_recents(&file) {
             log::warn!("[purple] failed to save recents: {e}");
         }
+    }
+
+    /// Open the file-browser overlay with the given session. Stores the
+    /// session and switches to `Screen::FileBrowser` for the session's
+    /// alias. Any previously-open session is replaced.
+    pub(crate) fn open_file_browser(&mut self, session: crate::file_browser::FileBrowserSession) {
+        let alias = session.alias.clone();
+        self.file_browser_session = Some(session);
+        self.set_screen(Screen::FileBrowser { alias });
+    }
+
+    /// Close the file-browser overlay. Persists the current pane paths to
+    /// `file_browser_state.host_paths` so the next open re-seeds them,
+    /// drops the session, and returns to the host list.
+    pub(crate) fn close_file_browser(&mut self) {
+        if let Some(fb) = self.file_browser_session.take() {
+            self.file_browser_state
+                .host_paths
+                .insert(fb.alias, (fb.local_path, fb.remote_path));
+        }
+        self.set_screen(Screen::HostList);
     }
 
     /// Flush a deferred vault config write if one is pending and no form is open.

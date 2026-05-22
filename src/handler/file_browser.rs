@@ -127,17 +127,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
 
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
-            // Save paths for next time
-            if let Some(ref fb) = app.file_browser_session {
-                let alias = fb.alias.clone();
-                let local = fb.local_path.clone();
-                let remote = fb.remote_path.clone();
-                app.file_browser_state
-                    .host_paths
-                    .insert(alias, (local, remote));
-            }
-            app.file_browser_session = None;
-            app.set_screen(Screen::HostList);
+            app.close_file_browser();
         }
         KeyCode::Tab => {
             fb.active_pane = match fb.active_pane {

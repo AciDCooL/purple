@@ -9506,3 +9506,120 @@ fn open_region_picker_does_not_touch_other_pickers() {
     assert!(!app.ui.proxyjump_picker.open);
     assert!(!app.ui.vault_role_picker.open);
 }
+
+fn make_fb_session(
+    alias: &str,
+    local: &str,
+    remote: &str,
+) -> crate::file_browser::FileBrowserSession {
+    crate::file_browser::FileBrowserSession {
+        alias: alias.to_string(),
+        askpass: None,
+        active_pane: crate::file_browser::BrowserPane::Local,
+        local_path: PathBuf::from(local),
+        local_entries: Vec::new(),
+        local_list_state: ratatui::widgets::ListState::default(),
+        local_selected: std::collections::HashSet::new(),
+        local_error: None,
+        remote_path: remote.to_string(),
+        remote_entries: Vec::new(),
+        remote_list_state: ratatui::widgets::ListState::default(),
+        remote_selected: std::collections::HashSet::new(),
+        remote_error: None,
+        remote_loading: false,
+        show_hidden: false,
+        sort: crate::file_browser::BrowserSort::Name,
+        confirm_copy: None,
+        transferring: None,
+        transfer_error: None,
+        connection_recorded: false,
+    }
+}
+
+#[test]
+fn open_file_browser_sets_session_and_screen() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.open_file_browser(make_fb_session("web", "/tmp", "/home"));
+    assert!(app.file_browser_session.is_some());
+    match &app.screen {
+        Screen::FileBrowser { alias } => assert_eq!(alias, "web"),
+        other => panic!("expected FileBrowser screen, got {:?}", other),
+    }
+}
+
+#[test]
+fn open_file_browser_replaces_existing_session() {
+    // Re-opening for a different alias must drop the previous session
+    // outright; lingering state from a stale alias would surface in the
+    // overlay until the next render. Screen must follow the new alias.
+    let mut app = make_app("Host a\n  HostName 1.1.1.1\nHost b\n  HostName 2.2.2.2\n");
+    app.open_file_browser(make_fb_session("a", "/tmp", "/home"));
+    app.open_file_browser(make_fb_session("b", "/var", "/srv"));
+    let fb = app
+        .file_browser_session
+        .as_ref()
+        .expect("session must be present");
+    assert_eq!(fb.alias, "b");
+    assert_eq!(fb.local_path, PathBuf::from("/var"));
+    match &app.screen {
+        Screen::FileBrowser { alias } => assert_eq!(alias, "b"),
+        other => panic!("expected FileBrowser screen for b, got {:?}", other),
+    }
+}
+
+#[test]
+fn close_file_browser_saves_paths_and_clears_session() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.open_file_browser(make_fb_session("web", "/etc", "/var/log"));
+    app.close_file_browser();
+    assert!(app.file_browser_session.is_none());
+    let saved = app
+        .file_browser_state
+        .host_paths
+        .get("web")
+        .expect("paths must be saved for web");
+    assert_eq!(saved.0, PathBuf::from("/etc"));
+    assert_eq!(saved.1, "/var/log");
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn close_file_browser_without_session_does_not_touch_host_paths() {
+    // Calling close defensively (no overlay open) must not invent a
+    // host_paths entry nor crash. It still routes back to HostList.
+    // Seed a non-default screen so the HostList assertion proves the
+    // transition rather than passing on the App::new default.
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.set_screen(Screen::FileBrowser {
+        alias: "web".to_string(),
+    });
+    app.file_browser_state.host_paths.insert(
+        "web".to_string(),
+        (PathBuf::from("/tmp"), "/home".to_string()),
+    );
+    let before = app.file_browser_state.host_paths.clone();
+    app.close_file_browser();
+    assert!(app.file_browser_session.is_none());
+    assert_eq!(app.file_browser_state.host_paths, before);
+    assert!(matches!(app.screen, Screen::HostList));
+}
+
+#[test]
+fn close_file_browser_overwrites_previous_paths_for_same_alias() {
+    // A second visit must update the saved paths to whatever the user
+    // navigated to during this session, not stick on the first visit.
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.file_browser_state.host_paths.insert(
+        "web".to_string(),
+        (PathBuf::from("/old"), "/old-remote".to_string()),
+    );
+    app.open_file_browser(make_fb_session("web", "/new", "/new-remote"));
+    app.close_file_browser();
+    let saved = app
+        .file_browser_state
+        .host_paths
+        .get("web")
+        .expect("paths must still exist for web");
+    assert_eq!(saved.0, PathBuf::from("/new"));
+    assert_eq!(saved.1, "/new-remote");
+}

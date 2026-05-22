@@ -224,10 +224,7 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
         transfer_error: None,
         connection_recorded: false,
     };
-    app.file_browser_session = Some(fb);
-    app.set_screen(Screen::FileBrowser {
-        alias: alias.clone(),
-    });
+    app.open_file_browser(fb);
     // Fetch remote home dir in background
     let tx = events_tx.clone();
     let remote = remote_path;
