@@ -689,11 +689,11 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
         (body_area, None)
     };
 
-    let update_title = app.update.available.as_ref().map(|ver| {
+    let update_title = app.update.available().map(|ver| {
         let label = host_list::build_update_label(
             ver,
-            app.update.headline.as_deref(),
-            app.update.hint,
+            app.update.headline(),
+            app.update.hint(),
             list_area.width,
         );
         Line::from(Span::styled(label, theme::update_badge()))

@@ -67,7 +67,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         ))
         .alignment(Alignment::Center),
     );
-    if let Some(new_version) = app.update.available.as_ref() {
+    if let Some(new_version) = app.update.available() {
         lines.push(
             Line::from(Span::styled(
                 msg::update_available(new_version),

@@ -6,11 +6,11 @@
 #[derive(Default)]
 pub struct UpdateState {
     /// Available version string (None if up to date or unchecked).
-    pub available: Option<String>,
+    pub(in crate::app) available: Option<String>,
     /// Update announcement headline.
-    pub headline: Option<String>,
+    pub(in crate::app) headline: Option<String>,
     /// Update hint string (install command suggestion).
-    pub hint: &'static str,
+    pub(in crate::app) hint: &'static str,
 }
 
 impl UpdateState {
@@ -20,5 +20,22 @@ impl UpdateState {
             hint: crate::update::update_hint(),
             ..Self::default()
         }
+    }
+
+    pub fn available(&self) -> Option<&String> {
+        self.available.as_ref()
+    }
+
+    pub fn headline(&self) -> Option<&str> {
+        self.headline.as_deref()
+    }
+
+    pub fn hint(&self) -> &'static str {
+        self.hint
+    }
+
+    pub fn announce(&mut self, version: String, headline: Option<String>) {
+        self.available = Some(version);
+        self.headline = headline;
     }
 }

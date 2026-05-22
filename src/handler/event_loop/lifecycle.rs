@@ -142,6 +142,5 @@ pub(crate) fn handle_ping_result(
 
 /// Handle `AppEvent::UpdateAvailable`.
 pub(crate) fn handle_update_available(app: &mut App, version: String, headline: Option<String>) {
-    app.update.available = Some(version);
-    app.update.headline = headline;
+    app.update.announce(version, headline);
 }

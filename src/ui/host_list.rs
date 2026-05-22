@@ -521,13 +521,8 @@ fn render_display_list(
     }
     let title = Line::from(title_spans);
 
-    let update_title = app.update.available.as_ref().map(|ver| {
-        let label = build_update_label(
-            ver,
-            app.update.headline.as_deref(),
-            app.update.hint,
-            area.width,
-        );
+    let update_title = app.update.available().map(|ver| {
+        let label = build_update_label(ver, app.update.headline(), app.update.hint(), area.width);
         Line::from(Span::styled(label, theme::update_badge()))
     });
 
@@ -789,13 +784,8 @@ fn render_search_list(
         theme::bold(),
     )]);
 
-    let update_title = app.update.available.as_ref().map(|ver| {
-        let label = build_update_label(
-            ver,
-            app.update.headline.as_deref(),
-            app.update.hint,
-            area.width,
-        );
+    let update_title = app.update.available().map(|ver| {
+        let label = build_update_label(ver, app.update.headline(), app.update.hint(), area.width);
         Line::from(Span::styled(label, theme::update_badge()))
     });
 
