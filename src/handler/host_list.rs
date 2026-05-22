@@ -357,8 +357,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     return;
                 }
                 let current_tags = host.tags.join(", ");
-                app.tags.cursor = current_tags.chars().count();
-                app.tags.input = Some(current_tags);
+                app.tags.open_tag_input(current_tags);
             }
         }
         KeyCode::Char('s') => {

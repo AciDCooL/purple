@@ -64,6 +64,24 @@ pub struct TagState {
     pub list: Vec<String>,
 }
 
+impl TagState {
+    /// Open the inline tag-edit input on the host detail screen with the
+    /// given seed text. Cursor lands at the end of the text so users can
+    /// type extra tags without re-positioning.
+    pub(crate) fn open_tag_input(&mut self, text: String) {
+        self.cursor = text.chars().count();
+        self.input = Some(text);
+    }
+
+    /// Close the inline tag-edit input. Called on both Enter (after the
+    /// submit hits disk) and Esc (cancel) so the two fields cannot drift
+    /// out of sync.
+    pub(crate) fn close_tag_input(&mut self) {
+        self.input = None;
+        self.cursor = 0;
+    }
+}
+
 /// User action per tag row in the bulk tag editor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BulkTagAction {
@@ -183,4 +201,65 @@ pub struct BulkTagApplyResult {
     pub removed: usize,
     /// Hosts skipped because they live in an Include file.
     pub skipped_included: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_tag_input_seeds_text_and_parks_cursor_at_end() {
+        let mut t = TagState::default();
+        t.open_tag_input("prod, web".to_string());
+        assert_eq!(t.input.as_deref(), Some("prod, web"));
+        assert_eq!(t.cursor, "prod, web".chars().count());
+    }
+
+    #[test]
+    fn open_tag_input_with_empty_text_lands_cursor_at_zero() {
+        let mut t = TagState::default();
+        t.open_tag_input(String::new());
+        assert_eq!(t.input.as_deref(), Some(""));
+        assert_eq!(t.cursor, 0);
+    }
+
+    #[test]
+    fn open_tag_input_counts_chars_not_bytes() {
+        // Cursor units are character positions; multi-byte text must not
+        // produce a byte-offset cursor (host_detail handler indexes by
+        // chars when converting to byte positions).
+        let mut t = TagState::default();
+        t.open_tag_input("café".to_string());
+        assert_eq!(t.cursor, 4);
+    }
+
+    #[test]
+    fn close_tag_input_clears_both_fields() {
+        let mut t = TagState::default();
+        t.open_tag_input("staging".to_string());
+        t.close_tag_input();
+        assert!(t.input.is_none());
+        assert_eq!(t.cursor, 0);
+    }
+
+    #[test]
+    fn close_tag_input_on_idle_state_is_noop() {
+        let mut t = TagState::default();
+        t.close_tag_input();
+        assert!(t.input.is_none());
+        assert_eq!(t.cursor, 0);
+    }
+
+    #[test]
+    fn close_tag_input_does_not_touch_picker_list() {
+        // The `list` field powers the tag picker overlay and lives
+        // independently of the inline tag-edit input.
+        let mut t = TagState {
+            list: vec!["prod".to_string(), "web".to_string()],
+            ..Default::default()
+        };
+        t.open_tag_input("staging".to_string());
+        t.close_tag_input();
+        assert_eq!(t.list, vec!["prod".to_string(), "web".to_string()]);
+    }
 }

@@ -154,7 +154,7 @@ pub struct App {
     pub(crate) keys: KeysState,
 
     /// Tag library and per-host tag mappings.
-    pub tags: TagState,
+    pub(crate) tags: TagState,
 
     /// Host form and bulk tag editor scratch state.
     pub(crate) forms: FormState,

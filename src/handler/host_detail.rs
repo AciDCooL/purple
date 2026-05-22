@@ -28,12 +28,10 @@ pub(super) fn handle_tag_input(app: &mut App, key: KeyEvent) {
                     }
                 }
             }
-            app.tags.input = None;
-            app.tags.cursor = 0;
+            app.tags.close_tag_input();
         }
         KeyCode::Esc => {
-            app.tags.input = None;
-            app.tags.cursor = 0;
+            app.tags.close_tag_input();
         }
         KeyCode::Left if app.tags.cursor > 0 => {
             app.tags.cursor -= 1;
