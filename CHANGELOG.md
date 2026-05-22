@@ -1,3 +1,10 @@
+## 3.15.11 - 2026-05-22
+
+- change: Container request queues and host renames get sturdier.
+- change: A logs or exec request that displaces a previous unstarted one is now logged, so dropped intents stay traceable.
+- change: Host renames guard against accidental name collisions on container caches, refresh batches and folded-group state.
+- change: Containers tab preferences hydrate through a single startup path that cannot silently revert in-session edits.
+
 ## 3.15.10 - 2026-05-22
 
 - change: Sturdier internals, with no UI changes.
