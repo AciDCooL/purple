@@ -115,10 +115,7 @@ impl Drop for App {
         // Cancel and join any in-flight Vault SSH bulk-sign worker so it
         // cannot keep writing to ~/.purple/certs/ after teardown (panic
         // unwind, normal exit, etc.).
-        if let Some(ref cancel) = self.vault.signing_cancel {
-            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-        if let Some(handle) = self.vault.sign_thread.take() {
+        if let Some(handle) = self.vault.cancel_signing_run() {
             let _ = handle.join();
         }
         // Same dance for key-push workers: signal cancel, join, so a
@@ -172,7 +169,7 @@ pub struct App {
     pub(crate) ping: PingState,
 
     /// Vault SSH certificate cache and signing run state.
-    pub vault: VaultState,
+    pub(crate) vault: VaultState,
 
     /// Tunnel definitions per host and active tunnel processes.
     pub(crate) tunnels: TunnelState,

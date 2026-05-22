@@ -445,8 +445,7 @@ fn start_vault_bulk_sign(
             // surface the error. otherwise the status bar is stuck at
             // "Signing 0/N" with no way for the user to recover.
             log::warn!("[purple] vault sign thread: spawn failed: {}", e);
-            app.vault.signing_cancel = None;
-            app.vault.sign_thread = None;
+            let _ = app.vault.finalize_signing_run();
             app.notify_error(crate::messages::vault_spawn_failed(&e));
         }
     }

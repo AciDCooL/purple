@@ -3,8 +3,6 @@
 //! atomically on completion; the cert-check cache is keyed by alias and
 //! survives single-host failures by storing them as `Invalid(message)`.
 
-use std::time::Instant;
-
 use crate::app::App;
 use crate::ssh_config;
 use crate::vault_ssh;
@@ -84,9 +82,11 @@ pub(crate) fn handle_vault_sign_all_done(
     aborted_message: Option<String>,
     first_error: Option<String>,
 ) -> std::ops::ControlFlow<()> {
-    app.vault.signing_cancel = None;
-    // Join the background thread now that it has finished.
-    if let Some(handle) = app.vault.sign_thread.take() {
+    // Join the background thread now that it has finished. Use the
+    // finalize variant: the worker already emitted VaultSignAllDone,
+    // so re-signalling cancel here could hit a newer run's Arc if the
+    // user pressed V→V→V during the dispatch window.
+    if let Some(handle) = app.vault.finalize_signing_run() {
         log::debug!("[purple] vault sign thread: joining");
         let _ = handle.join();
         log::info!(
@@ -233,25 +233,18 @@ pub(crate) fn handle_cert_check_result(
     alias: String,
     status: vault_ssh::CertStatus,
 ) {
-    app.vault.cert_checks_in_flight.remove(&alias);
     let mtime = crate::tui_loop::current_cert_mtime(&alias, app);
-    app.vault
-        .cert_cache
-        .insert(alias, (Instant::now(), status, mtime));
+    app.vault.record_cert_check(alias, status, mtime);
 }
 
 /// Handle `AppEvent::CertCheckError`.
 pub(crate) fn handle_cert_check_error(app: &mut App, alias: String, message: String) {
     // Cache the error as Invalid so the lazy-check loop doesn't
     // re-spawn a background thread on every poll tick.
-    app.vault.cert_checks_in_flight.remove(&alias);
-    app.vault.cert_cache.insert(
+    app.vault.record_cert_check(
         alias.clone(),
-        (
-            Instant::now(),
-            vault_ssh::CertStatus::Invalid(message.clone()),
-            None,
-        ),
+        vault_ssh::CertStatus::Invalid(message.clone()),
+        None,
     );
     app.notify_background_error(crate::messages::vault_cert_check_failed(&alias, &message));
 }

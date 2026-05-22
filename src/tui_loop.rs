@@ -174,7 +174,7 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
         .map(|h| (h.alias.clone(), h.certificate_file.clone()))
         .collect();
     for (alias, cert_file) in vault_aliases {
-        app.vault.cert_checks_in_flight.insert(alias.clone());
+        app.vault.mark_cert_check_started(alias.clone());
         let tx = events_tx.clone();
         std::thread::spawn(move || {
             let check_path = match vault_ssh::resolve_cert_path(&alias, &cert_file) {
@@ -438,7 +438,7 @@ fn lazy_cert_check(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>)
             {
                 let alias = selected.alias.clone();
                 let cert_file = selected.certificate_file.clone();
-                app.vault.cert_checks_in_flight.insert(alias.clone());
+                app.vault.mark_cert_check_started(alias.clone());
                 let tx = events_tx.clone();
                 std::thread::spawn(move || {
                     let check_path = match vault_ssh::resolve_cert_path(&alias, &cert_file) {
@@ -948,10 +948,7 @@ fn handle_pending_snippet(
 fn tui_teardown(app: &mut App, terminal: &mut tui::Tui) -> Result<()> {
     app.flush_pending_vault_write();
 
-    if let Some(ref cancel) = app.vault.signing_cancel {
-        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-    if let Some(handle) = app.vault.sign_thread.take() {
+    if let Some(handle) = app.vault.cancel_signing_run() {
         let _ = handle.join();
     }
 
