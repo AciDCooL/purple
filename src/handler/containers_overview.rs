@@ -240,7 +240,7 @@ fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
 /// are no-ops. The drain happens unconditionally so a second tick
 /// does not retry the same items.
 pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
-    let drained: Vec<String> = std::mem::take(&mut app.container_state.pending_fetch_aliases);
+    let drained: Vec<String> = app.container_state.drain_pending_fetches();
     if app.demo_mode || drained.is_empty() {
         return;
     }
@@ -297,13 +297,14 @@ pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEv
     let in_flight_aliases: std::collections::HashSet<String> =
         initial.iter().map(|i| i.alias.clone()).collect();
 
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue: new_items,
-        in_flight,
-        total,
-        completed: 0,
-        in_flight_aliases,
-    });
+    app.containers_overview
+        .start_refresh(crate::app::RefreshBatch {
+            queue: new_items,
+            in_flight,
+            total,
+            completed: 0,
+            in_flight_aliases,
+        });
 
     let config_path = app.reload.config_path.clone();
     let bw_session = app.bw_session.clone();
@@ -341,13 +342,14 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         }
         let in_flight_aliases: std::collections::HashSet<String> =
             snapshots.iter().map(|(a, _)| a.clone()).collect();
-        app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-            queue: std::collections::VecDeque::new(),
-            in_flight: total,
-            total,
-            completed: 0,
-            in_flight_aliases,
-        });
+        app.containers_overview
+            .start_refresh(crate::app::RefreshBatch {
+                queue: std::collections::VecDeque::new(),
+                in_flight: total,
+                total,
+                completed: 0,
+                in_flight_aliases,
+            });
         app.notify_progress(crate::messages::container_refresh_progress(0, total));
         let tx = events_tx.clone();
         std::thread::spawn(move || {
@@ -405,13 +407,14 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     let in_flight_aliases: std::collections::HashSet<String> =
         initial_batch.iter().map(|i| i.alias.clone()).collect();
 
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue,
-        in_flight,
-        total,
-        completed: 0,
-        in_flight_aliases,
-    });
+    app.containers_overview
+        .start_refresh(crate::app::RefreshBatch {
+            queue,
+            in_flight,
+            total,
+            completed: 0,
+            in_flight_aliases,
+        });
     app.notify_progress(crate::messages::container_refresh_progress(0, total));
 
     let config_path = app.reload.config_path.clone();
@@ -445,14 +448,15 @@ fn exec_into_selected_container(app: &mut App) {
         row.name,
         row.id
     );
-    app.container_state.pending_exec = Some(crate::app::ContainerExecRequest {
-        alias: row.alias,
-        askpass,
-        runtime,
-        container_id: row.id,
-        container_name: row.name,
-        command: None,
-    });
+    app.container_state
+        .queue_exec(crate::app::ContainerExecRequest {
+            alias: row.alias,
+            askpass,
+            runtime,
+            container_id: row.id,
+            container_name: row.name,
+            command: None,
+        });
 }
 
 /// Resolve the cursor to a row, validate that it is running, and
@@ -506,13 +510,14 @@ fn queue_logs_fetch_for_selected(app: &mut App) {
         row.name,
         row.id
     );
-    app.container_state.pending_logs = Some(crate::app::ContainerLogsRequest {
-        alias: row.alias.clone(),
-        askpass,
-        runtime,
-        container_id: row.id.clone(),
-        container_name: row.name.clone(),
-    });
+    app.container_state
+        .queue_logs(crate::app::ContainerLogsRequest {
+            alias: row.alias.clone(),
+            askpass,
+            runtime,
+            container_id: row.id.clone(),
+            container_name: row.name.clone(),
+        });
     // Open the overlay immediately with an empty body so the user
     // sees a loading placeholder while the SSH call runs. The result
     // event populates `body` and clears the placeholder.
@@ -795,7 +800,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             let was_header = selected_header_alias(app).is_some();
             let pinned = selected_container_alias(app).or_else(|| selected_header_alias(app));
             let new_mode = app.containers_overview.sort_mode.next();
-            app.containers_overview.sort_mode = new_mode;
+            let save_result = app.containers_overview.set_sort_mode(new_mode);
             match pinned {
                 Some(alias) => reposition_cursor_on(app, &alias, was_header),
                 None => app
@@ -803,11 +808,11 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                     .containers_overview_state
                     .select(first_visible_idx(app)),
             }
-            if let Err(e) = preferences::save_containers_sort_mode(new_mode) {
-                log::warn!("[config] Failed to persist containers sort mode: {e}");
-                app.notify_error(crate::messages::sorted_by_save_failed(new_mode.label(), &e));
-            } else {
-                app.notify(crate::messages::sorted_by(new_mode.label()));
+            match save_result {
+                Ok(()) => app.notify(crate::messages::sorted_by(new_mode.label())),
+                Err(e) => {
+                    app.notify_error(crate::messages::sorted_by_save_failed(new_mode.label(), &e))
+                }
             }
         }
         KeyCode::Char(':') => {
@@ -890,12 +895,9 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             } else {
                 ViewMode::Compact
             };
-            app.containers_overview.view_mode = new_mode;
+            let _ = app.containers_overview.set_view_mode(new_mode);
             app.ui.detail_toggle_pending = true;
             app.ui.detail_scroll = 0;
-            if let Err(e) = preferences::save_containers_view_mode(new_mode) {
-                log::warn!("[config] Failed to persist containers view mode: {e}");
-            }
         }
         // SPACE GUARD MUST PRECEDE the generic Char(c) arm below. Without
         // it, fuzz-style char input would shadow the host-row collapse

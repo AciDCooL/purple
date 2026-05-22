@@ -194,11 +194,11 @@ pub struct App {
 
     // Containers
     /// Cache and cross-host pending operations; always present.
-    pub container_state: ContainerState,
+    pub(crate) container_state: ContainerState,
     /// Per-host overlay session state; Some when the containers overlay is open.
-    pub container_session: Option<ContainerSession>,
+    pub(crate) container_session: Option<ContainerSession>,
     /// Containers tab data: per-host docker ps cache, selection.
-    pub containers_overview: ContainersOverviewState,
+    pub(crate) containers_overview: ContainersOverviewState,
 
     /// Demo mode: all mutations are in-memory only, no disk writes.
     pub demo_mode: bool,
@@ -288,12 +288,15 @@ impl App {
     /// introduced hosts trigger an initial `docker ps`. pre-existing
     /// cache-missing hosts are explicitly left alone.
     pub fn queue_new_aliases_since(&mut self, before_aliases: &std::collections::HashSet<String>) {
-        for h in &self.hosts_state.list {
-            if !before_aliases.contains(&h.alias) {
-                self.container_state
-                    .pending_fetch_aliases
-                    .push(h.alias.clone());
-            }
+        let new_aliases: Vec<String> = self
+            .hosts_state
+            .list
+            .iter()
+            .filter(|h| !before_aliases.contains(&h.alias))
+            .map(|h| h.alias.clone())
+            .collect();
+        for alias in new_aliases {
+            self.container_state.queue_fetch(alias);
         }
     }
 

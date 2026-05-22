@@ -453,9 +453,7 @@ pub fn apply_saved_sort(app: &mut App) {
     app.hosts_state.sort_mode = saved;
     app.hosts_state.group_by = group;
     app.hosts_state.view_mode = crate::preferences::load_view_mode();
-    app.containers_overview.view_mode = crate::preferences::load_containers_view_mode();
-    app.containers_overview.sort_mode = crate::preferences::load_containers_sort_mode();
-    app.containers_overview.collapsed_hosts = crate::preferences::load_containers_collapsed_hosts();
+    app.containers_overview.hydrate_from_prefs();
     if app.clear_stale_group_tag() {
         if let Err(e) = crate::preferences::save_group_by(&app.hosts_state.group_by) {
             app.notify_error(crate::messages::group_pref_reset_failed(&e));

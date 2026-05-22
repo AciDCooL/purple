@@ -303,7 +303,7 @@ fn requeue_logs_fetch(app: &mut App, alias: String, container_id: String, contai
         alias,
         container_id
     );
-    app.container_state.pending_logs = Some(ContainerLogsRequest {
+    app.container_state.queue_logs(ContainerLogsRequest {
         alias,
         askpass,
         runtime,

@@ -85,7 +85,7 @@ fn queue_exec_with_command(
         container_id,
         command.len()
     );
-    app.container_state.pending_exec = Some(ContainerExecRequest {
+    app.container_state.queue_exec(ContainerExecRequest {
         alias,
         askpass,
         runtime,

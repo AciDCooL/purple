@@ -702,8 +702,7 @@ fn queue_container_action(
         action
     );
     app.container_state
-        .pending_actions
-        .push_back(crate::app::ContainerActionRequest {
+        .queue_action(crate::app::ContainerActionRequest {
             alias,
             askpass,
             runtime,

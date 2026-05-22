@@ -179,7 +179,7 @@ pub(crate) fn drive_refresh_batch(app: &mut App, alias: &str, events_tx: &mpsc::
 
     // Update progress / completion notification.
     if queue_remaining == 0 && still_in_flight == 0 {
-        app.containers_overview.refresh_batch = None;
+        app.containers_overview.clear_refresh();
         // Clear the sticky progress footer set by notify_progress so the
         // success toast is the only thing the user sees after the batch.
         app.status_center.status = None;

@@ -403,18 +403,15 @@ impl App {
             if let Some(v) = self.ping.last_checked.remove(old_alias) {
                 self.ping.last_checked.insert(new_alias.clone(), v);
             }
-            if let Some(v) = self.container_state.cache.remove(old_alias) {
-                self.container_state.cache.insert(new_alias.clone(), v);
+            if self.container_state.migrate_alias(old_alias, new_alias) {
                 container_cache_changed = true;
             }
-            if self
-                .containers_overview
-                .auto_list_in_flight
-                .remove(old_alias)
-            {
-                self.containers_overview
-                    .auto_list_in_flight
-                    .insert(new_alias.clone());
+            // collapsed_hosts (inside containers_overview) is persistent so
+            // the returned flag drives the save below. auto_list_in_flight
+            // and refresh_batch.in_flight_aliases are non-persistent and
+            // handled inside the same method.
+            if self.containers_overview.migrate_alias(old_alias, new_alias) {
+                collapsed_hosts_changed = true;
             }
             if self.vault.cert_checks_in_flight.remove(old_alias) {
                 self.vault.cert_checks_in_flight.insert(new_alias.clone());
@@ -426,11 +423,6 @@ impl App {
                 self.file_browser_state
                     .host_paths
                     .insert(new_alias.clone(), v);
-            }
-            if let Some(batch) = self.containers_overview.refresh_batch.as_mut() {
-                if batch.in_flight_aliases.remove(old_alias) {
-                    batch.in_flight_aliases.insert(new_alias.clone());
-                }
             }
             // Sign worker holds the same Arc<Mutex<...>>. Recover on poison
             // so a panicked worker does not block migration. Migration only
@@ -444,15 +436,6 @@ impl App {
                 if sign.remove(old_alias) {
                     sign.insert(new_alias.clone());
                 }
-            }
-            // collapsed_hosts is persistent (preferences). Migrate here so
-            // reload_hosts' prune step sees the new alias as live and does
-            // not strip the user's collapsed-fleet state on rename.
-            if self.containers_overview.collapsed_hosts.remove(old_alias) {
-                self.containers_overview
-                    .collapsed_hosts
-                    .insert(new_alias.clone());
-                collapsed_hosts_changed = true;
             }
         }
         if container_cache_changed {

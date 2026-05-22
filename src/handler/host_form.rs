@@ -346,7 +346,7 @@ pub(super) fn submit_form(app: &mut App) {
     // loop. Only this alias is fetched: prevents an unrelated
     // cache-missing host from triggering an unwanted SSH connection
     // when the user edits an existing host.
-    app.container_state.pending_fetch_aliases.push(target_alias);
+    app.container_state.queue_fetch(target_alias);
 }
 
 /// Compute the stale-hint that App::open_host_edit_form expects.

@@ -248,6 +248,87 @@ impl Default for ContainersOverviewState {
     }
 }
 
+impl ContainersOverviewState {
+    /// Install a fresh refresh batch. Caller is responsible for spawning
+    /// the initial parallel listings after this call; this method only
+    /// owns the state slot.
+    pub fn start_refresh(&mut self, batch: RefreshBatch) {
+        self.refresh_batch = Some(batch);
+    }
+
+    /// Drop the active refresh batch. Called when the queue drains and
+    /// in-flight count returns to zero.
+    pub fn clear_refresh(&mut self) {
+        self.refresh_batch = None;
+    }
+
+    /// Load the persisted overview fields from `preferences`. Startup only:
+    /// clobbers any in-memory state with whatever is on disk. `pub(crate)`
+    /// so a stray mid-session caller cannot quietly revert user edits.
+    pub(crate) fn hydrate_from_prefs(&mut self) {
+        self.view_mode = crate::preferences::load_containers_view_mode();
+        self.sort_mode = crate::preferences::load_containers_sort_mode();
+        self.collapsed_hosts = crate::preferences::load_containers_collapsed_hosts();
+    }
+
+    /// Update `view_mode` and persist. Returns the persist error so the
+    /// caller can surface it (current call site discards it intentionally
+    /// to match the pre-encapsulation behavior where view-mode persist
+    /// failures only logged).
+    pub fn set_view_mode(&mut self, mode: ViewMode) -> std::io::Result<()> {
+        self.view_mode = mode;
+        crate::preferences::save_containers_view_mode(mode).inspect_err(|e| {
+            log::warn!("[config] Failed to persist containers view mode: {e}");
+        })
+    }
+
+    /// Update `sort_mode` and persist. Same contract as `set_view_mode`;
+    /// the call site does surface the error via a toast.
+    pub fn set_sort_mode(&mut self, mode: ContainersSortMode) -> std::io::Result<()> {
+        self.sort_mode = mode;
+        crate::preferences::save_containers_sort_mode(mode).inspect_err(|e| {
+            log::warn!("[config] Failed to persist containers sort mode: {e}");
+        })
+    }
+
+    /// Rename an alias across every alias-keyed set in this state.
+    /// Returns `true` when `collapsed_hosts` changed so the caller can
+    /// persist; `auto_list_in_flight` and `refresh_batch.in_flight_aliases`
+    /// are also migrated but are not persistent so they do not affect
+    /// the return value. No-op (returns `false`) when `old == new`.
+    pub fn migrate_alias(&mut self, old: &str, new: &str) -> bool {
+        if old == new {
+            return false;
+        }
+        if self.auto_list_in_flight.remove(old) {
+            debug_assert!(
+                !self.auto_list_in_flight.contains(new),
+                "auto_list_in_flight collision on rename {old} -> {new}"
+            );
+            self.auto_list_in_flight.insert(new.to_string());
+        }
+        if let Some(batch) = self.refresh_batch.as_mut() {
+            if batch.in_flight_aliases.remove(old) {
+                debug_assert!(
+                    !batch.in_flight_aliases.contains(new),
+                    "refresh_batch.in_flight_aliases collision on rename {old} -> {new}"
+                );
+                batch.in_flight_aliases.insert(new.to_string());
+            }
+        }
+        if self.collapsed_hosts.remove(old) {
+            debug_assert!(
+                !self.collapsed_hosts.contains(new),
+                "collapsed_hosts collision on rename {old} -> {new}"
+            );
+            self.collapsed_hosts.insert(new.to_string());
+            true
+        } else {
+            false
+        }
+    }
+}
+
 impl InspectCache {
     /// Returns `Some(entry)` only when the cache holds a *fresh* entry
     /// for `container_id` (`now - timestamp < TTL`). Stale entries
@@ -266,5 +347,142 @@ impl LogsCache {
         self.entries
             .get(container_id)
             .filter(|e| now.saturating_sub(e.timestamp) < LOGS_CACHE_TTL_SECS)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::preferences::tests_helpers::with_temp_prefs;
+
+    fn batch_with_aliases(aliases: &[&str]) -> RefreshBatch {
+        RefreshBatch {
+            queue: VecDeque::new(),
+            in_flight: aliases.len(),
+            total: aliases.len(),
+            completed: 0,
+            in_flight_aliases: aliases.iter().map(|a| a.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn start_refresh_installs_batch() {
+        let mut state = ContainersOverviewState::default();
+        assert!(state.refresh_batch.is_none());
+        state.start_refresh(batch_with_aliases(&["host-a", "host-b"]));
+        let batch = state.refresh_batch.as_ref().unwrap();
+        assert_eq!(batch.total, 2);
+        assert_eq!(batch.in_flight, 2);
+        assert!(batch.in_flight_aliases.contains("host-a"));
+    }
+
+    #[test]
+    fn clear_refresh_drops_batch() {
+        let mut state = ContainersOverviewState::default();
+        state.start_refresh(batch_with_aliases(&["host-a"]));
+        state.clear_refresh();
+        assert!(state.refresh_batch.is_none());
+    }
+
+    #[test]
+    fn hydrate_from_prefs_reads_persisted_values() {
+        with_temp_prefs("hydrate_from_prefs", |_path| {
+            crate::preferences::save_containers_view_mode(ViewMode::Compact).unwrap();
+            crate::preferences::save_containers_sort_mode(ContainersSortMode::AlphaContainer)
+                .unwrap();
+            let mut collapsed = std::collections::HashSet::new();
+            collapsed.insert("folded-host".to_string());
+            crate::preferences::save_containers_collapsed_hosts(&collapsed).unwrap();
+
+            let mut state = ContainersOverviewState::default();
+            state.hydrate_from_prefs();
+            assert_eq!(state.view_mode, ViewMode::Compact);
+            assert_eq!(state.sort_mode, ContainersSortMode::AlphaContainer);
+            assert!(state.collapsed_hosts.contains("folded-host"));
+        });
+    }
+
+    #[test]
+    fn set_view_mode_updates_field_and_persists() {
+        with_temp_prefs("set_view_mode", |_path| {
+            let mut state = ContainersOverviewState::default();
+            state.set_view_mode(ViewMode::Compact).unwrap();
+            assert_eq!(state.view_mode, ViewMode::Compact);
+            assert_eq!(
+                crate::preferences::load_containers_view_mode(),
+                ViewMode::Compact
+            );
+        });
+    }
+
+    #[test]
+    fn set_sort_mode_updates_field_and_persists() {
+        with_temp_prefs("set_sort_mode", |_path| {
+            let mut state = ContainersOverviewState::default();
+            state
+                .set_sort_mode(ContainersSortMode::AlphaContainer)
+                .unwrap();
+            assert_eq!(state.sort_mode, ContainersSortMode::AlphaContainer);
+            assert_eq!(
+                crate::preferences::load_containers_sort_mode(),
+                ContainersSortMode::AlphaContainer
+            );
+        });
+    }
+
+    #[test]
+    fn migrate_alias_renames_auto_list_in_flight() {
+        let mut state = ContainersOverviewState::default();
+        state.auto_list_in_flight.insert("old".to_string());
+        state.migrate_alias("old", "new");
+        assert!(state.auto_list_in_flight.contains("new"));
+        assert!(!state.auto_list_in_flight.contains("old"));
+    }
+
+    #[test]
+    fn migrate_alias_renames_refresh_batch_in_flight() {
+        let mut state = ContainersOverviewState::default();
+        state.start_refresh(batch_with_aliases(&["old"]));
+        // Non-persistent change: collapsed_hosts is untouched so the
+        // return value must be false even though the in-flight set
+        // was migrated. Pins the contract that drives the persist
+        // call in app::hosts::migrate_alias_keyed_caches.
+        assert!(!state.migrate_alias("old", "new"));
+        let batch = state.refresh_batch.as_ref().unwrap();
+        assert!(batch.in_flight_aliases.contains("new"));
+        assert!(!batch.in_flight_aliases.contains("old"));
+    }
+
+    #[test]
+    fn migrate_alias_self_rename_is_noop() {
+        let mut state = ContainersOverviewState::default();
+        state.collapsed_hosts.insert("same".to_string());
+        state.auto_list_in_flight.insert("same".to_string());
+        assert!(!state.migrate_alias("same", "same"));
+        assert!(state.collapsed_hosts.contains("same"));
+        assert!(state.auto_list_in_flight.contains("same"));
+    }
+
+    #[test]
+    fn migrate_alias_renames_collapsed_hosts_and_returns_true() {
+        let mut state = ContainersOverviewState::default();
+        state.collapsed_hosts.insert("old".to_string());
+        assert!(state.migrate_alias("old", "new"));
+        assert!(state.collapsed_hosts.contains("new"));
+        assert!(!state.collapsed_hosts.contains("old"));
+    }
+
+    #[test]
+    fn migrate_alias_returns_false_when_collapsed_unchanged() {
+        let mut state = ContainersOverviewState::default();
+        state.auto_list_in_flight.insert("old".to_string());
+        assert!(!state.migrate_alias("old", "new"));
+        assert!(state.auto_list_in_flight.contains("new"));
+    }
+
+    #[test]
+    fn migrate_alias_is_noop_when_nothing_matches() {
+        let mut state = ContainersOverviewState::default();
+        assert!(!state.migrate_alias("missing", "new"));
     }
 }

@@ -501,11 +501,9 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 } else {
                     app.update_last_modified();
                     app.reload_hosts();
-                    // Restored host has no container_cache entry —
+                    // Restored host has no container_cache entry,
                     // queue an initial fetch for THIS alias only.
-                    app.container_state
-                        .pending_fetch_aliases
-                        .push(alias.clone());
+                    app.container_state.queue_fetch(alias.clone());
                     app.notify(crate::messages::host_restored(&alias));
                 }
             } else {
