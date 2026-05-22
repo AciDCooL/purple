@@ -609,7 +609,7 @@ fn render_display_list(
             .hosts_state
             .list
             .iter()
-            .filter_map(|h| app.history.entries.get(&h.alias))
+            .filter_map(|h| app.history.entry(&h.alias))
             .map(|e| crate::history::ConnectionHistory::format_time_ago(e.last_connected))
             .filter(|s| !s.is_empty())
             .map(|s| s.width())
@@ -833,7 +833,7 @@ fn render_search_list(
         .max()
         .unwrap_or(0);
     let history_w = filtered_hosts()
-        .filter_map(|h| app.history.entries.get(&h.alias))
+        .filter_map(|h| app.history.entry(&h.alias))
         .map(|e| crate::history::ConnectionHistory::format_time_ago(e.last_connected))
         .filter(|s| !s.is_empty())
         .map(|s| s.width())
@@ -1191,8 +1191,7 @@ fn push_history_column<'a>(
 ) {
     let ago = ctx
         .history
-        .entries
-        .get(&host.alias)
+        .entry(&host.alias)
         .map(|e| crate::history::ConnectionHistory::format_time_ago(e.last_connected))
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "-".to_string());

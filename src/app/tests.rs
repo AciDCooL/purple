@@ -8777,24 +8777,18 @@ fn apply_alias_renames_migrates_history_and_recents_in_batch() {
 
     let mut app = make_app("Host a\n  HostName 1.2.3.4\nHost c\n  HostName 5.6.7.8\n");
     app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
-    app.history.entries.insert(
-        "a".to_string(),
-        crate::history::HistoryEntry {
-            alias: "a".to_string(),
-            last_connected: 1_700_000_000,
-            count: 3,
-            timestamps: vec![1_700_000_000],
-        },
-    );
-    app.history.entries.insert(
-        "c".to_string(),
-        crate::history::HistoryEntry {
-            alias: "c".to_string(),
-            last_connected: 1_700_000_500,
-            count: 7,
-            timestamps: vec![1_700_000_500],
-        },
-    );
+    app.history.upsert_entry(crate::history::HistoryEntry {
+        alias: "a".to_string(),
+        last_connected: 1_700_000_000,
+        count: 3,
+        timestamps: vec![1_700_000_000],
+    });
+    app.history.upsert_entry(crate::history::HistoryEntry {
+        alias: "c".to_string(),
+        last_connected: 1_700_000_500,
+        count: 7,
+        timestamps: vec![1_700_000_500],
+    });
 
     let mut seeded = crate::app::jump::RecentsFile::default();
     seeded.entries.push(crate::app::jump::RecentEntry {
@@ -8823,14 +8817,14 @@ fn apply_alias_renames_migrates_history_and_recents_in_batch() {
         ("c".to_string(), "c".to_string()),
     ]);
 
-    assert!(!app.history.entries.contains_key("a"));
-    assert!(app.history.entries.contains_key("b"));
+    assert!(app.history.entry("a").is_none());
+    assert!(app.history.entry("b").is_some());
     assert!(
-        app.history.entries.contains_key("c"),
+        app.history.entry("c").is_some(),
         "non-renamed host history must stay"
     );
-    assert_eq!(app.history.entries.get("b").unwrap().count, 3);
-    assert_eq!(app.history.entries.get("c").unwrap().count, 7);
+    assert_eq!(app.history.entry("b").unwrap().count, 3);
+    assert_eq!(app.history.entry("c").unwrap().count, 7);
 
     let reloaded = crate::app::jump::load_recents();
     let mut host_keys: Vec<String> = reloaded
@@ -9008,24 +9002,18 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
     // Seed history under the OLD alias because the SSH config write has
     // already happened (production callers run this AFTER ssh_config.write).
     app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
-    app.history.entries.insert(
-        "top-old".to_string(),
-        crate::history::HistoryEntry {
-            alias: "top-old".to_string(),
-            last_connected: 1_700_000_300,
-            count: 30,
-            timestamps: vec![1_700_000_300],
-        },
-    );
-    app.history.entries.insert(
-        "bot".to_string(),
-        crate::history::HistoryEntry {
-            alias: "bot".to_string(),
-            last_connected: 1_700_000_100,
-            count: 1,
-            timestamps: vec![1_700_000_100],
-        },
-    );
+    app.history.upsert_entry(crate::history::HistoryEntry {
+        alias: "top-old".to_string(),
+        last_connected: 1_700_000_300,
+        count: 30,
+        timestamps: vec![1_700_000_300],
+    });
+    app.history.upsert_entry(crate::history::HistoryEntry {
+        alias: "bot".to_string(),
+        last_connected: 1_700_000_100,
+        count: 1,
+        timestamps: vec![1_700_000_100],
+    });
     app.ping.status.insert(
         "top-old".to_string(),
         crate::app::PingStatus::Reachable { rtt_ms: 42 },
@@ -9058,8 +9046,8 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
     assert!(app.container_state.cache.contains_key("top-new"));
 
     // History migrated (would stay under top-old without apply_alias_renames).
-    assert!(!app.history.entries.contains_key("top-old"));
-    assert_eq!(app.history.entries.get("top-new").unwrap().count, 30);
+    assert!(app.history.entry("top-old").is_none());
+    assert_eq!(app.history.entry("top-new").unwrap().count, 30);
     assert!(app.containers_overview.collapsed_hosts.contains("top-new"));
 
     // Re-sort happened: top-new sits at index 0 of the display list
@@ -9085,17 +9073,14 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
 fn apply_alias_renames_empty_input_is_no_op() {
     let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
     app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
-    app.history.entries.insert(
-        "a".to_string(),
-        crate::history::HistoryEntry {
-            alias: "a".to_string(),
-            last_connected: 42,
-            count: 1,
-            timestamps: vec![42],
-        },
-    );
+    app.history.upsert_entry(crate::history::HistoryEntry {
+        alias: "a".to_string(),
+        last_connected: 42,
+        count: 1,
+        timestamps: vec![42],
+    });
     app.apply_alias_renames(&[]);
-    assert_eq!(app.history.entries.get("a").unwrap().count, 1);
+    assert_eq!(app.history.entry("a").unwrap().count, 1);
 }
 
 #[test]

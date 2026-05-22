@@ -2370,7 +2370,7 @@ mod tests {
     fn demo_app_has_history() {
         let (app, _guard) = demo_app();
         // 23 original + 5 new EU/customer/legacy + 2 do-personal = 30
-        assert_eq!(app.history.entries.len(), 30);
+        assert_eq!(app.history.entries().len(), 30);
     }
 
     #[test]

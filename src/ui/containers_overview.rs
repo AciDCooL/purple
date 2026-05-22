@@ -1121,7 +1121,7 @@ fn build_host_detail_lines(
             box_width,
         );
     }
-    if let Some(hist) = app.history.entries.get(alias) {
+    if let Some(hist) = app.history.entry(alias) {
         let ago = crate::history::ConnectionHistory::format_time_ago(hist.last_connected);
         if !ago.is_empty() {
             design::section_field(

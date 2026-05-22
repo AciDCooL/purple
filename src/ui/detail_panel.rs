@@ -425,7 +425,7 @@ fn render_activity(
     box_width: usize,
     max_value_width: usize,
 ) {
-    let Some(entry) = app.history.entries.get(&host.alias) else {
+    let Some(entry) = app.history.entry(&host.alias) else {
         return;
     };
 

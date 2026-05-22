@@ -58,8 +58,7 @@ pub(super) fn render_linked_hosts(frame: &mut Frame, app: &App, key: &SshKeyInfo
             let status = app.ping.status.get(alias).cloned();
             let last_connected = app
                 .history
-                .entries
-                .get(alias)
+                .entry(alias)
                 .map(|e| e.last_connected)
                 .unwrap_or(0);
             LinkedHostRow {

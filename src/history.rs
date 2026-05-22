@@ -26,7 +26,7 @@ pub struct HistoryEntry {
 /// Connection history tracking.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionHistory {
-    pub entries: HashMap<String, HistoryEntry>,
+    entries: HashMap<String, HistoryEntry>,
     path: PathBuf,
 }
 
@@ -101,6 +101,18 @@ impl ConnectionHistory {
             entries,
             path: PathBuf::new(),
         }
+    }
+
+    pub fn entries(&self) -> &HashMap<String, HistoryEntry> {
+        &self.entries
+    }
+
+    pub fn entry(&self, alias: &str) -> Option<&HistoryEntry> {
+        self.entries.get(alias)
+    }
+
+    pub fn upsert_entry(&mut self, entry: HistoryEntry) {
+        self.entries.insert(entry.alias.clone(), entry);
     }
 
     /// Record a connection to a host.

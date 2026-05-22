@@ -3003,15 +3003,12 @@ fn test_submit_form_rename_migrates_per_host_state() {
     // background `save()` is a silent no-op; we assert only the
     // in-memory migration here.
     app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
-    app.history.entries.insert(
-        "web-old".to_string(),
-        crate::history::HistoryEntry {
-            alias: "web-old".to_string(),
-            last_connected: 1_700_000_000,
-            count: 12,
-            timestamps: vec![1_700_000_000],
-        },
-    );
+    app.history.upsert_entry(crate::history::HistoryEntry {
+        alias: "web-old".to_string(),
+        last_connected: 1_700_000_000,
+        count: 12,
+        timestamps: vec![1_700_000_000],
+    });
     app.containers_overview
         .collapsed_hosts
         .insert("web-old".to_string());
@@ -3036,13 +3033,12 @@ fn test_submit_form_rename_migrates_per_host_state() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     assert!(
-        !app.history.entries.contains_key("web-old"),
+        app.history.entry("web-old").is_none(),
         "history under the old alias must be cleared"
     );
     let migrated = app
         .history
-        .entries
-        .get("web-new")
+        .entry("web-new")
         .expect("history must move under the new alias");
     assert_eq!(migrated.count, 12);
     assert_eq!(migrated.timestamps, vec![1_700_000_000]);
@@ -3086,33 +3082,24 @@ fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
          Host bot\n  HostName 3.3.3.3\n",
     );
     app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
-    app.history.entries.insert(
-        "top-old".to_string(),
-        crate::history::HistoryEntry {
-            alias: "top-old".to_string(),
-            last_connected: 1_700_000_300,
-            count: 30,
-            timestamps: vec![1_700_000_100, 1_700_000_200, 1_700_000_300],
-        },
-    );
-    app.history.entries.insert(
-        "mid".to_string(),
-        crate::history::HistoryEntry {
-            alias: "mid".to_string(),
-            last_connected: 1_700_000_200,
-            count: 5,
-            timestamps: vec![1_700_000_200],
-        },
-    );
-    app.history.entries.insert(
-        "bot".to_string(),
-        crate::history::HistoryEntry {
-            alias: "bot".to_string(),
-            last_connected: 1_700_000_100,
-            count: 1,
-            timestamps: vec![1_700_000_100],
-        },
-    );
+    app.history.upsert_entry(crate::history::HistoryEntry {
+        alias: "top-old".to_string(),
+        last_connected: 1_700_000_300,
+        count: 30,
+        timestamps: vec![1_700_000_100, 1_700_000_200, 1_700_000_300],
+    });
+    app.history.upsert_entry(crate::history::HistoryEntry {
+        alias: "mid".to_string(),
+        last_connected: 1_700_000_200,
+        count: 5,
+        timestamps: vec![1_700_000_200],
+    });
+    app.history.upsert_entry(crate::history::HistoryEntry {
+        alias: "bot".to_string(),
+        last_connected: 1_700_000_100,
+        count: 1,
+        timestamps: vec![1_700_000_100],
+    });
     app.hosts_state.sort_mode = sort_mode;
     app.apply_sort();
 
@@ -3279,31 +3266,24 @@ fn test_history_rename_leaves_sibling_keys_untouched() {
     // refuses multi-alias blocks before the per-host migration runs.
     let mut history =
         crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
-    history.entries.insert(
-        "web-01".to_string(),
-        crate::history::HistoryEntry {
-            alias: "web-01".to_string(),
-            last_connected: 1_700_000_000,
-            count: 4,
-            timestamps: vec![1_700_000_000],
-        },
-    );
-    history.entries.insert(
-        "web-prod".to_string(),
-        crate::history::HistoryEntry {
-            alias: "web-prod".to_string(),
-            last_connected: 1_700_000_500,
-            count: 9,
-            timestamps: vec![1_700_000_500],
-        },
-    );
+    history.upsert_entry(crate::history::HistoryEntry {
+        alias: "web-01".to_string(),
+        last_connected: 1_700_000_000,
+        count: 4,
+        timestamps: vec![1_700_000_000],
+    });
+    history.upsert_entry(crate::history::HistoryEntry {
+        alias: "web-prod".to_string(),
+        last_connected: 1_700_000_500,
+        count: 9,
+        timestamps: vec![1_700_000_500],
+    });
 
     assert!(history.rename("web-prod", "web-new"));
-    assert!(history.entries.contains_key("web-01"));
-    assert!(!history.entries.contains_key("web-prod"));
+    assert!(history.entry("web-01").is_some());
+    assert!(history.entry("web-prod").is_none());
     let moved = history
-        .entries
-        .get("web-new")
+        .entry("web-new")
         .expect("renamed alias must carry over");
     assert_eq!(moved.count, 9);
 }
