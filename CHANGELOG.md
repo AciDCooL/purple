@@ -1,3 +1,10 @@
+## 3.15.10 - 2026-05-22
+
+- change: Sturdier internals, with no UI changes.
+- change: Every module now lives in a shared library crate, so the bootstrap, CLI dispatch and direct-connect flows are reachable from tests for the first time.
+- change: Startup banner proxy detection is locked down by a unit test, so support bundles keep showing reliable environment context.
+- change: Internal seams that used to hide behind a thousand-line entry file now sit behind explicit module boundaries, making future tweaks safer to land.
+
 ## 3.15.9 - 2026-05-21
 
 - feat: Sturdier delete, toggle and picker internals across the app.

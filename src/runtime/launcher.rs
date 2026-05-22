@@ -1,0 +1,451 @@
+// Process bootstrap and the few CLI/TUI entry points that were small enough
+// to live next to fn main while big enough to clutter it. Lives in the lib
+// so integration tests and future entry points (e.g. an embedded TUI) can
+// reach the same surface.
+
+use std::path::Path;
+
+use anyhow::Result;
+use clap::CommandFactory;
+use clap_complete::generate;
+
+use crate::app::App;
+use crate::cli_args::{Cli, Commands, VaultCommands};
+use crate::runtime::helpers::{
+    apply_saved_sort, ensure_bw_session, ensure_keychain_password, ensure_proton_login,
+    ensure_vault_ssh_chain_if_needed, expand_user_path, resolve_config_path,
+};
+use crate::ssh_config::model::SshConfigFile;
+use crate::tui_loop::run_tui;
+use crate::{
+    askpass, cli, connection, demo, history, key_activity, logging, mcp, messages, preferences,
+    providers, snippet, ui, update,
+};
+
+/// Bootstrap the process after `Cli::parse()`. Owns theme init, logging
+/// init, the subcommand dispatch table and the TUI launch path. Returns
+/// when the chosen mode exits (subcommand return, direct-connect exit,
+/// TUI quit).
+pub fn run(cli: Cli) -> Result<()> {
+    ui::theme::init();
+
+    // Determine if this is a CLI subcommand (log to stderr too) or TUI (file only)
+    let is_cli_subcommand = cli.command.is_some() || cli.list || cli.connect.is_some();
+    logging::init(cli.verbose, is_cli_subcommand);
+
+    if let Some(ref name) = cli.theme {
+        if let Some(theme) = ui::theme::ThemeDef::find_builtin(name).or_else(|| {
+            ui::theme::ThemeDef::load_custom()
+                .into_iter()
+                .find(|t| t.name.eq_ignore_ascii_case(name))
+        }) {
+            ui::theme::set_theme(theme);
+        } else {
+            anyhow::bail!("Unknown theme: {}", name);
+        }
+    }
+
+    // Shell completions (no config file needed)
+    if let Some(shell) = cli.completions {
+        let mut cmd = Cli::command();
+        generate(shell, &mut cmd, "purple", &mut std::io::stdout());
+        return Ok(());
+    }
+
+    if cli.demo {
+        let mut app = demo::build_demo_app();
+        demo::seed_whats_new_toast(&mut app);
+        demo::seed_tunnel_live_snapshots(&mut app);
+        return run_tui(app);
+    }
+
+    // Provider and Update subcommands don't need SSH config
+    if let Some(Commands::Provider { command }) = cli.command {
+        return cli::handle_provider_command(command);
+    }
+    if let Some(Commands::Update) = cli.command {
+        return update::self_update();
+    }
+    if let Some(Commands::Password { command }) = cli.command {
+        return cli::handle_password_command(command);
+    }
+    if let Some(Commands::Mcp {
+        read_only,
+        no_audit,
+        audit_log,
+    }) = cli.command
+    {
+        let config_path = resolve_config_path(&cli.config)?;
+        let audit_log_path = if no_audit {
+            None
+        } else if let Some(path) = audit_log {
+            Some(expand_user_path(&path)?)
+        } else {
+            mcp::default_audit_log_path()
+        };
+        let options = mcp::McpOptions {
+            read_only,
+            audit_log_path,
+        };
+        return mcp::run(&config_path, options);
+    }
+    if let Some(Commands::Logs { tail, clear }) = cli.command {
+        return cli::handle_logs_command(tail, clear);
+    }
+    if let Some(Commands::Theme { command }) = cli.command {
+        return cli::handle_theme_command(command);
+    }
+    if let Some(Commands::WhatsNew { since }) = &cli.command {
+        let output = cli::run_whats_new(since.as_deref())?;
+        print!("{}", output);
+        return Ok(());
+    }
+
+    let config_path = resolve_config_path(&cli.config)?;
+    let mut config = SshConfigFile::parse(&config_path)?;
+    let repaired_groups = config.repair_absorbed_group_comments();
+    let orphaned_headers = config.remove_all_orphaned_group_headers();
+
+    write_startup_banner(&config, &config_path, cli.verbose);
+
+    // Handle subcommands that need SSH config
+    match cli.command {
+        Some(Commands::Add { target, alias, key }) => {
+            return cli::handle_quick_add(config, &target, alias.as_deref(), key.as_deref());
+        }
+        Some(Commands::Import {
+            file,
+            known_hosts,
+            group,
+        }) => {
+            return cli::handle_import(config, file.as_deref(), known_hosts, group.as_deref());
+        }
+        Some(Commands::Sync {
+            provider,
+            dry_run,
+            remove,
+        }) => {
+            return cli::handle_sync(config, provider.as_deref(), dry_run, remove);
+        }
+        Some(Commands::Tunnel { command }) => {
+            return cli::handle_tunnel_command(config, command);
+        }
+        Some(Commands::Snippet { command }) => {
+            return cli::handle_snippet_command(config, command, &config_path);
+        }
+        Some(Commands::Vault {
+            command:
+                VaultCommands::Sign {
+                    alias,
+                    all,
+                    vault_addr: cli_vault_addr,
+                },
+        }) => {
+            return cli::handle_vault_sign_command(config, alias, all, cli_vault_addr);
+        }
+        Some(Commands::Provider { .. })
+        | Some(Commands::Update)
+        | Some(Commands::Password { .. })
+        | Some(Commands::Mcp { .. })
+        | Some(Commands::Theme { .. })
+        | Some(Commands::Logs { .. })
+        | Some(Commands::WhatsNew { .. }) => unreachable!(),
+        None => {}
+    }
+
+    // Direct connect mode (--connect)
+    if let Some(alias) = cli.connect {
+        run_direct_connect(alias, &mut config, &config_path)?;
+    }
+
+    // List mode
+    if cli.list {
+        print_host_list(&config);
+        return Ok(());
+    }
+
+    // Positional argument: exact match → connect, otherwise → TUI with filter
+    if let Some(ref alias) = cli.alias {
+        return run_positional_alias(
+            alias,
+            config,
+            &config_path,
+            repaired_groups,
+            orphaned_headers,
+        );
+    }
+
+    // Interactive TUI mode
+    let mut app = App::new(config);
+    app.post_init();
+    apply_saved_sort(&mut app);
+    if repaired_groups > 0 || orphaned_headers > 0 {
+        app.notify(messages::config_repaired(repaired_groups, orphaned_headers));
+    }
+    run_tui(app)
+}
+
+/// Collect environment + config metadata and write a startup banner to the
+/// log file. Runs once at process start so support bundles always show
+/// the SSH config path, active providers, askpass sources and Vault
+/// posture under which purple ran.
+fn write_startup_banner(config: &SshConfigFile, config_path: &Path, verbose: bool) {
+    let level_str = logging::level_name(verbose);
+    let provider_config = providers::config::ProviderConfig::load();
+
+    let provider_names: Vec<String> = provider_config
+        .sections
+        .iter()
+        .map(|s| s.provider().to_string())
+        .collect();
+
+    let askpass_sources: Vec<String> = config
+        .host_entries()
+        .iter()
+        .filter_map(|h| h.askpass.as_ref())
+        .map(|s| s.to_string())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    let vault_ssh_info = {
+        let has_host_level = config.host_entries().iter().any(|h| h.vault_ssh.is_some());
+        let has_provider_level = provider_config
+            .sections
+            .iter()
+            .any(|s| !s.vault_role.is_empty());
+        if has_host_level || has_provider_level {
+            let addr = config
+                .host_entries()
+                .iter()
+                .find_map(|h| h.vault_addr.clone())
+                .or_else(|| {
+                    provider_config
+                        .sections
+                        .iter()
+                        .find(|s| !s.vault_addr.is_empty())
+                        .map(|s| s.vault_addr.clone())
+                })
+                .or_else(|| std::env::var("VAULT_ADDR").ok())
+                .unwrap_or_else(|| "not set".to_string());
+            Some(format!("enabled (addr={addr})"))
+        } else {
+            None
+        }
+    };
+
+    let ssh_version = logging::detect_ssh_version();
+    let term = std::env::var("TERM").unwrap_or_else(|_| "unset".to_string());
+    let colorterm = std::env::var("COLORTERM").unwrap_or_else(|_| "unset".to_string());
+    let theme = preferences::load_theme().unwrap_or_else(|| "Purple".to_string());
+    let hosts = config.host_entries().len();
+    let patterns = config.pattern_entries().len();
+    let snippets = snippet::SnippetStore::load().snippets.len();
+    let proxy_env = collect_proxy_env();
+
+    logging::write_banner(&logging::BannerInfo {
+        version: env!("CARGO_PKG_VERSION"),
+        config_path: &config_path.display().to_string(),
+        providers: &provider_names,
+        askpass_sources: &askpass_sources,
+        vault_ssh_info: vault_ssh_info.as_deref(),
+        ssh_version: &ssh_version,
+        term: &term,
+        colorterm: &colorterm,
+        level: &level_str,
+        theme: &theme,
+        hosts,
+        patterns,
+        snippets,
+        proxy_env: &proxy_env,
+    });
+}
+
+/// Build a compact string describing the proxy-related env vars in effect.
+/// Returns `"none"` when none of HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY
+/// are set. Only var names are recorded; values may contain credentials.
+fn collect_proxy_env() -> String {
+    let names = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
+    let set: Vec<&str> = names
+        .iter()
+        .copied()
+        .filter(|k| std::env::var(k).map(|v| !v.is_empty()).unwrap_or(false))
+        .collect();
+    if set.is_empty() {
+        "none".to_string()
+    } else {
+        set.join(",")
+    }
+}
+
+/// Direct-connect mode (`purple --connect <alias>`): resolve askpass and
+/// Vault SSH, run `ssh` inline and exit with its status code. Never
+/// returns on success. Always calls `std::process::exit`.
+fn run_direct_connect(alias: String, config: &mut SshConfigFile, config_path: &Path) -> Result<()> {
+    let provider_config = providers::config::ProviderConfig::load();
+    let host_entry = config.host_entries().into_iter().find(|h| h.alias == alias);
+    if host_entry.is_some() {
+        if let Some((msg, _is_error)) =
+            ensure_vault_ssh_chain_if_needed(&alias, config_path, &provider_config, config)
+        {
+            eprintln!("{}", msg);
+        }
+    }
+    let askpass = host_entry
+        .as_ref()
+        .and_then(|h| h.askpass.clone())
+        .or_else(preferences::load_askpass_default);
+    ensure_proton_login(askpass.as_deref());
+    let bw_session = ensure_bw_session(None, askpass.as_deref());
+    ensure_keychain_password(&alias, askpass.as_deref());
+    let result = connection::connect(
+        &alias,
+        config_path,
+        askpass.as_deref(),
+        bw_session.as_deref(),
+        false,
+    )?;
+    let code = result.status.code().unwrap_or(1);
+    if code != 255 {
+        history::ConnectionHistory::load().record(&alias);
+        key_activity::KeyActivityLog::record_oneshot(&alias, key_activity::now_secs());
+    }
+    askpass::cleanup_marker(&alias);
+    std::process::exit(code);
+}
+
+/// Positional-alias mode (`purple <alias>`): if the alias is an exact
+/// match, connect directly. Otherwise open the TUI with the alias
+/// pre-filled as a search filter.
+fn run_positional_alias(
+    alias: &str,
+    mut config: SshConfigFile,
+    config_path: &Path,
+    repaired_groups: usize,
+    orphaned_headers: usize,
+) -> Result<()> {
+    let host_opt = config
+        .host_entries()
+        .iter()
+        .find(|h| h.alias == *alias)
+        .cloned();
+    if let Some(host) = host_opt {
+        let provider_config = providers::config::ProviderConfig::load();
+        if let Some((msg, _is_error)) = ensure_vault_ssh_chain_if_needed(
+            &host.alias,
+            config_path,
+            &provider_config,
+            &mut config,
+        ) {
+            eprintln!("{}", msg);
+        }
+        let alias = host.alias.clone();
+        let askpass = host
+            .askpass
+            .clone()
+            .or_else(preferences::load_askpass_default);
+        ensure_proton_login(askpass.as_deref());
+        let bw_session = ensure_bw_session(None, askpass.as_deref());
+        ensure_keychain_password(&alias, askpass.as_deref());
+        print!("{}", messages::cli::beaming_up(&alias));
+        let result = connection::connect(
+            &alias,
+            config_path,
+            askpass.as_deref(),
+            bw_session.as_deref(),
+            false,
+        )?;
+        let code = result.status.code().unwrap_or(1);
+        if code != 255 {
+            history::ConnectionHistory::load().record(&alias);
+            key_activity::KeyActivityLog::record_oneshot(&alias, key_activity::now_secs());
+        }
+        askpass::cleanup_marker(&alias);
+        std::process::exit(code);
+    }
+
+    // No exact match. Open TUI with search pre-filled.
+    let mut app = App::new(config);
+    app.post_init();
+    apply_saved_sort(&mut app);
+    if repaired_groups > 0 || orphaned_headers > 0 {
+        app.notify(messages::config_repaired(repaired_groups, orphaned_headers));
+    }
+    app.start_search_with(alias);
+    if app.search.filtered_indices.is_empty() {
+        app.notify(messages::no_exact_match(alias));
+    }
+    run_tui(app)
+}
+
+/// Plain-text host listing for `purple --list`. Prints `alias user@host:port`
+/// rows or the NO_HOSTS marker when the config has no Host blocks.
+fn print_host_list(config: &SshConfigFile) {
+    let entries = config.host_entries();
+    if entries.is_empty() {
+        println!("{}", messages::cli::NO_HOSTS);
+        return;
+    }
+    for host in &entries {
+        let user = if host.user.is_empty() {
+            String::new()
+        } else {
+            format!("{}@", host.user)
+        };
+        let port = if host.port == 22 {
+            String::new()
+        } else {
+            format!(":{}", host.port)
+        };
+        println!("{:<20} {}{}{}", host.alias, user, host.hostname, port);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Reads + mutates HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY. Serializes
+    // against any other lib-side env mutator via the shared test lock.
+    #[test]
+    fn collect_proxy_env_reports_set_vars_and_none() {
+        let _guard = crate::demo_flag::GLOBAL_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let names = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
+        let saved: Vec<(&str, Option<String>)> =
+            names.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+
+        unsafe {
+            for (k, _) in &saved {
+                std::env::remove_var(k);
+            }
+        }
+        assert_eq!(collect_proxy_env(), "none");
+
+        unsafe {
+            std::env::set_var("HTTPS_PROXY", "http://proxy.example:3128");
+        }
+        assert_eq!(collect_proxy_env(), "HTTPS_PROXY");
+
+        unsafe {
+            std::env::set_var("NO_PROXY", "localhost,127.0.0.1");
+        }
+        assert_eq!(collect_proxy_env(), "HTTPS_PROXY,NO_PROXY");
+
+        // Empty value counts as unset.
+        unsafe {
+            std::env::set_var("HTTPS_PROXY", "");
+        }
+        assert_eq!(collect_proxy_env(), "NO_PROXY");
+
+        unsafe {
+            for (k, v) in saved {
+                match v {
+                    Some(val) => std::env::set_var(k, val),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
+}
