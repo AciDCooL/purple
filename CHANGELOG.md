@@ -1,3 +1,11 @@
+## 3.15.12 - 2026-05-22
+
+- change: Sturdier overlay, vault and status internals.
+- change: Most App state now sits behind explicit module boundaries; future tweaks to overlays, vault and status land more predictably.
+- change: Each overlay (file browser, jump bar, tag input) has a single open/close entry point in the codebase, making state lifecycle inspectable from one spot.
+- change: Vault SSH cert status checks land their result and clear the in-flight reservation atomically.
+- change: Vault SSH bulk sign teardown is split between the active-cancel path and the post-done cleanup, keeping log signatures distinct per phase.
+
 ## 3.15.11 - 2026-05-22
 
 - change: Container request queues and host renames get sturdier.
