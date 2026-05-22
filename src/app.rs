@@ -144,11 +144,11 @@ pub struct App {
     /// Cursor reveal, detail-toggle, welcome timestamps and overlay meta.
     pub(crate) ui: UiSelection,
     /// Host-list incremental search query and matched hits.
-    pub search: SearchState,
+    pub(crate) search: SearchState,
     /// Reload-from-disk state when ~/.ssh/config changes externally.
-    pub reload: ReloadState,
+    pub(crate) reload: ReloadState,
     /// Conflict detection when an external edit clashes with our pending write.
-    pub conflict: ConflictState,
+    pub(crate) conflict: ConflictState,
 
     /// Keys-tab state: discovered keys, push runs, activity log.
     pub(crate) keys: KeysState,
@@ -160,7 +160,7 @@ pub struct App {
     pub(crate) forms: FormState,
 
     /// Connection history persisted to ~/.purple/history.
-    pub history: ConnectionHistory,
+    pub(crate) history: ConnectionHistory,
 
     /// Provider configs, sync runs, host conflict resolution.
     pub(crate) providers: ProviderState,
@@ -178,7 +178,7 @@ pub struct App {
     pub(crate) snippets: SnippetState,
 
     /// Self-update polling and badge state.
-    pub update: UpdateState,
+    pub(crate) update: UpdateState,
 
     /// askpass session token; not Keys-tab state.
     pub bw_session: Option<String>,
@@ -201,7 +201,7 @@ pub struct App {
     pub demo_mode: bool,
 
     /// Jump state. Some when the jump bar is open.
-    pub jump: Option<JumpState>,
+    pub(crate) jump: Option<JumpState>,
 }
 
 impl App {
@@ -671,6 +671,13 @@ impl App {
         state.recents = self.resolve_recents(&recents_file);
         self.jump = Some(state);
         self.recompute_jump_hits();
+    }
+
+    /// Close the unified jump overlay. Idempotent: a no-op when no jump
+    /// is open. Pairs with `open_jump`; the three handler arms (Esc,
+    /// Enter-after-dispatch, Backspace-on-empty) all route through here.
+    pub(crate) fn close_jump(&mut self) {
+        self.jump = None;
     }
 
     /// Translate the on-disk recents log into live `JumpHit`s, dropping

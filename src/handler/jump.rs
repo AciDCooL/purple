@@ -12,7 +12,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
     match key.code {
         KeyCode::Esc => {
             log::debug!("jump: closed via Esc");
-            app.jump = None;
+            app.close_jump();
         }
         KeyCode::Down => {
             if let Some(p) = app.jump.as_mut() {
@@ -58,7 +58,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 log::debug!("jump: dispatching {:?} via Enter", hit.identity());
                 app.record_jump_hit(&hit);
                 let mode = app.jump.as_ref().map(|p| p.mode).unwrap_or(JumpMode::Hosts);
-                app.jump = None;
+                app.close_jump();
                 dispatch_hit(app, &hit, mode, events_tx);
             }
         }
@@ -70,7 +70,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 .unwrap_or(true);
             if close {
                 log::debug!("jump: closed via Backspace on empty query");
-                app.jump = None;
+                app.close_jump();
             } else if let Some(p) = app.jump.as_mut() {
                 p.pop_query();
                 if p.query.is_empty() {

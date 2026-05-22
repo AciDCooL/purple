@@ -9623,3 +9623,24 @@ fn close_file_browser_overwrites_previous_paths_for_same_alias() {
     assert_eq!(saved.0, PathBuf::from("/new"));
     assert_eq!(saved.1, "/new-remote");
 }
+
+#[test]
+fn close_jump_clears_active_jump() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.open_jump(crate::app::JumpMode::Hosts);
+    assert!(app.jump.is_some());
+    app.close_jump();
+    assert!(app.jump.is_none());
+}
+
+#[test]
+fn close_jump_on_idle_state_is_noop() {
+    // The three handler arms that call close_jump all pre-check via
+    // `app.jump.is_some()` or `if let Some`, but the method itself must
+    // be defensible on its own so future callers cannot crash by
+    // calling it twice.
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    assert!(app.jump.is_none());
+    app.close_jump();
+    assert!(app.jump.is_none());
+}
