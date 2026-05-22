@@ -10594,20 +10594,22 @@ fn reload_hosts_drops_orphan_file_browser_host_paths() {
     // no self-pruning, so reload_hosts must strip aliases that no longer
     // exist or a rename leaves a ghost entry behind forever.
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
-    app.file_browser_state.host_paths.insert(
+    app.file_browser_state.set_host_path(
         "alive".to_string(),
-        (std::path::PathBuf::from("/var/log"), "/var/log".to_string()),
+        std::path::PathBuf::from("/var/log"),
+        "/var/log".to_string(),
     );
-    app.file_browser_state.host_paths.insert(
+    app.file_browser_state.set_host_path(
         "ghost".to_string(),
-        (std::path::PathBuf::from("/etc"), "/etc".to_string()),
+        std::path::PathBuf::from("/etc"),
+        "/etc".to_string(),
     );
 
     app.reload_hosts();
 
-    assert!(app.file_browser_state.host_paths.contains_key("alive"));
+    assert!(app.file_browser_state.contains_host("alive"));
     assert!(
-        !app.file_browser_state.host_paths.contains_key("ghost"),
+        !app.file_browser_state.contains_host("ghost"),
         "host_paths entry for a removed host must be pruned"
     );
 }
@@ -10766,9 +10768,10 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
     app.containers_overview
         .collapsed_hosts
         .insert(ghost.clone());
-    app.file_browser_state.host_paths.insert(
+    app.file_browser_state.set_host_path(
         ghost.clone(),
-        (std::path::PathBuf::from("/etc"), "/etc".to_string()),
+        std::path::PathBuf::from("/etc"),
+        "/etc".to_string(),
     );
     app.ping.status.insert(
         ghost.clone(),
@@ -10818,7 +10821,7 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
         "containers_overview.collapsed_hosts"
     );
     assert!(
-        !app.file_browser_state.host_paths.contains_key(&ghost),
+        !app.file_browser_state.contains_host(&ghost),
         "file_browser_state.host_paths"
     );
     assert!(!app.ping.status.contains_key(&ghost), "ping.status");

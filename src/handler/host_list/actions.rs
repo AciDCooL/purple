@@ -183,8 +183,7 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
     let has_tunnel = app.tunnels.active.contains_key(&alias);
     let (local_path, remote_path) = app
         .file_browser_state
-        .host_paths
-        .get(&alias)
+        .host_path(&alias)
         .cloned()
         .unwrap_or_else(|| {
             (
