@@ -300,9 +300,9 @@ fn start_vault_bulk_sign(
     ));
 
     let cancel = Arc::new(AtomicBool::new(false));
-    app.vault.signing_cancel = Some(cancel.clone());
+    app.vault.set_signing_cancel(cancel.clone());
 
-    let in_flight = app.vault.sign_in_flight.clone();
+    let in_flight = app.vault.sign_in_flight().clone();
     let tx = events_tx.clone();
     let spawn_result = std::thread::Builder::new()
         .name("vault-bulk-sign".into())
@@ -438,7 +438,7 @@ fn start_vault_bulk_sign(
     match spawn_result {
         Ok(handle) => {
             log::info!("[purple] vault sign thread: spawned");
-            app.vault.sign_thread = Some(handle);
+            app.vault.set_sign_thread(handle);
         }
         Err(e) => {
             // Spawn failed (e.g. OS thread limit). Clear the cancel flag and

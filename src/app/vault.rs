@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 pub struct VaultState {
     /// Cached vault certificate status per host alias.
     /// Tuple: (check timestamp, status, cert file mtime at check time).
-    pub cert_cache: HashMap<
+    pub(in crate::app) cert_cache: HashMap<
         String,
         (
             std::time::Instant,
@@ -15,17 +15,17 @@ pub struct VaultState {
         ),
     >,
     /// Aliases currently being checked for cert status (prevent duplicate checks).
-    pub cert_checks_in_flight: HashSet<String>,
+    pub(in crate::app) cert_checks_in_flight: HashSet<String>,
     /// Side-channel warning from cert-cache cleanup.
-    pub cleanup_warning: Option<String>,
+    pub(in crate::app) cleanup_warning: Option<String>,
     /// Cancel flag for the V-key vault signing background thread.
-    pub signing_cancel: Option<Arc<AtomicBool>>,
+    pub(in crate::app) signing_cancel: Option<Arc<AtomicBool>>,
     /// JoinHandle for the V-key vault signing background thread.
-    pub sign_thread: Option<std::thread::JoinHandle<()>>,
+    pub(in crate::app) sign_thread: Option<std::thread::JoinHandle<()>>,
     /// Aliases currently being signed by the bulk V-key loop.
-    pub sign_in_flight: Arc<Mutex<HashSet<String>>>,
+    pub(in crate::app) sign_in_flight: Arc<Mutex<HashSet<String>>>,
     /// Deferred config write from VaultSignAllDone (guarded while forms are open).
-    pub pending_config_write: bool,
+    pub(in crate::app) pending_config_write: bool,
 }
 
 impl Default for VaultState {
@@ -42,7 +42,77 @@ impl Default for VaultState {
     }
 }
 
+type CertCacheEntry = (
+    std::time::Instant,
+    crate::vault_ssh::CertStatus,
+    Option<std::time::SystemTime>,
+);
+
 impl VaultState {
+    pub fn cert_cache(&self) -> &HashMap<String, CertCacheEntry> {
+        &self.cert_cache
+    }
+
+    pub fn cert_entry(&self, alias: &str) -> Option<&CertCacheEntry> {
+        self.cert_cache.get(alias)
+    }
+
+    pub fn has_cert(&self, alias: &str) -> bool {
+        self.cert_cache.contains_key(alias)
+    }
+
+    pub fn insert_cert(&mut self, alias: String, entry: CertCacheEntry) {
+        self.cert_cache.insert(alias, entry);
+    }
+
+    pub fn remove_cert(&mut self, alias: &str) {
+        self.cert_cache.remove(alias);
+    }
+
+    pub fn clear_cert_cache(&mut self) {
+        self.cert_cache.clear();
+    }
+
+    pub fn is_cert_check_in_flight(&self, alias: &str) -> bool {
+        self.cert_checks_in_flight.contains(alias)
+    }
+
+    pub fn take_cleanup_warning(&mut self) -> Option<String> {
+        self.cleanup_warning.take()
+    }
+
+    pub fn signing_cancel(&self) -> Option<&Arc<AtomicBool>> {
+        self.signing_cancel.as_ref()
+    }
+
+    pub fn is_signing(&self) -> bool {
+        self.signing_cancel.is_some()
+    }
+
+    pub fn set_signing_cancel(&mut self, cancel: Arc<AtomicBool>) {
+        self.signing_cancel = Some(cancel);
+    }
+
+    pub fn clear_signing_cancel(&mut self) {
+        self.signing_cancel = None;
+    }
+
+    pub fn set_sign_thread(&mut self, handle: std::thread::JoinHandle<()>) {
+        self.sign_thread = Some(handle);
+    }
+
+    pub fn sign_in_flight(&self) -> &Arc<Mutex<HashSet<String>>> {
+        &self.sign_in_flight
+    }
+
+    pub fn pending_config_write(&self) -> bool {
+        self.pending_config_write
+    }
+
+    pub fn set_pending_config_write(&mut self, value: bool) {
+        self.pending_config_write = value;
+    }
+
     /// Reserve an alias against duplicate cert-status checks while a
     /// background thread runs. Paired with `record_cert_check` on the
     /// result event.

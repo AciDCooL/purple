@@ -1294,7 +1294,7 @@ pub fn build_demo_app() -> App {
         use crate::vault_ssh::CertStatus;
         let now = std::time::Instant::now();
         // aws-api-prod: valid cert, 6h remaining out of 8h total
-        app.vault.cert_cache.insert(
+        app.vault.insert_cert(
             "aws-api-prod".into(),
             (
                 now,
@@ -1307,7 +1307,7 @@ pub fn build_demo_app() -> App {
             ),
         );
         // aws-worker-eu: valid cert, 45m remaining out of 8h (warning tier)
-        app.vault.cert_cache.insert(
+        app.vault.insert_cert(
             "aws-worker-eu".into(),
             (
                 now,
@@ -1320,7 +1320,7 @@ pub fn build_demo_app() -> App {
             ),
         );
         // aws-batch-us: valid cert, 4h remaining out of 8h
-        app.vault.cert_cache.insert(
+        app.vault.insert_cert(
             "aws-batch-us".into(),
             (
                 now,
@@ -1333,7 +1333,7 @@ pub fn build_demo_app() -> App {
             ),
         );
         // gateway-vpn: valid cert, 7h remaining out of 8h
-        app.vault.cert_cache.insert(
+        app.vault.insert_cert(
             "gateway-vpn".into(),
             (
                 now,
@@ -1346,7 +1346,7 @@ pub fn build_demo_app() -> App {
             ),
         );
         // pve-web-01: valid cert, 3h remaining out of 8h
-        app.vault.cert_cache.insert(
+        app.vault.insert_cert(
             "pve-web-01".into(),
             (
                 now,
@@ -1359,7 +1359,7 @@ pub fn build_demo_app() -> App {
             ),
         );
         // prod-eu1: valid cert, 5h remaining out of 8h
-        app.vault.cert_cache.insert(
+        app.vault.insert_cert(
             "prod-eu1".into(),
             (
                 now,
@@ -1372,7 +1372,7 @@ pub fn build_demo_app() -> App {
             ),
         );
         // prod-eu2: valid cert, 90 seconds remaining out of 8h (red tier — about to expire)
-        app.vault.cert_cache.insert(
+        app.vault.insert_cert(
             "prod-eu2".into(),
             (
                 now,

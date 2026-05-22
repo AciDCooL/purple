@@ -688,9 +688,9 @@ fn render_vault_cert(
         // things (missing/expired/invalid). It is consumed below to render
         // a "(press V to sign)" affordance hint next to the status text.
         let mut needs_action = false;
-        let (status_text, status_style) = if app.vault.cert_checks_in_flight.contains(&host.alias) {
+        let (status_text, status_style) = if app.vault.is_cert_check_in_flight(&host.alias) {
             ("Checking...".to_string(), theme::muted())
-        } else if let Some((checked_at, status, _mtime)) = app.vault.cert_cache.get(&host.alias) {
+        } else if let Some((checked_at, status, _mtime)) = app.vault.cert_entry(&host.alias) {
             let elapsed = checked_at.elapsed().as_secs() as i64;
             match status {
                 crate::vault_ssh::CertStatus::Valid { remaining_secs, .. } => {

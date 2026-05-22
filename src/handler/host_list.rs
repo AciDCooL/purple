@@ -79,7 +79,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
 
     match key.code {
         KeyCode::Char('q') => {
-            if let Some(ref cancel) = app.vault.signing_cancel {
+            if let Some(cancel) = app.vault.signing_cancel() {
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             app.running = false;

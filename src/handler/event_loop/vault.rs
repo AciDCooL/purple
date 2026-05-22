@@ -119,7 +119,7 @@ pub(crate) fn handle_vault_sign_all_done(
     if signed > 0 {
         if app.is_form_open() {
             // Defer config write to avoid mtime conflict with open forms
-            app.vault.pending_config_write = true;
+            app.vault.set_pending_config_write(true);
             if failed > 0 {
                 app.notify_sticky_error(summary_msg);
             } else {

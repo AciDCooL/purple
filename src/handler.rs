@@ -64,7 +64,7 @@ pub fn handle_key_event(
             app.set_screen(Screen::HostList);
             return Ok(());
         }
-        if let Some(ref cancel) = app.vault.signing_cancel {
+        if let Some(cancel) = app.vault.signing_cancel() {
             cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         app.running = false;

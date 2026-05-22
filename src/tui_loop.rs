@@ -59,7 +59,7 @@ pub fn run_tui(mut app: App) -> Result<()> {
         // During animation, use a short timeout for smooth frames (~60fps).
         // During ping checking, use 80ms timeout for spinner.
         // Otherwise, block until the next event arrives.
-        let vault_signing = app.vault.signing_cancel.is_some();
+        let vault_signing = app.vault.is_signing();
         let provider_syncing = !app.providers.syncing.is_empty();
         // Tunnels tab drives the live chart animation. While at least
         // one tunnel is running we tick at 16ms (~60 fps) so the
@@ -169,8 +169,8 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
         .list
         .iter()
         .filter(|h| vault_ssh::has_purple_vault_context(h))
-        .filter(|h| !app.vault.cert_checks_in_flight.contains(&h.alias))
-        .filter(|h| !app.vault.cert_cache.contains_key(&h.alias))
+        .filter(|h| !app.vault.is_cert_check_in_flight(&h.alias))
+        .filter(|h| !app.vault.has_cert(&h.alias))
         .map(|h| (h.alias.clone(), h.certificate_file.clone()))
         .collect();
     for (alias, cert_file) in vault_aliases {
@@ -420,21 +420,18 @@ fn lazy_cert_check(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>)
                     .ok()
                     .and_then(|p| std::fs::metadata(&p).ok())
                     .and_then(|m| m.modified().ok());
-            let cache_stale = cache_entry_is_stale(
-                app.vault.cert_cache.get(&selected.alias),
-                current_mtime,
-                |t| t.elapsed().as_secs(),
-            );
+            let cache_stale =
+                cache_entry_is_stale(app.vault.cert_entry(&selected.alias), current_mtime, |t| {
+                    t.elapsed().as_secs()
+                });
 
             let sign_in_flight = app
                 .vault
-                .sign_in_flight
+                .sign_in_flight()
                 .lock()
                 .map(|g| g.contains(&selected.alias))
                 .unwrap_or(false);
-            if cache_stale
-                && !app.vault.cert_checks_in_flight.contains(&selected.alias)
-                && !sign_in_flight
+            if cache_stale && !app.vault.is_cert_check_in_flight(&selected.alias) && !sign_in_flight
             {
                 let alias = selected.alias.clone();
                 let cert_file = selected.certificate_file.clone();

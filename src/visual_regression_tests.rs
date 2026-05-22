@@ -440,7 +440,7 @@ fn visual_keys_overview_no_vault() {
     for host in &mut app.hosts_state.list {
         host.vault_ssh = None;
     }
-    app.vault.cert_cache.clear();
+    app.vault.clear_cert_cache();
     let actual = render_screen(&mut app);
     assert_golden("keys_overview_no_vault", &actual);
 }
@@ -1593,7 +1593,7 @@ fn visual_host_detail_vault_expired() {
     // so the role line takes the non-inherited path.
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.vault.cert_cache.insert(
+    app.vault.insert_cert(
         "gateway-vpn".to_string(),
         (
             std::time::Instant::now(),
@@ -1640,7 +1640,7 @@ fn visual_host_detail_no_provider_tag() {
     // cert cache for it so the status falls back to "Not signed".
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.vault.cert_cache.remove("prod-eu2");
+    app.vault.remove_cert("prod-eu2");
     select_host_by_alias(&mut app, "prod-eu2");
     app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
     let actual = render_screen(&mut app);

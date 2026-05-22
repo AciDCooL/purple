@@ -70,9 +70,9 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
         return;
     }
     // Cancel any in-progress vault signing thread
-    if let Some(ref cancel) = app.vault.signing_cancel {
+    if let Some(cancel) = app.vault.signing_cancel() {
         cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-        app.vault.signing_cancel = None;
+        app.vault.clear_signing_cancel();
         app.notify(crate::messages::VAULT_SIGNING_CANCELLED);
         return;
     }

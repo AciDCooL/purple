@@ -3191,9 +3191,7 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
     app.containers_overview
         .auto_list_in_flight
         .insert("web-old".to_string());
-    app.vault
-        .cert_checks_in_flight
-        .insert("web-old".to_string());
+    app.vault.mark_cert_check_started("web-old".to_string());
 
     app.screen = Screen::EditHost {
         alias: "web-old".to_string(),
@@ -3248,8 +3246,8 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
         "auto_list_in_flight must follow the rename"
     );
     assert!(
-        !app.vault.cert_checks_in_flight.contains("web-old")
-            && app.vault.cert_checks_in_flight.contains("web-new"),
+        !app.vault.is_cert_check_in_flight("web-old")
+            && app.vault.is_cert_check_in_flight("web-new"),
         "vault.cert_checks_in_flight must follow the rename"
     );
 
@@ -10713,7 +10711,7 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
     app.tunnels
         .summaries_cache
         .insert(ghost.clone(), String::new());
-    app.vault.cert_cache.insert(
+    app.vault.insert_cert(
         ghost.clone(),
         (
             std::time::Instant::now(),
@@ -10721,9 +10719,9 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
             None,
         ),
     );
-    app.vault.cert_checks_in_flight.insert(ghost.clone());
+    app.vault.mark_cert_check_started(ghost.clone());
     {
-        let mut sign = app.vault.sign_in_flight.lock().expect("lock");
+        let mut sign = app.vault.sign_in_flight().lock().expect("lock");
         sign.insert(ghost.clone());
     }
     app.container_state.cache.insert(
@@ -10770,16 +10768,13 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
         !app.tunnels.summaries_cache.contains_key(&ghost),
         "tunnels.summaries_cache"
     );
+    assert!(!app.vault.has_cert(&ghost), "vault.cert_cache");
     assert!(
-        !app.vault.cert_cache.contains_key(&ghost),
-        "vault.cert_cache"
-    );
-    assert!(
-        !app.vault.cert_checks_in_flight.contains(&ghost),
+        !app.vault.is_cert_check_in_flight(&ghost),
         "vault.cert_checks_in_flight"
     );
     {
-        let sign = app.vault.sign_in_flight.lock().expect("lock");
+        let sign = app.vault.sign_in_flight().lock().expect("lock");
         assert!(!sign.contains(&ghost), "vault.sign_in_flight");
     }
     assert!(
@@ -10822,14 +10817,14 @@ fn reload_hosts_drops_orphan_sign_in_flight() {
     // worker fires. reload_hosts must take the lock and prune.
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
     {
-        let mut sign = app.vault.sign_in_flight.lock().expect("lock");
+        let mut sign = app.vault.sign_in_flight().lock().expect("lock");
         sign.insert("alive".to_string());
         sign.insert("ghost".to_string());
     }
 
     app.reload_hosts();
 
-    let sign = app.vault.sign_in_flight.lock().expect("lock");
+    let sign = app.vault.sign_in_flight().lock().expect("lock");
     assert!(sign.contains("alive"));
     assert!(
         !sign.contains("ghost"),
