@@ -1,3 +1,10 @@
+## 3.15.14 - 2026-05-23
+
+- change: Steadier internals across host, tunnel and snippet state.
+- change: Tag input, search and jump bar overlays manage state through named operations, so future tweaks to those flows land in one place.
+- change: Ping refreshes, container fetches and tunnel start/stop share one entry per domain, keeping behaviour uniform across the Hosts, Tunnels and Containers tabs.
+- change: Snippet store edits route through a single update path, so a save failure and its in-memory rollback stay in sync.
+
 ## 3.15.13 - 2026-05-22
 
 - change: Tighter App state seams across more sub-systems.
