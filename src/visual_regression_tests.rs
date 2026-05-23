@@ -410,7 +410,7 @@ fn visual_keys_overview() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
-    app.keys.list_state.select(Some(0));
+    app.keys.list_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("keys_overview", &actual);
 }
@@ -424,7 +424,7 @@ fn visual_keys_overview_hardware_key() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
     // Demo key #1 is yubikey_work (sk-ED25519).
-    app.keys.list_state.select(Some(1));
+    app.keys.list_state_mut().select(Some(1));
     let actual = render_screen(&mut app);
     assert_golden("keys_overview_hardware", &actual);
 }
@@ -437,7 +437,7 @@ fn visual_keys_overview_no_vault() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
-    app.keys.list_state.select(Some(0));
+    app.keys.list_state_mut().select(Some(0));
     for host in app.hosts_state.list_mut() {
         host.vault_ssh = None;
     }
@@ -455,7 +455,7 @@ fn visual_keys_overview_two_cards() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
-    app.keys.list_state.select(Some(0));
+    app.keys.list_state_mut().select(Some(0));
     let backend = TestBackend::new(200, 40);
     let mut terminal = Terminal::new(backend).expect("create terminal");
     let mut anim = AnimationState::default();
@@ -476,10 +476,11 @@ fn visual_keys_overview_many_linked_hosts() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
-    app.keys.list_state.select(Some(0));
-    app.keys.list[0].fingerprint = "SHA256:1LayGj+CVIvJfOnQqADAT52DoJHhSa30feF/23wbRuE".to_string();
+    app.keys.list_state_mut().select(Some(0));
+    app.keys.list_mut()[0].fingerprint =
+        "SHA256:1LayGj+CVIvJfOnQqADAT52DoJHhSa30feF/23wbRuE".to_string();
     let synthetic: Vec<String> = (1..=31).map(|i| format!("host-{:02}", i)).collect();
-    app.keys.list[0].linked_hosts = synthetic.clone();
+    app.keys.list_mut()[0].linked_hosts = synthetic.clone();
     for alias in &synthetic {
         app.hosts_state
             .list_mut()
@@ -508,7 +509,7 @@ fn visual_keys_overview_narrow() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
-    app.keys.list_state.select(Some(0));
+    app.keys.list_state_mut().select(Some(0));
     let backend = TestBackend::new(80, 30);
     let mut terminal = Terminal::new(backend).expect("create terminal");
     let mut anim = AnimationState::default();
@@ -529,7 +530,7 @@ fn visual_keys_overview_search() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
     app.search.set_query(Some("rsa".to_string()));
-    app.keys.list_state.select(Some(0));
+    app.keys.list_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("keys_overview_search", &actual);
 }
@@ -543,7 +544,7 @@ fn visual_keys_overview_search_no_match() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
     app.search.set_query(Some("xyzzy".to_string()));
-    app.keys.list_state.select(None);
+    app.keys.list_state_mut().select(None);
     let actual = render_screen(&mut app);
     assert_golden("keys_overview_search_no_match", &actual);
 }
@@ -556,9 +557,9 @@ fn visual_keys_push_picker() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
-    app.keys.list_state.select(Some(0));
+    app.keys.list_state_mut().select(Some(0));
     app.screen = Screen::KeyPushPicker { key_index: 0 };
-    app.keys.push.list_state.select(Some(0));
+    app.keys.push_mut().list_state.select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("keys_push_picker", &actual);
 }
@@ -580,9 +581,9 @@ fn visual_keys_push_picker_selected() {
         "demo host count drifted; update this assertion and regenerate the golden"
     );
     app.top_page = crate::app::TopPage::Keys;
-    app.keys.list_state.select(Some(0));
+    app.keys.list_state_mut().select(Some(0));
     app.screen = Screen::KeyPushPicker { key_index: 0 };
-    app.keys.push.list_state.select(Some(0));
+    app.keys.push_mut().list_state.select(Some(0));
     // Pick two non-vault hosts so the selected glyph renders.
     let to_select: Vec<String> = app
         .hosts_state
@@ -593,7 +594,7 @@ fn visual_keys_push_picker_selected() {
         .map(|h| h.alias.clone())
         .collect();
     for a in to_select {
-        app.keys.push.selected.insert(a);
+        app.keys.push_mut().selected.insert(a);
     }
     let actual = render_screen(&mut app);
     assert_golden("keys_push_picker_selected", &actual);
@@ -615,7 +616,7 @@ fn visual_keys_push_confirm() {
         .take(3)
         .map(|h| h.alias.clone())
         .collect();
-    app.keys.push.committed = aliases;
+    app.keys.push_mut().committed = aliases;
     app.screen = Screen::ConfirmKeyPush { key_index: 0 };
     let actual = render_screen(&mut app);
     assert_golden("keys_push_confirm", &actual);
@@ -629,8 +630,8 @@ fn visual_keys_overview_empty() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
-    app.keys.list.clear();
-    app.keys.list_state.select(None);
+    app.keys.list_mut().clear();
+    app.keys.list_state_mut().select(None);
     let actual = render_screen(&mut app);
     assert_golden("keys_overview_empty", &actual);
 }

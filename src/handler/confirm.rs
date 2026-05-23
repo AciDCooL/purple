@@ -729,7 +729,7 @@ pub(super) fn handle_key_push_key(
                 Screen::ConfirmKeyPush { key_index } => *key_index,
                 _ => return,
             };
-            let aliases = std::mem::take(&mut app.keys.push.committed);
+            let aliases = std::mem::take(&mut app.keys.push_mut().committed);
             app.set_screen(Screen::HostList);
             start_key_push(app, key_index, aliases, events_tx);
         }
@@ -740,7 +740,7 @@ pub(super) fn handle_key_push_key(
                 Screen::ConfirmKeyPush { key_index } => *key_index,
                 _ => return,
             };
-            app.keys.push.committed.clear();
+            app.keys.push_mut().committed.clear();
             app.set_screen(Screen::KeyPushPicker { key_index });
         }
         ConfirmAction::Ignored => {}
@@ -764,18 +764,18 @@ fn start_key_push(
     // expected_count protects the in-flight branch, worker.is_finished()
     // protects the post-cancel branch where the worker is still draining
     // but its results no longer count toward any expected total.
-    if app.keys.push.expected_count > 0
+    if app.keys.push().expected_count > 0
         || app
             .keys
-            .push
+            .push()
             .worker
             .as_ref()
             .is_some_and(|h| !h.is_finished())
     {
         log::debug!(
             "[purple] key_push: rejected second push, run already in progress ({} of {})",
-            app.keys.push.results.len(),
-            app.keys.push.expected_count
+            app.keys.push().results.len(),
+            app.keys.push().expected_count
         );
         app.notify_warning(crate::messages::KEY_PUSH_ALREADY_IN_PROGRESS);
         return;
@@ -785,7 +785,7 @@ fn start_key_push(
         app.notify_error(crate::messages::KEY_PUSH_NO_HOSTS_SELECTED);
         return;
     }
-    let Some(key_info) = app.keys.list.get(key_index).cloned() else {
+    let Some(key_info) = app.keys.list().get(key_index).cloned() else {
         return;
     };
     if key_info.is_certificate {
@@ -853,7 +853,7 @@ fn start_key_push(
     };
 
     // Reset accumulators and start a new run.
-    let (run_id, cancel) = app.keys.push.start_run(aliases.len());
+    let (run_id, cancel) = app.keys.push_mut().start_run(aliases.len());
 
     app.notify_progress(crate::messages::key_push_in_progress(
         &key_info.name,
@@ -880,7 +880,7 @@ fn start_key_push(
         });
     match handle {
         Ok(h) => {
-            app.keys.push.worker = Some(h);
+            app.keys.push_mut().worker = Some(h);
         }
         Err(e) => {
             log::error!("[purple] key_push: failed to spawn worker: {}", e);
@@ -889,7 +889,7 @@ fn start_key_push(
             // failure message.
             app.status_center.clear_sticky_status();
             app.notify_error(crate::messages::key_push_thread_spawn_failed());
-            app.keys.push.clear_inflight_state();
+            app.keys.push_mut().clear_inflight_state();
         }
     }
 }
@@ -925,7 +925,7 @@ mod key_push_confirm_tests {
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBnSCk/2pwG7QHQHIvF2UxYZsMP1qJ4XbJjT7mxBSBb1 test@host\n",
         )
         .unwrap();
-        app.keys.list.push(crate::ssh_keys::SshKeyInfo {
+        app.keys.list_mut().push(crate::ssh_keys::SshKeyInfo {
             name: "id_test".into(),
             display_path: pub_path.with_extension("").to_string_lossy().into_owned(),
             key_type: "ED25519".into(),
@@ -950,7 +950,7 @@ mod key_push_confirm_tests {
     #[test]
     fn n_returns_to_picker_with_key_index_preserved() {
         let (mut app, _scratch) = make_app();
-        app.keys.push.committed = vec!["h1".into()];
+        app.keys.push_mut().committed = vec!["h1".into()];
         app.screen = Screen::ConfirmKeyPush { key_index: 0 };
         let (tx, _rx) = mpsc::channel();
         handle_key_push_key(&mut app, k(KeyCode::Char('n')), &tx);
@@ -959,7 +959,7 @@ mod key_push_confirm_tests {
             ref other => panic!("expected KeyPushPicker, got {:?}", other),
         }
         assert!(
-            app.keys.push.committed.is_empty(),
+            app.keys.push().committed.is_empty(),
             "n should drop the frozen selection"
         );
     }
@@ -967,7 +967,7 @@ mod key_push_confirm_tests {
     #[test]
     fn esc_routes_through_route_confirm_key_and_returns_to_picker() {
         let (mut app, _scratch) = make_app();
-        app.keys.push.committed = vec!["h1".into()];
+        app.keys.push_mut().committed = vec!["h1".into()];
         app.screen = Screen::ConfirmKeyPush { key_index: 0 };
         let (tx, _rx) = mpsc::channel();
         handle_key_push_key(&mut app, k(KeyCode::Esc), &tx);
@@ -977,15 +977,19 @@ mod key_push_confirm_tests {
     #[test]
     fn start_rejects_when_a_previous_run_is_still_in_flight() {
         let (mut app, _scratch) = make_app();
-        app.keys.push.expected_count = 2;
-        app.keys.push.results.push(crate::key_push::KeyPushResult {
-            alias: "h1".into(),
-            outcome: crate::key_push::KeyPushOutcome::Appended,
-        });
+        app.keys.push_mut().expected_count = 2;
+        app.keys
+            .push_mut()
+            .results
+            .push(crate::key_push::KeyPushResult {
+                alias: "h1".into(),
+                outcome: crate::key_push::KeyPushOutcome::Appended,
+            });
         let (tx, _rx) = mpsc::channel();
         start_key_push(&mut app, 0, vec!["h1".into()], &tx);
         assert_eq!(
-            app.keys.push.expected_count, 2,
+            app.keys.push().expected_count,
+            2,
             "guard must not reset in-flight state"
         );
         let toast = app.status_center.toast().expect("toast set");
@@ -1001,8 +1005,8 @@ mod key_push_confirm_tests {
         let (mut app, _scratch) = make_app();
         let (tx, _rx) = mpsc::channel();
         start_key_push(&mut app, 0, Vec::new(), &tx);
-        assert_eq!(app.keys.push.expected_count, 0);
-        assert!(app.keys.push.worker.is_none());
+        assert_eq!(app.keys.push().expected_count, 0);
+        assert!(app.keys.push().worker.is_none());
         let toast = app.status_center.toast().expect("toast set");
         assert!(toast.is_error());
     }
@@ -1010,11 +1014,11 @@ mod key_push_confirm_tests {
     #[test]
     fn start_rejects_certificate_key() {
         let (mut app, _scratch) = make_app();
-        app.keys.list[0].is_certificate = true;
+        app.keys.list_mut()[0].is_certificate = true;
         let (tx, _rx) = mpsc::channel();
         start_key_push(&mut app, 0, vec!["h1".into()], &tx);
-        assert_eq!(app.keys.push.expected_count, 0);
-        assert!(app.keys.push.worker.is_none());
+        assert_eq!(app.keys.push().expected_count, 0);
+        assert!(app.keys.push().worker.is_none());
         let toast = app.status_center.toast().expect("toast set");
         assert!(toast.is_error());
         assert!(toast.text.contains("Certificates"));
@@ -1023,10 +1027,10 @@ mod key_push_confirm_tests {
     #[test]
     fn start_rejects_missing_pubkey_file() {
         let (mut app, _scratch) = make_app();
-        app.keys.list[0].display_path = "/tmp/purple-this-file-does-not-exist".into();
+        app.keys.list_mut()[0].display_path = "/tmp/purple-this-file-does-not-exist".into();
         let (tx, _rx) = mpsc::channel();
         start_key_push(&mut app, 0, vec!["h1".into()], &tx);
-        assert_eq!(app.keys.push.expected_count, 0);
+        assert_eq!(app.keys.push().expected_count, 0);
         let toast = app.status_center.toast().expect("toast set");
         assert!(toast.is_error());
     }
@@ -1042,12 +1046,13 @@ mod key_push_confirm_tests {
             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBnSCk/2pwG7QHQHIvF2UxYZsMP1qJ4XbJjT7mxBSBb1 real\ncommand=\"evil\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBnSCk/2pwG7QHQHIvF2UxYZsMP1qJ4XbJjT7mxBSBb2 hack\n",
         )
         .unwrap();
-        app.keys.list[0].display_path = pub_path.with_extension("").to_string_lossy().into_owned();
-        app.keys.list[0].name = "id_bad".into();
+        app.keys.list_mut()[0].display_path =
+            pub_path.with_extension("").to_string_lossy().into_owned();
+        app.keys.list_mut()[0].name = "id_bad".into();
         let (tx, _rx) = mpsc::channel();
         start_key_push(&mut app, 0, vec!["h1".into()], &tx);
-        assert_eq!(app.keys.push.expected_count, 0);
-        assert!(app.keys.push.worker.is_none());
+        assert_eq!(app.keys.push().expected_count, 0);
+        assert!(app.keys.push().worker.is_none());
         let toast = app.status_center.toast().expect("toast set");
         assert!(toast.is_error());
         assert!(toast.text.contains("validation"));

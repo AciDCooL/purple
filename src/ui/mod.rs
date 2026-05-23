@@ -122,7 +122,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         Screen::ConfirmKeyPush { key_index } => {
             let key_index = *key_index;
             render_overlay(frame, app, anim, move |frame, app| {
-                let aliases = app.keys.push.committed.clone();
+                let aliases = app.keys.push().committed.clone();
                 confirm_dialog::render_key_push(frame, app, key_index, &aliases)
             });
         }

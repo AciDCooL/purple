@@ -19,22 +19,22 @@ pub(crate) fn handle_key_push_result(
     run_id: u64,
     result: crate::key_push::KeyPushResult,
 ) {
-    if run_id != app.keys.push.run_id {
+    if run_id != app.keys.push().run_id {
         log::debug!(
             "[purple] key_push: dropping stale result for alias={} (event run_id={} current={})",
             result.alias,
             run_id,
-            app.keys.push.run_id
+            app.keys.push().run_id
         );
         return;
     }
-    let expected = app.keys.push.expected_count;
+    let expected = app.keys.push().expected_count;
     if expected == 0 {
         // No run is in flight (cancel just zeroed expected_count); drop.
         return;
     }
-    app.keys.push.results.push(result);
-    if app.keys.push.results.len() < expected {
+    app.keys.push_mut().results.push(result);
+    if app.keys.push().results.len() < expected {
         return;
     }
     finalize_key_push(app);
@@ -49,7 +49,7 @@ fn finalize_key_push(app: &mut App) {
     let mut appended = 0usize;
     let mut already = 0usize;
     let mut failed: Vec<(String, String)> = Vec::new();
-    for r in &app.keys.push.results {
+    for r in &app.keys.push().results {
         match &r.outcome {
             KeyPushOutcome::Appended => appended += 1,
             KeyPushOutcome::AlreadyPresent => already += 1,
@@ -57,7 +57,7 @@ fn finalize_key_push(app: &mut App) {
         }
     }
 
-    let total = app.keys.push.results.len();
+    let total = app.keys.push().results.len();
     // Drop the "Pushing X to N hosts..." sticky progress before the
     // outcome toast lands; otherwise the footer would keep advertising
     // a push that already finished.
@@ -97,22 +97,24 @@ fn finalize_key_push(app: &mut App) {
     if appended > 0 {
         let ssh_dir = crate::ssh_keys::resolve_ssh_dir();
         if let Some(dir) = ssh_dir {
-            app.keys.list = crate::ssh_keys::discover_keys(&dir, app.hosts_state.list());
+            app.keys
+                .set_list(crate::ssh_keys::discover_keys(&dir, app.hosts_state.list()));
             // Clamp the key-list cursor in case discover_keys returned a
             // shorter list (a key removed between push start and finalize
             // would otherwise leave the cursor pointing past the end).
-            if let Some(sel) = app.keys.list_state.selected() {
-                if app.keys.list.is_empty() {
-                    app.keys.list_state.select(None);
-                } else if sel >= app.keys.list.len() {
-                    app.keys.list_state.select(Some(app.keys.list.len() - 1));
+            if let Some(sel) = app.keys.list_state().selected() {
+                if app.keys.list().is_empty() {
+                    app.keys.list_state_mut().select(None);
+                } else if sel >= app.keys.list().len() {
+                    let last = app.keys.list().len() - 1;
+                    app.keys.list_state_mut().select(Some(last));
                 }
             }
         }
     }
 
     // Reset push state for the next run.
-    app.keys.push.finish_run();
+    app.keys.push_mut().finish_run();
 }
 
 #[cfg(test)]
@@ -141,7 +143,7 @@ mod tests {
         let mut app = App::new(config);
         // Tests assume a fresh run_id so they can fire results with run_id=1
         // without colliding with whatever default App::new set up.
-        app.keys.push.run_id = 1;
+        app.keys.push_mut().run_id = 1;
         app
     }
 
@@ -155,10 +157,14 @@ mod tests {
     #[test]
     fn handle_result_does_not_finalize_below_expected() {
         let mut app = make_app();
-        app.keys.push.expected_count = 3;
+        app.keys.push_mut().expected_count = 3;
         handle_key_push_result(&mut app, 1, result("h1", KeyPushOutcome::AlreadyPresent));
-        assert_eq!(app.keys.push.results.len(), 1);
-        assert_eq!(app.keys.push.expected_count, 3, "should not finalize early");
+        assert_eq!(app.keys.push().results.len(), 1);
+        assert_eq!(
+            app.keys.push().expected_count,
+            3,
+            "should not finalize early"
+        );
     }
 
     #[test]
@@ -167,9 +173,9 @@ mod tests {
         // results from the worker must be dropped, not re-trigger the
         // finalize path.
         let mut app = make_app();
-        app.keys.push.expected_count = 0;
+        app.keys.push_mut().expected_count = 0;
         handle_key_push_result(&mut app, 1, result("h1", KeyPushOutcome::Appended));
-        assert!(app.keys.push.results.is_empty());
+        assert!(app.keys.push().results.is_empty());
     }
 
     #[test]
@@ -179,11 +185,11 @@ mod tests {
         // run_id has been bumped: the stale events must not contaminate
         // the new run's accumulator.
         let mut app = make_app();
-        app.keys.push.expected_count = 2;
-        app.keys.push.run_id = 7;
+        app.keys.push_mut().expected_count = 2;
+        app.keys.push_mut().run_id = 7;
         handle_key_push_result(&mut app, 6, result("h-stale", KeyPushOutcome::Appended));
         assert!(
-            app.keys.push.results.is_empty(),
+            app.keys.push().results.is_empty(),
             "stale-run event must not push into the new run's results"
         );
     }
@@ -191,16 +197,16 @@ mod tests {
     #[test]
     fn finalize_all_already_present_emits_success_toast() {
         let mut app = make_app();
-        app.keys.push.expected_count = 2;
+        app.keys.push_mut().expected_count = 2;
         app.keys
-            .push
+            .push_mut()
             .results
             .push(result("h1", KeyPushOutcome::AlreadyPresent));
         handle_key_push_result(&mut app, 1, result("h2", KeyPushOutcome::AlreadyPresent));
         // After finalize, accumulator state is cleared.
-        assert_eq!(app.keys.push.expected_count, 0);
-        assert!(app.keys.push.results.is_empty());
-        assert!(app.keys.push.selected.is_empty());
+        assert_eq!(app.keys.push().expected_count, 0);
+        assert!(app.keys.push().results.is_empty());
+        assert!(app.keys.push().selected.is_empty());
         // Last status should be a non-sticky (toast) success.
         let toast = app.status_center.toast().expect("toast set");
         assert!(!toast.sticky, "fully-successful run is a plain toast");
@@ -209,9 +215,9 @@ mod tests {
     #[test]
     fn finalize_all_failed_emits_sticky_error() {
         let mut app = make_app();
-        app.keys.push.expected_count = 2;
+        app.keys.push_mut().expected_count = 2;
         app.keys
-            .push
+            .push_mut()
             .results
             .push(result("h1", KeyPushOutcome::Failed("oops".into())));
         handle_key_push_result(
@@ -219,7 +225,7 @@ mod tests {
             1,
             result("h2", KeyPushOutcome::Failed("also bad".into())),
         );
-        assert_eq!(app.keys.push.expected_count, 0);
+        assert_eq!(app.keys.push().expected_count, 0);
         let status = app.status_center.status().expect("sticky status");
         assert!(
             status.sticky && status.is_error(),
@@ -230,17 +236,17 @@ mod tests {
     #[test]
     fn finalize_partial_failure_is_sticky_and_names_failed_hosts() {
         let mut app = make_app();
-        app.keys.push.expected_count = 3;
+        app.keys.push_mut().expected_count = 3;
         app.keys
-            .push
+            .push_mut()
             .results
             .push(result("h1", KeyPushOutcome::AlreadyPresent));
         app.keys
-            .push
+            .push_mut()
             .results
             .push(result("h2", KeyPushOutcome::Failed("bad".into())));
         handle_key_push_result(&mut app, 1, result("h3", KeyPushOutcome::AlreadyPresent));
-        assert_eq!(app.keys.push.expected_count, 0);
+        assert_eq!(app.keys.push().expected_count, 0);
         let status = app.status_center.status().expect("sticky status set");
         assert!(
             status.sticky && status.is_error(),
@@ -259,9 +265,9 @@ mod tests {
         // override directory exists but is empty, so the refresh yields
         // zero keys without touching the test runner's actual ~/.ssh.
         let mut app = make_app();
-        app.keys.push.expected_count = 1;
+        app.keys.push_mut().expected_count = 1;
         // Pre-seed a stale key entry to prove the refresh ran.
-        app.keys.list.push(crate::ssh_keys::SshKeyInfo {
+        app.keys.list_mut().push(crate::ssh_keys::SshKeyInfo {
             name: "stale".into(),
             display_path: "~/.ssh/stale".into(),
             key_type: "ED25519".into(),
@@ -278,9 +284,9 @@ mod tests {
         });
         handle_key_push_result(&mut app, 1, result("h", KeyPushOutcome::Appended));
         assert!(
-            app.keys.list.is_empty(),
+            app.keys.list().is_empty(),
             "discover_keys against an empty override dir should return zero keys"
         );
-        assert_eq!(app.keys.list_state.selected(), None);
+        assert_eq!(app.keys.list_state().selected(), None);
     }
 }

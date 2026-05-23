@@ -61,7 +61,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64) {
     // search is active. With a single key, the card adds no value and
     // we give the freed width to the info card.
     let search_active = app.search.query().is_some();
-    let show_key_list = app.keys.list.len() > 1 || search_active;
+    let show_key_list = app.keys.list().len() > 1 || search_active;
 
     // Order: top nav, optional Vault SSH strip, hero (with key list,
     // randomart and info side-by-side), linked hosts, footer.
@@ -89,7 +89,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64) {
     let hosts_area = chunks[next_idx + 1];
     let footer_area = chunks[next_idx + 2];
 
-    if app.keys.list.is_empty() {
+    if app.keys.list().is_empty() {
         render_empty_state(frame, hero_area, hosts_area);
     } else {
         // Split the hero into a fixed-width Keys list card on the left
@@ -101,11 +101,11 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64) {
         }
         let resolved = current_key_index(app);
         if let Some(idx) = resolved {
-            if let Some(key) = app.keys.list.get(idx) {
+            if let Some(key) = app.keys.list().get(idx) {
                 render_hero(
                     frame,
                     key,
-                    &app.keys.activity,
+                    app.keys.activity(),
                     hero_remaining,
                     bishop_size,
                     spinner_tick,
@@ -153,8 +153,8 @@ fn split_hero_for_key_list(hero: Rect, show_list: bool) -> (Rect, Rect) {
 /// an active search filter. Falls back to index 0 when nothing is
 /// selected so the hero renders the first key by default.
 fn current_key_index(app: &App) -> Option<usize> {
-    let sel = app.keys.list_state.selected().unwrap_or(0);
-    crate::ssh_keys::resolve_selection(&app.keys.list, app.search.query(), sel)
+    let sel = app.keys.list_state().selected().unwrap_or(0);
+    crate::ssh_keys::resolve_selection(app.keys.list(), app.search.query(), sel)
 }
 
 /// Render the shared top navigation bar via `host_list::top_bar_spans`.
@@ -178,8 +178,8 @@ fn render_top_bar(frame: &mut Frame, app: &App, area: Rect) {
 /// Search active flips the title to `search: <q> (N/M)` and filters the
 /// rows; selection state is reused for both modes.
 fn render_key_list_card(frame: &mut Frame, app: &mut App, area: Rect) {
-    let total = app.keys.list.len();
-    let filtered = crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query());
+    let total = app.keys.list().len();
+    let filtered = crate::ssh_keys::filtered_key_indices(app.keys.list(), app.search.query());
     let search_active = app.search.query().is_some();
 
     let block = if search_active {
@@ -192,7 +192,7 @@ fn render_key_list_card(frame: &mut Frame, app: &mut App, area: Rect) {
             Some(&format!("{} ({}/{})", q, filtered.len(), total)),
         ))
     } else {
-        let sel = app.keys.list_state.selected().unwrap_or(0) + 1;
+        let sel = app.keys.list_state().selected().unwrap_or(0) + 1;
         design::main_block_line(card_title("KEYS", Some(&format!("{}/{}", sel, total))))
     };
     let inner = block.inner(area);
@@ -204,14 +204,14 @@ fn render_key_list_card(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let items: Vec<ListItem> = filtered
         .iter()
-        .map(|&idx| ListItem::new(Line::from(Span::raw(app.keys.list[idx].name.clone()))))
+        .map(|&idx| ListItem::new(Line::from(Span::raw(app.keys.list()[idx].name.clone()))))
         .collect();
 
     let list = List::new(items)
         .highlight_style(theme::selected_row())
         .highlight_symbol(design::HOST_HIGHLIGHT);
 
-    frame.render_stateful_widget(list, inner, &mut app.keys.list_state);
+    frame.render_stateful_widget(list, inner, app.keys.list_state_mut());
 }
 
 /// Build a card title in the host-detail sub-card style: bold

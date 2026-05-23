@@ -1376,8 +1376,8 @@ pub fn build_demo_app() -> App {
         // Others left as Missing (Not signed) for variety
     }
 
-    app.keys.list = demo_keys();
-    app.keys.activity = demo_key_activity();
+    app.keys.set_list(demo_keys());
+    app.keys.set_activity(demo_key_activity());
 
     // Preferences. Demo boots into Detailed view on both the Host List and
     // the Containers tab so screenshots and the demo recording land on a
@@ -2420,7 +2420,7 @@ mod tests {
         // Five keys covering the five visual states the tab must render:
         // encrypted ed25519, hardware-bound FIDO2, encrypted ed25519 not in
         // agent, plaintext weak RSA, and an orphan deprecated key.
-        assert_eq!(app.keys.list.len(), 5);
+        assert_eq!(app.keys.list().len(), 5);
     }
 
     #[test]
@@ -2428,7 +2428,7 @@ mod tests {
         let (app, _guard) = demo_app();
         // Every demo key must populate the new SshKeyInfo fields so the
         // visual goldens render bishop blocks and strength meters.
-        for key in &app.keys.list {
+        for key in app.keys.list() {
             assert!(
                 key.bishop_art.lines().count() == 11,
                 "demo key {} should have 11 bishop lines, got {}",

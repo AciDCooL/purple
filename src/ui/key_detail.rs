@@ -7,7 +7,7 @@ use super::theme;
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &App, index: usize) {
-    let Some(key) = app.keys.list.get(index) else {
+    let Some(key) = app.keys.list().get(index) else {
         return;
     };
 

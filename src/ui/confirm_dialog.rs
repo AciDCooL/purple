@@ -182,7 +182,7 @@ pub fn render_confirm_purge_stale(
 pub fn render_key_push(frame: &mut Frame, app: &App, key_index: usize, aliases: &[String]) {
     let key_name = app
         .keys
-        .list
+        .list()
         .get(key_index)
         .map(|k| format!("{}.pub", k.name))
         .unwrap_or_else(|| "key".to_string());

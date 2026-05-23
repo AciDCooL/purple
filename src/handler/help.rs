@@ -46,14 +46,16 @@ pub(super) fn handle_key_list_key(app: &mut App, key: KeyEvent) {
             app.select_prev_key();
         }
         KeyCode::PageDown => {
-            crate::app::page_down(&mut app.keys.list_state, app.keys.list.len(), 10);
+            let len = app.keys.list().len();
+            crate::app::page_down(app.keys.list_state_mut(), len, 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(&mut app.keys.list_state, app.keys.list.len(), 10);
+            let len = app.keys.list().len();
+            crate::app::page_up(app.keys.list_state_mut(), len, 10);
         }
         KeyCode::Enter => {
-            if let Some(index) = app.keys.list_state.selected() {
-                if index < app.keys.list.len() {
+            if let Some(index) = app.keys.list_state().selected() {
+                if index < app.keys.list().len() {
                     app.set_screen(Screen::KeyDetail { index });
                 }
             }

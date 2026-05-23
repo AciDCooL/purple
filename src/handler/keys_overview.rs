@@ -39,16 +39,19 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             app.select_prev_key();
         }
         KeyCode::PageDown => {
-            crate::app::page_down(&mut app.keys.list_state, app.keys.list.len(), 10);
+            let len = app.keys.list().len();
+            crate::app::page_down(app.keys.list_state_mut(), len, 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(&mut app.keys.list_state, app.keys.list.len(), 10);
+            let len = app.keys.list().len();
+            crate::app::page_up(app.keys.list_state_mut(), len, 10);
         }
-        KeyCode::Home | KeyCode::Char('g') if !app.keys.list.is_empty() => {
-            app.keys.list_state.select(Some(0));
+        KeyCode::Home | KeyCode::Char('g') if !app.keys.list().is_empty() => {
+            app.keys.list_state_mut().select(Some(0));
         }
-        KeyCode::End | KeyCode::Char('G') if !app.keys.list.is_empty() => {
-            app.keys.list_state.select(Some(app.keys.list.len() - 1));
+        KeyCode::End | KeyCode::Char('G') if !app.keys.list().is_empty() => {
+            let last = app.keys.list().len() - 1;
+            app.keys.list_state_mut().select(Some(last));
         }
         // Enter and `c` both copy the selected pubkey. Enter is the
         // advertised primary in the footer; `c` is the muscle-memory
@@ -73,8 +76,8 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             // tab filters at render time and only needs the query string.
             app.search.set_query(Some(String::new()));
             // Reset selection so we always land on the first match.
-            if !app.keys.list.is_empty() {
-                app.keys.list_state.select(Some(0));
+            if !app.keys.list().is_empty() {
+                app.keys.list_state_mut().select(Some(0));
             }
             log::debug!("[purple] keys: opened search");
         }
@@ -124,7 +127,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 /// finalised). Used as the Esc-guard so cancel only fires when there is
 /// something to cancel.
 pub(super) fn push_in_flight(app: &App) -> bool {
-    app.keys.push.expected_count > 0 && app.keys.push.cancel.is_some()
+    app.keys.push().expected_count > 0 && app.keys.push().cancel.is_some()
 }
 
 /// Cancel an in-flight push run. Sets the cancel flag (so the worker
@@ -138,9 +141,9 @@ pub(super) fn push_in_flight(app: &App) -> bool {
 /// to launch a second worker until `worker.is_finished()`; `App::drop`
 /// joins on exit.
 fn cancel_push_if_running(app: &mut App) {
-    let done = app.keys.push.results.len();
-    let total = app.keys.push.expected_count;
-    if let Some(ref cancel) = app.keys.push.cancel {
+    let done = app.keys.push().results.len();
+    let total = app.keys.push().expected_count;
+    if let Some(ref cancel) = app.keys.push().cancel {
         cancel.store(true, Ordering::Relaxed);
     }
     log::debug!(
@@ -150,7 +153,7 @@ fn cancel_push_if_running(app: &mut App) {
     );
     // Clear accumulators and bump run_id so any KeyPushResult event still
     // in flight from the cancelled worker is dropped on arrival.
-    app.keys.push.cancel_run();
+    app.keys.push_mut().cancel_run();
     // Drop the progress toast through the status-center invariant so the
     // cancel message is unambiguously the latest status.
     app.status_center.clear_sticky_status();
@@ -162,17 +165,17 @@ fn cancel_push_if_running(app: &mut App) {
 /// (copies the highlighted match and clears the query). Tab/BackTab also
 /// exit search-mode before cycling tabs.
 fn handle_search_keys(app: &mut App, key: KeyEvent) {
-    let filtered = crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query());
+    let filtered = crate::ssh_keys::filtered_key_indices(app.keys.list(), app.search.query());
     let count = filtered.len();
     match key.code {
         KeyCode::Esc => {
             app.search.set_query(None);
             // Restore selection to first key so navigation feels stable
             // when the user re-opens the same view.
-            if !app.keys.list.is_empty() {
-                app.keys.list_state.select(Some(0));
+            if !app.keys.list().is_empty() {
+                app.keys.list_state_mut().select(Some(0));
             } else {
-                app.keys.list_state.select(None);
+                app.keys.list_state_mut().select(None);
             }
         }
         KeyCode::Enter => {
@@ -189,38 +192,42 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
             app.cycle_top_page_prev();
         }
         KeyCode::Down | KeyCode::Right if count > 0 => {
-            let cur = app.keys.list_state.selected().unwrap_or(0);
-            app.keys.list_state.select(Some((cur + 1).min(count - 1)));
+            let cur = app.keys.list_state().selected().unwrap_or(0);
+            app.keys
+                .list_state_mut()
+                .select(Some((cur + 1).min(count - 1)));
         }
         KeyCode::Up | KeyCode::Left if count > 0 => {
-            let cur = app.keys.list_state.selected().unwrap_or(0);
-            app.keys.list_state.select(Some(cur.saturating_sub(1)));
+            let cur = app.keys.list_state().selected().unwrap_or(0);
+            app.keys
+                .list_state_mut()
+                .select(Some(cur.saturating_sub(1)));
         }
         KeyCode::PageDown => {
-            crate::app::page_down(&mut app.keys.list_state, count, 10);
+            crate::app::page_down(app.keys.list_state_mut(), count, 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(&mut app.keys.list_state, count, 10);
+            crate::app::page_up(app.keys.list_state_mut(), count, 10);
         }
         KeyCode::Backspace => {
             app.search.pop_query_char();
             // Re-anchor selection to the first match after the query shrinks.
             let new_count =
-                crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query()).len();
+                crate::ssh_keys::filtered_key_indices(app.keys.list(), app.search.query()).len();
             if new_count == 0 {
-                app.keys.list_state.select(None);
+                app.keys.list_state_mut().select(None);
             } else {
-                app.keys.list_state.select(Some(0));
+                app.keys.list_state_mut().select(Some(0));
             }
         }
         KeyCode::Char(c) => {
             app.search.push_query_char(c);
             let new_count =
-                crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query()).len();
+                crate::ssh_keys::filtered_key_indices(app.keys.list(), app.search.query()).len();
             if new_count == 0 {
-                app.keys.list_state.select(None);
+                app.keys.list_state_mut().select(None);
             } else {
-                app.keys.list_state.select(Some(0));
+                app.keys.list_state_mut().select(Some(0));
             }
         }
         _ => {}
@@ -234,14 +241,14 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
 /// filtered list, so we translate back through `filtered_key_indices`
 /// before looking up the underlying `SshKeyInfo`.
 fn copy_selected_pubkey(app: &mut App) {
-    let Some(sel) = app.keys.list_state.selected() else {
+    let Some(sel) = app.keys.list_state().selected() else {
         return;
     };
-    let Some(idx) = crate::ssh_keys::resolve_selection(&app.keys.list, app.search.query(), sel)
+    let Some(idx) = crate::ssh_keys::resolve_selection(app.keys.list(), app.search.query(), sel)
     else {
         return;
     };
-    let Some(key_info) = app.keys.list.get(idx) else {
+    let Some(key_info) = app.keys.list().get(idx) else {
         return;
     };
     let pub_path = format!("{}.pub", key_info.display_path);
@@ -274,15 +281,15 @@ fn copy_selected_pubkey(app: &mut App) {
 /// `app.keys.list` index so the picker title and the eventual confirm dialog
 /// name the right key.
 fn open_push_picker(app: &mut App) {
-    let Some(sel) = app.keys.list_state.selected() else {
+    let Some(sel) = app.keys.list_state().selected() else {
         return;
     };
     let Some(key_index) =
-        crate::ssh_keys::resolve_selection(&app.keys.list, app.search.query(), sel)
+        crate::ssh_keys::resolve_selection(app.keys.list(), app.search.query(), sel)
     else {
         return;
     };
-    if app.keys.list.get(key_index).is_none() {
+    if app.keys.list().get(key_index).is_none() {
         return;
     }
     // Guard: pushing to zero hosts surfaces an empty picker, which
@@ -294,7 +301,7 @@ fn open_push_picker(app: &mut App) {
         return;
     }
     // Fresh picker: drop any leftover selection from a prior run.
-    app.keys.push.reset_picker();
+    app.keys.push_mut().reset_picker();
     app.set_screen(Screen::KeyPushPicker { key_index });
     log::debug!("[purple] keys: opened push picker for index={}", key_index);
 }
@@ -387,17 +394,21 @@ mod tests {
     fn open_push_picker_under_search_translates_filtered_index() {
         let mut app = make_app();
         seed_one_host(&mut app);
-        app.keys.list = vec![key("id_ed25519"), key("yubikey_work"), key("customer-x")];
+        app.keys.set_list(vec![
+            key("id_ed25519"),
+            key("yubikey_work"),
+            key("customer-x"),
+        ]);
         app.search.set_query(Some("yubi".to_string()));
         // After applying the filter, position 0 in the visible list is
         // "yubikey_work" which is index 1 in app.keys.list.
-        app.keys.list_state.select(Some(0));
+        app.keys.list_state_mut().select(Some(0));
         open_push_picker(&mut app);
         match app.screen {
             Screen::KeyPushPicker { key_index } => {
                 assert_eq!(
                     key_index, 1,
-                    "filtered idx 0 must map to app.keys.list idx 1"
+                    "filtered idx 0 must map to app.keys.list() idx 1"
                 );
             }
             ref other => panic!("expected KeyPushPicker, got {:?}", other),
@@ -408,13 +419,13 @@ mod tests {
     fn open_push_picker_resets_picker_state() {
         let mut app = make_app();
         seed_one_host(&mut app);
-        app.keys.list = vec![key("id_ed25519")];
-        app.keys.list_state.select(Some(0));
+        app.keys.set_list(vec![key("id_ed25519")]);
+        app.keys.list_state_mut().select(Some(0));
         // Pre-existing stale selection from a previous picker run.
-        app.keys.push.selected.insert("old-host".to_string());
+        app.keys.push_mut().selected.insert("old-host".to_string());
         open_push_picker(&mut app);
         assert!(
-            app.keys.push.selected.is_empty(),
+            app.keys.push().selected.is_empty(),
             "selection must be reset on new picker open"
         );
     }
@@ -423,14 +434,14 @@ mod tests {
     fn push_in_flight_true_only_when_cancel_and_expected_set() {
         let mut app = make_app();
         assert!(!push_in_flight(&app));
-        app.keys.push.expected_count = 3;
+        app.keys.push_mut().expected_count = 3;
         assert!(
             !push_in_flight(&app),
             "expected_count alone is not in-flight"
         );
-        app.keys.push.cancel = Some(Arc::new(AtomicBool::new(false)));
+        app.keys.push_mut().cancel = Some(Arc::new(AtomicBool::new(false)));
         assert!(push_in_flight(&app), "both fields set: in flight");
-        app.keys.push.cancel = None;
+        app.keys.push_mut().cancel = None;
         assert!(!push_in_flight(&app));
     }
 
@@ -439,20 +450,23 @@ mod tests {
         let mut app = make_app();
         // Seed an in-flight push.
         let flag = Arc::new(AtomicBool::new(false));
-        app.keys.push.cancel = Some(flag.clone());
-        app.keys.push.expected_count = 5;
-        app.keys.push.results.push(crate::key_push::KeyPushResult {
-            alias: "h1".into(),
-            outcome: crate::key_push::KeyPushOutcome::Appended,
-        });
-        app.keys.push.selected.insert("h1".to_string());
+        app.keys.push_mut().cancel = Some(flag.clone());
+        app.keys.push_mut().expected_count = 5;
+        app.keys
+            .push_mut()
+            .results
+            .push(crate::key_push::KeyPushResult {
+                alias: "h1".into(),
+                outcome: crate::key_push::KeyPushOutcome::Appended,
+            });
+        app.keys.push_mut().selected.insert("h1".to_string());
         // Esc should observe push_in_flight and cancel.
         handle_key(&mut app, k(KeyCode::Esc));
         assert!(flag.load(std::sync::atomic::Ordering::Relaxed));
-        assert_eq!(app.keys.push.expected_count, 0);
-        assert!(app.keys.push.results.is_empty());
-        assert!(app.keys.push.cancel.is_none());
-        assert!(app.keys.push.selected.is_empty());
+        assert_eq!(app.keys.push().expected_count, 0);
+        assert!(app.keys.push().results.is_empty());
+        assert!(app.keys.push().cancel.is_none());
+        assert!(app.keys.push().selected.is_empty());
         // Cancel toast surfaced.
         assert!(app.status_center.toast().is_some());
     }
@@ -462,19 +476,19 @@ mod tests {
     #[test]
     fn right_arrow_advances_key_selection() {
         let mut app = make_app();
-        app.keys.list = vec![key("a"), key("b"), key("c")];
-        app.keys.list_state.select(Some(0));
+        app.keys.set_list(vec![key("a"), key("b"), key("c")]);
+        app.keys.list_state_mut().select(Some(0));
         handle_key(&mut app, k(KeyCode::Right));
-        assert_eq!(app.keys.list_state.selected(), Some(1));
+        assert_eq!(app.keys.list_state().selected(), Some(1));
     }
 
     #[test]
     fn left_arrow_retreats_key_selection() {
         let mut app = make_app();
-        app.keys.list = vec![key("a"), key("b"), key("c")];
-        app.keys.list_state.select(Some(2));
+        app.keys.set_list(vec![key("a"), key("b"), key("c")]);
+        app.keys.list_state_mut().select(Some(2));
         handle_key(&mut app, k(KeyCode::Left));
-        assert_eq!(app.keys.list_state.selected(), Some(1));
+        assert_eq!(app.keys.list_state().selected(), Some(1));
     }
 
     #[test]
@@ -482,19 +496,19 @@ mod tests {
         // select_next_key wraps modulo, matching the j/k behaviour we
         // preserve via the alias.
         let mut app = make_app();
-        app.keys.list = vec![key("a"), key("b")];
-        app.keys.list_state.select(Some(1));
+        app.keys.set_list(vec![key("a"), key("b")]);
+        app.keys.list_state_mut().select(Some(1));
         handle_key(&mut app, k(KeyCode::Right));
-        assert_eq!(app.keys.list_state.selected(), Some(0));
+        assert_eq!(app.keys.list_state().selected(), Some(0));
     }
 
     #[test]
     fn left_arrow_at_start_wraps_to_last() {
         let mut app = make_app();
-        app.keys.list = vec![key("a"), key("b")];
-        app.keys.list_state.select(Some(0));
+        app.keys.set_list(vec![key("a"), key("b")]);
+        app.keys.list_state_mut().select(Some(0));
         handle_key(&mut app, k(KeyCode::Left));
-        assert_eq!(app.keys.list_state.selected(), Some(1));
+        assert_eq!(app.keys.list_state().selected(), Some(1));
     }
 
     // --- Dispatcher coverage: navigation and search (H12) ---
@@ -502,12 +516,12 @@ mod tests {
     #[test]
     fn slash_opens_search_and_resets_selection() {
         let mut app = make_app();
-        app.keys.list = vec![key("a"), key("b"), key("c")];
-        app.keys.list_state.select(Some(2));
+        app.keys.set_list(vec![key("a"), key("b"), key("c")]);
+        app.keys.list_state_mut().select(Some(2));
         handle_key(&mut app, k(KeyCode::Char('/')));
         assert_eq!(app.search.query(), Some(""));
         assert_eq!(
-            app.keys.list_state.selected(),
+            app.keys.list_state().selected(),
             Some(0),
             "search must land cursor on the first match"
         );
@@ -516,7 +530,7 @@ mod tests {
     #[test]
     fn search_typing_appends_to_query() {
         let mut app = make_app();
-        app.keys.list = vec![key("alpha"), key("bravo")];
+        app.keys.set_list(vec![key("alpha"), key("bravo")]);
         handle_key(&mut app, k(KeyCode::Char('/')));
         handle_key(&mut app, k(KeyCode::Char('a')));
         handle_key(&mut app, k(KeyCode::Char('l')));
@@ -526,7 +540,7 @@ mod tests {
     #[test]
     fn search_esc_clears_query() {
         let mut app = make_app();
-        app.keys.list = vec![key("alpha")];
+        app.keys.set_list(vec![key("alpha")]);
         handle_key(&mut app, k(KeyCode::Char('/')));
         handle_key(&mut app, k(KeyCode::Char('a')));
         handle_key(&mut app, k(KeyCode::Esc));
@@ -539,12 +553,12 @@ mod tests {
         // close search mode. The user can keep typing to refine the query.
         // Esc is the explicit "close search" affordance.
         let mut app = make_app();
-        app.keys.list = vec![key("alpha")];
+        app.keys.set_list(vec![key("alpha")]);
         handle_key(&mut app, k(KeyCode::Char('/')));
         handle_key(&mut app, k(KeyCode::Backspace));
         assert_eq!(app.search.query(), Some(""));
         // Cursor must remain on a valid match index when filtered list is non-empty.
-        assert_eq!(app.keys.list_state.selected(), Some(0));
+        assert_eq!(app.keys.list_state().selected(), Some(0));
     }
 
     #[test]
@@ -560,7 +574,7 @@ mod tests {
     fn tab_in_search_mode_exits_search_before_cycling() {
         let mut app = make_app();
         app.top_page = crate::app::TopPage::Keys;
-        app.keys.list = vec![key("alpha")];
+        app.keys.set_list(vec![key("alpha")]);
         handle_key(&mut app, k(KeyCode::Char('/')));
         handle_key(&mut app, k(KeyCode::Tab));
         assert!(app.search.query().is_none());
@@ -580,8 +594,8 @@ mod tests {
         // Pressing Enter on an empty Keys tab must not panic. Earlier
         // versions indexed app.keys.list[0] in the copy path.
         let mut app = make_app();
-        app.keys.list.clear();
-        app.keys.list_state.select(None);
+        app.keys.list_mut().clear();
+        app.keys.list_state_mut().select(None);
         handle_key(&mut app, k(KeyCode::Enter));
         // The presence of any toast is fine; the invariant is "no panic".
     }
@@ -589,7 +603,7 @@ mod tests {
     #[test]
     fn n_opens_whats_new_overlay() {
         let mut app = make_app();
-        app.keys.list = vec![key("a")];
+        app.keys.set_list(vec![key("a")]);
         handle_key(&mut app, k(KeyCode::Char('n')));
         assert!(matches!(app.screen, Screen::WhatsNew(_)));
     }

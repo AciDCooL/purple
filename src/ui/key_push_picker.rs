@@ -24,13 +24,13 @@ const MAX_VISIBLE_ROWS: u16 = 16;
 /// of the key being pushed; it drives the overlay title only.
 pub fn render(frame: &mut Frame, app: &mut App, key_index: usize) {
     let hosts: Vec<&HostEntry> = pickable_hosts(app).collect();
-    let selected_count = app.keys.push.selected.len();
+    let selected_count = app.keys.push().selected.len();
     let total = hosts.len();
     let eligible_total = hosts.iter().filter(|h| !is_vault_host(h)).count();
 
     let key_label = app
         .keys
-        .list
+        .list()
         .get(key_index)
         .map(|k| format!("{}.pub", k.name))
         .unwrap_or_else(|| "key".to_string());
@@ -75,20 +75,20 @@ pub fn render(frame: &mut Frame, app: &mut App, key_index: usize) {
         let content_w = inner.width as usize;
         let items: Vec<ListItem> = hosts
             .iter()
-            .map(|h| build_row(h, &app.keys.push.selected, content_w))
+            .map(|h| build_row(h, &app.keys.push().selected, content_w))
             .collect();
 
-        let sel = app.keys.push.list_state.selected();
+        let sel = app.keys.push().list_state.selected();
         let new_sel = match sel {
             Some(i) if i < hosts.len() => Some(i),
             _ => Some(0),
         };
         if new_sel != sel {
-            app.keys.push.list_state.select(new_sel);
+            app.keys.push_mut().list_state.select(new_sel);
         }
 
         let list = List::new(items).highlight_style(theme::selected_row());
-        frame.render_stateful_widget(list, inner, &mut app.keys.push.list_state);
+        frame.render_stateful_widget(list, inner, &mut app.keys.push_mut().list_state);
     }
 
     let footer_area = design::render_overlay_footer(frame, area);

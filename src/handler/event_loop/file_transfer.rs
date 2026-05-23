@@ -81,7 +81,7 @@ pub(crate) fn handle_scp_complete(
                 // Field-disjoint helper: fb already holds &mut app.file_browser_session,
                 // so the `App::record_key_use` method would not borrow-check.
                 crate::key_activity::record_and_flush(
-                    &mut app.keys.activity,
+                    app.keys.activity_mut(),
                     &alias,
                     crate::key_activity::now_secs(),
                 );

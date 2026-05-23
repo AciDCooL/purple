@@ -1,7 +1,7 @@
 //! Key handler for `Screen::KeyPushPicker`.
 //!
 //! Multi-select host picker reached from the Keys tab via `p`. Selection
-//! is held in `app.keys.push.selected` (HashSet of aliases). Vault-ssh
+//! is held in `app.keys.push().selected` (HashSet of aliases). Vault-ssh
 //! hosts cannot be selected; Space and `a` skip them.
 
 use crossterm::event::{KeyCode, KeyEvent};
@@ -33,16 +33,16 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     let host_count = pickable_hosts(app).count();
     match key.code {
         KeyCode::Esc => {
-            app.keys.push.selected.clear();
+            app.keys.push_mut().selected.clear();
             app.set_screen(Screen::HostList);
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if host_count == 0 {
                 return;
             }
-            let cur = app.keys.push.list_state.selected().unwrap_or(0);
+            let cur = app.keys.push().list_state.selected().unwrap_or(0);
             app.keys
-                .push
+                .push_mut()
                 .list_state
                 .select(Some((cur + 1).min(host_count - 1)));
         }
@@ -50,20 +50,23 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             if host_count == 0 {
                 return;
             }
-            let cur = app.keys.push.list_state.selected().unwrap_or(0);
-            app.keys.push.list_state.select(Some(cur.saturating_sub(1)));
+            let cur = app.keys.push().list_state.selected().unwrap_or(0);
+            app.keys
+                .push_mut()
+                .list_state
+                .select(Some(cur.saturating_sub(1)));
         }
         KeyCode::PageDown => {
-            crate::app::page_down(&mut app.keys.push.list_state, host_count, 10);
+            crate::app::page_down(&mut app.keys.push_mut().list_state, host_count, 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(&mut app.keys.push.list_state, host_count, 10);
+            crate::app::page_up(&mut app.keys.push_mut().list_state, host_count, 10);
         }
         KeyCode::Home | KeyCode::Char('g') if host_count > 0 => {
-            app.keys.push.list_state.select(Some(0));
+            app.keys.push_mut().list_state.select(Some(0));
         }
         KeyCode::End | KeyCode::Char('G') if host_count > 0 => {
-            app.keys.push.list_state.select(Some(host_count - 1));
+            app.keys.push_mut().list_state.select(Some(host_count - 1));
         }
         KeyCode::Char(' ') => {
             toggle_at_cursor(app);
@@ -82,7 +85,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 /// are skipped so the user cannot accidentally target a cert-managed
 /// host with a static-key append.
 fn toggle_at_cursor(app: &mut App) {
-    let Some(idx) = app.keys.push.list_state.selected() else {
+    let Some(idx) = app.keys.push().list_state.selected() else {
         return;
     };
     let host = match pickable_hosts(app).nth(idx) {
@@ -94,15 +97,15 @@ fn toggle_at_cursor(app: &mut App) {
         return;
     }
     let alias = host.alias.clone();
-    if app.keys.push.selected.contains(&alias) {
-        app.keys.push.selected.remove(&alias);
+    if app.keys.push().selected.contains(&alias) {
+        app.keys.push_mut().selected.remove(&alias);
     } else {
-        app.keys.push.selected.insert(alias.clone());
+        app.keys.push_mut().selected.insert(alias.clone());
     }
     log::debug!(
         "[purple] key_push picker: toggled {} (now {} selected)",
         alias,
-        app.keys.push.selected.len()
+        app.keys.push().selected.len()
     );
 }
 
@@ -116,10 +119,12 @@ fn toggle_select_all_eligible(app: &mut App) {
     if eligible.is_empty() {
         return;
     }
-    let all_already_selected = eligible.iter().all(|a| app.keys.push.selected.contains(a));
+    let all_already_selected = eligible
+        .iter()
+        .all(|a| app.keys.push().selected.contains(a));
     if all_already_selected {
         for alias in &eligible {
-            app.keys.push.selected.remove(alias);
+            app.keys.push_mut().selected.remove(alias);
         }
         log::debug!(
             "[purple] key_push picker: cleared all {} eligible selections",
@@ -128,7 +133,7 @@ fn toggle_select_all_eligible(app: &mut App) {
     } else {
         let n = eligible.len();
         for alias in eligible {
-            app.keys.push.selected.insert(alias);
+            app.keys.push_mut().selected.insert(alias);
         }
         log::debug!(
             "[purple] key_push picker: selected all {} eligible hosts",
@@ -137,11 +142,11 @@ fn toggle_select_all_eligible(app: &mut App) {
     }
 }
 
-/// Enter: freeze the selection into `app.keys.push.committed` and
+/// Enter: freeze the selection into `app.keys.push().committed` and
 /// transition. Empty selection notifies but stays on the picker so the
 /// user gets feedback instead of a silent no-op.
 fn commit_to_confirm(app: &mut App, key_index: usize) {
-    if app.keys.push.selected.is_empty() {
+    if app.keys.push().selected.is_empty() {
         app.notify(crate::messages::KEY_PUSH_NONE_SELECTED);
         return;
     }
@@ -149,9 +154,9 @@ fn commit_to_confirm(app: &mut App, key_index: usize) {
     // not HashSet iteration order, so the confirm dialog reads stably.
     let aliases: Vec<String> = pickable_hosts(app)
         .map(|h| h.alias.clone())
-        .filter(|a| app.keys.push.selected.contains(a))
+        .filter(|a| app.keys.push().selected.contains(a))
         .collect();
-    app.keys.push.committed = aliases;
+    app.keys.push_mut().committed = aliases;
     app.set_screen(Screen::ConfirmKeyPush { key_index });
 }
 
@@ -174,7 +179,7 @@ mod tests {
         };
         let mut app = App::new(config);
         // Seed a minimal key so commit_to_confirm can identify it.
-        app.keys.list = vec![crate::ssh_keys::SshKeyInfo {
+        app.keys.set_list(vec![crate::ssh_keys::SshKeyInfo {
             name: "id_ed25519".into(),
             display_path: "~/.ssh/id_ed25519".into(),
             key_type: "ED25519".into(),
@@ -188,9 +193,9 @@ mod tests {
             agent_loaded: false,
             is_certificate: false,
             mtime_ts: None,
-        }];
+        }]);
         app.screen = Screen::KeyPushPicker { key_index: 0 };
-        app.keys.push.list_state.select(Some(0));
+        app.keys.push_mut().list_state.select(Some(0));
         app
     }
 
@@ -202,10 +207,10 @@ mod tests {
     fn space_toggles_selection_on_eligible_host() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
         handle_key(&mut app, k(KeyCode::Char(' ')));
-        assert!(app.keys.push.selected.contains("h1"));
+        assert!(app.keys.push().selected.contains("h1"));
         handle_key(&mut app, k(KeyCode::Char(' ')));
         assert!(
-            !app.keys.push.selected.contains("h1"),
+            !app.keys.push().selected.contains("h1"),
             "second Space deselects"
         );
     }
@@ -216,9 +221,9 @@ mod tests {
             "Host h1\n  HostName 1.1.1.1\n  # purple:vault-ssh ops/prod\nHost h2\n  HostName 2.2.2.2\n",
         );
         // Cursor on h1 (vault).
-        app.keys.push.list_state.select(Some(0));
+        app.keys.push_mut().list_state.select(Some(0));
         handle_key(&mut app, k(KeyCode::Char(' ')));
-        assert!(!app.keys.push.selected.contains("h1"));
+        assert!(!app.keys.push().selected.contains("h1"));
         assert!(
             app.status_center.toast().is_some(),
             "vault skip should toast"
@@ -233,10 +238,10 @@ mod tests {
         let mut app = make_app(
             "Host signed-prod\n  HostName 10.0.0.1\n  CertificateFile ~/.purple/certs/signed-prod-cert.pub\nHost plain\n  HostName 2.2.2.2\n",
         );
-        app.keys.push.list_state.select(Some(0));
+        app.keys.push_mut().list_state.select(Some(0));
         handle_key(&mut app, k(KeyCode::Char(' ')));
         assert!(
-            !app.keys.push.selected.contains("signed-prod"),
+            !app.keys.push().selected.contains("signed-prod"),
             "cert-file vault host must not be selectable"
         );
         assert!(app.status_center.toast().is_some());
@@ -248,10 +253,10 @@ mod tests {
             "Host plain\n  HostName 1.1.1.1\nHost role-vault\n  HostName 2.2.2.2\n  # purple:vault-ssh ops/prod\nHost cert-vault\n  HostName 3.3.3.3\n  CertificateFile ~/.purple/certs/cert-vault-cert.pub\nHost plain2\n  HostName 4.4.4.4\n",
         );
         handle_key(&mut app, k(KeyCode::Char('a')));
-        assert!(app.keys.push.selected.contains("plain"));
-        assert!(app.keys.push.selected.contains("plain2"));
-        assert!(!app.keys.push.selected.contains("role-vault"));
-        assert!(!app.keys.push.selected.contains("cert-vault"));
+        assert!(app.keys.push().selected.contains("plain"));
+        assert!(app.keys.push().selected.contains("plain2"));
+        assert!(!app.keys.push().selected.contains("role-vault"));
+        assert!(!app.keys.push().selected.contains("cert-vault"));
     }
 
     #[test]
@@ -260,21 +265,21 @@ mod tests {
             "Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n  # purple:vault-ssh ops/prod\nHost h3\n  HostName 3.3.3.3\n",
         );
         handle_key(&mut app, k(KeyCode::Char('a')));
-        assert!(app.keys.push.selected.contains("h1"));
+        assert!(app.keys.push().selected.contains("h1"));
         assert!(
-            !app.keys.push.selected.contains("h2"),
+            !app.keys.push().selected.contains("h2"),
             "vault host excluded"
         );
-        assert!(app.keys.push.selected.contains("h3"));
+        assert!(app.keys.push().selected.contains("h3"));
     }
 
     #[test]
     fn a_again_clears_when_all_eligible_already_selected() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
         handle_key(&mut app, k(KeyCode::Char('a')));
-        assert_eq!(app.keys.push.selected.len(), 2);
+        assert_eq!(app.keys.push().selected.len(), 2);
         handle_key(&mut app, k(KeyCode::Char('a')));
-        assert!(app.keys.push.selected.is_empty());
+        assert!(app.keys.push().selected.is_empty());
     }
 
     #[test]
@@ -288,12 +293,12 @@ mod tests {
     #[test]
     fn enter_with_selection_transitions_to_confirm() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
-        app.keys.push.selected.insert("h1".to_string());
-        app.keys.push.selected.insert("h2".to_string());
+        app.keys.push_mut().selected.insert("h1".to_string());
+        app.keys.push_mut().selected.insert("h2".to_string());
         handle_key(&mut app, k(KeyCode::Enter));
         match app.screen {
             Screen::ConfirmKeyPush { .. } => {
-                assert_eq!(app.keys.push.committed.len(), 2);
+                assert_eq!(app.keys.push().committed.len(), 2);
             }
             ref other => panic!("expected ConfirmKeyPush, got {:?}", other),
         }
@@ -307,39 +312,39 @@ mod tests {
         let mut app = make_app(
             "Host alpha\n  HostName 1.1.1.1\nHost beta\n  HostName 2.2.2.2\nHost gamma\n  HostName 3.3.3.3\n",
         );
-        app.keys.push.selected.insert("gamma".to_string());
-        app.keys.push.selected.insert("alpha".to_string());
+        app.keys.push_mut().selected.insert("gamma".to_string());
+        app.keys.push_mut().selected.insert("alpha".to_string());
         handle_key(&mut app, k(KeyCode::Enter));
-        assert_eq!(app.keys.push.committed, vec!["alpha", "gamma"]);
+        assert_eq!(app.keys.push().committed, vec!["alpha", "gamma"]);
     }
 
     #[test]
     fn esc_clears_selection_and_returns_to_host_list() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\n");
-        app.keys.push.selected.insert("h1".to_string());
+        app.keys.push_mut().selected.insert("h1".to_string());
         handle_key(&mut app, k(KeyCode::Esc));
-        assert!(app.keys.push.selected.is_empty());
+        assert!(app.keys.push().selected.is_empty());
         assert!(matches!(app.screen, Screen::HostList));
     }
 
     #[test]
     fn down_moves_cursor_within_bounds() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
-        app.keys.push.list_state.select(Some(0));
+        app.keys.push_mut().list_state.select(Some(0));
         handle_key(&mut app, k(KeyCode::Down));
-        assert_eq!(app.keys.push.list_state.selected(), Some(1));
+        assert_eq!(app.keys.push().list_state.selected(), Some(1));
         // Down at end stays at end.
         handle_key(&mut app, k(KeyCode::Down));
-        assert_eq!(app.keys.push.list_state.selected(), Some(1));
+        assert_eq!(app.keys.push().list_state.selected(), Some(1));
     }
 
     #[test]
     fn up_moves_cursor_clamped_to_zero() {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\nHost h2\n  HostName 2.2.2.2\n");
-        app.keys.push.list_state.select(Some(1));
+        app.keys.push_mut().list_state.select(Some(1));
         handle_key(&mut app, k(KeyCode::Up));
-        assert_eq!(app.keys.push.list_state.selected(), Some(0));
+        assert_eq!(app.keys.push().list_state.selected(), Some(0));
         handle_key(&mut app, k(KeyCode::Up));
-        assert_eq!(app.keys.push.list_state.selected(), Some(0));
+        assert_eq!(app.keys.push().list_state.selected(), Some(0));
     }
 }
