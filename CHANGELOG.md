@@ -1,3 +1,8 @@
+## 3.15.16 - 2026-05-23
+
+- change: Sturdier internals behind the Containers tab.
+- change: The Containers overview screen is split into focused modules, so future changes to that view stay consistent and land in one place.
+
 ## 3.15.15 - 2026-05-23
 
 - change: Sturdier internals across hosts, keys, forms and UI.
