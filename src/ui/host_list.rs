@@ -288,7 +288,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
     let area = frame.area();
 
     let is_searching = app.search.query.is_some();
-    let is_tagging = app.tags.input.is_some();
+    let is_tagging = app.tags.input().is_some();
     // Top navigation bar: always visible. Bordered block with three slots:
     // [purple brand] [hosts (N)] [tunnels (M)]. Top + content + bottom = 3 rows.
     let top_bar_height: u16 = 3;
@@ -482,7 +482,7 @@ fn render_display_list(
         .filter(|i| matches!(i, HostListItem::Host { .. } | HostListItem::Pattern { .. }))
         .count();
     let mut title_spans = vec![Span::styled(format!(" {} ", visible_count), theme::bold())];
-    if app.tags.input.is_some() {
+    if app.tags.input().is_some() {
         title_spans.push(Span::styled("── ", theme::muted()));
         title_spans.push(Span::styled(" TAGGING ", theme::brand_badge()));
     } else if !app.hosts_state.multi_select.is_empty() {
@@ -1466,7 +1466,7 @@ fn tag_bar_spans<'a>(input: &'a str, provider_tags: &[String]) -> Vec<Span<'a>> 
 }
 
 fn render_tag_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let input = app.tags.input.as_deref().unwrap_or("");
+    let input = app.tags.input().unwrap_or("");
     let provider_tags = app
         .selected_host()
         .map(|h| h.provider_tags.clone())

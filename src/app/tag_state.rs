@@ -59,9 +59,9 @@ pub fn select_display_tags(
 /// Tag editor state.
 #[derive(Default)]
 pub struct TagState {
-    pub input: Option<String>,
-    pub cursor: usize,
-    pub list: Vec<String>,
+    pub(in crate::app) input: Option<String>,
+    pub(in crate::app) cursor: usize,
+    pub(in crate::app) list: Vec<String>,
 }
 
 impl TagState {
@@ -79,6 +79,65 @@ impl TagState {
     pub(crate) fn close_tag_input(&mut self) {
         self.input = None;
         self.cursor = 0;
+    }
+
+    pub fn input(&self) -> Option<&str> {
+        self.input.as_deref()
+    }
+
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    pub fn list(&self) -> &[String] {
+        &self.list
+    }
+
+    pub fn cursor_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor -= 1;
+        }
+    }
+
+    pub fn cursor_right(&mut self) {
+        if let Some(ref input) = self.input {
+            if self.cursor < input.chars().count() {
+                self.cursor += 1;
+            }
+        }
+    }
+
+    pub fn cursor_home(&mut self) {
+        self.cursor = 0;
+    }
+
+    pub fn cursor_end(&mut self) {
+        if let Some(ref input) = self.input {
+            self.cursor = input.chars().count();
+        }
+    }
+
+    /// Insert a char at the cursor position and advance the cursor.
+    /// No-op when the input is not active.
+    pub fn insert_char(&mut self, c: char) {
+        if let Some(ref mut input) = self.input {
+            let byte_pos = super::char_to_byte_pos(input, self.cursor);
+            input.insert(byte_pos, c);
+            self.cursor += 1;
+        }
+    }
+
+    /// Delete the char left of the cursor. No-op when cursor is 0 or input is inactive.
+    pub fn backspace(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        if let Some(ref mut input) = self.input {
+            let byte_pos = super::char_to_byte_pos(input, self.cursor);
+            let prev = super::char_to_byte_pos(input, self.cursor - 1);
+            input.drain(prev..byte_pos);
+            self.cursor -= 1;
+        }
     }
 }
 

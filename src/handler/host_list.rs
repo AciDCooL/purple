@@ -72,7 +72,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
 
 pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     // Handle tag input mode
-    if app.tags.input.is_some() {
+    if app.tags.input().is_some() {
         super::host_detail::handle_tag_input(app, key);
         return;
     }

@@ -7834,7 +7834,10 @@ fn t_routes_to_bulk_editor_when_selection_active() {
     app.hosts_state.multi_select.insert(1);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert_eq!(app.screen, Screen::BulkTagEditor);
-    assert!(app.tags.input.is_none(), "single-host input must NOT open");
+    assert!(
+        app.tags.input().is_none(),
+        "single-host input must NOT open"
+    );
     assert_eq!(app.forms.bulk_tag_editor.aliases.len(), 2);
 }
 
@@ -7845,7 +7848,7 @@ fn t_opens_single_host_input_when_no_selection() {
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert_eq!(app.screen, Screen::HostList);
     assert!(
-        app.tags.input.is_some(),
+        app.tags.input().is_some(),
         "must fall back to existing single-host tag input"
     );
 }

@@ -5,7 +5,7 @@ use crate::app::{App, Screen};
 pub(super) fn handle_tag_input(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Enter => {
-            if let Some(ref input) = app.tags.input {
+            if let Some(input) = app.tags.input() {
                 let tags: Vec<String> = input
                     .split(',')
                     .map(|t| t.trim().to_string())
@@ -33,38 +33,23 @@ pub(super) fn handle_tag_input(app: &mut App, key: KeyEvent) {
         KeyCode::Esc => {
             app.tags.close_tag_input();
         }
-        KeyCode::Left if app.tags.cursor > 0 => {
-            app.tags.cursor -= 1;
+        KeyCode::Left => {
+            app.tags.cursor_left();
         }
         KeyCode::Right => {
-            if let Some(ref input) = app.tags.input {
-                if app.tags.cursor < input.chars().count() {
-                    app.tags.cursor += 1;
-                }
-            }
+            app.tags.cursor_right();
         }
         KeyCode::Home => {
-            app.tags.cursor = 0;
+            app.tags.cursor_home();
         }
         KeyCode::End => {
-            if let Some(ref input) = app.tags.input {
-                app.tags.cursor = input.chars().count();
-            }
+            app.tags.cursor_end();
         }
         KeyCode::Char(c) => {
-            if let Some(ref mut input) = app.tags.input {
-                let byte_pos = crate::app::char_to_byte_pos(input, app.tags.cursor);
-                input.insert(byte_pos, c);
-                app.tags.cursor += 1;
-            }
+            app.tags.insert_char(c);
         }
-        KeyCode::Backspace if app.tags.cursor > 0 => {
-            if let Some(ref mut input) = app.tags.input {
-                let byte_pos = crate::app::char_to_byte_pos(input, app.tags.cursor);
-                let prev = crate::app::char_to_byte_pos(input, app.tags.cursor - 1);
-                input.drain(prev..byte_pos);
-                app.tags.cursor -= 1;
-            }
+        KeyCode::Backspace => {
+            app.tags.backspace();
         }
         _ => {}
     }

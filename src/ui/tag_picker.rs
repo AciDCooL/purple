@@ -7,7 +7,7 @@ use super::theme;
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    if app.tags.list.is_empty() {
+    if app.tags.list().is_empty() {
         super::render_picker_empty_overlay(
             frame,
             "Filter by Tag",
@@ -76,7 +76,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // PICKER_MAX_W], height grows with item count up to PICKER_MAX_H.
     // Reserve 1 row below the block for the external footer.
     let width = super::picker_overlay_width(frame);
-    let height = (app.tags.list.len() as u16 + 2)
+    let height = (app.tags.list().len() as u16 + 2)
         .min(design::PICKER_MAX_H)
         .min(frame.area().height.saturating_sub(3));
     if height < super::PICKER_MIN_HEIGHT {
@@ -87,7 +87,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let items: Vec<ListItem> = app
         .tags
-        .list
+        .list()
         .iter()
         .map(|tag| {
             let count = tag_counts.get(tag.as_str()).copied().unwrap_or(0);
