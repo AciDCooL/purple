@@ -462,14 +462,14 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             // previous tag list. After a successful undo the snapshot is
             // cleared so the next `u` falls through to the deleted-host
             // stack as usual.
-            if let Some(snapshot) = app.forms.bulk_tag_undo.take() {
+            if let Some(snapshot) = app.forms.take_bulk_tag_undo() {
                 let config_backup = app.hosts_state.ssh_config().clone();
                 for (alias, tags) in &snapshot {
                     let _ = app.hosts_state.ssh_config_mut().set_host_tags(alias, tags);
                 }
                 if let Err(e) = app.hosts_state.ssh_config().write() {
                     app.hosts_state.set_ssh_config(config_backup);
-                    app.forms.bulk_tag_undo = Some(snapshot);
+                    app.forms.set_bulk_tag_undo(Some(snapshot));
                     app.notify_error(crate::messages::failed_to_save(&e));
                 } else {
                     let count = snapshot.len();

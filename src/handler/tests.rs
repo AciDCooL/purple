@@ -110,7 +110,7 @@ fn test_provider_form_init_existing_do_preserves_auto_sync_true() {
     let mut app = make_providers_app_with_do();
     open_provider_form(&mut app, "digitalocean");
     assert!(
-        app.providers.form.auto_sync,
+        app.providers.form_mut().auto_sync,
         "Bestaande DO provider (auto_sync=true) moet true blijven in het form"
     );
 }
@@ -120,7 +120,7 @@ fn test_provider_form_init_existing_proxmox_preserves_auto_sync_false() {
     let mut app = make_providers_app_with_proxmox();
     open_provider_form(&mut app, "proxmox");
     assert!(
-        !app.providers.form.auto_sync,
+        !app.providers.form_mut().auto_sync,
         "Bestaande Proxmox provider (auto_sync=false) moet false blijven in het form"
     );
 }
@@ -149,7 +149,7 @@ fn test_provider_form_init_existing_do_explicit_false_preserved() {
     });
     open_provider_form(&mut app, "digitalocean");
     assert!(
-        !app.providers.form.auto_sync,
+        !app.providers.form_mut().auto_sync,
         "DO met auto_sync=false moet false blijven"
     );
 }
@@ -162,7 +162,7 @@ fn test_provider_form_init_new_proxmox_defaults_to_false() {
     *app.providers.config_mut() = test_provider_config(); // geen config voor proxmox
     open_provider_form(&mut app, "proxmox");
     assert!(
-        !app.providers.form.auto_sync,
+        !app.providers.form_mut().auto_sync,
         "Nieuw Proxmox form moet auto_sync=false als default tonen"
     );
 }
@@ -174,7 +174,7 @@ fn test_provider_form_init_new_digitalocean_defaults_to_true() {
     *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "digitalocean");
     assert!(
-        app.providers.form.auto_sync,
+        app.providers.form_mut().auto_sync,
         "Nieuw DigitalOcean form moet auto_sync=true als default tonen"
     );
 }
@@ -186,7 +186,7 @@ fn make_form_app_focused_on(provider: &str, field: ProviderFormField) -> App {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare(provider),
     };
-    app.providers.form = ProviderFormFields {
+    *app.providers.form_mut() = ProviderFormFields {
         label: String::new(),
         label_entry: false,
         url: String::new(),
@@ -264,29 +264,29 @@ fn assert_status_not_contains(app: &App, not_expected: &str) {
 #[test]
 fn test_space_toggles_auto_sync_true_to_false() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::AutoSync);
-    assert!(app.providers.form.auto_sync);
+    assert!(app.providers.form_mut().auto_sync);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(!app.providers.form.auto_sync);
+    assert!(!app.providers.form_mut().auto_sync);
 }
 
 #[test]
 fn test_space_toggles_auto_sync_false_to_true() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::AutoSync);
-    app.providers.form.auto_sync = false;
+    app.providers.form_mut().auto_sync = false;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.providers.form.auto_sync);
+    assert!(app.providers.form_mut().auto_sync);
 }
 
 #[test]
 fn test_space_on_other_field_does_not_affect_auto_sync() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.auto_sync = true;
+    app.providers.form_mut().auto_sync = true;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     // Space op Token voegt spatie toe aan tekstveld; auto_sync ongewijzigd
-    assert!(app.providers.form.auto_sync);
+    assert!(app.providers.form_mut().auto_sync);
 }
 
 // --- Char/Backspace blokkering op AutoSync ---
@@ -294,21 +294,21 @@ fn test_space_on_other_field_does_not_affect_auto_sync() {
 #[test]
 fn test_char_input_blocked_when_auto_sync_focused() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::AutoSync);
-    let original_token = app.providers.form.token.clone();
+    let original_token = app.providers.form_mut().token.clone();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
     // Geen enkel tekstveld mag gewijzigd zijn
-    assert_eq!(app.providers.form.token, original_token);
-    assert_eq!(app.providers.form.alias_prefix, "do");
+    assert_eq!(app.providers.form_mut().token, original_token);
+    assert_eq!(app.providers.form_mut().alias_prefix, "do");
 }
 
 #[test]
 fn test_backspace_blocked_when_auto_sync_focused() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::AutoSync);
-    let original_token = app.providers.form.token.clone();
+    let original_token = app.providers.form_mut().token.clone();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.providers.form.token, original_token);
+    assert_eq!(app.providers.form_mut().token, original_token);
 }
 
 // --- Submit persisteert auto_sync ---
@@ -321,7 +321,7 @@ fn test_submit_provider_form_persists_auto_sync_false() {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
     *app.providers.config_mut() = test_provider_config();
-    app.providers.form = ProviderFormFields {
+    *app.providers.form_mut() = ProviderFormFields {
         label: String::new(),
         label_entry: false,
         url: String::new(),
@@ -365,7 +365,7 @@ fn test_submit_provider_form_persists_auto_sync_true() {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
     *app.providers.config_mut() = test_provider_config();
-    app.providers.form = ProviderFormFields {
+    *app.providers.form_mut() = ProviderFormFields {
         label: String::new(),
         label_entry: false,
         url: String::new(),
@@ -408,7 +408,7 @@ fn test_submit_provider_form_persists_vault_role() {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
     *app.providers.config_mut() = test_provider_config();
-    app.providers.form = ProviderFormFields {
+    *app.providers.form_mut() = ProviderFormFields {
         label: String::new(),
         label_entry: false,
         url: String::new(),
@@ -458,7 +458,7 @@ fn test_provider_config_parse_vault_role_present() {
 #[test]
 fn test_submit_provider_form_rejects_control_chars_in_token() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.token = "tok\x01en".to_string();
+    app.providers.form_mut().token = "tok\x01en".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "control characters");
@@ -467,7 +467,7 @@ fn test_submit_provider_form_rejects_control_chars_in_token() {
 #[test]
 fn test_submit_provider_form_rejects_control_chars_in_alias_prefix() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.alias_prefix = "do\x00".to_string();
+    app.providers.form_mut().alias_prefix = "do\x00".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "control characters");
@@ -476,8 +476,8 @@ fn test_submit_provider_form_rejects_control_chars_in_alias_prefix() {
 #[test]
 fn test_submit_provider_form_rejects_control_chars_in_url() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::Url);
-    app.providers.form.url = "https://pve\x0a.local:8006".to_string();
-    app.providers.form.token = "user@pam!t=secret".to_string();
+    app.providers.form_mut().url = "https://pve\x0a.local:8006".to_string();
+    app.providers.form_mut().token = "user@pam!t=secret".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "control characters");
@@ -486,7 +486,7 @@ fn test_submit_provider_form_rejects_control_chars_in_url() {
 #[test]
 fn test_submit_provider_form_rejects_control_chars_in_user() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.user = "ro\tot".to_string();
+    app.providers.form_mut().user = "ro\tot".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "control characters");
@@ -495,7 +495,7 @@ fn test_submit_provider_form_rejects_control_chars_in_user() {
 #[test]
 fn test_submit_provider_form_rejects_control_chars_in_identity_file() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.identity_file = "~/.ssh/id\x1b_rsa".to_string();
+    app.providers.form_mut().identity_file = "~/.ssh/id\x1b_rsa".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "control characters");
@@ -504,8 +504,8 @@ fn test_submit_provider_form_rejects_control_chars_in_identity_file() {
 #[test]
 fn test_submit_proxmox_rejects_empty_url() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::Url);
-    app.providers.form.url = "".to_string();
-    app.providers.form.token = "user@pam!t=secret".to_string();
+    app.providers.form_mut().url = "".to_string();
+    app.providers.form_mut().token = "user@pam!t=secret".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "URL is required");
@@ -514,8 +514,8 @@ fn test_submit_proxmox_rejects_empty_url() {
 #[test]
 fn test_submit_proxmox_rejects_http_url() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::Url);
-    app.providers.form.url = "http://pve.local:8006".to_string();
-    app.providers.form.token = "user@pam!t=secret".to_string();
+    app.providers.form_mut().url = "http://pve.local:8006".to_string();
+    app.providers.form_mut().token = "user@pam!t=secret".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "https://");
@@ -524,8 +524,8 @@ fn test_submit_proxmox_rejects_http_url() {
 #[test]
 fn test_submit_proxmox_accepts_https_url() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::Url);
-    app.providers.form.url = "https://pve.local:8006".to_string();
-    app.providers.form.token = "user@pam!t=secret".to_string();
+    app.providers.form_mut().url = "https://pve.local:8006".to_string();
+    app.providers.form_mut().token = "user@pam!t=secret".to_string();
     submit_form(&mut app);
     assert_status_not_contains(&app, "URL is required");
     assert_status_not_contains(&app, "https://");
@@ -534,8 +534,8 @@ fn test_submit_proxmox_accepts_https_url() {
 #[test]
 fn test_submit_proxmox_rejects_bare_hostname_url() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::Url);
-    app.providers.form.url = "pve.local:8006".to_string();
-    app.providers.form.token = "user@pam!t=secret".to_string();
+    app.providers.form_mut().url = "pve.local:8006".to_string();
+    app.providers.form_mut().token = "user@pam!t=secret".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "https://");
@@ -544,7 +544,7 @@ fn test_submit_proxmox_rejects_bare_hostname_url() {
 #[test]
 fn test_submit_provider_form_rejects_empty_token() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.token = "".to_string();
+    app.providers.form_mut().token = "".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "Token");
@@ -553,7 +553,7 @@ fn test_submit_provider_form_rejects_empty_token() {
 #[test]
 fn test_submit_provider_form_rejects_whitespace_only_token() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.token = "   ".to_string();
+    app.providers.form_mut().token = "   ".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "Token");
@@ -562,7 +562,7 @@ fn test_submit_provider_form_rejects_whitespace_only_token() {
 #[test]
 fn test_submit_provider_form_rejects_pattern_alias_prefix() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.alias_prefix = "do*".to_string();
+    app.providers.form_mut().alias_prefix = "do*".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "pattern");
@@ -571,7 +571,7 @@ fn test_submit_provider_form_rejects_pattern_alias_prefix() {
 #[test]
 fn test_submit_provider_form_rejects_question_mark_alias() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.alias_prefix = "do?".to_string();
+    app.providers.form_mut().alias_prefix = "do?".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "pattern");
@@ -580,7 +580,7 @@ fn test_submit_provider_form_rejects_question_mark_alias() {
 #[test]
 fn test_submit_provider_form_rejects_negation_alias() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.alias_prefix = "!do".to_string();
+    app.providers.form_mut().alias_prefix = "!do".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "pattern");
@@ -589,7 +589,7 @@ fn test_submit_provider_form_rejects_negation_alias() {
 #[test]
 fn test_submit_provider_form_rejects_whitespace_in_user() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.user = "my user".to_string();
+    app.providers.form_mut().user = "my user".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "whitespace");
@@ -604,7 +604,7 @@ fn make_gcp_form_app() -> App {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("gcp"),
     };
-    app.providers.form = ProviderFormFields {
+    *app.providers.form_mut() = ProviderFormFields {
         label: String::new(),
         label_entry: false,
         url: String::new(),
@@ -630,7 +630,7 @@ fn make_gcp_form_app() -> App {
 #[test]
 fn test_submit_gcp_rejects_empty_project() {
     let mut app = make_gcp_form_app();
-    app.providers.form.project = "".to_string();
+    app.providers.form_mut().project = "".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "Project ID");
@@ -639,7 +639,7 @@ fn test_submit_gcp_rejects_empty_project() {
 #[test]
 fn test_submit_gcp_rejects_whitespace_only_project() {
     let mut app = make_gcp_form_app();
-    app.providers.form.project = "   ".to_string();
+    app.providers.form_mut().project = "   ".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "Project ID");
@@ -648,7 +648,7 @@ fn test_submit_gcp_rejects_whitespace_only_project() {
 #[test]
 fn test_submit_gcp_rejects_empty_token() {
     let mut app = make_gcp_form_app();
-    app.providers.form.token = "".to_string();
+    app.providers.form_mut().token = "".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "Token");
@@ -657,7 +657,7 @@ fn test_submit_gcp_rejects_empty_token() {
 #[test]
 fn test_submit_gcp_empty_token_shows_gcp_specific_hint() {
     let mut app = make_gcp_form_app();
-    app.providers.form.token = "".to_string();
+    app.providers.form_mut().token = "".to_string();
     submit_form(&mut app);
     assert_status_contains(&app, "service account");
 }
@@ -671,12 +671,18 @@ fn test_gcp_form_has_project_field() {
 #[test]
 fn test_gcp_form_tab_cycles_through_project() {
     let mut app = make_gcp_form_app();
-    app.providers.form.focused_field = ProviderFormField::Token;
+    app.providers.form_mut().focused_field = ProviderFormField::Token;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.providers.form.focused_field, ProviderFormField::Project);
+    assert_eq!(
+        app.providers.form_mut().focused_field,
+        ProviderFormField::Project
+    );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.providers.form.focused_field, ProviderFormField::Regions);
+    assert_eq!(
+        app.providers.form_mut().focused_field,
+        ProviderFormField::Regions
+    );
 }
 
 #[test]
@@ -685,8 +691,8 @@ fn test_provider_form_init_new_gcp_defaults() {
     app.screen = Screen::Providers;
     *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "gcp");
-    assert!(app.providers.form.project.is_empty());
-    assert!(app.providers.form.auto_sync);
+    assert!(app.providers.form_mut().project.is_empty());
+    assert!(app.providers.form_mut().auto_sync);
 }
 
 // =========================================================================
@@ -699,7 +705,7 @@ fn make_azure_form_app() -> App {
         id: crate::providers::config::ProviderConfigId::bare("azure"),
     };
     *app.providers.config_mut() = test_provider_config();
-    app.providers.form = ProviderFormFields {
+    *app.providers.form_mut() = ProviderFormFields {
         label: String::new(),
         label_entry: false,
         url: String::new(),
@@ -725,7 +731,7 @@ fn make_azure_form_app() -> App {
 #[test]
 fn test_submit_azure_rejects_empty_subscriptions() {
     let mut app = make_azure_form_app();
-    app.providers.form.regions = "".to_string();
+    app.providers.form_mut().regions = "".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "subscription");
@@ -734,7 +740,7 @@ fn test_submit_azure_rejects_empty_subscriptions() {
 #[test]
 fn test_submit_azure_rejects_whitespace_only_subscriptions() {
     let mut app = make_azure_form_app();
-    app.providers.form.regions = "   ".to_string();
+    app.providers.form_mut().regions = "   ".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "subscription");
@@ -752,13 +758,16 @@ fn test_azure_form_has_regions_field() {
 #[test]
 fn test_azure_form_tab_cycles_through_regions() {
     let mut app = make_azure_form_app();
-    app.providers.form.focused_field = ProviderFormField::Token;
+    app.providers.form_mut().focused_field = ProviderFormField::Token;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.providers.form.focused_field, ProviderFormField::Regions);
+    assert_eq!(
+        app.providers.form_mut().focused_field,
+        ProviderFormField::Regions
+    );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::AliasPrefix
     );
 }
@@ -766,12 +775,12 @@ fn test_azure_form_tab_cycles_through_regions() {
 #[test]
 fn test_azure_regions_field_accepts_typing() {
     let mut app = make_azure_form_app();
-    app.providers.form.focused_field = ProviderFormField::Regions;
-    app.providers.form.regions = String::new();
-    app.providers.form.cursor_pos = 0;
+    app.providers.form_mut().focused_field = ProviderFormField::Regions;
+    app.providers.form_mut().regions = String::new();
+    app.providers.form_mut().cursor_pos = 0;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
-    assert_eq!(app.providers.form.regions, "a");
+    assert_eq!(app.providers.form_mut().regions, "a");
 }
 
 fn make_ovh_form_app() -> App {
@@ -779,7 +788,7 @@ fn make_ovh_form_app() -> App {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
-    app.providers.form = ProviderFormFields {
+    *app.providers.form_mut() = ProviderFormFields {
         label: String::new(),
         label_entry: false,
         url: String::new(),
@@ -806,7 +815,7 @@ fn make_ovh_form_app() -> App {
 fn test_ovh_space_on_regions_opens_picker() {
     // Pickers open on Space, never on Enter. Enter always submits.
     let mut app = make_ovh_form_app();
-    app.providers.form.focused_field = ProviderFormField::Regions;
+    app.providers.form_mut().focused_field = ProviderFormField::Regions;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
@@ -819,7 +828,7 @@ fn test_ovh_space_on_regions_opens_picker() {
 #[test]
 fn test_ovh_picker_select_eu() {
     let mut app = make_ovh_form_app();
-    app.providers.form.focused_field = ProviderFormField::Regions;
+    app.providers.form_mut().focused_field = ProviderFormField::Regions;
     app.ui.region_picker.open = true;
     app.ui.region_picker.cursor = 0;
 
@@ -832,12 +841,12 @@ fn test_ovh_picker_select_eu() {
 
     // Press Space to select "eu"
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert_eq!(app.providers.form.regions, "eu");
+    assert_eq!(app.providers.form_mut().regions, "eu");
 
     // Press Enter to confirm
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.region_picker.open);
-    assert_eq!(app.providers.form.regions, "eu");
+    assert_eq!(app.providers.form_mut().regions, "eu");
 }
 
 #[test]
@@ -857,11 +866,11 @@ fn test_ovh_picker_select_us() {
     assert_eq!(app.ui.region_picker.cursor, 3);
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert_eq!(app.providers.form.regions, "us");
+    assert_eq!(app.providers.form_mut().regions, "us");
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.region_picker.open);
-    assert_eq!(app.providers.form.regions, "us");
+    assert_eq!(app.providers.form_mut().regions, "us");
 }
 
 #[test]
@@ -877,11 +886,11 @@ fn test_ovh_picker_space_on_header_toggles_all() {
     // Space on header selects all endpoints
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     // All three should be selected (order preserved by OVH_ENDPOINTS)
-    assert_eq!(app.providers.form.regions, "eu,ca,us");
+    assert_eq!(app.providers.form_mut().regions, "eu,ca,us");
 
     // Space again on header deselects all
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert_eq!(app.providers.form.regions, "");
+    assert_eq!(app.providers.form_mut().regions, "");
 }
 
 #[test]
@@ -913,7 +922,7 @@ fn test_ovh_picker_enter_selects_and_closes() {
     // Enter directly (no Space needed) selects "ca" and closes
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.region_picker.open);
-    assert_eq!(app.providers.form.regions, "ca");
+    assert_eq!(app.providers.form_mut().regions, "ca");
 }
 
 #[test]
@@ -929,13 +938,13 @@ fn test_ovh_picker_enter_on_header_closes_without_select() {
     // Enter on header: no item to select, just closes
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.region_picker.open);
-    assert_eq!(app.providers.form.regions, "");
+    assert_eq!(app.providers.form_mut().regions, "");
 }
 
 #[test]
 fn test_ovh_picker_enter_replaces_previous_selection() {
     let mut app = make_ovh_form_app();
-    app.providers.form.regions = "eu".to_string(); // previously selected EU
+    app.providers.form_mut().regions = "eu".to_string(); // previously selected EU
     app.ui.region_picker.open = true;
     app.ui.region_picker.cursor = 3; // "us"
     app.screen = Screen::ProviderForm {
@@ -945,13 +954,13 @@ fn test_ovh_picker_enter_replaces_previous_selection() {
     let (tx, _rx) = mpsc::channel();
     // Enter on "us" should replace "eu" with "us" (single-select)
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.providers.form.regions, "us");
+    assert_eq!(app.providers.form_mut().regions, "us");
 }
 
 #[test]
 fn test_azure_enter_on_regions_does_not_open_picker() {
     let mut app = make_azure_form_app();
-    app.providers.form.focused_field = ProviderFormField::Regions;
+    app.providers.form_mut().focused_field = ProviderFormField::Regions;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Must NOT open region picker (Azure uses text input, not picker)
@@ -964,7 +973,7 @@ fn test_azure_enter_on_regions_does_not_open_picker() {
 #[test]
 fn test_submit_azure_rejects_invalid_subscription_id() {
     let mut app = make_azure_form_app();
-    app.providers.form.regions = "not-a-uuid".to_string();
+    app.providers.form_mut().regions = "not-a-uuid".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "Invalid subscription ID");
@@ -973,7 +982,7 @@ fn test_submit_azure_rejects_invalid_subscription_id() {
 #[test]
 fn test_submit_azure_rejects_mixed_valid_invalid_subscriptions() {
     let mut app = make_azure_form_app();
-    app.providers.form.regions = "12345678-1234-1234-1234-123456789012,bad-id".to_string();
+    app.providers.form_mut().regions = "12345678-1234-1234-1234-123456789012,bad-id".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     assert_status_contains(&app, "Invalid subscription ID");
@@ -989,24 +998,27 @@ fn test_provider_form_tab_cycles_cloud_fields() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::AliasPrefix
     );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.providers.form.focused_field, ProviderFormField::User);
+    assert_eq!(
+        app.providers.form_mut().focused_field,
+        ProviderFormField::User
+    );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::IdentityFile
     );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::VaultRole
     );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::AutoSync
     );
 }
@@ -1017,7 +1029,7 @@ fn test_provider_form_shift_tab_reverse() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::BackTab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::VaultRole
     );
 }
@@ -1027,32 +1039,38 @@ fn test_provider_form_proxmox_has_extra_fields() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::Url);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.providers.form.focused_field, ProviderFormField::Token);
+    assert_eq!(
+        app.providers.form_mut().focused_field,
+        ProviderFormField::Token
+    );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::AliasPrefix
     );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.providers.form.focused_field, ProviderFormField::User);
+    assert_eq!(
+        app.providers.form_mut().focused_field,
+        ProviderFormField::User
+    );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::IdentityFile
     );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::VerifyTls
     );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::VaultRole
     );
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         ProviderFormField::AutoSync
     );
 }
@@ -1068,12 +1086,12 @@ fn test_provider_form_esc_returns_to_provider_list() {
 #[test]
 fn test_provider_form_space_toggles_verify_tls() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::VerifyTls);
-    assert!(app.providers.form.verify_tls);
+    assert!(app.providers.form_mut().verify_tls);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(!app.providers.form.verify_tls);
+    assert!(!app.providers.form_mut().verify_tls);
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.providers.form.verify_tls);
+    assert!(app.providers.form_mut().verify_tls);
 }
 
 #[test]
@@ -1082,7 +1100,7 @@ fn test_provider_form_char_input_verify_tls_blocked() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
     // No text field should have changed
-    assert_eq!(app.providers.form.token, "tok");
+    assert_eq!(app.providers.form_mut().token, "tok");
 }
 
 #[test]
@@ -1090,7 +1108,7 @@ fn test_provider_form_backspace_verify_tls_blocked() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::VerifyTls);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.providers.form.token, "tok");
+    assert_eq!(app.providers.form_mut().token, "tok");
 }
 
 #[test]
@@ -1105,21 +1123,21 @@ fn test_provider_form_space_opens_key_picker() {
 #[test]
 fn test_provider_form_char_appended_to_focused_field() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.token = "tok".to_string();
-    app.providers.form.cursor_pos = 3;
+    app.providers.form_mut().token = "tok".to_string();
+    app.providers.form_mut().cursor_pos = 3;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('X')), &tx);
-    assert_eq!(app.providers.form.token, "tokX");
+    assert_eq!(app.providers.form_mut().token, "tokX");
 }
 
 #[test]
 fn test_provider_form_backspace_removes_from_focused_field() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.token = "tok".to_string();
-    app.providers.form.cursor_pos = 3;
+    app.providers.form_mut().token = "tok".to_string();
+    app.providers.form_mut().cursor_pos = 3;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.providers.form.token, "to");
+    assert_eq!(app.providers.form_mut().token, "to");
 }
 
 // =========================================================================
@@ -1241,9 +1259,9 @@ fn test_provider_list_enter_opens_form_with_existing_config() {
     let mut app = make_providers_app_with_do();
     open_provider_form(&mut app, "digitalocean");
     assert!(matches!(app.screen, Screen::ProviderForm { ref id } if id.provider == "digitalocean"));
-    assert_eq!(app.providers.form.token, "tok");
-    assert_eq!(app.providers.form.alias_prefix, "do");
-    assert_eq!(app.providers.form.user, "root");
+    assert_eq!(app.providers.form_mut().token, "tok");
+    assert_eq!(app.providers.form_mut().alias_prefix, "do");
+    assert_eq!(app.providers.form_mut().user, "root");
 }
 
 #[test]
@@ -1253,9 +1271,9 @@ fn test_provider_list_enter_opens_form_with_defaults() {
     *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "vultr");
     assert!(matches!(app.screen, Screen::ProviderForm { ref id } if id.provider == "vultr"));
-    assert_eq!(app.providers.form.token, "");
-    assert_eq!(app.providers.form.user, "root");
-    assert!(app.providers.form.auto_sync); // vultr default true
+    assert_eq!(app.providers.form_mut().token, "");
+    assert_eq!(app.providers.form_mut().user, "root");
+    assert!(app.providers.form_mut().auto_sync); // vultr default true
 }
 
 #[test]
@@ -1265,7 +1283,7 @@ fn test_provider_form_proxmox_default_alias_prefix() {
     *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "proxmox");
     // Proxmox short_label is "pve"
-    assert_eq!(app.providers.form.alias_prefix, "pve");
+    assert_eq!(app.providers.form_mut().alias_prefix, "pve");
 }
 
 // =========================================================================
@@ -1291,7 +1309,7 @@ fn test_all_cloud_providers_default_auto_sync_true() {
         *app.providers.config_mut() = test_provider_config();
         open_provider_form(&mut app, provider);
         assert!(
-            app.providers.form.auto_sync,
+            app.providers.form_mut().auto_sync,
             "{} should default auto_sync=true",
             provider
         );
@@ -1304,14 +1322,14 @@ fn test_proxmox_defaults_auto_sync_false() {
     app.screen = Screen::Providers;
     *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "proxmox");
-    assert!(!app.providers.form.auto_sync);
+    assert!(!app.providers.form_mut().auto_sync);
 }
 
 #[test]
 fn test_submit_proxmox_https_case_insensitive() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::Url);
-    app.providers.form.url = "HTTPS://pve.local:8006".to_string();
-    app.providers.form.token = "user@pam!t=secret".to_string();
+    app.providers.form_mut().url = "HTTPS://pve.local:8006".to_string();
+    app.providers.form_mut().token = "user@pam!t=secret".to_string();
     submit_form(&mut app);
     assert_status_not_contains(&app, "https://");
 }
@@ -1319,7 +1337,7 @@ fn test_submit_proxmox_https_case_insensitive() {
 #[test]
 fn test_submit_non_proxmox_url_not_required() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.url = "".to_string();
+    app.providers.form_mut().url = "".to_string();
     submit_form(&mut app);
     assert_status_not_contains(&app, "URL is required");
 }
@@ -1327,7 +1345,7 @@ fn test_submit_non_proxmox_url_not_required() {
 #[test]
 fn test_submit_provider_form_accepts_empty_alias_prefix() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.alias_prefix = "".to_string();
+    app.providers.form_mut().alias_prefix = "".to_string();
     submit_form(&mut app);
     assert_status_not_contains(&app, "pattern");
 }
@@ -1335,7 +1353,7 @@ fn test_submit_provider_form_accepts_empty_alias_prefix() {
 #[test]
 fn test_submit_provider_form_accepts_hyphenated_alias() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.alias_prefix = "my-cloud".to_string();
+    app.providers.form_mut().alias_prefix = "my-cloud".to_string();
     submit_form(&mut app);
     assert_status_not_contains(&app, "pattern");
 }
@@ -1343,7 +1361,7 @@ fn test_submit_provider_form_accepts_hyphenated_alias() {
 #[test]
 fn test_submit_provider_form_rejects_space_in_alias_prefix() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
-    app.providers.form.alias_prefix = "my cloud".to_string();
+    app.providers.form_mut().alias_prefix = "my cloud".to_string();
     submit_form(&mut app);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     let msg = &app
@@ -1368,8 +1386,8 @@ fn ctrl_key(c: char) -> KeyEvent {
 fn make_form_app() -> App {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::AddHost;
-    app.forms.host = crate::app::HostForm::new();
-    app.forms.host.expanded = true; // Tests assume all fields visible
+    *app.forms.host_mut() = crate::app::HostForm::new();
+    app.forms.host_mut().expanded = true; // Tests assume all fields visible
     app
 }
 
@@ -1379,7 +1397,7 @@ fn make_form_app() -> App {
 fn test_space_on_askpass_opens_password_picker() {
     // Pickers open on Space, never on Enter.
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(app.ui.password_picker.open);
@@ -1389,7 +1407,7 @@ fn test_space_on_askpass_opens_password_picker() {
 #[test]
 fn test_space_on_identityfile_opens_key_picker() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::IdentityFile;
+    app.forms.host_mut().focused_field = FormField::IdentityFile;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(app.ui.key_picker.open);
@@ -1398,7 +1416,7 @@ fn test_space_on_identityfile_opens_key_picker() {
 #[test]
 fn test_space_on_proxyjump_opens_proxyjump_picker() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::ProxyJump;
+    app.forms.host_mut().focused_field = FormField::ProxyJump;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(app.ui.proxyjump_picker.open);
@@ -1411,18 +1429,18 @@ fn test_space_on_proxyjump_opens_proxyjump_picker() {
 #[test]
 fn test_space_on_vaultssh_with_no_candidates_inserts_literal_space() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::VaultSsh;
+    app.forms.host_mut().focused_field = FormField::VaultSsh;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(!app.ui.vault_role_picker.open);
-    assert_eq!(app.forms.host.vault_ssh, " ");
+    assert_eq!(app.forms.host_mut().vault_ssh, " ");
 }
 
 #[test]
 fn test_space_on_vaultssh_with_candidates_opens_picker() {
     let mut app = make_form_app();
     app.hosts_state.list_mut()[0].vault_ssh = Some("admin".to_string());
-    app.forms.host.focused_field = FormField::VaultSsh;
+    app.forms.host_mut().focused_field = FormField::VaultSsh;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(app.ui.vault_role_picker.open);
@@ -1439,7 +1457,7 @@ fn test_password_picker_esc_closes() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(!app.ui.password_picker.open);
     // Form field should be unchanged
-    assert_eq!(app.forms.host.askpass, "");
+    assert_eq!(app.forms.host_mut().askpass, "");
 }
 
 #[test]
@@ -1472,7 +1490,7 @@ fn test_vault_role_picker_esc_closes() {
 #[test]
 fn test_region_picker_esc_closes() {
     let mut app = make_ovh_form_app();
-    app.providers.form.focused_field = ProviderFormField::Regions;
+    app.providers.form_mut().focused_field = ProviderFormField::Regions;
     app.ui.region_picker.open = true;
     app.ui.region_picker.cursor = 0;
     let (tx, _rx) = mpsc::channel();
@@ -1547,7 +1565,7 @@ fn test_password_picker_select_keychain() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
-    assert_eq!(app.forms.host.askpass, "keychain");
+    assert_eq!(app.forms.host_mut().askpass, "keychain");
 }
 
 // --- Enter selects source: 1Password (prefix) ---
@@ -1559,8 +1577,8 @@ fn test_password_picker_select_1password() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
-    assert_eq!(app.forms.host.askpass, "op://");
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "op://");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 // --- Enter selects source: Bitwarden (prefix) ---
@@ -1572,8 +1590,8 @@ fn test_password_picker_select_bitwarden() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
-    assert_eq!(app.forms.host.askpass, "bw:");
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "bw:");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 // --- Enter selects source: pass (prefix) ---
@@ -1585,8 +1603,8 @@ fn test_password_picker_select_pass() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
-    assert_eq!(app.forms.host.askpass, "pass:");
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "pass:");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 // --- Enter selects source: HashiCorp Vault (prefix) ---
@@ -1598,8 +1616,8 @@ fn test_password_picker_select_vault() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
-    assert_eq!(app.forms.host.askpass, "vault:");
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "vault:");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 // --- Enter selects source: Proton Pass (prefix) ---
@@ -1611,8 +1629,8 @@ fn test_password_picker_select_proton_pass() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
-    assert_eq!(app.forms.host.askpass, "proton:");
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "proton:");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 // --- Host form writes proton askpass comment and round-trips ---
@@ -1649,16 +1667,16 @@ fn test_host_form_proton_askpass_writes_comment() {
 #[test]
 fn test_password_picker_select_custom() {
     let mut app = make_form_app();
-    app.forms.host.askpass = "old-value".to_string();
+    app.forms.host_mut().askpass = "old-value".to_string();
     app.ui.password_picker.open_at(6); // Custom command
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
-    assert_eq!(app.forms.host.askpass, "");
+    assert_eq!(app.forms.host_mut().askpass, "");
     // Custom-command branch must refocus AskPass so the next keystroke
     // lands in the askpass input, not whichever field had focus before
     // the picker opened.
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 // --- Enter selects source: None (clears) ---
@@ -1666,12 +1684,12 @@ fn test_password_picker_select_custom() {
 #[test]
 fn test_password_picker_select_none() {
     let mut app = make_form_app();
-    app.forms.host.askpass = "keychain".to_string();
+    app.forms.host_mut().askpass = "keychain".to_string();
     app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
-    assert_eq!(app.forms.host.askpass, "");
+    assert_eq!(app.forms.host_mut().askpass, "");
 }
 
 // --- Picker blocks other form input ---
@@ -1679,24 +1697,24 @@ fn test_password_picker_select_none() {
 #[test]
 fn test_password_picker_blocks_char_input() {
     let mut app = make_form_app();
-    app.forms.host.askpass = "".to_string();
+    app.forms.host_mut().askpass = "".to_string();
     app.ui.password_picker.open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
     // 'x' should not be appended to any form field
-    assert_eq!(app.forms.host.askpass, "");
-    assert_eq!(app.forms.host.alias, "");
+    assert_eq!(app.forms.host_mut().askpass, "");
+    assert_eq!(app.forms.host_mut().alias, "");
 }
 
 #[test]
 fn test_password_picker_blocks_tab() {
     let mut app = make_form_app();
-    let original_field = app.forms.host.focused_field;
+    let original_field = app.forms.host_mut().focused_field;
     app.ui.password_picker.open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     // Tab should not change focused field
-    assert_eq!(app.forms.host.focused_field, original_field);
+    assert_eq!(app.forms.host_mut().focused_field, original_field);
 }
 
 // --- Picker on EditHost screen ---
@@ -1707,15 +1725,15 @@ fn test_password_picker_works_on_edit_host() {
     app.screen = Screen::EditHost {
         alias: "test".to_string(),
     };
-    app.forms.host = crate::app::HostForm::new();
-    app.forms.host.focused_field = FormField::AskPass;
+    *app.forms.host_mut() = crate::app::HostForm::new();
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     // Space on empty picker field opens the picker.
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(app.ui.password_picker.open);
     // Inside the picker, Enter selects the highlighted entry (keychain).
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.forms.host.askpass, "keychain");
+    assert_eq!(app.forms.host_mut().askpass, "keychain");
 }
 
 // --- Picker priority over key picker ---
@@ -1883,7 +1901,7 @@ fn test_edit_host_populates_askpass_in_form() {
     // Press 'e' to edit
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     if matches!(app.screen, Screen::EditHost { .. }) {
-        assert_eq!(app.forms.host.askpass, "pass:ssh/prod");
+        assert_eq!(app.forms.host_mut().askpass, "pass:ssh/prod");
     }
 }
 
@@ -1895,7 +1913,7 @@ fn test_edit_host_populates_empty_askpass() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     if matches!(app.screen, Screen::EditHost { .. }) {
-        assert_eq!(app.forms.host.askpass, "");
+        assert_eq!(app.forms.host_mut().askpass, "");
     }
 }
 
@@ -1906,50 +1924,50 @@ fn test_edit_host_populates_empty_askpass() {
 #[test]
 fn test_tab_reaches_askpass_field() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::ProxyJump;
+    app.forms.host_mut().focused_field = FormField::ProxyJump;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 #[test]
 fn test_tab_from_askpass_goes_to_tags() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.forms.host.focused_field, FormField::Tags);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::Tags);
 }
 
 #[test]
 fn test_shift_tab_from_tags_goes_to_askpass() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::Tags;
+    app.forms.host_mut().focused_field = FormField::Tags;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::BackTab), &tx);
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 #[test]
 fn test_typing_in_askpass_field() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('k')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
-    assert_eq!(app.forms.host.askpass, "key");
+    assert_eq!(app.forms.host_mut().askpass, "key");
 }
 
 #[test]
 fn test_backspace_in_askpass_field() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
-    app.forms.host.askpass = "vault:".to_string();
-    app.forms.host.cursor_pos = 6;
+    app.forms.host_mut().focused_field = FormField::AskPass;
+    app.forms.host_mut().askpass = "vault:".to_string();
+    app.forms.host_mut().cursor_pos = 6;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.forms.host.askpass, "vault");
+    assert_eq!(app.forms.host_mut().askpass, "vault");
 }
 
 // =========================================================================
@@ -1959,7 +1977,7 @@ fn test_backspace_in_askpass_field() {
 #[test]
 fn test_picker_select_op_then_type_rest() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     // Space on empty picker field opens the picker.
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
@@ -1967,19 +1985,19 @@ fn test_picker_select_op_then_type_rest() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     // Inside the picker, Enter selects.
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.forms.host.askpass, "op://");
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "op://");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
     // Now type the rest of the URI
     let _ = handle_key_event(&mut app, key(KeyCode::Char('V')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('I')), &tx);
-    assert_eq!(app.forms.host.askpass, "op://V/I");
+    assert_eq!(app.forms.host_mut().askpass, "op://V/I");
 }
 
 #[test]
 fn test_picker_select_vault_then_type_rest() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     // Space on empty picker field opens the picker.
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
@@ -1990,27 +2008,27 @@ fn test_picker_select_vault_then_type_rest() {
     assert_eq!(app.ui.password_picker.list.selected(), Some(4));
     // Inside the picker, Enter selects.
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.forms.host.askpass, "vault:");
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "vault:");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
     // Type the path
     for c in "secret/ssh#pass".chars() {
         let _ = handle_key_event(&mut app, key(KeyCode::Char(c)), &tx);
     }
-    assert_eq!(app.forms.host.askpass, "vault:secret/ssh#pass");
+    assert_eq!(app.forms.host_mut().askpass, "vault:secret/ssh#pass");
 }
 
 #[test]
 fn test_picker_select_keychain_no_further_typing_needed() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     // Space on empty picker field opens the picker.
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     // Inside the picker, Enter selects keychain (index 0, already selected).
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.forms.host.askpass, "keychain");
+    assert_eq!(app.forms.host_mut().askpass, "keychain");
     // focused_field stays on AskPass (picker was opened from AskPass)
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 // =========================================================================
@@ -2035,7 +2053,7 @@ fn test_picker_keychain_sets_status_message() {
 #[test]
 fn test_picker_none_sets_cleared_status() {
     let mut app = make_form_app();
-    app.forms.host.askpass = "keychain".to_string();
+    app.forms.host_mut().askpass = "keychain".to_string();
     app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
@@ -2051,7 +2069,7 @@ fn test_picker_prefix_source_shows_guidance() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(app.status_center.toast().unwrap().text.contains("Complete"));
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
 
 // =========================================================================
@@ -2061,23 +2079,23 @@ fn test_picker_prefix_source_shows_guidance() {
 #[test]
 fn test_backspace_after_prefix_selection() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     // Space opens the picker; Enter selects 1Password (after pre-positioning).
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     app.ui.password_picker.list.select(Some(1));
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.forms.host.askpass, "op://");
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "op://");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
     // Type something
     let _ = handle_key_event(&mut app, key(KeyCode::Char('V')), &tx);
-    assert_eq!(app.forms.host.askpass, "op://V");
+    assert_eq!(app.forms.host_mut().askpass, "op://V");
     // Backspace removes last char
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.forms.host.askpass, "op://");
+    assert_eq!(app.forms.host_mut().askpass, "op://");
     // Another backspace removes the trailing /
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.forms.host.askpass, "op:/");
+    assert_eq!(app.forms.host_mut().askpass, "op:/");
 }
 
 // =========================================================================
@@ -2090,16 +2108,16 @@ fn test_edit_form_populates_askpass() {
         make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass vault:secret/ssh#pw\n");
     // Simulate what happens when user presses 'e' on a host
     let entry = app.hosts_state.ssh_config().host_entries()[0].clone();
-    app.forms.host = crate::app::HostForm::from_entry(&entry, Default::default());
-    assert_eq!(app.forms.host.askpass, "vault:secret/ssh#pw");
+    *app.forms.host_mut() = crate::app::HostForm::from_entry(&entry, Default::default());
+    assert_eq!(app.forms.host_mut().askpass, "vault:secret/ssh#pw");
 }
 
 #[test]
 fn test_edit_form_empty_askpass_when_none() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n");
     let entry = app.hosts_state.ssh_config().host_entries()[0].clone();
-    app.forms.host = crate::app::HostForm::from_entry(&entry, Default::default());
-    assert_eq!(app.forms.host.askpass, "");
+    *app.forms.host_mut() = crate::app::HostForm::from_entry(&entry, Default::default());
+    assert_eq!(app.forms.host_mut().askpass, "");
 }
 
 // =========================================================================
@@ -2183,9 +2201,9 @@ fn test_password_picker_item_count_matches_sources() {
 #[test]
 fn test_full_flow_picker_to_typed_value() {
     let mut app = make_form_app();
-    app.forms.host.alias = "myhost".to_string();
-    app.forms.host.hostname = "10.0.0.1".to_string();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().alias = "myhost".to_string();
+    app.forms.host_mut().hostname = "10.0.0.1".to_string();
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
 
     // Space opens picker; pre-position to Bitwarden (index 2); Enter selects.
@@ -2194,17 +2212,17 @@ fn test_full_flow_picker_to_typed_value() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     // Verify field has prefix
-    assert_eq!(app.forms.host.askpass, "bw:");
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "bw:");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 
     // Type the item name
     for c in "my-ssh-server".chars() {
         let _ = handle_key_event(&mut app, key(KeyCode::Char(c)), &tx);
     }
-    assert_eq!(app.forms.host.askpass, "bw:my-ssh-server");
+    assert_eq!(app.forms.host_mut().askpass, "bw:my-ssh-server");
 
     // Verify to_entry produces correct askpass
-    let entry = app.forms.host.to_entry();
+    let entry = app.forms.host_mut().to_entry();
     assert_eq!(entry.askpass, Some("bw:my-ssh-server".to_string()));
 }
 
@@ -2212,28 +2230,28 @@ fn test_full_flow_picker_to_typed_value() {
 fn test_full_flow_picker_keychain_then_tab_away() {
     let mut app = make_form_app();
     // Only set alias (not hostname) so auto-submit doesn't trigger after picker
-    app.forms.host.alias = "myhost".to_string();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().alias = "myhost".to_string();
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
 
     // Space opens picker; Enter selects keychain (index 0, default).
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
-    assert_eq!(app.forms.host.askpass, "keychain");
+    assert_eq!(app.forms.host_mut().askpass, "keychain");
     // Focus stays on AskPass (picker opened from AskPass)
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 
     // Tab to next field (Tags is after AskPass)
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.forms.host.focused_field, FormField::Tags);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::Tags);
 }
 
 #[test]
 fn test_full_flow_clear_askpass_via_picker_none() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
-    app.forms.host.askpass = "op://Vault/Item/pw".to_string();
+    app.forms.host_mut().focused_field = FormField::AskPass;
+    app.forms.host_mut().askpass = "op://Vault/Item/pw".to_string();
     let (tx, _rx) = mpsc::channel();
 
     // Field has content → Space inserts literal. To re-open the picker,
@@ -2248,8 +2266,8 @@ fn test_full_flow_clear_askpass_via_picker_none() {
     }
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
-    assert_eq!(app.forms.host.askpass, "");
-    let entry = app.forms.host.to_entry();
+    assert_eq!(app.forms.host_mut().askpass, "");
+    let entry = app.forms.host_mut().to_entry();
     assert_eq!(entry.askpass, None);
 }
 
@@ -2280,7 +2298,7 @@ fn test_ctrl_p_on_provider_form_does_not_open_password_picker() {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
-    app.providers.form = crate::app::ProviderFormFields::new();
+    *app.providers.form_mut() = crate::app::ProviderFormFields::new();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('p'), &tx);
     // Provider form does not have a password picker
@@ -2354,36 +2372,36 @@ Host beta
 #[test]
 fn test_type_askpass_directly_without_picker() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     for c in "keychain".chars() {
         let _ = handle_key_event(&mut app, key(KeyCode::Char(c)), &tx);
     }
-    assert_eq!(app.forms.host.askpass, "keychain");
+    assert_eq!(app.forms.host_mut().askpass, "keychain");
 }
 
 #[test]
 fn test_type_custom_command_directly() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     for c in "my-script %a %h".chars() {
         let _ = handle_key_event(&mut app, key(KeyCode::Char(c)), &tx);
     }
-    assert_eq!(app.forms.host.askpass, "my-script %a %h");
+    assert_eq!(app.forms.host_mut().askpass, "my-script %a %h");
 }
 
 #[test]
 fn test_clear_askpass_with_backspace() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
-    app.forms.host.askpass = "keychain".to_string();
-    app.forms.host.cursor_pos = 8;
+    app.forms.host_mut().focused_field = FormField::AskPass;
+    app.forms.host_mut().askpass = "keychain".to_string();
+    app.forms.host_mut().cursor_pos = 8;
     let (tx, _rx) = mpsc::channel();
     for _ in 0..8 {
         let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
     }
-    assert_eq!(app.forms.host.askpass, "");
+    assert_eq!(app.forms.host_mut().askpass, "");
 }
 
 // =========================================================================
@@ -2428,12 +2446,12 @@ fn test_delete_undo_preserves_askpass_in_config() {
 #[test]
 fn test_askpass_unicode_in_custom_command() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     for c in "get-p\u{00E4}ss %h".chars() {
         let _ = handle_key_event(&mut app, key(KeyCode::Char(c)), &tx);
     }
-    assert_eq!(app.forms.host.askpass, "get-p\u{00E4}ss %h");
+    assert_eq!(app.forms.host_mut().askpass, "get-p\u{00E4}ss %h");
 }
 
 // =========================================================================
@@ -2446,9 +2464,9 @@ fn test_space_on_empty_askpass_field_opens_picker() {
     // it inserts a literal space
     // (so custom commands like `my-script %h` keep working).
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     // Field is empty (default after make_form_app).
-    assert!(app.forms.host.askpass.is_empty());
+    assert!(app.forms.host_mut().askpass.is_empty());
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(app.ui.password_picker.open);
@@ -2459,16 +2477,16 @@ fn test_space_on_populated_askpass_field_inserts_literal() {
     // Empty-field gate: once the user has typed anything, Space inserts a
     // literal space (so multi-word custom commands work).
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
-    app.forms.host.askpass = "my-script".to_string();
-    app.forms.host.cursor_pos = 9;
+    app.forms.host_mut().focused_field = FormField::AskPass;
+    app.forms.host_mut().askpass = "my-script".to_string();
+    app.forms.host_mut().cursor_pos = 9;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
         !app.ui.password_picker.open,
         "Space on a populated picker field must NOT open the picker"
     );
-    assert_eq!(app.forms.host.askpass, "my-script ");
+    assert_eq!(app.forms.host_mut().askpass, "my-script ");
 }
 
 #[test]
@@ -2476,13 +2494,13 @@ fn test_picker_open_on_empty_then_enter_selects_keychain() {
     // Space on empty picker field opens the picker; inside the picker,
     // Enter is the canonical "select" key.
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
-    assert!(app.forms.host.askpass.is_empty());
+    app.forms.host_mut().focused_field = FormField::AskPass;
+    assert!(app.forms.host_mut().askpass.is_empty());
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(app.ui.password_picker.open);
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.forms.host.askpass, "keychain");
+    assert_eq!(app.forms.host_mut().askpass, "keychain");
     assert!(!app.ui.password_picker.open);
 }
 
@@ -2545,8 +2563,8 @@ fn test_e_key_opens_edit_form_with_askpass() {
     // Press 'e' to edit the selected host
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     assert!(matches!(app.screen, Screen::EditHost { .. }));
-    assert_eq!(app.forms.host.askpass, "op://Vault/SSH/pw");
-    assert_eq!(app.forms.host.hostname, "10.0.0.1");
+    assert_eq!(app.forms.host_mut().askpass, "op://Vault/SSH/pw");
+    assert_eq!(app.forms.host_mut().hostname, "10.0.0.1");
 }
 
 #[test]
@@ -2555,7 +2573,7 @@ fn test_e_key_opens_edit_form_without_askpass() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     assert!(matches!(app.screen, Screen::EditHost { .. }));
-    assert_eq!(app.forms.host.askpass, "");
+    assert_eq!(app.forms.host_mut().askpass, "");
 }
 
 // =========================================================================
@@ -2565,8 +2583,8 @@ fn test_e_key_opens_edit_form_without_askpass() {
 #[test]
 fn test_picker_esc_preserves_existing_askpass() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
-    app.forms.host.askpass = "vault:secret/ssh#pw".to_string();
+    app.forms.host_mut().focused_field = FormField::AskPass;
+    app.forms.host_mut().askpass = "vault:secret/ssh#pw".to_string();
     let (tx, _rx) = mpsc::channel();
     // Field has content → user must clear it to reach the picker. Simulate
     // by setting the picker open directly (the unit under test is the Esc
@@ -2579,7 +2597,7 @@ fn test_picker_esc_preserves_existing_askpass() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     // Original value preserved
-    assert_eq!(app.forms.host.askpass, "vault:secret/ssh#pw");
+    assert_eq!(app.forms.host_mut().askpass, "vault:secret/ssh#pw");
 }
 
 // =========================================================================
@@ -2589,11 +2607,11 @@ fn test_picker_esc_preserves_existing_askpass() {
 #[test]
 fn test_backspace_on_empty_askpass_is_noop() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
-    app.forms.host.askpass = "".to_string();
+    app.forms.host_mut().focused_field = FormField::AskPass;
+    app.forms.host_mut().askpass = "".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.forms.host.askpass, "");
+    assert_eq!(app.forms.host_mut().askpass, "");
 }
 
 // =========================================================================
@@ -2603,23 +2621,23 @@ fn test_backspace_on_empty_askpass_is_noop() {
 #[test]
 fn test_tab_from_askpass_to_tags() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
-    assert_eq!(app.forms.host.focused_field, FormField::Tags);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::Tags);
 }
 
 #[test]
 fn test_shift_tab_from_askpass_to_proxyjump() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::AskPass;
+    app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(
         &mut app,
         KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT),
         &tx,
     );
-    assert_eq!(app.forms.host.focused_field, FormField::ProxyJump);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::ProxyJump);
 }
 
 // =========================================================================
@@ -2674,7 +2692,7 @@ fn test_password_picker_keychain_sets_status_message() {
 #[test]
 fn test_password_picker_none_sets_cleared_status() {
     let mut app = make_form_app();
-    app.forms.host.askpass = "keychain".to_string();
+    app.forms.host_mut().askpass = "keychain".to_string();
     app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
@@ -2693,7 +2711,7 @@ fn test_password_picker_prefix_source_focuses_askpass_field() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert_eq!(
-        app.forms.host.focused_field,
+        app.forms.host_mut().focused_field,
         FormField::AskPass,
         "Prefix source should focus AskPass field"
     );
@@ -2710,8 +2728,8 @@ fn test_password_picker_prefix_bw_focuses_askpass() {
     app.ui.password_picker.open_at(2); // Bitwarden (bw:)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
-    assert_eq!(app.forms.host.askpass, "bw:");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "bw:");
 }
 
 #[test]
@@ -2720,8 +2738,8 @@ fn test_password_picker_prefix_pass_focuses_askpass() {
     app.ui.password_picker.open_at(3); // pass (pass:)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
-    assert_eq!(app.forms.host.askpass, "pass:");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "pass:");
 }
 
 #[test]
@@ -2730,8 +2748,8 @@ fn test_password_picker_prefix_vault_focuses_askpass() {
     app.ui.password_picker.open_at(4); // Vault (vault:)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert_eq!(app.forms.host.focused_field, FormField::AskPass);
-    assert_eq!(app.forms.host.askpass, "vault:");
+    assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
+    assert_eq!(app.forms.host_mut().askpass, "vault:");
 }
 
 // =========================================================================
@@ -2797,10 +2815,10 @@ fn test_form_submit_with_all_password_source_types() {
     for source in &sources {
         let mut app = make_app("");
         app.screen = Screen::AddHost;
-        app.forms.host.alias = "test-host".to_string();
-        app.forms.host.hostname = "10.0.0.1".to_string();
-        app.forms.host.askpass = source.to_string();
-        let entry = app.forms.host.to_entry();
+        app.forms.host_mut().alias = "test-host".to_string();
+        app.forms.host_mut().hostname = "10.0.0.1".to_string();
+        app.forms.host_mut().askpass = source.to_string();
+        let entry = app.forms.host_mut().to_entry();
         assert_eq!(
             entry.askpass.as_deref(),
             Some(*source),
@@ -2814,10 +2832,10 @@ fn test_form_submit_with_all_password_source_types() {
 fn test_form_submit_empty_askpass_is_none() {
     let mut app = make_app("");
     app.screen = Screen::AddHost;
-    app.forms.host.alias = "test-host".to_string();
-    app.forms.host.hostname = "10.0.0.1".to_string();
-    app.forms.host.askpass = "".to_string();
-    let entry = app.forms.host.to_entry();
+    app.forms.host_mut().alias = "test-host".to_string();
+    app.forms.host_mut().hostname = "10.0.0.1".to_string();
+    app.forms.host_mut().askpass = "".to_string();
+    let entry = app.forms.host_mut().to_entry();
     assert!(entry.askpass.is_none(), "Empty askpass should produce None");
 }
 
@@ -2830,11 +2848,11 @@ fn test_password_picker_enter_with_no_selection() {
     let mut app = make_form_app();
     app.ui.password_picker.open = true;
     app.ui.password_picker.list = ratatui::widgets::ListState::default(); // no selection
-    app.forms.host.askpass = "old".to_string();
+    app.forms.host_mut().askpass = "old".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.password_picker.open);
-    assert_eq!(app.forms.host.askpass, "old");
+    assert_eq!(app.forms.host_mut().askpass, "old");
 }
 
 // =========================================================================
@@ -2872,12 +2890,12 @@ fn test_password_picker_ctrl_d_closes_picker() {
 #[test]
 fn test_password_picker_ctrl_d_does_not_change_form_askpass() {
     let mut app = make_form_app();
-    app.forms.host.askpass = "old".to_string();
+    app.forms.host_mut().askpass = "old".to_string();
     app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('d'), &tx);
     // Ctrl+D only sets the global default, not the form field
-    assert_eq!(app.forms.host.askpass, "old");
+    assert_eq!(app.forms.host_mut().askpass, "old");
 }
 
 #[test]
@@ -2920,10 +2938,10 @@ fn test_submit_form_old_askpass_tracked_for_edit() {
     app.screen = Screen::EditHost {
         alias: "myserver".to_string(),
     };
-    app.forms.host.alias = "myserver".to_string();
-    app.forms.host.hostname = "10.0.0.1".to_string();
+    app.forms.host_mut().alias = "myserver".to_string();
+    app.forms.host_mut().hostname = "10.0.0.1".to_string();
     // Change askpass to something else
-    app.forms.host.askpass = "op://Vault/Item/pw".to_string();
+    app.forms.host_mut().askpass = "op://Vault/Item/pw".to_string();
     // The old_askpass detection in submit_form looks up app.hosts_state.list() by alias
     let old = app
         .hosts_state
@@ -2940,10 +2958,10 @@ fn test_submit_form_no_keychain_removal_when_unchanged() {
     app.screen = Screen::EditHost {
         alias: "myserver".to_string(),
     };
-    app.forms.host.alias = "myserver".to_string();
-    app.forms.host.hostname = "10.0.0.1".to_string();
+    app.forms.host_mut().alias = "myserver".to_string();
+    app.forms.host_mut().hostname = "10.0.0.1".to_string();
     // Keep askpass as keychain
-    app.forms.host.askpass = "keychain".to_string();
+    app.forms.host_mut().askpass = "keychain".to_string();
     let old = app
         .hosts_state
         .list()
@@ -2952,7 +2970,7 @@ fn test_submit_form_no_keychain_removal_when_unchanged() {
         .and_then(|h| h.askpass.clone());
     // Same source, no removal needed
     assert_eq!(old.as_deref(), Some("keychain"));
-    assert_eq!(app.forms.host.askpass, "keychain");
+    assert_eq!(app.forms.host_mut().askpass, "keychain");
 }
 
 #[test]
@@ -3005,9 +3023,9 @@ fn test_submit_form_rename_migrates_per_host_state() {
     app.screen = Screen::EditHost {
         alias: "web-old".to_string(),
     };
-    app.forms.host = crate::app::HostForm::new();
-    app.forms.host.alias = "web-new".to_string();
-    app.forms.host.hostname = "1.2.3.4".to_string();
+    *app.forms.host_mut() = crate::app::HostForm::new();
+    app.forms.host_mut().alias = "web-new".to_string();
+    app.forms.host_mut().hostname = "1.2.3.4".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
@@ -3102,9 +3120,9 @@ fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
     app.screen = Screen::EditHost {
         alias: "top-old".to_string(),
     };
-    app.forms.host = crate::app::HostForm::new();
-    app.forms.host.alias = "top-new".to_string();
-    app.forms.host.hostname = "1.1.1.1".to_string();
+    *app.forms.host_mut() = crate::app::HostForm::new();
+    app.forms.host_mut().alias = "top-new".to_string();
+    app.forms.host_mut().hostname = "1.1.1.1".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
@@ -3174,9 +3192,9 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
     app.screen = Screen::EditHost {
         alias: "web-old".to_string(),
     };
-    app.forms.host = crate::app::HostForm::new();
-    app.forms.host.alias = "web-new".to_string();
-    app.forms.host.hostname = "1.2.3.4".to_string();
+    *app.forms.host_mut() = crate::app::HostForm::new();
+    app.forms.host_mut().alias = "web-new".to_string();
+    app.forms.host_mut().hostname = "1.2.3.4".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
@@ -3342,7 +3360,7 @@ fn test_snippet_picker_enter_starts_output() {
         }
         _ => panic!("Expected SnippetOutput screen, got {:?}", app.screen),
     }
-    assert!(app.snippets.output.is_some());
+    assert!(app.snippets.output().is_some());
 }
 
 #[test]
@@ -3365,7 +3383,7 @@ fn test_snippet_picker_a_opens_add_form() {
         app.screen,
         Screen::SnippetForm { editing: None, .. }
     ));
-    assert!(app.snippets.form.name.is_empty());
+    assert!(app.snippets.form_mut().name.is_empty());
 }
 
 #[test]
@@ -3381,8 +3399,8 @@ fn test_snippet_picker_e_opens_edit_form() {
             ..
         }
     ));
-    assert_eq!(app.snippets.form.name, "check-disk");
-    assert_eq!(app.snippets.form.command, "df -h");
+    assert_eq!(app.snippets.form_mut().name, "check-disk");
+    assert_eq!(app.snippets.form_mut().command, "df -h");
 }
 
 #[test]
@@ -3393,12 +3411,12 @@ fn test_snippet_picker_d_deletes_and_saves() {
 
     // d sets pending confirmation
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
-    assert_eq!(app.snippets.pending_delete, Some(0));
+    assert_eq!(app.snippets.pending_delete(), Some(0));
     assert_eq!(app.snippets.store().snippets.len(), 2); // not yet deleted
 
     // y confirms deletion
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
-    assert_eq!(app.snippets.pending_delete, None);
+    assert_eq!(app.snippets.pending_delete(), None);
     assert_eq!(app.snippets.store().snippets.len(), 1);
     assert_eq!(app.snippets.store().snippets[0].name, "uptime");
     assert_eq!(app.ui.snippet_picker_state.selected(), Some(0));
@@ -3417,7 +3435,7 @@ fn test_snippet_picker_d_last_item_selects_none() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
-    assert_eq!(app.snippets.pending_delete, Some(0));
+    assert_eq!(app.snippets.pending_delete(), Some(0));
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(app.snippets.store().snippets.is_empty());
@@ -3440,7 +3458,7 @@ fn test_snippet_picker_d_rollback_on_save_failure() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
-    assert_eq!(app.snippets.pending_delete, Some(0));
+    assert_eq!(app.snippets.pending_delete(), Some(0));
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     // Rollback: snippet should still be there
@@ -3456,7 +3474,7 @@ fn test_snippet_picker_d_rollback_on_save_failure() {
 #[test]
 fn test_snippet_form_esc_returns_to_picker() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
@@ -3470,7 +3488,7 @@ fn test_snippet_form_esc_returns_to_picker() {
 #[test]
 fn test_snippet_form_tab_cycles_fields() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
@@ -3478,25 +3496,25 @@ fn test_snippet_form_tab_cycles_fields() {
     let (tx, _rx) = mpsc::channel();
 
     assert_eq!(
-        app.snippets.form.focused_field,
+        app.snippets.form_mut().focused_field,
         crate::app::SnippetFormField::Name
     );
 
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.snippets.form.focused_field,
+        app.snippets.form_mut().focused_field,
         crate::app::SnippetFormField::Command
     );
 
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.snippets.form.focused_field,
+        app.snippets.form_mut().focused_field,
         crate::app::SnippetFormField::Description
     );
 
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     assert_eq!(
-        app.snippets.form.focused_field,
+        app.snippets.form_mut().focused_field,
         crate::app::SnippetFormField::Name
     );
 }
@@ -3504,7 +3522,7 @@ fn test_snippet_form_tab_cycles_fields() {
 #[test]
 fn test_snippet_form_char_insert() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
@@ -3513,16 +3531,16 @@ fn test_snippet_form_char_insert() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
-    assert_eq!(app.snippets.form.name, "ab");
-    assert_eq!(app.snippets.form.cursor_pos, 2);
+    assert_eq!(app.snippets.form_mut().name, "ab");
+    assert_eq!(app.snippets.form_mut().cursor_pos, 2);
 }
 
 #[test]
 fn test_snippet_form_backspace() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
-    app.snippets.form.name = "abc".to_string();
-    app.snippets.form.cursor_pos = 3;
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
+    app.snippets.form_mut().name = "abc".to_string();
+    app.snippets.form_mut().cursor_pos = 3;
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
@@ -3530,18 +3548,18 @@ fn test_snippet_form_backspace() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.snippets.form.name, "ab");
-    assert_eq!(app.snippets.form.cursor_pos, 2);
+    assert_eq!(app.snippets.form_mut().name, "ab");
+    assert_eq!(app.snippets.form_mut().cursor_pos, 2);
 }
 
 #[test]
 fn test_snippet_form_submit_add() {
     let mut app = make_snippet_app();
     let _ = app.snippets.store_mut().save();
-    app.snippets.form = crate::app::SnippetForm::new();
-    app.snippets.form.name = "new-cmd".to_string();
-    app.snippets.form.command = "whoami".to_string();
-    app.snippets.form.cursor_pos = 6;
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
+    app.snippets.form_mut().name = "new-cmd".to_string();
+    app.snippets.form_mut().command = "whoami".to_string();
+    app.snippets.form_mut().cursor_pos = 6;
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
@@ -3558,9 +3576,9 @@ fn test_snippet_form_submit_add() {
 fn test_snippet_form_submit_edit() {
     let mut app = make_snippet_app();
     let _ = app.snippets.store_mut().save();
-    app.snippets.form =
+    *app.snippets.form_mut() =
         crate::app::SnippetForm::from_snippet(&app.snippets.store().snippets[0].clone());
-    app.snippets.form.command = "df -hT".to_string();
+    app.snippets.form_mut().command = "df -hT".to_string();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: Some(0),
@@ -3575,8 +3593,8 @@ fn test_snippet_form_submit_edit() {
 #[test]
 fn test_snippet_form_submit_rejects_empty_name() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
-    app.snippets.form.command = "ls".to_string();
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
+    app.snippets.form_mut().command = "ls".to_string();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
@@ -3593,10 +3611,10 @@ fn test_snippet_form_submit_rejects_empty_name() {
 fn test_snippet_form_submit_rejects_duplicate_name() {
     let mut app = make_snippet_app();
     let _ = app.snippets.store_mut().save();
-    app.snippets.form = crate::app::SnippetForm::new();
-    app.snippets.form.name = "uptime".to_string();
-    app.snippets.form.command = "uptime -s".to_string();
-    app.snippets.form.cursor_pos = 9;
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
+    app.snippets.form_mut().name = "uptime".to_string();
+    app.snippets.form_mut().command = "uptime -s".to_string();
+    app.snippets.form_mut().cursor_pos = 9;
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
@@ -3619,10 +3637,10 @@ fn test_snippet_form_submit_rollback_on_save_failure() {
     let mut app = make_snippet_app();
     // Force save failure
     app.snippets.store_mut().path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
-    app.snippets.form = crate::app::SnippetForm::new();
-    app.snippets.form.name = "new-cmd".to_string();
-    app.snippets.form.command = "whoami".to_string();
-    app.snippets.form.cursor_pos = 6;
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
+    app.snippets.form_mut().name = "new-cmd".to_string();
+    app.snippets.form_mut().command = "whoami".to_string();
+    app.snippets.form_mut().cursor_pos = 6;
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
@@ -3647,10 +3665,10 @@ fn test_snippet_form_edit_rename_rollback_on_save_failure() {
     let mut app = make_snippet_app();
     // Force save failure
     app.snippets.store_mut().path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
-    app.snippets.form =
+    *app.snippets.form_mut() =
         crate::app::SnippetForm::from_snippet(&app.snippets.store().snippets[0].clone());
-    app.snippets.form.name = "renamed".to_string();
-    app.snippets.form.cursor_pos = 7;
+    app.snippets.form_mut().name = "renamed".to_string();
+    app.snippets.form_mut().cursor_pos = 7;
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: Some(0),
@@ -3721,8 +3739,8 @@ fn make_tunnel_form_app(field: crate::app::TunnelFormField) -> App {
         alias: "test".to_string(),
         editing: None,
     };
-    app.tunnels.form = crate::app::TunnelForm::new();
-    app.tunnels.form.focused_field = field;
+    *app.tunnels.form_mut() = crate::app::TunnelForm::new();
+    app.tunnels.form_mut().focused_field = field;
     app
 }
 
@@ -3730,13 +3748,13 @@ fn make_tunnel_form_app(field: crate::app::TunnelFormField) -> App {
 fn test_tunnel_form_space_cycles_type_local_to_remote() {
     let mut app = make_tunnel_form_app(crate::app::TunnelFormField::Type);
     assert_eq!(
-        app.tunnels.form.tunnel_type,
+        app.tunnels.form_mut().tunnel_type,
         crate::tunnel::TunnelType::Local
     );
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert_eq!(
-        app.tunnels.form.tunnel_type,
+        app.tunnels.form_mut().tunnel_type,
         crate::tunnel::TunnelType::Remote
     );
 }
@@ -3744,11 +3762,11 @@ fn test_tunnel_form_space_cycles_type_local_to_remote() {
 #[test]
 fn test_tunnel_form_space_cycles_type_remote_to_dynamic() {
     let mut app = make_tunnel_form_app(crate::app::TunnelFormField::Type);
-    app.tunnels.form.tunnel_type = crate::tunnel::TunnelType::Remote;
+    app.tunnels.form_mut().tunnel_type = crate::tunnel::TunnelType::Remote;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert_eq!(
-        app.tunnels.form.tunnel_type,
+        app.tunnels.form_mut().tunnel_type,
         crate::tunnel::TunnelType::Dynamic
     );
 }
@@ -3756,11 +3774,11 @@ fn test_tunnel_form_space_cycles_type_remote_to_dynamic() {
 #[test]
 fn test_tunnel_form_space_cycles_type_dynamic_to_local() {
     let mut app = make_tunnel_form_app(crate::app::TunnelFormField::Type);
-    app.tunnels.form.tunnel_type = crate::tunnel::TunnelType::Dynamic;
+    app.tunnels.form_mut().tunnel_type = crate::tunnel::TunnelType::Dynamic;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert_eq!(
-        app.tunnels.form.tunnel_type,
+        app.tunnels.form_mut().tunnel_type,
         crate::tunnel::TunnelType::Local
     );
 }
@@ -3771,7 +3789,7 @@ fn test_tunnel_form_left_on_type_does_not_cycle() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Left), &tx);
     assert_eq!(
-        app.tunnels.form.tunnel_type,
+        app.tunnels.form_mut().tunnel_type,
         crate::tunnel::TunnelType::Local
     );
 }
@@ -3782,7 +3800,7 @@ fn test_tunnel_form_right_on_type_does_not_cycle() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Right), &tx);
     assert_eq!(
-        app.tunnels.form.tunnel_type,
+        app.tunnels.form_mut().tunnel_type,
         crate::tunnel::TunnelType::Local
     );
 }
@@ -3790,21 +3808,21 @@ fn test_tunnel_form_right_on_type_does_not_cycle() {
 #[test]
 fn test_tunnel_form_space_on_bind_port_inserts_space() {
     let mut app = make_tunnel_form_app(crate::app::TunnelFormField::BindPort);
-    app.tunnels.form.bind_port = "80".to_string();
-    app.tunnels.form.cursor_pos = 2;
+    app.tunnels.form_mut().bind_port = "80".to_string();
+    app.tunnels.form_mut().cursor_pos = 2;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert_eq!(app.tunnels.form.bind_port, "80 ");
+    assert_eq!(app.tunnels.form_mut().bind_port, "80 ");
 }
 
 #[test]
 fn test_tunnel_form_left_on_text_moves_cursor() {
     let mut app = make_tunnel_form_app(crate::app::TunnelFormField::BindPort);
-    app.tunnels.form.bind_port = "8080".to_string();
-    app.tunnels.form.cursor_pos = 2;
+    app.tunnels.form_mut().bind_port = "8080".to_string();
+    app.tunnels.form_mut().cursor_pos = 2;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Left), &tx);
-    assert_eq!(app.tunnels.form.cursor_pos, 1);
+    assert_eq!(app.tunnels.form_mut().cursor_pos, 1);
 }
 
 // --- Dirty-check tests ---
@@ -3812,7 +3830,7 @@ fn test_tunnel_form_left_on_text_moves_cursor() {
 #[test]
 fn test_host_form_clean_esc_closes_immediately() {
     let mut app = make_app("Host test\n  HostName test.com\n");
-    app.forms.host = crate::app::HostForm::new();
+    *app.forms.host_mut() = crate::app::HostForm::new();
     app.screen = Screen::AddHost;
     app.capture_form_baseline();
     let (tx, _rx) = mpsc::channel();
@@ -3824,10 +3842,10 @@ fn test_host_form_clean_esc_closes_immediately() {
 #[test]
 fn test_host_form_dirty_esc_shows_confirmation() {
     let mut app = make_app("Host test\n  HostName test.com\n");
-    app.forms.host = crate::app::HostForm::new();
+    *app.forms.host_mut() = crate::app::HostForm::new();
     app.screen = Screen::AddHost;
     app.capture_form_baseline();
-    app.forms.host.alias = "dirty".to_string();
+    app.forms.host_mut().alias = "dirty".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::AddHost));
@@ -3837,24 +3855,24 @@ fn test_host_form_dirty_esc_shows_confirmation() {
 #[test]
 fn test_host_form_dirty_esc_y_closes() {
     let mut app = make_app("Host test\n  HostName test.com\n");
-    app.forms.host = crate::app::HostForm::new();
+    *app.forms.host_mut() = crate::app::HostForm::new();
     app.screen = Screen::AddHost;
     app.capture_form_baseline();
-    app.forms.host.alias = "dirty".to_string();
+    app.forms.host_mut().alias = "dirty".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert!(app.forms.host_baseline.is_none());
+    assert!(app.forms.host_baseline().is_none());
 }
 
 #[test]
 fn test_host_form_dirty_esc_n_stays() {
     let mut app = make_app("Host test\n  HostName test.com\n");
-    app.forms.host = crate::app::HostForm::new();
+    *app.forms.host_mut() = crate::app::HostForm::new();
     app.screen = Screen::AddHost;
     app.capture_form_baseline();
-    app.forms.host.hostname = "changed.com".to_string();
+    app.forms.host_mut().hostname = "changed.com".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
@@ -3865,10 +3883,10 @@ fn test_host_form_dirty_esc_n_stays() {
 #[test]
 fn test_host_form_dirty_esc_other_key_ignored() {
     let mut app = make_app("Host test\n  HostName test.com\n");
-    app.forms.host = crate::app::HostForm::new();
+    *app.forms.host_mut() = crate::app::HostForm::new();
     app.screen = Screen::AddHost;
     app.capture_form_baseline();
-    app.forms.host.alias = "dirty".to_string();
+    app.forms.host_mut().alias = "dirty".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
@@ -3882,9 +3900,9 @@ fn test_tunnel_form_dirty_esc_shows_confirmation() {
         alias: "test".to_string(),
         editing: None,
     };
-    app.tunnels.form = crate::app::TunnelForm::new();
+    *app.tunnels.form_mut() = crate::app::TunnelForm::new();
     app.capture_tunnel_form_baseline();
-    app.tunnels.form.bind_port = "9000".to_string();
+    app.tunnels.form_mut().bind_port = "9000".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::TunnelForm { .. }));
@@ -3898,7 +3916,7 @@ fn test_tunnel_form_clean_esc_closes() {
         alias: "test".to_string(),
         editing: None,
     };
-    app.tunnels.form = crate::app::TunnelForm::new();
+    *app.tunnels.form_mut() = crate::app::TunnelForm::new();
     app.capture_tunnel_form_baseline();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
@@ -3913,9 +3931,9 @@ fn test_snippet_picker_d_esc_cancels_delete() {
     let _ = app.snippets.store_mut().save();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
-    assert_eq!(app.snippets.pending_delete, Some(0));
+    assert_eq!(app.snippets.pending_delete(), Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert_eq!(app.snippets.pending_delete, None);
+    assert_eq!(app.snippets.pending_delete(), None);
     assert_eq!(app.snippets.store().snippets.len(), 2);
 }
 
@@ -3926,7 +3944,7 @@ fn test_snippet_picker_d_n_cancels_delete() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
-    assert_eq!(app.snippets.pending_delete, None);
+    assert_eq!(app.snippets.pending_delete(), None);
     assert_eq!(app.snippets.store().snippets.len(), 2);
 }
 
@@ -3937,7 +3955,7 @@ fn test_snippet_picker_d_other_key_ignored() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    assert_eq!(app.snippets.pending_delete, Some(0));
+    assert_eq!(app.snippets.pending_delete(), Some(0));
     assert_eq!(app.snippets.store().snippets.len(), 2);
 }
 
@@ -3986,7 +4004,7 @@ fn test_host_detail_e_opens_edit() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     assert!(matches!(app.screen, Screen::EditHost { .. }));
-    assert!(app.forms.host_baseline.is_some());
+    assert!(app.forms.host_baseline().is_some());
 }
 
 #[test]
@@ -4023,37 +4041,37 @@ fn test_host_detail_e_on_included_host_stays() {
 #[test]
 fn test_provider_form_left_on_verify_tls_stays_same() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::VerifyTls);
-    assert!(app.providers.form.verify_tls);
+    assert!(app.providers.form_mut().verify_tls);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Left), &tx);
-    assert!(app.providers.form.verify_tls);
+    assert!(app.providers.form_mut().verify_tls);
 }
 
 #[test]
 fn test_provider_form_right_on_verify_tls_stays_same() {
     let mut app = make_form_app_focused_on("proxmox", ProviderFormField::VerifyTls);
-    assert!(app.providers.form.verify_tls);
+    assert!(app.providers.form_mut().verify_tls);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Right), &tx);
-    assert!(app.providers.form.verify_tls);
+    assert!(app.providers.form_mut().verify_tls);
 }
 
 #[test]
 fn test_provider_form_left_on_auto_sync_stays_same() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::AutoSync);
-    assert!(app.providers.form.auto_sync);
+    assert!(app.providers.form_mut().auto_sync);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Left), &tx);
-    assert!(app.providers.form.auto_sync);
+    assert!(app.providers.form_mut().auto_sync);
 }
 
 #[test]
 fn test_provider_form_right_on_auto_sync_stays_same() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::AutoSync);
-    assert!(app.providers.form.auto_sync);
+    assert!(app.providers.form_mut().auto_sync);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Right), &tx);
-    assert!(app.providers.form.auto_sync);
+    assert!(app.providers.form_mut().auto_sync);
 }
 
 // --- Provider form: dirty-check on Esc ---
@@ -4072,7 +4090,7 @@ fn test_provider_form_clean_esc_with_baseline_closes() {
 fn test_provider_form_dirty_esc_shows_confirmation() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
     app.capture_provider_form_baseline();
-    app.providers.form.token = "newtoken".to_string();
+    app.providers.form_mut().token = "newtoken".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
@@ -4083,7 +4101,7 @@ fn test_provider_form_dirty_esc_shows_confirmation() {
 fn test_provider_form_dirty_esc_y_closes() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
     app.capture_provider_form_baseline();
-    app.providers.form.token = "newtoken".to_string();
+    app.providers.form_mut().token = "newtoken".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
@@ -4095,7 +4113,7 @@ fn test_provider_form_dirty_esc_y_closes() {
 fn test_provider_form_dirty_esc_n_stays() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
     app.capture_provider_form_baseline();
-    app.providers.form.token = "newtoken".to_string();
+    app.providers.form_mut().token = "newtoken".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
@@ -4108,7 +4126,7 @@ fn test_provider_form_dirty_esc_n_stays() {
 #[test]
 fn test_snippet_form_clean_esc_with_baseline_closes() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
@@ -4123,13 +4141,13 @@ fn test_snippet_form_clean_esc_with_baseline_closes() {
 #[test]
 fn test_snippet_form_dirty_esc_shows_confirmation() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
     };
     app.capture_snippet_form_baseline();
-    app.snippets.form.name = "dirty".to_string();
+    app.snippets.form_mut().name = "dirty".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::SnippetForm { .. }));
@@ -4139,13 +4157,13 @@ fn test_snippet_form_dirty_esc_shows_confirmation() {
 #[test]
 fn test_snippet_form_dirty_esc_y_closes() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
     };
     app.capture_snippet_form_baseline();
-    app.snippets.form.name = "dirty".to_string();
+    app.snippets.form_mut().name = "dirty".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
@@ -4165,9 +4183,9 @@ fn test_tunnel_list_d_y_deletes_tunnel() {
     app.ui.tunnel_list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
-    assert_eq!(app.tunnels.pending_delete, Some(0));
+    assert_eq!(app.tunnels.pending_delete(), Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
-    assert!(app.tunnels.pending_delete.is_none());
+    assert!(app.tunnels.pending_delete().is_none());
 }
 
 #[test]
@@ -4180,9 +4198,9 @@ fn test_tunnel_list_d_esc_cancels_delete() {
     app.ui.tunnel_list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
-    assert_eq!(app.tunnels.pending_delete, Some(0));
+    assert_eq!(app.tunnels.pending_delete(), Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(app.tunnels.pending_delete.is_none());
+    assert!(app.tunnels.pending_delete().is_none());
     assert_eq!(app.tunnels.list().len(), 1);
 }
 
@@ -4197,7 +4215,7 @@ fn test_tunnel_list_d_n_cancels_delete() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
-    assert!(app.tunnels.pending_delete.is_none());
+    assert!(app.tunnels.pending_delete().is_none());
     assert_eq!(app.tunnels.list().len(), 1);
 }
 
@@ -4217,15 +4235,15 @@ fn test_host_form_baseline_cleared_after_submit() {
     let mut app = App::new(config);
     *app.providers.config_mut() = test_provider_config();
     crate::preferences::set_path_override(dir.path().join("preferences"));
-    app.forms.host = crate::app::HostForm::new();
-    app.forms.host.alias = "newhost".to_string();
-    app.forms.host.hostname = "new.example.com".to_string();
+    *app.forms.host_mut() = crate::app::HostForm::new();
+    app.forms.host_mut().alias = "newhost".to_string();
+    app.forms.host_mut().hostname = "new.example.com".to_string();
     app.screen = Screen::AddHost;
     app.capture_form_mtime();
     app.capture_form_baseline();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(app.forms.host_baseline.is_none());
+    assert!(app.forms.host_baseline().is_none());
 }
 
 // --- Edge case: uppercase Y in discard confirms ---
@@ -4233,15 +4251,15 @@ fn test_host_form_baseline_cleared_after_submit() {
 #[test]
 fn test_host_form_dirty_esc_uppercase_y_closes() {
     let mut app = make_app("Host test\n  HostName test.com\n");
-    app.forms.host = crate::app::HostForm::new();
+    *app.forms.host_mut() = crate::app::HostForm::new();
     app.screen = Screen::AddHost;
     app.capture_form_baseline();
-    app.forms.host.user = "ubuntu".to_string();
+    app.forms.host_mut().user = "ubuntu".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('Y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert!(app.forms.host_baseline.is_none());
+    assert!(app.forms.host_baseline().is_none());
 }
 
 // --- Snippet form: dirty + n stays ---
@@ -4249,13 +4267,13 @@ fn test_host_form_dirty_esc_uppercase_y_closes() {
 #[test]
 fn test_snippet_form_dirty_esc_n_stays() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
     };
     app.capture_snippet_form_baseline();
-    app.snippets.form.command = "changed".to_string();
+    app.snippets.form_mut().command = "changed".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
@@ -4269,13 +4287,13 @@ fn test_snippet_form_dirty_esc_n_stays() {
 #[test]
 fn test_snippet_form_dirty_esc_other_key_ignored() {
     let mut app = make_snippet_app();
-    app.snippets.form = crate::app::SnippetForm::new();
+    *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
         editing: None,
     };
     app.capture_snippet_form_baseline();
-    app.snippets.form.command = "changed".to_string();
+    app.snippets.form_mut().command = "changed".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
@@ -4292,9 +4310,9 @@ fn test_tunnel_form_dirty_esc_y_closes() {
         alias: "test".to_string(),
         editing: None,
     };
-    app.tunnels.form = crate::app::TunnelForm::new();
+    *app.tunnels.form_mut() = crate::app::TunnelForm::new();
     app.capture_tunnel_form_baseline();
-    app.tunnels.form.remote_host = "db.local".to_string();
+    app.tunnels.form_mut().remote_host = "db.local".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
@@ -4309,9 +4327,9 @@ fn test_tunnel_form_dirty_esc_n_stays() {
         alias: "test".to_string(),
         editing: None,
     };
-    app.tunnels.form = crate::app::TunnelForm::new();
+    *app.tunnels.form_mut() = crate::app::TunnelForm::new();
     app.capture_tunnel_form_baseline();
-    app.tunnels.form.bind_port = "9001".to_string();
+    app.tunnels.form_mut().bind_port = "9001".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
@@ -4331,9 +4349,9 @@ fn test_tunnel_delete_other_key_ignored() {
     app.ui.tunnel_list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
-    assert_eq!(app.tunnels.pending_delete, Some(0));
+    assert_eq!(app.tunnels.pending_delete(), Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Char('z')), &tx);
-    assert_eq!(app.tunnels.pending_delete, Some(0));
+    assert_eq!(app.tunnels.pending_delete(), Some(0));
 }
 
 // --- Provider form: dirty + other key ignored ---
@@ -4342,7 +4360,7 @@ fn test_tunnel_delete_other_key_ignored() {
 fn test_provider_form_dirty_esc_other_key_ignored() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::Token);
     app.capture_provider_form_baseline();
-    app.providers.form.token = "newtoken".to_string();
+    app.providers.form_mut().token = "newtoken".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
@@ -5588,7 +5606,7 @@ fn test_tunnel_delete_confirmation_question_opens_help() {
     app.screen = Screen::TunnelList {
         alias: "web".to_string(),
     };
-    app.tunnels.pending_delete = Some(0);
+    app.tunnels.request_delete(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('?')), &tx);
     match &app.screen {
@@ -5598,7 +5616,7 @@ fn test_tunnel_delete_confirmation_question_opens_help() {
         other => panic!("Expected Help screen, got {:?}", other),
     }
     assert_eq!(
-        app.tunnels.pending_delete,
+        app.tunnels.pending_delete(),
         Some(0),
         "pending_tunnel_delete should be preserved"
     );
@@ -5630,7 +5648,7 @@ fn test_container_confirm_action_question_opens_help() {
 #[test]
 fn test_snippet_picker_pending_delete_question_opens_help() {
     let mut app = make_snippet_app();
-    app.snippets.pending_delete = Some(0);
+    app.snippets.request_delete(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('?')), &tx);
     match &app.screen {
@@ -6646,32 +6664,32 @@ fn host_form_new_pattern_starts_expanded() {
 #[test]
 fn host_form_tab_from_alias_stays_collapsed() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.focused_field, FormField::Hostname);
-    assert!(!app.forms.host.expanded);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::Hostname);
+    assert!(!app.forms.host_mut().expanded);
 }
 
 #[test]
 fn host_form_tab_from_hostname_expands() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.focused_field = FormField::Hostname;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().focused_field = FormField::Hostname;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert!(app.forms.host.expanded);
-    assert_eq!(app.forms.host.focused_field, FormField::User);
+    assert!(app.forms.host_mut().expanded);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::User);
 }
 
 #[test]
 fn host_form_collapsed_backtab_wraps() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(
@@ -6680,18 +6698,18 @@ fn host_form_collapsed_backtab_wraps() {
         &tx,
     )
     .unwrap();
-    assert_eq!(app.forms.host.focused_field, FormField::Hostname);
-    assert!(!app.forms.host.expanded);
+    assert_eq!(app.forms.host_mut().focused_field, FormField::Hostname);
+    assert!(!app.forms.host_mut().expanded);
 }
 
 #[test]
 fn host_form_expanded_does_not_trigger_dirty() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "test".to_string();
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "test".to_string();
     app.screen = Screen::AddHost;
     app.capture_form_baseline();
-    app.forms.host.expanded = true;
+    app.forms.host_mut().expanded = true;
     assert!(!app.host_form_is_dirty());
 }
 
@@ -6809,10 +6827,10 @@ fn provider_form_expanded_does_not_trigger_dirty() {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
-    app.providers.form = ProviderFormFields::new();
-    app.providers.form.token = "tok".to_string();
+    *app.providers.form_mut() = ProviderFormFields::new();
+    app.providers.form_mut().token = "tok".to_string();
     app.capture_provider_form_baseline();
-    app.providers.form.expanded = true;
+    app.providers.form_mut().expanded = true;
     assert!(!app.provider_form_is_dirty());
 }
 
@@ -6821,10 +6839,10 @@ fn provider_form_expanded_does_not_trigger_dirty() {
 #[test]
 fn host_form_collapsed_enter_saves() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "myhost".to_string();
-    app.forms.host.hostname = "myhost.local".to_string();
-    app.forms.host.focused_field = FormField::Hostname;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "myhost".to_string();
+    app.forms.host_mut().hostname = "myhost.local".to_string();
+    app.forms.host_mut().focused_field = FormField::Hostname;
     app.screen = Screen::AddHost;
     app.capture_form_mtime();
     app.capture_form_baseline();
@@ -6846,17 +6864,17 @@ fn provider_form_tab_from_last_required_expands() {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
-    app.providers.form = ProviderFormFields::new();
-    app.providers.form.token = "tok".to_string();
+    *app.providers.form_mut() = ProviderFormFields::new();
+    app.providers.form_mut().token = "tok".to_string();
     // Token is the only required field for DO
-    app.providers.form.focused_field = crate::app::ProviderFormField::Token;
-    app.providers.form.expanded = false;
+    app.providers.form_mut().focused_field = crate::app::ProviderFormField::Token;
+    app.providers.form_mut().expanded = false;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert!(app.providers.form.expanded);
+    assert!(app.providers.form_mut().expanded);
     // First optional field for DO is AliasPrefix
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         crate::app::ProviderFormField::AliasPrefix
     );
 }
@@ -6868,9 +6886,9 @@ fn provider_form_collapsed_backtab_wraps() {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("aws"),
     };
-    app.providers.form = ProviderFormFields::new();
-    app.providers.form.focused_field = crate::app::ProviderFormField::Token;
-    app.providers.form.expanded = false;
+    *app.providers.form_mut() = ProviderFormFields::new();
+    app.providers.form_mut().focused_field = crate::app::ProviderFormField::Token;
+    app.providers.form_mut().expanded = false;
     let tx = mpsc::channel().0;
     handle_key_event(
         &mut app,
@@ -6880,10 +6898,10 @@ fn provider_form_collapsed_backtab_wraps() {
     .unwrap();
     // Token is first required; BackTab wraps to last required (Regions)
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         crate::app::ProviderFormField::Regions
     );
-    assert!(!app.providers.form.expanded);
+    assert!(!app.providers.form_mut().expanded);
 }
 
 #[test]
@@ -6893,17 +6911,17 @@ fn provider_form_tab_within_collapsed_required() {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("aws"),
     };
-    app.providers.form = ProviderFormFields::new();
-    app.providers.form.focused_field = crate::app::ProviderFormField::Token;
-    app.providers.form.expanded = false;
+    *app.providers.form_mut() = ProviderFormFields::new();
+    app.providers.form_mut().focused_field = crate::app::ProviderFormField::Token;
+    app.providers.form_mut().expanded = false;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
     // Token -> Profile (mid-required, should NOT expand)
     assert_eq!(
-        app.providers.form.focused_field,
+        app.providers.form_mut().focused_field,
         crate::app::ProviderFormField::Profile
     );
-    assert!(!app.providers.form.expanded);
+    assert!(!app.providers.form_mut().expanded);
 }
 
 // --- theme_at_index tests ---
@@ -7479,7 +7497,7 @@ fn proxyjump_picker_enter_on_section_label_is_noop() {
         "Enter on a SectionLabel must not close the picker"
     );
     assert!(
-        app.forms.host.proxy_jump.is_empty(),
+        app.forms.host_mut().proxy_jump.is_empty(),
         "Enter on a SectionLabel must not populate the ProxyJump field"
     );
 }
@@ -7502,7 +7520,7 @@ fn proxyjump_picker_enter_on_separator_is_noop() {
         "Enter on a Separator must not close the picker"
     );
     assert!(
-        app.forms.host.proxy_jump.is_empty(),
+        app.forms.host_mut().proxy_jump.is_empty(),
         "Enter on a Separator must not populate the ProxyJump field"
     );
 }
@@ -7523,7 +7541,8 @@ fn proxyjump_picker_enter_on_host_applies_alias_and_closes() {
         "Enter on a Host must close the picker"
     );
     assert_eq!(
-        app.forms.host.proxy_jump, "bastion",
+        app.forms.host_mut().proxy_jump,
+        "bastion",
         "the selected host's alias must populate the ProxyJump field"
     );
 }
@@ -7533,112 +7552,112 @@ fn proxyjump_picker_enter_on_host_applies_alias_and_closes() {
 #[test]
 fn host_form_smart_paste_detects_bare_domain() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "db.example.com".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "db.example.com".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     // Tab away from Alias triggers smart paste
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.hostname, "db.example.com");
+    assert_eq!(app.forms.host_mut().hostname, "db.example.com");
     // Alias stays unchanged — only hostname is suggested
-    assert_eq!(app.forms.host.alias, "db.example.com");
+    assert_eq!(app.forms.host_mut().alias, "db.example.com");
 }
 
 #[test]
 fn host_form_smart_paste_detects_ip_address() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "192.168.1.100".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "192.168.1.100".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.hostname, "192.168.1.100");
-    assert_eq!(app.forms.host.alias, "192.168.1.100");
+    assert_eq!(app.forms.host_mut().hostname, "192.168.1.100");
+    assert_eq!(app.forms.host_mut().alias, "192.168.1.100");
 }
 
 #[test]
 fn host_form_smart_paste_skips_plain_name() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "myserver".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "myserver".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
     // No dot means no detection — alias stays, hostname stays empty
-    assert_eq!(app.forms.host.alias, "myserver");
-    assert!(app.forms.host.hostname.is_empty());
+    assert_eq!(app.forms.host_mut().alias, "myserver");
+    assert!(app.forms.host_mut().hostname.is_empty());
 }
 
 #[test]
 fn host_form_smart_paste_domain_no_overwrite_hostname() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "db.example.com".to_string();
-    app.forms.host.hostname = "already.set.com".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "db.example.com".to_string();
+    app.forms.host_mut().hostname = "already.set.com".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
     // Hostname already populated — don't overwrite
-    assert_eq!(app.forms.host.hostname, "already.set.com");
-    assert_eq!(app.forms.host.alias, "db.example.com");
+    assert_eq!(app.forms.host_mut().hostname, "already.set.com");
+    assert_eq!(app.forms.host_mut().alias, "db.example.com");
 }
 
 #[test]
 fn host_form_smart_paste_rejects_leading_dot() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = ".example.com".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = ".example.com".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
     // Leading dot produces empty first label — must not fire
-    assert_eq!(app.forms.host.alias, ".example.com");
-    assert!(app.forms.host.hostname.is_empty());
+    assert_eq!(app.forms.host_mut().alias, ".example.com");
+    assert!(app.forms.host_mut().hostname.is_empty());
 }
 
 #[test]
 fn host_form_smart_paste_rejects_bare_dot() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = ".".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = ".".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.alias, ".");
-    assert!(app.forms.host.hostname.is_empty());
+    assert_eq!(app.forms.host_mut().alias, ".");
+    assert!(app.forms.host_mut().hostname.is_empty());
 }
 
 #[test]
 fn host_form_smart_paste_ignores_ipv6_mixed() {
     // IPv4-mapped IPv6 notation must not trigger bare-domain detection
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "::ffff:192.0.2.1".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "::ffff:192.0.2.1".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.alias, "::ffff:192.0.2.1");
-    assert!(app.forms.host.hostname.is_empty());
+    assert_eq!(app.forms.host_mut().alias, "::ffff:192.0.2.1");
+    assert!(app.forms.host_mut().hostname.is_empty());
 }
 
 #[test]
 fn host_form_smart_paste_allows_underscore_hostname() {
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "my_host.internal".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "my_host.internal".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.hostname, "my_host.internal");
-    assert_eq!(app.forms.host.alias, "my_host.internal");
+    assert_eq!(app.forms.host_mut().hostname, "my_host.internal");
+    assert_eq!(app.forms.host_mut().alias, "my_host.internal");
 }
 
 #[test]
@@ -7646,9 +7665,9 @@ fn host_form_smart_paste_fires_on_enter() {
     // Enter on Alias also calls maybe_smart_paste before submit.
     // Use a minimal valid config so submit_form can succeed.
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "web.example.com".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "web.example.com".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
@@ -7673,59 +7692,59 @@ fn host_form_smart_paste_fires_on_enter() {
 fn host_form_smart_paste_rejects_trailing_dot() {
     // Trailing dot is invalid for SSH HostName — must not fire
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "example.com.".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "example.com.".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.alias, "example.com.");
-    assert!(app.forms.host.hostname.is_empty());
+    assert_eq!(app.forms.host_mut().alias, "example.com.");
+    assert!(app.forms.host_mut().hostname.is_empty());
 }
 
 #[test]
 fn host_form_smart_paste_rejects_short_dotted_string() {
     // "1.1" (len 3) should not trigger — too short to be a real hostname
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "1.1".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "1.1".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.alias, "1.1");
-    assert!(app.forms.host.hostname.is_empty());
+    assert_eq!(app.forms.host_mut().alias, "1.1");
+    assert!(app.forms.host_mut().hostname.is_empty());
 }
 
 #[test]
 fn host_form_smart_paste_minimum_valid_length() {
     // "x.io" (len 4) is the shortest that should trigger
     let mut app = make_app("");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "x.io".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "x.io".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::AddHost;
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.hostname, "x.io");
-    assert_eq!(app.forms.host.alias, "x.io");
+    assert_eq!(app.forms.host_mut().hostname, "x.io");
+    assert_eq!(app.forms.host_mut().alias, "x.io");
 }
 
 #[test]
 fn host_form_smart_paste_no_fire_on_edit_with_hostname() {
     // EditHost: hostname already populated from existing entry — must not overwrite
     let mut app = make_app("Host myserver\n  HostName myserver.local\n");
-    app.forms.host = HostForm::new();
-    app.forms.host.alias = "db.example.com".to_string();
-    app.forms.host.hostname = "myserver.local".to_string();
-    app.forms.host.focused_field = FormField::Alias;
+    *app.forms.host_mut() = HostForm::new();
+    app.forms.host_mut().alias = "db.example.com".to_string();
+    app.forms.host_mut().hostname = "myserver.local".to_string();
+    app.forms.host_mut().focused_field = FormField::Alias;
     app.screen = Screen::EditHost {
         alias: "myserver".to_string(),
     };
     let tx = mpsc::channel().0;
     handle_key_event(&mut app, key(KeyCode::Tab), &tx).unwrap();
-    assert_eq!(app.forms.host.hostname, "myserver.local");
-    assert_eq!(app.forms.host.alias, "db.example.com");
+    assert_eq!(app.forms.host_mut().hostname, "myserver.local");
+    assert_eq!(app.forms.host_mut().alias, "db.example.com");
 }
 
 // ---------------------------------------------------------------------
@@ -7784,7 +7803,7 @@ fn t_routes_to_bulk_editor_when_selection_active() {
         app.tags.input().is_none(),
         "single-host input must NOT open"
     );
-    assert_eq!(app.forms.bulk_tag_editor.aliases.len(), 2);
+    assert_eq!(app.forms.bulk_tag_editor_mut().aliases.len(), 2);
 }
 
 #[test]
@@ -7824,7 +7843,7 @@ fn bulk_editor_space_cycles_and_enter_applies() {
     // Land the cursor on `prod`.
     let prod_row = app
         .forms
-        .bulk_tag_editor
+        .bulk_tag_editor()
         .rows
         .iter()
         .position(|r| r.tag == "prod")
@@ -7833,7 +7852,7 @@ fn bulk_editor_space_cycles_and_enter_applies() {
     // One Space: Leave → AddToAll.
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
     assert_eq!(
-        app.forms.bulk_tag_editor.rows[prod_row].action,
+        app.forms.bulk_tag_editor_mut().rows[prod_row].action,
         crate::app::BulkTagAction::AddToAll
     );
     handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
@@ -7861,7 +7880,7 @@ fn bulk_editor_esc_with_dirty_shows_discard_then_confirms() {
     // Stage a change.
     let prod_row = app
         .forms
-        .bulk_tag_editor
+        .bulk_tag_editor()
         .rows
         .iter()
         .position(|r| r.tag == "prod")
@@ -7869,7 +7888,7 @@ fn bulk_editor_esc_with_dirty_shows_discard_then_confirms() {
     app.ui.bulk_tag_editor_state.select(Some(prod_row));
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
     assert!(
-        app.forms.bulk_tag_editor.is_dirty(),
+        app.forms.bulk_tag_editor_mut().is_dirty(),
         "Space cycle should mark editor dirty"
     );
     // Esc on dirty editor opens the discard prompt; editor stays open.
@@ -7886,7 +7905,7 @@ fn bulk_editor_esc_with_dirty_shows_discard_then_confirms() {
     // Confirm the discard.
     handle_key_event(&mut app, key(KeyCode::Char('y')), &tx).unwrap();
     assert_eq!(app.screen, Screen::HostList);
-    assert!(app.forms.bulk_tag_editor.rows.is_empty());
+    assert!(app.forms.bulk_tag_editor_mut().rows.is_empty());
     assert!(!app.forms.is_discard_pending());
 }
 
@@ -7913,7 +7932,7 @@ fn bulk_editor_esc_dirty_then_no_keeps_editor_open() {
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     let prod_row = app
         .forms
-        .bulk_tag_editor
+        .bulk_tag_editor()
         .rows
         .iter()
         .position(|r| r.tag == "prod")
@@ -7925,7 +7944,10 @@ fn bulk_editor_esc_dirty_then_no_keeps_editor_open() {
     handle_key_event(&mut app, key(KeyCode::Char('n')), &tx).unwrap();
     assert!(!app.forms.is_discard_pending());
     assert_eq!(app.screen, Screen::BulkTagEditor);
-    assert!(app.forms.bulk_tag_editor.is_dirty(), "Changes preserved");
+    assert!(
+        app.forms.bulk_tag_editor_mut().is_dirty(),
+        "Changes preserved"
+    );
 }
 
 #[test]
@@ -7935,15 +7957,15 @@ fn bulk_editor_plus_opens_new_tag_input() {
     app.hosts_state.multi_select_mut().insert(0);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Char('+')), &tx).unwrap();
-    assert!(app.forms.bulk_tag_editor.new_tag_input.is_some());
+    assert!(app.forms.bulk_tag_editor_mut().new_tag_input.is_some());
     // Type "eu" and Enter.
     handle_key_event(&mut app, key(KeyCode::Char('e')), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Char('u')), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
-    assert!(app.forms.bulk_tag_editor.new_tag_input.is_none());
+    assert!(app.forms.bulk_tag_editor_mut().new_tag_input.is_none());
     let eu = app
         .forms
-        .bulk_tag_editor
+        .bulk_tag_editor()
         .rows
         .iter()
         .find(|r| r.tag == "eu");
@@ -7973,7 +7995,7 @@ fn bulk_tag_undo_restores_previous_tags() {
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     let prod_row = app
         .forms
-        .bulk_tag_editor
+        .bulk_tag_editor()
         .rows
         .iter()
         .position(|r| r.tag == "prod")
@@ -7993,9 +8015,9 @@ fn bulk_tag_undo_restores_previous_tags() {
         .unwrap();
     assert!(!a.tags.contains(&"prod".to_string()));
     // Undo.
-    assert!(app.forms.bulk_tag_undo.is_some());
+    assert!(app.forms.bulk_tag_undo().is_some());
     handle_key_event(&mut app, key(KeyCode::Char('u')), &tx).unwrap();
-    assert!(app.forms.bulk_tag_undo.is_none());
+    assert!(app.forms.bulk_tag_undo().is_none());
     // Verify prod is back.
     let a = app
         .hosts_state
@@ -8024,7 +8046,7 @@ fn bulk_editor_q_cancels_like_esc() {
     assert_eq!(app.screen, Screen::BulkTagEditor);
     handle_key_event(&mut app, key(KeyCode::Char('q')), &tx).unwrap();
     assert_eq!(app.screen, Screen::HostList);
-    assert!(app.forms.bulk_tag_editor.rows.is_empty());
+    assert!(app.forms.bulk_tag_editor_mut().rows.is_empty());
 }
 
 #[test]
@@ -8034,7 +8056,7 @@ fn bulk_editor_jk_navigates_rows() {
     app.hosts_state.multi_select_mut().insert(0);
     app.hosts_state.multi_select_mut().insert(1);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
-    assert!(app.forms.bulk_tag_editor.rows.len() >= 2);
+    assert!(app.forms.bulk_tag_editor_mut().rows.len() >= 2);
     let initial = app.ui.bulk_tag_editor_state.selected();
     handle_key_event(&mut app, key(KeyCode::Char('j')), &tx).unwrap();
     let after_j = app.ui.bulk_tag_editor_state.selected();
@@ -8054,14 +8076,17 @@ fn bulk_editor_help_roundtrip() {
     // Stage a change so we can verify state survives the help roundtrip.
     app.ui.bulk_tag_editor_state.select(Some(0));
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
-    let action_before = app.forms.bulk_tag_editor.rows[0].action;
+    let action_before = app.forms.bulk_tag_editor_mut().rows[0].action;
     // Open help.
     handle_key_event(&mut app, key(KeyCode::Char('?')), &tx).unwrap();
     assert!(matches!(app.screen, Screen::Help { .. }));
     // Return from help.
     handle_key_event(&mut app, key(KeyCode::Esc), &tx).unwrap();
     assert_eq!(app.screen, Screen::BulkTagEditor);
-    assert_eq!(app.forms.bulk_tag_editor.rows[0].action, action_before);
+    assert_eq!(
+        app.forms.bulk_tag_editor_mut().rows[0].action,
+        action_before
+    );
 }
 
 #[test]
@@ -8077,30 +8102,30 @@ fn bulk_editor_new_tag_input_backspace_and_cursor() {
     handle_key_event(&mut app, key(KeyCode::Char('b')), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Char('c')), &tx).unwrap();
     assert_eq!(
-        app.forms.bulk_tag_editor.new_tag_input.as_deref(),
+        app.forms.bulk_tag_editor_mut().new_tag_input.as_deref(),
         Some("abc")
     );
-    assert_eq!(app.forms.bulk_tag_editor.new_tag_cursor, 3);
+    assert_eq!(app.forms.bulk_tag_editor_mut().new_tag_cursor, 3);
     // Backspace removes 'c'.
     handle_key_event(&mut app, key(KeyCode::Backspace), &tx).unwrap();
     assert_eq!(
-        app.forms.bulk_tag_editor.new_tag_input.as_deref(),
+        app.forms.bulk_tag_editor_mut().new_tag_input.as_deref(),
         Some("ab")
     );
-    assert_eq!(app.forms.bulk_tag_editor.new_tag_cursor, 2);
+    assert_eq!(app.forms.bulk_tag_editor_mut().new_tag_cursor, 2);
     // Left, Right.
     handle_key_event(&mut app, key(KeyCode::Left), &tx).unwrap();
-    assert_eq!(app.forms.bulk_tag_editor.new_tag_cursor, 1);
+    assert_eq!(app.forms.bulk_tag_editor_mut().new_tag_cursor, 1);
     handle_key_event(&mut app, key(KeyCode::Right), &tx).unwrap();
-    assert_eq!(app.forms.bulk_tag_editor.new_tag_cursor, 2);
+    assert_eq!(app.forms.bulk_tag_editor_mut().new_tag_cursor, 2);
     // Home, End.
     handle_key_event(&mut app, key(KeyCode::Home), &tx).unwrap();
-    assert_eq!(app.forms.bulk_tag_editor.new_tag_cursor, 0);
+    assert_eq!(app.forms.bulk_tag_editor_mut().new_tag_cursor, 0);
     handle_key_event(&mut app, key(KeyCode::End), &tx).unwrap();
-    assert_eq!(app.forms.bulk_tag_editor.new_tag_cursor, 2);
+    assert_eq!(app.forms.bulk_tag_editor_mut().new_tag_cursor, 2);
     // Esc cancels input without closing editor.
     handle_key_event(&mut app, key(KeyCode::Esc), &tx).unwrap();
-    assert!(app.forms.bulk_tag_editor.new_tag_input.is_none());
+    assert!(app.forms.bulk_tag_editor_mut().new_tag_input.is_none());
     assert_eq!(app.screen, Screen::BulkTagEditor);
 }
 
@@ -8292,7 +8317,7 @@ fn vault_sign_confirm_esc_cancels() {
 fn enter_on_identity_file_field_does_not_open_key_picker() {
     // Invariant 1: Enter never opens a picker.
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::IdentityFile;
+    app.forms.host_mut().focused_field = FormField::IdentityFile;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(
@@ -8304,8 +8329,8 @@ fn enter_on_identity_file_field_does_not_open_key_picker() {
 #[test]
 fn space_on_empty_identity_file_opens_key_picker() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::IdentityFile;
-    assert!(app.forms.host.identity_file.is_empty());
+    app.forms.host_mut().focused_field = FormField::IdentityFile;
+    assert!(app.forms.host_mut().identity_file.is_empty());
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(app.ui.key_picker.open);
@@ -8314,22 +8339,22 @@ fn space_on_empty_identity_file_opens_key_picker() {
 #[test]
 fn space_on_populated_identity_file_inserts_literal() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::IdentityFile;
-    app.forms.host.identity_file = "/home/me/keys/id".to_string();
-    app.forms.host.cursor_pos = app.forms.host.identity_file.chars().count();
+    app.forms.host_mut().focused_field = FormField::IdentityFile;
+    app.forms.host_mut().identity_file = "/home/me/keys/id".to_string();
+    app.forms.host_mut().cursor_pos = app.forms.host_mut().identity_file.chars().count();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
         !app.ui.key_picker.open,
         "Space on populated IdentityFile must NOT open picker"
     );
-    assert_eq!(app.forms.host.identity_file, "/home/me/keys/id ");
+    assert_eq!(app.forms.host_mut().identity_file, "/home/me/keys/id ");
 }
 
 #[test]
 fn enter_on_proxy_jump_field_does_not_open_picker() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::ProxyJump;
+    app.forms.host_mut().focused_field = FormField::ProxyJump;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(!app.ui.proxyjump_picker.open);
@@ -8338,7 +8363,7 @@ fn enter_on_proxy_jump_field_does_not_open_picker() {
 #[test]
 fn space_on_empty_proxy_jump_opens_picker() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::ProxyJump;
+    app.forms.host_mut().focused_field = FormField::ProxyJump;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(app.ui.proxyjump_picker.open);
@@ -8347,13 +8372,13 @@ fn space_on_empty_proxy_jump_opens_picker() {
 #[test]
 fn space_on_populated_proxy_jump_inserts_literal() {
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::ProxyJump;
-    app.forms.host.proxy_jump = "bastion".to_string();
-    app.forms.host.cursor_pos = 7;
+    app.forms.host_mut().focused_field = FormField::ProxyJump;
+    app.forms.host_mut().proxy_jump = "bastion".to_string();
+    app.forms.host_mut().cursor_pos = 7;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(!app.ui.proxyjump_picker.open);
-    assert_eq!(app.forms.host.proxy_jump, "bastion ");
+    assert_eq!(app.forms.host_mut().proxy_jump, "bastion ");
 }
 
 #[test]
@@ -8362,7 +8387,7 @@ fn space_on_empty_vault_ssh_with_no_candidates_inserts_literal() {
     // are role candidates. With none configured, Space on empty VaultSsh
     // degrades to literal-space insert so the user can type the role.
     let mut app = make_form_app();
-    app.forms.host.focused_field = FormField::VaultSsh;
+    app.forms.host_mut().focused_field = FormField::VaultSsh;
     assert!(app.vault_role_candidates().is_empty());
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
@@ -8371,7 +8396,8 @@ fn space_on_empty_vault_ssh_with_no_candidates_inserts_literal() {
         "no candidates → no picker, even on empty field"
     );
     assert_eq!(
-        app.forms.host.vault_ssh, " ",
+        app.forms.host_mut().vault_ssh,
+        " ",
         "Space falls through to literal-space insert"
     );
 }
@@ -8389,27 +8415,27 @@ fn enter_on_provider_identity_file_does_not_open_picker() {
 #[test]
 fn space_on_populated_provider_identity_file_inserts_literal() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::IdentityFile);
-    app.providers.form.identity_file = "/path".to_string();
-    app.providers.form.cursor_pos = 5;
+    app.providers.form_mut().identity_file = "/path".to_string();
+    app.providers.form_mut().cursor_pos = 5;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(!app.ui.key_picker.open);
-    assert_eq!(app.providers.form.identity_file, "/path ");
+    assert_eq!(app.providers.form_mut().identity_file, "/path ");
 }
 
 #[test]
 fn space_on_populated_ovh_regions_inserts_literal() {
     let mut app = make_ovh_form_app();
-    app.providers.form.focused_field = ProviderFormField::Regions;
-    app.providers.form.regions = "eu".to_string();
-    app.providers.form.cursor_pos = 2;
+    app.providers.form_mut().focused_field = ProviderFormField::Regions;
+    app.providers.form_mut().regions = "eu".to_string();
+    app.providers.form_mut().cursor_pos = 2;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
         !app.ui.region_picker.open,
         "Space on populated Regions must NOT open picker"
     );
-    assert_eq!(app.providers.form.regions, "eu ");
+    assert_eq!(app.providers.form_mut().regions, "eu ");
 }
 
 // ── Container confirm n/N cancels ───────────────────────────────────
@@ -8891,9 +8917,9 @@ fn tunnels_overview_e_opens_form_for_selected_row() {
         other => panic!("expected TunnelForm, got {:?}", other.variant_name()),
     }
     // Form should be pre-populated with the row's tunnel data.
-    assert_eq!(app.tunnels.form.bind_port, "8080");
-    assert_eq!(app.tunnels.form.remote_host, "localhost");
-    assert_eq!(app.tunnels.form.remote_port, "80");
+    assert_eq!(app.tunnels.form_mut().bind_port, "8080");
+    assert_eq!(app.tunnels.form_mut().remote_host, "localhost");
+    assert_eq!(app.tunnels.form_mut().remote_port, "80");
 }
 
 #[test]
@@ -8901,17 +8927,17 @@ fn tunnels_overview_d_sets_pending_delete() {
     let mut app = make_tunnels_overview_app();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
-    assert_eq!(app.tunnels.pending_delete, Some(0));
+    assert_eq!(app.tunnels.pending_delete(), Some(0));
     assert!(matches!(app.screen, Screen::HostList));
 }
 
 #[test]
 fn tunnels_overview_pending_delete_y_removes_tunnel_and_returns_to_overview() {
     let mut app = make_tunnels_overview_app();
-    app.tunnels.pending_delete = Some(0);
+    app.tunnels.request_delete(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
-    assert_eq!(app.tunnels.pending_delete, None);
+    assert_eq!(app.tunnels.pending_delete(), None);
     assert!(matches!(app.screen, Screen::HostList));
     assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
     // Tunnel directive must be gone from the in-memory ssh_config.
@@ -8922,10 +8948,10 @@ fn tunnels_overview_pending_delete_y_removes_tunnel_and_returns_to_overview() {
 #[test]
 fn tunnels_overview_pending_delete_n_cancels() {
     let mut app = make_tunnels_overview_app();
-    app.tunnels.pending_delete = Some(0);
+    app.tunnels.request_delete(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
-    assert_eq!(app.tunnels.pending_delete, None);
+    assert_eq!(app.tunnels.pending_delete(), None);
     let rules = app.hosts_state.ssh_config().find_tunnel_directives("test");
     assert_eq!(rules.len(), 1, "tunnel must still be present after cancel");
 }
@@ -9002,10 +9028,10 @@ fn tunnels_overview_n_opens_whats_new() {
 #[test]
 fn tunnels_overview_pending_delete_esc_cancels() {
     let mut app = make_tunnels_overview_app();
-    app.tunnels.pending_delete = Some(0);
+    app.tunnels.request_delete(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert_eq!(app.tunnels.pending_delete, None);
+    assert_eq!(app.tunnels.pending_delete(), None);
     let rules = app.hosts_state.ssh_config().find_tunnel_directives("test");
     assert_eq!(rules.len(), 1);
 }
@@ -9013,12 +9039,12 @@ fn tunnels_overview_pending_delete_esc_cancels() {
 #[test]
 fn tunnels_overview_pending_delete_other_key_ignored() {
     let mut app = make_tunnels_overview_app();
-    app.tunnels.pending_delete = Some(0);
+    app.tunnels.request_delete(0);
     let (tx, _rx) = mpsc::channel();
     // A stray character must not silently transition state — pending_delete
     // stays armed, the tunnel stays in the config, and no toast fires.
     let _ = handle_key_event(&mut app, key(KeyCode::Char('t')), &tx);
-    assert_eq!(app.tunnels.pending_delete, Some(0));
+    assert_eq!(app.tunnels.pending_delete(), Some(0));
     let rules = app.hosts_state.ssh_config().find_tunnel_directives("test");
     assert_eq!(rules.len(), 1);
 }
@@ -9032,7 +9058,7 @@ fn tunnel_form_esc_from_tunnels_overview_returns_to_overview() {
         alias: "test".to_string(),
         editing: None,
     };
-    app.tunnels.form = crate::app::TunnelForm::new();
+    *app.tunnels.form_mut() = crate::app::TunnelForm::new();
     app.capture_tunnel_form_baseline();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
@@ -9047,10 +9073,10 @@ fn tunnel_form_submit_from_tunnels_overview_returns_to_overview() {
         alias: "test".to_string(),
         editing: None,
     };
-    app.tunnels.form = crate::app::TunnelForm::new();
-    app.tunnels.form.bind_port = "9090".to_string();
-    app.tunnels.form.remote_host = "internal.corp".to_string();
-    app.tunnels.form.remote_port = "443".to_string();
+    *app.tunnels.form_mut() = crate::app::TunnelForm::new();
+    app.tunnels.form_mut().bind_port = "9090".to_string();
+    app.tunnels.form_mut().remote_host = "internal.corp".to_string();
+    app.tunnels.form_mut().remote_port = "443".to_string();
     app.capture_form_mtime();
     app.capture_tunnel_form_baseline();
     let (tx, _rx) = mpsc::channel();
@@ -9071,7 +9097,7 @@ fn tunnel_form_esc_from_host_detail_still_returns_to_tunnel_list() {
         alias: "test".to_string(),
         editing: None,
     };
-    app.tunnels.form = crate::app::TunnelForm::new();
+    *app.tunnels.form_mut() = crate::app::TunnelForm::new();
     app.capture_tunnel_form_baseline();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);

@@ -1102,7 +1102,7 @@ fn visual_tunnels_overview_delete_confirm() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Tunnels;
     app.ui.tunnels_overview_state.select(Some(0));
-    app.tunnels.pending_delete = Some(0);
+    app.tunnels.request_delete(0);
     let actual = render_screen(&mut app);
     assert_golden("tunnels_overview_delete_confirm", &actual);
 }
@@ -1174,20 +1174,21 @@ fn visual_snippet_form() {
 fn visual_snippet_output() {
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.snippets.output = Some(crate::app::SnippetOutputState {
-        run_id: 1,
-        results: vec![crate::app::SnippetHostOutput {
-            alias: "bastion-ams".to_string(),
-            stdout: "load average: 0.12 0.18 0.21\n".to_string(),
-            stderr: String::new(),
-            exit_code: Some(0),
-        }],
-        scroll_offset: 0,
-        completed: 1,
-        total: 1,
-        all_done: true,
-        cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    });
+    app.snippets
+        .set_output(Some(crate::app::SnippetOutputState {
+            run_id: 1,
+            results: vec![crate::app::SnippetHostOutput {
+                alias: "bastion-ams".to_string(),
+                stdout: "load average: 0.12 0.18 0.21\n".to_string(),
+                stderr: String::new(),
+                exit_code: Some(0),
+            }],
+            scroll_offset: 0,
+            completed: 1,
+            total: 1,
+            all_done: true,
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }));
     app.screen = Screen::SnippetOutput {
         snippet_name: "uptime".to_string(),
         target_aliases: vec!["bastion-ams".to_string()],
@@ -1208,7 +1209,8 @@ fn visual_snippet_param_form() {
     // Param form requires state populated with the snippet's params (none here),
     // so build an empty SnippetParamFormState matching the snippet.
     let params: Vec<crate::snippet::SnippetParam> = Vec::new();
-    app.snippets.param_form = Some(crate::app::SnippetParamFormState::new(&params));
+    app.snippets
+        .set_param_form(Some(crate::app::SnippetParamFormState::new(&params)));
     app.screen = Screen::SnippetParamForm {
         snippet,
         target_aliases: vec!["bastion-ams".to_string()],
@@ -1443,7 +1445,7 @@ fn visual_provider_form_label_entry() {
     // Replicate what open_add_config_flow's `_ =>` branch would do, without
     // depending on demo data layout. Label is the focused field; the form
     // sits in collapsed mode like a freshly opened add flow.
-    app.providers.form = crate::app::ProviderFormFields {
+    *app.providers.form_mut() = crate::app::ProviderFormFields {
         label: String::new(),
         label_entry: true,
         url: String::new(),

@@ -228,30 +228,30 @@ pub(super) fn handle_tunnel_form_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Tab | KeyCode::Down => {
-            app.tunnels.form.focus_next();
+            app.tunnels.form_mut().focus_next();
         }
         KeyCode::BackTab | KeyCode::Up => {
-            app.tunnels.form.focus_prev();
+            app.tunnels.form_mut().focus_prev();
         }
-        KeyCode::Left if app.tunnels.form.cursor_pos > 0 => {
-            app.tunnels.form.cursor_pos -= 1;
+        KeyCode::Left if app.tunnels.form_mut().cursor_pos > 0 => {
+            app.tunnels.form_mut().cursor_pos -= 1;
         }
         KeyCode::Right => {
             let len = app
                 .tunnels
-                .form
+                .form()
                 .focused_value()
                 .map(|v| v.chars().count())
                 .unwrap_or(0);
-            if app.tunnels.form.cursor_pos < len {
-                app.tunnels.form.cursor_pos += 1;
+            if app.tunnels.form_mut().cursor_pos < len {
+                app.tunnels.form_mut().cursor_pos += 1;
             }
         }
         KeyCode::Home => {
-            app.tunnels.form.cursor_pos = 0;
+            app.tunnels.form_mut().cursor_pos = 0;
         }
         KeyCode::End => {
-            app.tunnels.form.sync_cursor_to_end();
+            app.tunnels.form_mut().sync_cursor_to_end();
         }
         KeyCode::Enter => {
             submit_tunnel_form(app, &alias, editing);
@@ -260,15 +260,15 @@ pub(super) fn handle_tunnel_form_key(app: &mut App, key: KeyEvent) {
         // Space on a Type field cycles tunnel kind instead of being
         // captured as a literal space character.
         KeyCode::Char(' ')
-            if app.tunnels.form.focused_field == crate::app::TunnelFormField::Type =>
+            if app.tunnels.form_mut().focused_field == crate::app::TunnelFormField::Type =>
         {
-            app.tunnels.form.tunnel_type = app.tunnels.form.tunnel_type.next();
+            app.tunnels.form_mut().tunnel_type = app.tunnels.form_mut().tunnel_type.next();
         }
         KeyCode::Char(c) => {
-            app.tunnels.form.insert_char(c);
+            app.tunnels.form_mut().insert_char(c);
         }
         KeyCode::Backspace => {
-            app.tunnels.form.delete_char_before_cursor();
+            app.tunnels.form_mut().delete_char_before_cursor();
         }
         _ => {}
     }
@@ -281,12 +281,12 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
         return;
     }
 
-    if let Err(msg) = app.tunnels.form.validate() {
+    if let Err(msg) = app.tunnels.form_mut().validate() {
         app.notify_error(msg);
         return;
     }
 
-    let (directive_key, directive_value) = app.tunnels.form.to_directive();
+    let (directive_key, directive_value) = app.tunnels.form_mut().to_directive();
     let config_backup = app.hosts_state.ssh_config().clone();
 
     // If editing, remove the old directive first

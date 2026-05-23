@@ -49,7 +49,7 @@ pub fn handle_key_event(
     // Global Ctrl+C handler — screen-conditional for SnippetOutput
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
         if matches!(app.screen, Screen::SnippetOutput { .. }) {
-            if let Some(ref state) = app.snippets.output {
+            if let Some(state) = app.snippets.output() {
                 if !state.all_done {
                     if state.cancel.load(Ordering::Relaxed) {
                         // Second Ctrl+C: cancel already pending, force close
@@ -60,7 +60,7 @@ pub fn handle_key_event(
                     }
                 }
             }
-            app.snippets.output = None;
+            app.snippets.set_output(None);
             app.set_screen(Screen::HostList);
             return Ok(());
         }

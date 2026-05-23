@@ -46,16 +46,10 @@ use crate::tunnel_live::{
 /// methods here.
 pub struct TunnelState {
     pub(in crate::app) list: Vec<TunnelRule>,
-    // Held at `pub(crate)` because the form sub-state lives on its own
-    // axis (handled by the forthcoming `forms` seal); per-field tunnel
-    // form mutations are too numerous to wrap behind methods here.
-    pub(crate) form: TunnelForm,
+    pub(in crate::app) form: TunnelForm,
     pub(in crate::app) active: HashMap<String, ActiveTunnel>,
     pub(in crate::app) form_baseline: Option<TunnelFormBaseline>,
-    // Held at `pub(crate)` so the existing `if let Some(idx) = ...pending_delete`
-    // multi-line patterns continue to compile; explicit accessor returns
-    // a copy.
-    pub(crate) pending_delete: Option<usize>,
+    pub(in crate::app) pending_delete: Option<usize>,
     pub(in crate::app) summaries_cache: HashMap<String, String>,
     /// Sort mode for the tunnels overview screen. Cycled by `s`.
     pub(in crate::app) sort_mode: TunnelSortMode,

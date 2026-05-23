@@ -43,10 +43,10 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
     }
 
     // Handle pending snippet delete confirmation via the shared confirm router.
-    if app.snippets.pending_delete.is_some() && key.code != KeyCode::Char('?') {
+    if app.snippets.pending_delete().is_some() && key.code != KeyCode::Char('?') {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                let Some(sel) = app.snippets.pending_delete.take() else {
+                let Some(sel) = app.snippets.take_pending_delete() else {
                     return;
                 };
                 if sel < app.snippets.store().snippets.len() {
@@ -152,7 +152,8 @@ fn run_or_prompt_params(
     }
     let params = crate::snippet::parse_params(&snippet.command);
     if !params.is_empty() {
-        app.snippets.param_form = Some(crate::app::SnippetParamFormState::new(&params));
+        app.snippets
+            .set_param_form(Some(crate::app::SnippetParamFormState::new(&params)));
         app.snippets.set_pending_terminal(terminal_mode);
         app.set_screen(Screen::SnippetParamForm {
             snippet,
@@ -205,15 +206,16 @@ fn start_snippet_output(
         target_aliases.len()
     );
 
-    app.snippets.output = Some(crate::app::SnippetOutputState {
-        run_id,
-        results: Vec::new(),
-        scroll_offset: 0,
-        completed: 0,
-        total: target_aliases.len(),
-        all_done: false,
-        cancel: cancel.clone(),
-    });
+    app.snippets
+        .set_output(Some(crate::app::SnippetOutputState {
+            run_id,
+            results: Vec::new(),
+            scroll_offset: 0,
+            completed: 0,
+            total: target_aliases.len(),
+            all_done: false,
+            cancel: cancel.clone(),
+        }));
 
     app.set_screen(Screen::SnippetOutput {
         snippet_name: snippet.name.clone(),
@@ -257,54 +259,53 @@ fn snippet_result_lines(r: &crate::app::SnippetHostOutput) -> usize {
 pub(super) fn handle_output_key(app: &mut App, key: KeyEvent) {
     let total_lines = app
         .snippets
-        .output
-        .as_ref()
+        .output()
         .map(|s| s.results.iter().map(snippet_result_lines).sum::<usize>())
         .unwrap_or(0);
 
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
-            if let Some(ref state) = app.snippets.output {
+            if let Some(state) = app.snippets.output() {
                 if !state.all_done {
                     state.cancel.store(true, Ordering::Relaxed);
                 }
             }
-            app.snippets.output = None;
+            app.snippets.set_output(None);
             app.set_screen(Screen::HostList);
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            if let Some(ref mut state) = app.snippets.output {
+            if let Some(state) = app.snippets.output_mut() {
                 state.scroll_offset = state.scroll_offset.saturating_add(1);
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            if let Some(ref mut state) = app.snippets.output {
+            if let Some(state) = app.snippets.output_mut() {
                 state.scroll_offset = state.scroll_offset.saturating_sub(1);
             }
         }
         KeyCode::PageDown => {
-            if let Some(ref mut state) = app.snippets.output {
+            if let Some(state) = app.snippets.output_mut() {
                 state.scroll_offset = state.scroll_offset.saturating_add(20);
             }
         }
         KeyCode::PageUp => {
-            if let Some(ref mut state) = app.snippets.output {
+            if let Some(state) = app.snippets.output_mut() {
                 state.scroll_offset = state.scroll_offset.saturating_sub(20);
             }
         }
         KeyCode::Char('G') => {
-            if let Some(ref mut state) = app.snippets.output {
+            if let Some(state) = app.snippets.output_mut() {
                 state.scroll_offset = total_lines.saturating_sub(1);
             }
         }
         KeyCode::Char('g') => {
-            if let Some(ref mut state) = app.snippets.output {
+            if let Some(state) = app.snippets.output_mut() {
                 state.scroll_offset = 0;
             }
         }
         KeyCode::Char('n') => {
             // Jump to next host header
-            if let Some(ref mut state) = app.snippets.output {
+            if let Some(state) = app.snippets.output_mut() {
                 let current = state.scroll_offset;
                 let mut line = 0;
                 for result in &state.results {
@@ -319,7 +320,7 @@ pub(super) fn handle_output_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('N') => {
             // Jump to previous host header
-            if let Some(ref mut state) = app.snippets.output {
+            if let Some(state) = app.snippets.output_mut() {
                 let current = state.scroll_offset;
                 let mut offsets = Vec::new();
                 let mut line = 0;
@@ -338,7 +339,7 @@ pub(super) fn handle_output_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('c') => {
             // Copy all output
-            if let Some(ref state) = app.snippets.output {
+            if let Some(state) = app.snippets.output() {
                 let mut text = String::new();
                 for result in &state.results {
                     text.push_str(&format!("-- {} --\n", result.alias));
@@ -463,7 +464,7 @@ pub(super) fn handle_param_form_key(
         _ => return,
     };
 
-    let form = match app.snippets.param_form.as_mut() {
+    let form = match app.snippets.param_form_mut() {
         Some(f) => f,
         None => return,
     };
@@ -580,48 +581,48 @@ pub(super) fn handle_form_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Tab | KeyCode::Down => {
-            app.snippets.form.focus_next();
+            app.snippets.form_mut().focus_next();
         }
         KeyCode::BackTab | KeyCode::Up => {
-            app.snippets.form.focus_prev();
+            app.snippets.form_mut().focus_prev();
         }
-        KeyCode::Left if app.snippets.form.cursor_pos > 0 => {
-            app.snippets.form.cursor_pos -= 1;
+        KeyCode::Left if app.snippets.form_mut().cursor_pos > 0 => {
+            app.snippets.form_mut().cursor_pos -= 1;
         }
         KeyCode::Right => {
-            let len = app.snippets.form.focused_value().chars().count();
-            if app.snippets.form.cursor_pos < len {
-                app.snippets.form.cursor_pos += 1;
+            let len = app.snippets.form_mut().focused_value().chars().count();
+            if app.snippets.form_mut().cursor_pos < len {
+                app.snippets.form_mut().cursor_pos += 1;
             }
         }
         KeyCode::Home => {
-            app.snippets.form.cursor_pos = 0;
+            app.snippets.form_mut().cursor_pos = 0;
         }
         KeyCode::End => {
-            app.snippets.form.sync_cursor_to_end();
+            app.snippets.form_mut().sync_cursor_to_end();
         }
         KeyCode::Enter => {
             submit_snippet_form(app, &target_aliases, editing);
         }
         KeyCode::Char(c) => {
-            app.snippets.form.insert_char(c);
+            app.snippets.form_mut().insert_char(c);
         }
         KeyCode::Backspace => {
-            app.snippets.form.delete_char_before_cursor();
+            app.snippets.form_mut().delete_char_before_cursor();
         }
         _ => {}
     }
 }
 
 fn submit_snippet_form(app: &mut App, target_aliases: &[String], editing: Option<usize>) {
-    if let Err(msg) = app.snippets.form.validate() {
+    if let Err(msg) = app.snippets.form_mut().validate() {
         app.notify_error(msg);
         return;
     }
 
-    let new_name = app.snippets.form.name.trim().to_string();
-    let new_command = app.snippets.form.command.trim().to_string();
-    let new_description = app.snippets.form.description.trim().to_string();
+    let new_name = app.snippets.form_mut().name.trim().to_string();
+    let new_command = app.snippets.form_mut().command.trim().to_string();
+    let new_description = app.snippets.form_mut().description.trim().to_string();
 
     // Check for duplicate name (skip the snippet being edited)
     let old_name = editing.and_then(|idx| {
@@ -669,7 +670,7 @@ fn submit_snippet_form(app: &mut App, target_aliases: &[String], editing: Option
     }
 
     // Re-select in picker
-    let name = app.snippets.form.name.trim().to_string();
+    let name = app.snippets.form_mut().name.trim().to_string();
     let new_idx = app
         .snippets
         .store()
@@ -712,7 +713,8 @@ mod param_form_tests {
             snippet,
             target_aliases: vec!["h1".to_string()],
         };
-        app.snippets.param_form = Some(SnippetParamFormState::new(&[]));
+        app.snippets
+            .set_param_form(Some(SnippetParamFormState::new(&[])));
         app
     }
 
@@ -727,7 +729,7 @@ mod param_form_tests {
         let (tx, _rx) = mpsc::channel();
         handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
         assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
-        assert!(app.snippets.param_form.is_none());
+        assert!(app.snippets.param_form().is_none());
     }
 
     #[test]
@@ -738,14 +740,15 @@ mod param_form_tests {
             name: "name".to_string(),
             default: None,
         }];
-        app.snippets.param_form = Some(SnippetParamFormState::new(&params));
+        app.snippets
+            .set_param_form(Some(SnippetParamFormState::new(&params)));
         if let Screen::SnippetParamForm { snippet, .. } = &mut app.screen {
             snippet.command = "echo {{name}}".to_string();
         }
         let (tx, _rx) = mpsc::channel();
         handle_param_form_key(&mut app, k(KeyCode::Char('h')), &tx);
         handle_param_form_key(&mut app, k(KeyCode::Char('i')), &tx);
-        let state = app.snippets.param_form.as_ref().expect("form state");
+        let state = app.snippets.param_form().expect("form state");
         assert_eq!(state.values[0], "hi");
     }
 
@@ -755,13 +758,13 @@ mod param_form_tests {
             name: "name".to_string(),
             default: None,
         }];
-        app.snippets.param_form = Some(SnippetParamFormState::new(&params));
+        app.snippets
+            .set_param_form(Some(SnippetParamFormState::new(&params)));
         if let Screen::SnippetParamForm { snippet, .. } = &mut app.screen {
             snippet.command = "echo {{name}}".to_string();
         }
         app.snippets
-            .param_form
-            .as_mut()
+            .param_form_mut()
             .expect("form state")
             .insert_char('x');
         // Pre-set pending_terminal so the y-branch reset is observable;
@@ -789,7 +792,7 @@ mod param_form_tests {
         handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
         handle_param_form_key(&mut app, k(KeyCode::Char('y')), &tx);
         assert!(!app.forms.is_discard_pending());
-        assert!(app.snippets.param_form.is_none());
+        assert!(app.snippets.param_form().is_none());
         assert!(!app.snippets.pending_terminal());
         assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
     }
@@ -802,7 +805,7 @@ mod param_form_tests {
         handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
         handle_param_form_key(&mut app, k(KeyCode::Char('n')), &tx);
         assert!(!app.forms.is_discard_pending());
-        assert!(app.snippets.param_form.is_some());
+        assert!(app.snippets.param_form().is_some());
         assert!(matches!(app.screen, Screen::SnippetParamForm { .. }));
     }
 
@@ -817,7 +820,7 @@ mod param_form_tests {
         handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
         handle_param_form_key(&mut app, k(KeyCode::Char('x')), &tx);
         assert!(app.forms.is_discard_pending());
-        assert!(app.snippets.param_form.is_some());
+        assert!(app.snippets.param_form().is_some());
     }
 }
 
@@ -848,7 +851,7 @@ mod output_tests {
                 exit_code: Some(0),
             })
             .collect();
-        app.snippets.output = Some(SnippetOutputState {
+        app.snippets.set_output(Some(SnippetOutputState {
             run_id: 1,
             results,
             scroll_offset: 0,
@@ -856,7 +859,7 @@ mod output_tests {
             total: line_count,
             all_done: true,
             cancel: Arc::new(AtomicBool::new(false)),
-        });
+        }));
         app.screen = Screen::SnippetOutput {
             snippet_name: "echo".to_string(),
             target_aliases: vec!["h0".to_string()],
@@ -873,7 +876,7 @@ mod output_tests {
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app_on_output(5);
         handle_output_key(&mut app, k(KeyCode::Char('j')));
-        let state = app.snippets.output.as_ref().expect("output state");
+        let state = app.snippets.output().expect("output state");
         assert_eq!(state.scroll_offset, 1);
     }
 
@@ -883,6 +886,6 @@ mod output_tests {
         let mut app = make_app_on_output(3);
         handle_output_key(&mut app, k(KeyCode::Esc));
         assert!(matches!(app.screen, Screen::HostList));
-        assert!(app.snippets.output.is_none());
+        assert!(app.snippets.output().is_none());
     }
 }

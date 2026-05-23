@@ -433,12 +433,12 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
     let display_name = crate::providers::provider_display_name(provider_name);
     let title = format!("Providers > {}", display_name);
 
-    let expanded = app.providers.form.expanded;
+    let expanded = app.providers.form().expanded;
     // Progressive disclosure: when `vault_role` is empty, `VaultAddr` is
     // filtered out by `visible_fields(provider)` and therefore never
     // rendered or navigable. Re-enabling the role brings the field back
     // with whatever value the user had previously typed.
-    let filtered_all: Vec<ProviderFormField> = app.providers.form.visible_fields(provider_name);
+    let filtered_all: Vec<ProviderFormField> = app.providers.form().visible_fields(provider_name);
     let all_fields: &[ProviderFormField] = &filtered_all;
     let required_count = all_fields
         .iter()
@@ -474,7 +474,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
         let content_y = divider_y + 1;
         y_offset += 2;
 
-        let is_focused = app.providers.form.focused_field == field;
+        let is_focused = app.providers.form().focused_field == field;
         let label_style = if is_focused {
             theme::accent_bold()
         } else {
@@ -511,7 +511,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
             frame,
             content_area,
             field,
-            &app.providers.form,
+            app.providers.form(),
             provider_name,
         );
     }
@@ -526,7 +526,7 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
         let mode = if !expanded && visible_fields.len() < all_fields.len() {
             design::FormFooterMode::Collapsed
         } else {
-            design::FormFooterMode::Expanded(app.providers.form.focused_field.kind(provider_name))
+            design::FormFooterMode::Expanded(app.providers.form().focused_field.kind(provider_name))
         };
         design::form_save_footer(mode).render_with_status(frame, footer_area, app);
     }
@@ -806,7 +806,7 @@ fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
     let rows = build_region_rows(provider_name);
     let selected: std::collections::HashSet<&str> = app
         .providers
-        .form
+        .form()
         .regions
         .split(',')
         .map(|s| s.trim())

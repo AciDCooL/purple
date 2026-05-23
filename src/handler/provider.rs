@@ -524,10 +524,10 @@ fn warn_aws_token_format(app: &mut App, provider_name: &str) {
     if provider_name.parse::<ProviderKind>().ok() != Some(ProviderKind::Aws) {
         return;
     }
-    if app.providers.form.focused_field != crate::app::ProviderFormField::Token {
+    if app.providers.form_mut().focused_field != crate::app::ProviderFormField::Token {
         return;
     }
-    let token = app.providers.form.token.trim();
+    let token = app.providers.form_mut().token.trim();
     if token.is_empty() {
         return;
     }
@@ -560,7 +560,7 @@ pub(super) fn handle_provider_form_key(
     // Progressive disclosure: hide `VaultAddr` when no role is set so Tab
     // navigation skips the hidden field. `visible_fields` is a filtered
     // snapshot of `fields_for(provider)` taken once per key press.
-    let visible = app.providers.form.visible_fields(&provider_name);
+    let visible = app.providers.form_mut().visible_fields(&provider_name);
     let fields: &[crate::app::ProviderFormField] = &visible;
     // Field-kind predicates live on `ProviderFormField` so the rule is
     // enforced in one place. Note: `is_picker` here matches the full set
@@ -597,7 +597,7 @@ pub(super) fn handle_provider_form_key(
         }
         KeyCode::Tab | KeyCode::Down => {
             warn_aws_token_format(app, &provider_name);
-            if !app.providers.form.expanded {
+            if !app.providers.form_mut().expanded {
                 // Use visible_fields so the dynamic Label (issue #51) joins the
                 // navigation cycle alongside provider-static fields. Required
                 // fields are always first in the per-provider arrays, and the
@@ -613,36 +613,37 @@ pub(super) fn handle_provider_form_key(
                 let required = &all[..req_count];
                 if required.is_empty() {
                     // Fallback: no required fields, use full field list
-                    app.providers.form.focused_field =
-                        app.providers.form.focused_field.next(fields);
+                    app.providers.form_mut().focused_field =
+                        app.providers.form_mut().focused_field.next(fields);
                 } else {
                     let pos = required
                         .iter()
-                        .position(|f| *f == app.providers.form.focused_field);
+                        .position(|f| *f == app.providers.form_mut().focused_field);
                     if let Some(idx) = pos {
                         if idx + 1 < required.len() {
-                            app.providers.form.focused_field = required[idx + 1];
+                            app.providers.form_mut().focused_field = required[idx + 1];
                         } else if req_count < all.len() {
                             // Last required field: expand and focus first optional
-                            app.providers.form.expanded = true;
-                            app.providers.form.focused_field = all[req_count];
+                            app.providers.form_mut().expanded = true;
+                            app.providers.form_mut().focused_field = all[req_count];
                         } else {
                             // No optional fields, wrap
-                            app.providers.form.focused_field = required[0];
+                            app.providers.form_mut().focused_field = required[0];
                         }
                     } else {
-                        app.providers.form.focused_field =
-                            app.providers.form.focused_field.next(fields);
+                        app.providers.form_mut().focused_field =
+                            app.providers.form_mut().focused_field.next(fields);
                     }
                 }
             } else {
-                app.providers.form.focused_field = app.providers.form.focused_field.next(fields);
+                app.providers.form_mut().focused_field =
+                    app.providers.form_mut().focused_field.next(fields);
             }
-            app.providers.form.sync_cursor_to_end();
+            app.providers.form_mut().sync_cursor_to_end();
         }
         KeyCode::BackTab | KeyCode::Up => {
             warn_aws_token_format(app, &provider_name);
-            if !app.providers.form.expanded {
+            if !app.providers.form_mut().expanded {
                 let all = &visible;
                 let req_count = all
                     .iter()
@@ -653,39 +654,40 @@ pub(super) fn handle_provider_form_key(
                 let required = &all[..req_count];
                 if required.is_empty() {
                     // Fallback: no required fields, use full field list
-                    app.providers.form.focused_field =
-                        app.providers.form.focused_field.prev(fields);
+                    app.providers.form_mut().focused_field =
+                        app.providers.form_mut().focused_field.prev(fields);
                 } else {
                     let pos = required
                         .iter()
-                        .position(|f| *f == app.providers.form.focused_field);
+                        .position(|f| *f == app.providers.form_mut().focused_field);
                     if let Some(idx) = pos {
                         let prev_idx = if idx > 0 { idx - 1 } else { required.len() - 1 };
-                        app.providers.form.focused_field = required[prev_idx];
+                        app.providers.form_mut().focused_field = required[prev_idx];
                     } else {
                         // Focus is on a non-required field while collapsed; go to last required
-                        app.providers.form.focused_field = required[required.len() - 1];
+                        app.providers.form_mut().focused_field = required[required.len() - 1];
                     }
                 }
             } else {
-                app.providers.form.focused_field = app.providers.form.focused_field.prev(fields);
+                app.providers.form_mut().focused_field =
+                    app.providers.form_mut().focused_field.prev(fields);
             }
-            app.providers.form.sync_cursor_to_end();
+            app.providers.form_mut().sync_cursor_to_end();
         }
-        KeyCode::Left if app.providers.form.cursor_pos > 0 => {
-            app.providers.form.cursor_pos -= 1;
+        KeyCode::Left if app.providers.form_mut().cursor_pos > 0 => {
+            app.providers.form_mut().cursor_pos -= 1;
         }
         KeyCode::Right => {
-            let len = app.providers.form.focused_value().chars().count();
-            if app.providers.form.cursor_pos < len {
-                app.providers.form.cursor_pos += 1;
+            let len = app.providers.form_mut().focused_value().chars().count();
+            if app.providers.form_mut().cursor_pos < len {
+                app.providers.form_mut().cursor_pos += 1;
             }
         }
         KeyCode::Home => {
-            app.providers.form.cursor_pos = 0;
+            app.providers.form_mut().cursor_pos = 0;
         }
         KeyCode::End => {
-            app.providers.form.sync_cursor_to_end();
+            app.providers.form_mut().sync_cursor_to_end();
         }
         KeyCode::Enter => {
             // INVARIANT: Enter ALWAYS submits the form, regardless of focused
@@ -696,24 +698,26 @@ pub(super) fn handle_provider_form_key(
         // Order: toggle first, picker second (no overlap, but explicit
         // ordering protects against future ProviderFormField additions).
         KeyCode::Char(' ')
-            if app.providers.form.focused_field == crate::app::ProviderFormField::VerifyTls =>
+            if app.providers.form_mut().focused_field
+                == crate::app::ProviderFormField::VerifyTls =>
         {
-            app.providers.form.verify_tls = !app.providers.form.verify_tls;
+            app.providers.form_mut().verify_tls = !app.providers.form_mut().verify_tls;
         }
         KeyCode::Char(' ')
-            if app.providers.form.focused_field == crate::app::ProviderFormField::AutoSync =>
+            if app.providers.form_mut().focused_field
+                == crate::app::ProviderFormField::AutoSync =>
         {
-            app.providers.form.auto_sync = !app.providers.form.auto_sync;
+            app.providers.form_mut().auto_sync = !app.providers.form_mut().auto_sync;
         }
         // Empty-field gate: same rationale as host_form — once the user
         // has typed anything, Space inserts a literal space so custom
         // identity paths (e.g. `~/My Keys/id_rsa`) and free-form region
         // lists work. On an empty picker field, Space opens the picker.
         KeyCode::Char(' ')
-            if is_picker(app.providers.form.focused_field)
-                && app.providers.form.focused_value().is_empty() =>
+            if is_picker(app.providers.form_mut().focused_field)
+                && app.providers.form_mut().focused_value().is_empty() =>
         {
-            let f = app.providers.form.focused_field;
+            let f = app.providers.form_mut().focused_field;
             if f == crate::app::ProviderFormField::IdentityFile {
                 app.open_key_picker();
             } else if f == crate::app::ProviderFormField::Regions {
@@ -725,7 +729,7 @@ pub(super) fn handle_provider_form_key(
             // every other field, including picker fields, accepts free-text
             // typing so users can supply custom paths or region values not
             // surfaced by the picker. Matches the host form's Char arm.
-            let f = app.providers.form.focused_field;
+            let f = app.providers.form_mut().focused_field;
             if is_toggle(f) {
                 // Nothing to do.
             } else if f == crate::app::ProviderFormField::Label {
@@ -734,17 +738,17 @@ pub(super) fn handle_provider_form_key(
                 // validation. Reject silently like the migration screen
                 // (handler/provider.rs:502) does for the same constraints.
                 let allowed = c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
-                if allowed && app.providers.form.label.len() < 32 {
-                    app.providers.form.insert_char(c);
+                if allowed && app.providers.form_mut().label.len() < 32 {
+                    app.providers.form_mut().insert_char(c);
                 }
             } else {
-                app.providers.form.insert_char(c);
+                app.providers.form_mut().insert_char(c);
             }
         }
         KeyCode::Backspace => {
-            let f = app.providers.form.focused_field;
+            let f = app.providers.form_mut().focused_field;
             if !is_toggle(f) {
-                app.providers.form.delete_char_before_cursor();
+                app.providers.form_mut().delete_char_before_cursor();
             }
         }
         _ => {}
@@ -770,11 +774,11 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     // save would fail downstream in validate_label. Reject early with a
     // pointed message so the user is not surprised by a "label is empty"
     // toast at the end of a long form.
-    if app.providers.form.label_entry {
-        let typed = app.providers.form.label.trim().to_string();
+    if app.providers.form_mut().label_entry {
+        let typed = app.providers.form_mut().label.trim().to_string();
         if let Err(e) = providers::config::validate_label(&typed) {
             app.notify_error(crate::messages::label_invalid(&e));
-            app.providers.form.focused_field = crate::app::ProviderFormField::Label;
+            app.providers.form_mut().focused_field = crate::app::ProviderFormField::Label;
             return;
         }
         // Reject collisions explicitly so the user understands why the save
@@ -783,7 +787,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
             providers::config::ProviderConfigId::labeled(provider_name.clone(), typed.clone());
         if app.providers.config().section_by_id(&candidate).is_some() {
             app.notify_error(crate::messages::label_already_in_use(&typed));
-            app.providers.form.focused_field = crate::app::ProviderFormField::Label;
+            app.providers.form_mut().focused_field = crate::app::ProviderFormField::Label;
             return;
         }
         // The form opened with `alias_prefix = <short_label>` because we did
@@ -795,8 +799,8 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         let short = providers::get_provider(provider_name.as_str())
             .map(|p| p.short_label().to_string())
             .unwrap_or_else(|| provider_name.clone());
-        if app.providers.form.alias_prefix.trim() == short {
-            app.providers.form.alias_prefix = format!("{}-{}", short, typed);
+        if app.providers.form_mut().alias_prefix.trim() == short {
+            app.providers.form_mut().alias_prefix = format!("{}-{}", short, typed);
         }
         form_id = candidate;
     }
@@ -808,26 +812,30 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
 
     // Reject control characters in all fields (prevents INI injection)
-    let pf_fields = [
-        (&app.providers.form.url, "URL"),
-        (&app.providers.form.token, "Token"),
-        (&app.providers.form.alias_prefix, "Alias Prefix"),
-        (&app.providers.form.user, "User"),
-        (&app.providers.form.identity_file, "Identity File"),
-        (&app.providers.form.profile, "Profile"),
-        (&app.providers.form.project, "Project ID"),
-        (&app.providers.form.regions, "Regions"),
-    ];
-    for (value, name) in &pf_fields {
-        if value.chars().any(|c| c.is_control()) {
-            app.notify_warning(crate::messages::contains_control_chars(name));
-            return;
-        }
+    let control_char_field = {
+        let pf = app.providers.form();
+        [
+            (&pf.url, "URL"),
+            (&pf.token, "Token"),
+            (&pf.alias_prefix, "Alias Prefix"),
+            (&pf.user, "User"),
+            (&pf.identity_file, "Identity File"),
+            (&pf.profile, "Profile"),
+            (&pf.project, "Project ID"),
+            (&pf.regions, "Regions"),
+        ]
+        .into_iter()
+        .find(|(value, _)| value.chars().any(|c| c.is_control()))
+        .map(|(_, name)| name)
+    };
+    if let Some(name) = control_char_field {
+        app.notify_warning(crate::messages::contains_control_chars(name));
+        return;
     }
 
     // Proxmox requires a URL
     if kind == Some(ProviderKind::Proxmox) {
-        let url = app.providers.form.url.trim();
+        let url = app.providers.form_mut().url.trim();
         if url.is_empty() {
             app.notify_warning(crate::messages::URL_REQUIRED_PROXMOX);
             return;
@@ -839,9 +847,9 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
 
     // AWS allows empty token when profile is set (credentials from ~/.aws/credentials)
-    if app.providers.form.token.trim().is_empty()
+    if app.providers.form_mut().token.trim().is_empty()
         && kind != Some(ProviderKind::Tailscale)
-        && (kind != Some(ProviderKind::Aws) || app.providers.form.profile.trim().is_empty())
+        && (kind != Some(ProviderKind::Aws) || app.providers.form_mut().profile.trim().is_empty())
     {
         let hint = if kind == Some(ProviderKind::Gcp) {
             crate::messages::PROVIDER_TOKEN_REQUIRED_GCP.to_string()
@@ -856,28 +864,29 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
 
     // GCP requires a project ID
-    if kind == Some(ProviderKind::Gcp) && app.providers.form.project.trim().is_empty() {
+    if kind == Some(ProviderKind::Gcp) && app.providers.form_mut().project.trim().is_empty() {
         app.notify_warning(crate::messages::PROJECT_REQUIRED_GCP);
         return;
     }
 
     // Oracle requires a compartment OCID
-    if kind == Some(ProviderKind::Oracle) && app.providers.form.compartment.trim().is_empty() {
+    if kind == Some(ProviderKind::Oracle) && app.providers.form_mut().compartment.trim().is_empty()
+    {
         app.notify_warning(crate::messages::COMPARTMENT_REQUIRED_OCI);
         return;
     }
 
     // AWS/Scaleway require at least one region/zone
-    if kind == Some(ProviderKind::Aws) && app.providers.form.regions.trim().is_empty() {
+    if kind == Some(ProviderKind::Aws) && app.providers.form_mut().regions.trim().is_empty() {
         app.notify_warning(crate::messages::REGIONS_REQUIRED_AWS);
         return;
     }
-    if kind == Some(ProviderKind::Scaleway) && app.providers.form.regions.trim().is_empty() {
+    if kind == Some(ProviderKind::Scaleway) && app.providers.form_mut().regions.trim().is_empty() {
         app.notify_warning(crate::messages::ZONES_REQUIRED_SCALEWAY);
         return;
     }
     if kind == Some(ProviderKind::Azure) {
-        let subs = app.providers.form.regions.trim();
+        let subs = app.providers.form().regions.trim().to_string();
         if subs.is_empty() {
             app.notify_warning(crate::messages::SUBSCRIPTIONS_REQUIRED_AZURE);
             return;
@@ -890,15 +899,15 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         }
     }
 
-    let token = app.providers.form.token.trim().to_string();
-    let alias_prefix = app.providers.form.alias_prefix.trim().to_string();
+    let token = app.providers.form_mut().token.trim().to_string();
+    let alias_prefix = app.providers.form_mut().alias_prefix.trim().to_string();
     if crate::ssh_config::model::is_host_pattern(&alias_prefix) {
         app.notify_warning(crate::messages::ALIAS_PREFIX_INVALID);
         return;
     }
 
     let user = {
-        let u = app.providers.form.user.trim();
+        let u = app.providers.form_mut().user.trim();
         if u.is_empty() {
             "root".to_string()
         } else {
@@ -910,7 +919,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         return;
     }
 
-    let vault_role_trimmed = app.providers.form.vault_role.trim();
+    let vault_role_trimmed = app.providers.form_mut().vault_role.trim();
     if !vault_role_trimmed.is_empty() && !crate::vault_ssh::is_valid_role(vault_role_trimmed) {
         app.notify_warning(crate::messages::VAULT_ROLE_FORMAT);
         return;
@@ -921,16 +930,16 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         token: token.clone(),
         alias_prefix,
         user,
-        identity_file: app.providers.form.identity_file.trim().to_string(),
-        url: app.providers.form.url.trim().to_string(),
-        verify_tls: app.providers.form.verify_tls,
-        auto_sync: app.providers.form.auto_sync,
-        profile: app.providers.form.profile.trim().to_string(),
-        regions: app.providers.form.regions.trim().to_string(),
-        project: app.providers.form.project.trim().to_string(),
-        compartment: app.providers.form.compartment.trim().to_string(),
-        vault_role: app.providers.form.vault_role.trim().to_string(),
-        vault_addr: app.providers.form.vault_addr.trim().to_string(),
+        identity_file: app.providers.form_mut().identity_file.trim().to_string(),
+        url: app.providers.form_mut().url.trim().to_string(),
+        verify_tls: app.providers.form_mut().verify_tls,
+        auto_sync: app.providers.form_mut().auto_sync,
+        profile: app.providers.form_mut().profile.trim().to_string(),
+        regions: app.providers.form_mut().regions.trim().to_string(),
+        project: app.providers.form_mut().project.trim().to_string(),
+        compartment: app.providers.form_mut().compartment.trim().to_string(),
+        vault_role: app.providers.form_mut().vault_role.trim().to_string(),
+        vault_addr: app.providers.form_mut().vault_addr.trim().to_string(),
     };
 
     // Snapshot for rollback. When migrating from bare to labeled, we have
@@ -1177,12 +1186,12 @@ mod labeled_add_tests {
         open_add_config_flow(&mut app, "proxmox");
         assert!(matches!(app.screen, Screen::ProviderForm { ref id }
                 if id.provider == "proxmox" && id.label.as_deref() == Some("")));
-        assert!(app.providers.form.label_entry);
+        assert!(app.providers.form_mut().label_entry);
         assert_eq!(
-            app.providers.form.focused_field,
+            app.providers.form_mut().focused_field,
             crate::app::ProviderFormField::Label
         );
-        assert_eq!(app.providers.form.label, "");
+        assert_eq!(app.providers.form_mut().label, "");
     }
 
     #[test]
@@ -1211,7 +1220,7 @@ mod labeled_add_tests {
         open_add_config_flow(&mut app, "proxmox");
         assert!(matches!(app.screen, Screen::ProviderForm { ref id }
                 if id.provider == "proxmox" && id.label.is_none()));
-        assert!(!app.providers.form.label_entry);
+        assert!(!app.providers.form_mut().label_entry);
     }
 
     #[test]
@@ -1224,9 +1233,9 @@ mod labeled_add_tests {
             .config_mut()
             .set_section(proxmox_section(Some("server1")));
         app.open_provider_form(ProviderConfigId::labeled("proxmox", "server1"));
-        assert!(!app.providers.form.label_entry);
+        assert!(!app.providers.form_mut().label_entry);
         assert_ne!(
-            app.providers.form.focused_field,
+            app.providers.form_mut().focused_field,
             crate::app::ProviderFormField::Label
         );
     }
@@ -1265,7 +1274,7 @@ mod labeled_add_tests {
         handle_provider_form_key(&mut app, k(KeyCode::Char('A')), &tx);
         handle_provider_form_key(&mut app, k(KeyCode::Char(' ')), &tx);
         handle_provider_form_key(&mut app, k(KeyCode::Char('@')), &tx);
-        assert_eq!(app.providers.form.label, "work");
+        assert_eq!(app.providers.form_mut().label, "work");
     }
 
     #[test]
@@ -1280,7 +1289,7 @@ mod labeled_add_tests {
         for _ in 0..40 {
             handle_provider_form_key(&mut app, k(KeyCode::Char('a')), &tx);
         }
-        assert_eq!(app.providers.form.label.len(), 32);
+        assert_eq!(app.providers.form_mut().label.len(), 32);
     }
 
     #[test]
@@ -1296,7 +1305,7 @@ mod labeled_add_tests {
         handle_provider_form_key(&mut app, k(KeyCode::Enter), &tx);
         assert!(matches!(app.screen, Screen::ProviderForm { .. }));
         assert_eq!(
-            app.providers.form.focused_field,
+            app.providers.form_mut().focused_field,
             crate::app::ProviderFormField::Label
         );
         // Original section still alone in the config.
@@ -1329,14 +1338,14 @@ mod labeled_add_tests {
         // Drive focus through the form rather than relying on Tab navigation
         // semantics so the test verifies persistence, not collapsed-mode key
         // routing (covered separately).
-        app.providers.form.expanded = true;
-        app.providers.form.focused_field = crate::app::ProviderFormField::Url;
-        app.providers.form.sync_cursor_to_end();
+        app.providers.form_mut().expanded = true;
+        app.providers.form_mut().focused_field = crate::app::ProviderFormField::Url;
+        app.providers.form_mut().sync_cursor_to_end();
         for c in "https://pve2.example.com:8006".chars() {
             handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
         }
-        app.providers.form.focused_field = crate::app::ProviderFormField::Token;
-        app.providers.form.sync_cursor_to_end();
+        app.providers.form_mut().focused_field = crate::app::ProviderFormField::Token;
+        app.providers.form_mut().sync_cursor_to_end();
         for c in "user@pam!t=secret".chars() {
             handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
         }
@@ -1352,16 +1361,16 @@ mod labeled_add_tests {
         assert!(
             names.contains(&"proxmox:server1".to_string()),
             "got {names:?} (label={:?} url={:?} token_len={})",
-            app.providers.form.label,
-            app.providers.form.url,
-            app.providers.form.token.len()
+            app.providers.form().label,
+            app.providers.form().url,
+            app.providers.form().token.len()
         );
         assert!(
             names.contains(&"proxmox:server2".to_string()),
             "got {names:?} (label={:?} url={:?} token_len={})",
-            app.providers.form.label,
-            app.providers.form.url,
-            app.providers.form.token.len()
+            app.providers.form().label,
+            app.providers.form().url,
+            app.providers.form().token.len()
         );
     }
 
@@ -1407,19 +1416,19 @@ mod labeled_add_tests {
         // Press `a` and re-add `server2`. With one labeled config remaining,
         // the `_ =>` branch fires and label-entry mode opens.
         open_add_config_flow(&mut app, "proxmox");
-        assert!(app.providers.form.label_entry);
+        assert!(app.providers.form_mut().label_entry);
         let (tx, _rx) = mpsc::channel();
         for c in "server2".chars() {
             handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
         }
-        app.providers.form.expanded = true;
-        app.providers.form.focused_field = crate::app::ProviderFormField::Url;
-        app.providers.form.sync_cursor_to_end();
+        app.providers.form_mut().expanded = true;
+        app.providers.form_mut().focused_field = crate::app::ProviderFormField::Url;
+        app.providers.form_mut().sync_cursor_to_end();
         for c in "https://pve-readd.example.com:8006".chars() {
             handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
         }
-        app.providers.form.focused_field = crate::app::ProviderFormField::Token;
-        app.providers.form.sync_cursor_to_end();
+        app.providers.form_mut().focused_field = crate::app::ProviderFormField::Token;
+        app.providers.form_mut().sync_cursor_to_end();
         for c in "user@pam!t=secret".chars() {
             handle_provider_form_key(&mut app, k(KeyCode::Char(c)), &tx);
         }
@@ -1470,7 +1479,7 @@ mod labeled_add_tests {
         handle_provider_form_key(&mut app, k(KeyCode::Enter), &tx);
         assert!(matches!(app.screen, Screen::ProviderForm { .. }));
         assert_eq!(
-            app.providers.form.focused_field,
+            app.providers.form_mut().focused_field,
             crate::app::ProviderFormField::Label
         );
         // No duplicate inserted.

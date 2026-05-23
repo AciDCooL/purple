@@ -14,7 +14,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         _ => return,
     };
 
-    let form = match &app.snippets.param_form {
+    let form = match app.snippets.param_form() {
         Some(f) => f,
         None => return,
     };
@@ -49,11 +49,11 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let param_count = form.params.len();
 
     // Update form state so the handler uses the correct window size
-    if let Some(ref mut f) = app.snippets.param_form {
+    if let Some(f) = app.snippets.param_form_mut() {
         f.visible_count = actual_visible.max(1);
     }
     // Re-borrow form immutably after mutation
-    let form = match &app.snippets.param_form {
+    let form = match app.snippets.param_form() {
         Some(f) => f,
         None => return,
     };

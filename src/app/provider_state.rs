@@ -105,10 +105,7 @@ impl SyncRecord {
 /// Pure state container.
 pub struct ProviderState {
     pub(in crate::app) config: ProviderConfig,
-    // Held at `pub(crate)` until the dedicated forms seal lands; the
-    // provider form has too many per-field mutations to wrap behind
-    // methods in this commit.
-    pub(crate) form: ProviderFormFields,
+    pub(in crate::app) form: ProviderFormFields,
     pub(in crate::app) syncing: HashMap<String, Arc<AtomicBool>>,
     /// Names of providers that completed during this sync batch.
     pub(in crate::app) sync_done: Vec<String>,
@@ -273,6 +270,14 @@ impl ProviderState {
 
     pub fn config_mut(&mut self) -> &mut ProviderConfig {
         &mut self.config
+    }
+
+    pub fn form(&self) -> &ProviderFormFields {
+        &self.form
+    }
+
+    pub fn form_mut(&mut self) -> &mut ProviderFormFields {
+        &mut self.form
     }
 
     pub fn syncing(&self) -> &HashMap<String, Arc<AtomicBool>> {

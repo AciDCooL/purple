@@ -85,7 +85,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     // container actions) instead of inline footer prompts under the
     // parent overlay.
     let footer_area = design::render_overlay_footer(frame, area);
-    if app.tunnels.pending_delete.is_some() {
+    if app.tunnels.pending_delete().is_some() {
         design::render_destructive_popup(
             frame,
             crate::messages::CONFIRM_TUNNEL_DELETE_TITLE,

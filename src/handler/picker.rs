@@ -45,21 +45,25 @@ pub(super) fn handle_password_picker(app: &mut App, key: KeyEvent) {
                     let is_custom_cmd = source.label == "Custom command";
                     let is_prefix = source.value.ends_with(':') || source.value.ends_with("//");
                     if is_none {
-                        app.forms.host.apply_password_source(String::new(), false);
+                        app.forms
+                            .host_mut()
+                            .apply_password_source(String::new(), false);
                         app.notify(crate::messages::PASSWORD_SOURCE_CLEARED);
                     } else if is_custom_cmd {
-                        app.forms.host.apply_password_source(String::new(), true);
+                        app.forms
+                            .host_mut()
+                            .apply_password_source(String::new(), true);
                         app.notify(crate::messages::ASKPASS_CUSTOM_COMMAND_HINT);
                         needs_more_input = true;
                     } else if is_prefix {
                         app.forms
-                            .host
+                            .host_mut()
                             .apply_password_source(source.value.to_string(), true);
                         app.notify(crate::messages::complete_path(source.label));
                         needs_more_input = true;
                     } else {
                         app.forms
-                            .host
+                            .host_mut()
                             .apply_password_source(source.value.to_string(), false);
                         app.notify(crate::messages::password_source_set(source.label));
                     }
@@ -90,11 +94,11 @@ pub(super) fn handle_key_picker_shared(app: &mut App, key: KeyEvent, for_provide
             if let Some(index) = app.ui.key_picker.list.selected() {
                 if let Some(key_info) = app.keys.list().get(index) {
                     if for_provider {
-                        app.providers.form.identity_file = key_info.display_path.clone();
-                        app.providers.form.sync_cursor_to_end();
+                        app.providers.form_mut().identity_file = key_info.display_path.clone();
+                        app.providers.form_mut().sync_cursor_to_end();
                     } else {
-                        app.forms.host.identity_file = key_info.display_path.clone();
-                        app.forms.host.sync_cursor_to_end();
+                        app.forms.host_mut().identity_file = key_info.display_path.clone();
+                        app.forms.host_mut().sync_cursor_to_end();
                     }
                     app.notify(crate::messages::key_selected(&key_info.name));
                 }
@@ -126,8 +130,8 @@ pub(super) fn handle_proxyjump_picker(app: &mut App, key: KeyEvent) {
                 if let Some(crate::app::ProxyJumpCandidate::Host { alias, .. }) =
                     candidates.get(index)
                 {
-                    app.forms.host.proxy_jump = alias.clone();
-                    app.forms.host.sync_cursor_to_end();
+                    app.forms.host_mut().proxy_jump = alias.clone();
+                    app.forms.host_mut().sync_cursor_to_end();
                     app.notify(crate::messages::proxy_jump_set(alias));
                     app.close_proxyjump_picker();
                     try_auto_submit_after_picker(app);
@@ -154,8 +158,8 @@ pub(super) fn handle_vault_role_picker(app: &mut App, key: KeyEvent) {
             let candidates = app.vault_role_candidates();
             if let Some(index) = app.ui.vault_role_picker.list.selected() {
                 if let Some(role) = candidates.get(index) {
-                    app.forms.host.vault_ssh = role.clone();
-                    app.forms.host.sync_cursor_to_end();
+                    app.forms.host_mut().vault_ssh = role.clone();
+                    app.forms.host_mut().sync_cursor_to_end();
                     app.notify(crate::messages::vault_role_set(role));
                 }
             }
@@ -167,7 +171,7 @@ pub(super) fn handle_vault_role_picker(app: &mut App, key: KeyEvent) {
 
 /// Auto-submit the host form after a picker selection if all required fields are filled.
 pub(super) fn try_auto_submit_after_picker(app: &mut App) {
-    if !app.forms.host.alias.is_empty() && !app.forms.host.hostname.is_empty() {
+    if !app.forms.host_mut().alias.is_empty() && !app.forms.host_mut().hostname.is_empty() {
         super::host_form::submit_form(app);
     }
 }

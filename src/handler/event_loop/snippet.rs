@@ -18,7 +18,7 @@ pub(crate) fn handle_snippet_host_done(
         app.record_key_use(&alias, crate::key_activity::now_secs());
         app.apply_sort();
     }
-    if let Some(ref mut state) = app.snippets.output {
+    if let Some(state) = app.snippets.output_mut() {
         if state.run_id == run_id {
             state.results.push(app::SnippetHostOutput {
                 alias,
@@ -32,7 +32,7 @@ pub(crate) fn handle_snippet_host_done(
 
 /// Handle `AppEvent::SnippetProgress`.
 pub(crate) fn handle_snippet_progress(app: &mut App, run_id: u64, completed: usize, total: usize) {
-    if let Some(ref mut state) = app.snippets.output {
+    if let Some(state) = app.snippets.output_mut() {
         if state.run_id == run_id {
             state.completed = completed;
             state.total = total;
@@ -42,7 +42,7 @@ pub(crate) fn handle_snippet_progress(app: &mut App, run_id: u64, completed: usi
 
 /// Handle `AppEvent::SnippetAllDone`.
 pub(crate) fn handle_snippet_all_done(app: &mut App, run_id: u64) {
-    if let Some(ref mut state) = app.snippets.output {
+    if let Some(state) = app.snippets.output_mut() {
         if state.run_id == run_id {
             state.all_done = true;
         }

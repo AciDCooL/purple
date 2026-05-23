@@ -203,7 +203,7 @@ fn nth_row(app: &App, target: usize) -> Option<(String, TunnelRule)> {
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     // Pending delete confirmation is exclusive: only y/n/Esc are handled,
     // every other key is ignored so a stray press cannot silently cancel.
-    if app.tunnels.pending_delete.is_some() {
+    if app.tunnels.pending_delete().is_some() {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => confirm_delete_selected(app),
             super::ConfirmAction::No => {

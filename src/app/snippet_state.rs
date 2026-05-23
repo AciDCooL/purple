@@ -8,21 +8,13 @@ use crate::snippet::{Snippet, SnippetStore};
 /// baseline and the pending-delete index. Pure state container.
 pub struct SnippetState {
     pub(in crate::app) store: SnippetStore,
-    // Held at `pub(crate)` until the dedicated forms seal lands; the
-    // SnippetForm has too many per-field mutations to wrap behind
-    // methods in this commit.
-    pub(crate) form: SnippetForm,
+    pub(in crate::app) form: SnippetForm,
     pub(in crate::app) pending: Option<(Snippet, Vec<String>)>,
-    // Held at `pub(crate)` because the output state is mutated through
-    // multi-line patterns the forthcoming forms seal will route through
-    // dedicated methods.
-    pub(crate) output: Option<SnippetOutputState>,
-    pub(crate) param_form: Option<SnippetParamFormState>,
+    pub(in crate::app) output: Option<SnippetOutputState>,
+    pub(in crate::app) param_form: Option<SnippetParamFormState>,
     pub(in crate::app) pending_terminal: bool,
     pub(in crate::app) form_baseline: Option<SnippetFormBaseline>,
-    // Held at `pub(crate)` so `if let Some(idx) = ...pending_delete`
-    // multi-line patterns continue to compile.
-    pub(crate) pending_delete: Option<usize>,
+    pub(in crate::app) pending_delete: Option<usize>,
 }
 
 impl Default for SnippetState {
@@ -47,6 +39,50 @@ impl SnippetState {
 
     pub fn store_mut(&mut self) -> &mut SnippetStore {
         &mut self.store
+    }
+
+    pub fn form(&self) -> &SnippetForm {
+        &self.form
+    }
+
+    pub fn form_mut(&mut self) -> &mut SnippetForm {
+        &mut self.form
+    }
+
+    pub fn output(&self) -> Option<&SnippetOutputState> {
+        self.output.as_ref()
+    }
+
+    pub fn output_mut(&mut self) -> Option<&mut SnippetOutputState> {
+        self.output.as_mut()
+    }
+
+    pub fn set_output(&mut self, output: Option<SnippetOutputState>) {
+        self.output = output;
+    }
+
+    pub fn take_output(&mut self) -> Option<SnippetOutputState> {
+        self.output.take()
+    }
+
+    pub fn param_form(&self) -> Option<&SnippetParamFormState> {
+        self.param_form.as_ref()
+    }
+
+    pub fn param_form_mut(&mut self) -> Option<&mut SnippetParamFormState> {
+        self.param_form.as_mut()
+    }
+
+    pub fn set_param_form(&mut self, param_form: Option<SnippetParamFormState>) {
+        self.param_form = param_form;
+    }
+
+    pub fn pending_delete(&self) -> Option<usize> {
+        self.pending_delete
+    }
+
+    pub fn take_pending_delete(&mut self) -> Option<usize> {
+        self.pending_delete.take()
     }
 
     pub fn pending(&self) -> Option<&(Snippet, Vec<String>)> {

@@ -8,7 +8,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     // keybindings (j/k/Space/Enter). Esc cancels the input without closing
     // the editor. The new-tag-input early-return runs BEFORE the discard
     // confirm so typing-mode Esc does not trigger the dirty check.
-    if app.forms.bulk_tag_editor.new_tag_input.is_some() {
+    if app.forms.bulk_tag_editor_mut().new_tag_input.is_some() {
         handle_new_tag_input(app, key);
         return;
     }
@@ -22,7 +22,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             super::ConfirmAction::Yes => {
                 app.forms.dismiss_discard_confirm();
                 app.set_screen(Screen::HostList);
-                app.forms.bulk_tag_editor = BulkTagEditorState::default();
+                *app.forms.bulk_tag_editor_mut() = BulkTagEditorState::default();
             }
             super::ConfirmAction::No => {
                 app.forms.dismiss_discard_confirm();
@@ -37,11 +37,11 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             // Stakes test: tag edits are non-trivial work (typing new tags,
             // deciding add/remove per row across N hosts). Warn before
             // discarding.
-            if app.forms.bulk_tag_editor.is_dirty() {
+            if app.forms.bulk_tag_editor_mut().is_dirty() {
                 app.forms.request_discard_confirm();
             } else {
                 app.set_screen(Screen::HostList);
-                app.forms.bulk_tag_editor = BulkTagEditorState::default();
+                *app.forms.bulk_tag_editor_mut() = BulkTagEditorState::default();
             }
         }
         KeyCode::Char('?') => {
@@ -63,13 +63,13 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             app.bulk_tag_editor_cycle_current();
         }
         KeyCode::Char('+') => {
-            app.forms.bulk_tag_editor.new_tag_input = Some(String::new());
-            app.forms.bulk_tag_editor.new_tag_cursor = 0;
+            app.forms.bulk_tag_editor_mut().new_tag_input = Some(String::new());
+            app.forms.bulk_tag_editor_mut().new_tag_cursor = 0;
         }
         KeyCode::Enter => match app.bulk_tag_apply() {
             Ok(result) => {
                 app.set_screen(Screen::HostList);
-                app.forms.bulk_tag_editor = BulkTagEditorState::default();
+                *app.forms.bulk_tag_editor_mut() = BulkTagEditorState::default();
                 let msg = format_apply_status(&result);
                 if !msg.is_empty() {
                     app.notify(msg);
@@ -102,45 +102,58 @@ fn handle_new_tag_input(app: &mut App, key: KeyEvent) {
             app.bulk_tag_editor_commit_new_tag();
         }
         KeyCode::Esc => {
-            app.forms.bulk_tag_editor.new_tag_input = None;
-            app.forms.bulk_tag_editor.new_tag_cursor = 0;
+            app.forms.bulk_tag_editor_mut().new_tag_input = None;
+            app.forms.bulk_tag_editor_mut().new_tag_cursor = 0;
         }
-        KeyCode::Left if app.forms.bulk_tag_editor.new_tag_cursor > 0 => {
-            app.forms.bulk_tag_editor.new_tag_cursor -= 1;
+        KeyCode::Left if app.forms.bulk_tag_editor_mut().new_tag_cursor > 0 => {
+            app.forms.bulk_tag_editor_mut().new_tag_cursor -= 1;
         }
         KeyCode::Right => {
-            if let Some(ref input) = app.forms.bulk_tag_editor.new_tag_input {
-                if app.forms.bulk_tag_editor.new_tag_cursor < input.chars().count() {
-                    app.forms.bulk_tag_editor.new_tag_cursor += 1;
+            let len = app
+                .forms
+                .bulk_tag_editor()
+                .new_tag_input
+                .as_ref()
+                .map(|s| s.chars().count());
+            if let Some(len) = len {
+                if app.forms.bulk_tag_editor().new_tag_cursor < len {
+                    app.forms.bulk_tag_editor_mut().new_tag_cursor += 1;
                 }
             }
         }
         KeyCode::Home => {
-            app.forms.bulk_tag_editor.new_tag_cursor = 0;
+            app.forms.bulk_tag_editor_mut().new_tag_cursor = 0;
         }
         KeyCode::End => {
-            if let Some(ref input) = app.forms.bulk_tag_editor.new_tag_input {
-                app.forms.bulk_tag_editor.new_tag_cursor = input.chars().count();
+            let len = app
+                .forms
+                .bulk_tag_editor()
+                .new_tag_input
+                .as_ref()
+                .map(|s| s.chars().count());
+            if let Some(len) = len {
+                app.forms.bulk_tag_editor_mut().new_tag_cursor = len;
             }
         }
-        KeyCode::Backspace if app.forms.bulk_tag_editor.new_tag_cursor > 0 => {
-            if let Some(ref mut input) = app.forms.bulk_tag_editor.new_tag_input {
-                let byte_pos =
-                    crate::app::char_to_byte_pos(input, app.forms.bulk_tag_editor.new_tag_cursor);
-                let prev = crate::app::char_to_byte_pos(
-                    input,
-                    app.forms.bulk_tag_editor.new_tag_cursor - 1,
-                );
+        KeyCode::Backspace if app.forms.bulk_tag_editor().new_tag_cursor > 0 => {
+            let cursor = app.forms.bulk_tag_editor().new_tag_cursor;
+            let mut drained = false;
+            if let Some(ref mut input) = app.forms.bulk_tag_editor_mut().new_tag_input {
+                let byte_pos = crate::app::char_to_byte_pos(input, cursor);
+                let prev = crate::app::char_to_byte_pos(input, cursor - 1);
                 input.drain(prev..byte_pos);
-                app.forms.bulk_tag_editor.new_tag_cursor -= 1;
+                drained = true;
+            }
+            if drained {
+                app.forms.bulk_tag_editor_mut().new_tag_cursor -= 1;
             }
         }
         KeyCode::Char(c) => {
-            if let Some(ref mut input) = app.forms.bulk_tag_editor.new_tag_input {
-                let byte_pos =
-                    crate::app::char_to_byte_pos(input, app.forms.bulk_tag_editor.new_tag_cursor);
+            let cursor = app.forms.bulk_tag_editor().new_tag_cursor;
+            if let Some(ref mut input) = app.forms.bulk_tag_editor_mut().new_tag_input {
+                let byte_pos = crate::app::char_to_byte_pos(input, cursor);
                 input.insert(byte_pos, c);
-                app.forms.bulk_tag_editor.new_tag_cursor += 1;
+                app.forms.bulk_tag_editor_mut().new_tag_cursor += 1;
             }
         }
         _ => {}

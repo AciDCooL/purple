@@ -780,7 +780,7 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: Rect, visible_count: us
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &mut App, rows: &[TunnelRow]) {
-    if app.tunnels.pending_delete.is_some() {
+    if app.tunnels.pending_delete().is_some() {
         // Destructive: render the centred popup so the affordance
         // matches host delete and the other danger confirms instead of
         // a footer prompt under the overview.

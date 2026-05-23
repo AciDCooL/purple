@@ -20,7 +20,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         _ => return,
     };
 
-    let is_dynamic = app.tunnels.form.tunnel_type == TunnelType::Dynamic;
+    let is_dynamic = app.tunnels.form().tunnel_type == TunnelType::Dynamic;
 
     let fields: Vec<TunnelFormField> = if is_dynamic {
         vec![TunnelFormField::Type, TunnelFormField::BindPort]
@@ -50,7 +50,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let divider_y = design::form_divider_y(inner, i);
         let content_y = divider_y + 1;
 
-        let is_focused = app.tunnels.form.focused_field == field;
+        let is_focused = app.tunnels.form().focused_field == field;
         let label_style = if is_focused {
             theme::accent_bold()
         } else {
@@ -67,7 +67,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         );
 
         let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
-        render_field_content(frame, content_area, field, &app.tunnels.form);
+        render_field_content(frame, content_area, field, app.tunnels.form());
     }
 
     // Footer below the block. Tunnel form has a single Toggle field (Type)
@@ -78,7 +78,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     if app.forms.is_discard_pending() {
         design::render_discard_prompt(frame, footer_area, app);
     } else {
-        let kind = if app.tunnels.form.focused_field == TunnelFormField::Type {
+        let kind = if app.tunnels.form().focused_field == TunnelFormField::Type {
             design::FieldKind::Toggle
         } else {
             design::FieldKind::Text

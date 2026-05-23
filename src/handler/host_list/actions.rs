@@ -20,7 +20,7 @@ pub(super) fn clone_selected(app: &mut App) {
         let mut form = HostForm::from_pattern_entry(pattern);
         form.alias.clear();
         form.cursor_pos = 0;
-        app.forms.host = form;
+        *app.forms.host_mut() = form;
         app.set_screen(Screen::AddHost);
         app.capture_form_mtime();
         app.capture_form_baseline();
@@ -48,7 +48,7 @@ pub(super) fn clone_selected(app: &mut App) {
         } else if vault_cleared {
             app.notify(crate::messages::CLONED_VAULT_CLEARED);
         }
-        app.forms.host = form;
+        *app.forms.host_mut() = form;
         app.set_screen(Screen::AddHost);
         app.capture_form_mtime();
         app.capture_form_baseline();

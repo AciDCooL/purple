@@ -35,7 +35,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let divider_y = design::form_divider_y(inner, i);
         let content_y = divider_y + 1;
 
-        let is_focused = app.snippets.form.focused_field == field;
+        let is_focused = app.snippets.form().focused_field == field;
         let label_style = if is_focused {
             theme::accent_bold()
         } else {
@@ -57,7 +57,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         );
 
         let content_area = Rect::new(inner.x + 1, content_y, inner.width.saturating_sub(1), 1);
-        render_field_content(frame, content_area, field, &app.snippets.form);
+        render_field_content(frame, content_area, field, app.snippets.form());
     }
 
     // Footer below the block. Snippet form has only text fields, so the

@@ -184,10 +184,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .primary("Enter", fl::ENTER_SELECT)
             .action("Esc", fl::ESC_CANCEL)
             .render_with_status(frame, footer_area, app);
-    } else if app.snippets.pending_delete.is_some() {
+    } else if app.snippets.pending_delete().is_some() {
         let name = app
             .snippets
-            .pending_delete
+            .pending_delete()
             .and_then(|i| app.snippets.store().snippets.get(i))
             .map(|s| s.name.as_str())
             .unwrap_or("");
