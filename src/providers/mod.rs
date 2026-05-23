@@ -20,9 +20,9 @@ mod vultr;
 
 pub use kind::ProviderKind;
 
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use log::{error, warn};
+use log::{debug, error, warn};
 use thiserror::Error;
 
 /// A host discovered from a cloud provider API.
@@ -464,6 +464,85 @@ fn map_ureq_error(err: ureq::Error) -> ProviderError {
         other => {
             error!("[external] Request failed: {other}");
             ProviderError::Http(other.to_string())
+        }
+    }
+}
+
+/// Upper bound on pages fetched from one paginated list endpoint. A safety
+/// valve for a provider that never signals its last page; 500 pages covers any
+/// realistic account.
+pub(crate) const MAX_PAGES: u64 = 500;
+
+/// One mapped page from a paginated list endpoint.
+pub(crate) struct PageResult {
+    /// Hosts mapped from this page, appended to the running total.
+    pub hosts: Vec<ProviderHost>,
+    /// Whether another page should be fetched.
+    pub more: bool,
+}
+
+/// Drive a paginated list endpoint under one shared cancellation, runaway-guard
+/// and partial-failure contract, so every JSON list provider behaves the same.
+///
+/// `fetch_page(index)` performs one request (0-based page index), parses it and
+/// maps entries into a `PageResult`. The closure owns its own cursor or
+/// page-number state across calls.
+///
+/// Failure policy, matching what `sync` relies on: a failure on the first page
+/// (nothing collected) propagates as a hard error so the provider is skipped
+/// and the config left untouched. A failure on a later page returns the hosts
+/// gathered so far as `PartialResult`, so add and update still run while remove
+/// and stale marking are suppressed upstream. `AuthFailed`, `RateLimited` and
+/// `Cancelled` always propagate immediately, even mid-run, because they
+/// invalidate the whole sync.
+pub(crate) fn paginate<F>(
+    cancel: &AtomicBool,
+    mut fetch_page: F,
+) -> Result<Vec<ProviderHost>, ProviderError>
+where
+    F: FnMut(u64) -> Result<PageResult, ProviderError>,
+{
+    let mut hosts = Vec::new();
+    let mut index = 0u64;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(ProviderError::Cancelled);
+        }
+        match fetch_page(index) {
+            Ok(page) => {
+                hosts.extend(page.hosts);
+                if !page.more {
+                    return Ok(hosts);
+                }
+            }
+            Err(
+                e @ (ProviderError::Cancelled
+                | ProviderError::AuthFailed
+                | ProviderError::RateLimited),
+            ) => return Err(e),
+            Err(e) => {
+                if hosts.is_empty() {
+                    return Err(e);
+                }
+                debug!(
+                    "[external] paginate: page {} failed after {} hosts collected, returning partial result ({e})",
+                    index + 1,
+                    hosts.len()
+                );
+                return Err(ProviderError::PartialResult {
+                    hosts,
+                    failures: 1,
+                    total: (index + 1) as usize,
+                });
+            }
+        }
+        index += 1;
+        if index >= MAX_PAGES {
+            debug!(
+                "[purple] paginate: reached MAX_PAGES ({MAX_PAGES}) guard, stopping with {} hosts",
+                hosts.len()
+            );
+            return Ok(hosts);
         }
     }
 }

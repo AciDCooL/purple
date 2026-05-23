@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use serde::Deserialize;
 
@@ -56,16 +56,10 @@ impl Provider for Vultr {
         token: &str,
         cancel: &AtomicBool,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        let mut all_hosts = Vec::new();
-        let mut cursor: Option<String> = None;
         let agent = super::http_agent();
-        let mut pages = 0u64;
+        let mut cursor: Option<String> = None;
 
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(ProviderError::Cancelled);
-            }
-
+        super::paginate(cancel, |_idx| {
             let url = match &cursor {
                 None => "https://api.vultr.com/v2/instances?per_page=500".to_string(),
                 Some(c) => format!(
@@ -82,10 +76,7 @@ impl Provider for Vultr {
                 .read_json()
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
-            if resp.instances.is_empty() {
-                break;
-            }
-
+            let mut hosts = Vec::new();
             for instance in &resp.instances {
                 // Prefer public IPv4, fall back to public IPv6
                 let ip = if !instance.main_ip.is_empty() && instance.main_ip != "0.0.0.0" {
@@ -108,7 +99,7 @@ impl Provider for Vultr {
                 if !instance.power_status.is_empty() {
                     metadata.push(("status".to_string(), instance.power_status.clone()));
                 }
-                all_hosts.push(ProviderHost {
+                hosts.push(ProviderHost {
                     server_id: instance.id.clone(),
                     name: instance.label.clone(),
                     ip,
@@ -117,17 +108,14 @@ impl Provider for Vultr {
                 });
             }
 
-            if resp.meta.links.next.is_empty() {
-                break;
-            }
-            cursor = Some(resp.meta.links.next.clone());
-            pages += 1;
-            if pages >= 500 {
-                break;
-            }
-        }
-
-        Ok(all_hosts)
+            let more = !resp.instances.is_empty() && !resp.meta.links.next.is_empty();
+            cursor = if more {
+                Some(resp.meta.links.next.clone())
+            } else {
+                None
+            };
+            Ok(super::PageResult { hosts, more })
+        })
     }
 }
 

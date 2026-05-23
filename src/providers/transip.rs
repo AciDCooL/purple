@@ -160,15 +160,10 @@ impl Provider for TransIp {
             return Err(ProviderError::Cancelled);
         }
 
-        let mut all_vpss = Vec::new();
-        let mut page = 1u64;
-        let per_page = 200;
+        let per_page = 200usize;
 
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(ProviderError::Cancelled);
-            }
-
+        super::paginate(cancel, |idx| {
+            let page = idx + 1;
             let url = format!(
                 "https://api.transip.nl/v6/vps?page={}&pageSize={}",
                 page, per_page
@@ -182,63 +177,49 @@ impl Provider for TransIp {
                 .read_json()
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
-            if resp.vpss.is_empty() {
-                break;
-            }
+            let mut hosts = Vec::with_capacity(resp.vpss.len());
+            for vps in &resp.vpss {
+                if vps.ip_address.is_empty() {
+                    continue;
+                }
+                let ip = super::strip_cidr(&vps.ip_address).to_string();
 
-            let batch_len = resp.vpss.len();
-            all_vpss.extend(resp.vpss);
+                let mut metadata = Vec::with_capacity(4);
+                if !vps.availability_zone.is_empty() {
+                    metadata.push(("zone".to_string(), vps.availability_zone.clone()));
+                }
+                if !vps.product_name.is_empty() {
+                    metadata.push(("plan".to_string(), vps.product_name.clone()));
+                }
+                if !vps.operating_system.is_empty() {
+                    metadata.push(("os".to_string(), vps.operating_system.clone()));
+                }
+                if !vps.status.is_empty() {
+                    metadata.push(("status".to_string(), vps.status.clone()));
+                }
 
-            if batch_len < per_page {
-                break;
-            }
-            page += 1;
-            if page > 500 {
-                break;
-            }
-        }
-
-        let mut hosts = Vec::with_capacity(all_vpss.len());
-        for vps in &all_vpss {
-            if vps.ip_address.is_empty() {
-                continue;
-            }
-            let ip = super::strip_cidr(&vps.ip_address).to_string();
-
-            let mut metadata = Vec::with_capacity(4);
-            if !vps.availability_zone.is_empty() {
-                metadata.push(("zone".to_string(), vps.availability_zone.clone()));
-            }
-            if !vps.product_name.is_empty() {
-                metadata.push(("plan".to_string(), vps.product_name.clone()));
-            }
-            if !vps.operating_system.is_empty() {
-                metadata.push(("os".to_string(), vps.operating_system.clone()));
-            }
-            if !vps.status.is_empty() {
-                metadata.push(("status".to_string(), vps.status.clone()));
-            }
-
-            let display_name = if !vps.description.is_empty() {
-                vps.description.clone()
-            } else {
-                vps.name.clone()
-            };
-
-            hosts.push(ProviderHost {
-                server_id: if !vps.uuid.is_empty() {
-                    vps.uuid.clone()
+                let display_name = if !vps.description.is_empty() {
+                    vps.description.clone()
                 } else {
                     vps.name.clone()
-                },
-                name: display_name,
-                ip,
-                tags: vps.tags.clone(),
-                metadata,
-            });
-        }
+                };
 
-        Ok(hosts)
+                hosts.push(ProviderHost {
+                    server_id: if !vps.uuid.is_empty() {
+                        vps.uuid.clone()
+                    } else {
+                        vps.name.clone()
+                    },
+                    name: display_name,
+                    ip,
+                    tags: vps.tags.clone(),
+                    metadata,
+                });
+            }
+
+            let more = !resp.vpss.is_empty() && resp.vpss.len() >= per_page;
+            Ok(super::PageResult { hosts, more })
+        })
     }
 }
 

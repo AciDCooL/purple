@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use serde::Deserialize;
 
@@ -92,15 +92,10 @@ impl Provider for Hetzner {
         token: &str,
         cancel: &AtomicBool,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        let mut all_hosts = Vec::new();
-        let mut page = 1u64;
         let agent = super::http_agent();
 
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(ProviderError::Cancelled);
-            }
-
+        super::paginate(cancel, |idx| {
+            let page = idx + 1;
             let url = format!(
                 "https://api.hetzner.cloud/v1/servers?page={}&per_page=50",
                 page
@@ -114,10 +109,7 @@ impl Provider for Hetzner {
                 .read_json()
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
-            if resp.servers.is_empty() {
-                break;
-            }
-
+            let mut hosts = Vec::new();
             for server in &resp.servers {
                 // Prefer public IPv4, fall back to public IPv6
                 // IPv6 addresses may include CIDR suffix (e.g. "2a01:4f8::1/64")
@@ -181,7 +173,7 @@ impl Provider for Hetzner {
                     if !server.status.is_empty() {
                         metadata.push(("status".to_string(), server.status.clone()));
                     }
-                    all_hosts.push(ProviderHost {
+                    hosts.push(ProviderHost {
                         server_id: server.id.to_string(),
                         name: server.name.clone(),
                         ip,
@@ -191,16 +183,10 @@ impl Provider for Hetzner {
                 }
             }
 
-            if resp.meta.pagination.page >= resp.meta.pagination.last_page {
-                break;
-            }
-            page += 1;
-            if page > 500 {
-                break;
-            }
-        }
-
-        Ok(all_hosts)
+            let more = !resp.servers.is_empty()
+                && resp.meta.pagination.page < resp.meta.pagination.last_page;
+            Ok(super::PageResult { hosts, more })
+        })
     }
 }
 

@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use serde::Deserialize;
 
@@ -66,15 +66,10 @@ impl Provider for Linode {
         token: &str,
         cancel: &AtomicBool,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        let mut all_hosts = Vec::new();
-        let mut page = 1u64;
         let agent = super::http_agent();
 
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(ProviderError::Cancelled);
-            }
-
+        super::paginate(cancel, |idx| {
+            let page = idx + 1;
             let url = format!(
                 "https://api.linode.com/v4/linode/instances?page={}&page_size=500",
                 page
@@ -88,10 +83,7 @@ impl Provider for Linode {
                 .read_json()
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
-            if resp.data.is_empty() {
-                break;
-            }
-
+            let mut hosts = Vec::new();
             for instance in &resp.data {
                 // Prefer public IPv4; fall back to private IPv4, then IPv6
                 let ip = instance
@@ -124,7 +116,7 @@ impl Provider for Linode {
                         if !instance.status.is_empty() {
                             metadata.push(("status".to_string(), instance.status.clone()));
                         }
-                        all_hosts.push(ProviderHost {
+                        hosts.push(ProviderHost {
                             server_id: instance.id.to_string(),
                             name: instance.label.clone(),
                             ip,
@@ -135,16 +127,9 @@ impl Provider for Linode {
                 }
             }
 
-            if resp.page >= resp.pages {
-                break;
-            }
-            page += 1;
-            if page > 500 {
-                break;
-            }
-        }
-
-        Ok(all_hosts)
+            let more = !resp.data.is_empty() && resp.page < resp.pages;
+            Ok(super::PageResult { hosts, more })
+        })
     }
 }
 

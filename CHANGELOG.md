@@ -1,3 +1,10 @@
+## 3.15.18 - 2026-05-23
+
+- feat: Provider sync keeps your hosts when a cloud API hiccups.
+- feat: A provider that fails partway through a sync still hands back every server it reached.
+- fix: Your existing hosts stay put on a partial sync, with removals and stale marking held back until a clean, complete fetch.
+- change: The same resilience covers DigitalOcean, Hetzner, Linode, Vultr, TransIP, Leaseweb and i3D.net.
+
 ## 3.15.17 - 2026-05-23
 
 - feat: The command palette runs exactly the row you highlight.

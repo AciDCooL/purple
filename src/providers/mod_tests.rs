@@ -1442,3 +1442,196 @@ fn test_http_xml_deserialization_with_quick_xml() {
     );
     mock.assert();
 }
+
+// =========================================================================
+// paginate: shared pagination skeleton + uniform partial-failure contract
+// =========================================================================
+
+fn ph(id: &str) -> ProviderHost {
+    ProviderHost::new(
+        id.to_string(),
+        id.to_string(),
+        "1.2.3.4".to_string(),
+        vec![],
+    )
+}
+
+#[test]
+fn test_paginate_single_page_returns_hosts() {
+    let cancel = AtomicBool::new(false);
+    let out = paginate(&cancel, |_idx| {
+        Ok(PageResult {
+            hosts: vec![ph("a"), ph("b")],
+            more: false,
+        })
+    })
+    .unwrap();
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0].server_id, "a");
+    assert_eq!(out[1].server_id, "b");
+}
+
+#[test]
+fn test_paginate_accumulates_pages_in_order() {
+    let cancel = AtomicBool::new(false);
+    let out = paginate(&cancel, |idx| {
+        Ok(PageResult {
+            hosts: vec![ph(&format!("p{idx}"))],
+            more: idx < 2,
+        })
+    })
+    .unwrap();
+    assert_eq!(
+        out.iter().map(|h| h.server_id.as_str()).collect::<Vec<_>>(),
+        vec!["p0", "p1", "p2"]
+    );
+}
+
+#[test]
+fn test_paginate_empty_page_stops() {
+    let cancel = AtomicBool::new(false);
+    let out = paginate(&cancel, |_idx| {
+        Ok(PageResult {
+            hosts: vec![],
+            more: false,
+        })
+    })
+    .unwrap();
+    assert!(out.is_empty());
+}
+
+#[test]
+fn test_paginate_first_page_error_propagates_not_partial() {
+    let cancel = AtomicBool::new(false);
+    let err = paginate(&cancel, |_idx| {
+        Err::<PageResult, _>(ProviderError::Http("boom".to_string()))
+    })
+    .unwrap_err();
+    // First page failed with nothing collected: hard error, provider skipped.
+    match err {
+        ProviderError::Http(m) => assert_eq!(m, "boom"),
+        other => panic!("expected Http error, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_paginate_later_page_error_returns_partial() {
+    let cancel = AtomicBool::new(false);
+    let err = paginate(&cancel, |idx| {
+        if idx == 0 {
+            Ok(PageResult {
+                hosts: vec![ph("a"), ph("b")],
+                more: true,
+            })
+        } else {
+            Err(ProviderError::Http("page 2 down".to_string()))
+        }
+    })
+    .unwrap_err();
+    // Later page failed after collecting hosts: keep them as partial so add/
+    // update still runs but remove and stale marking are suppressed upstream.
+    match err {
+        ProviderError::PartialResult {
+            hosts,
+            failures,
+            total,
+        } => {
+            assert_eq!(hosts.len(), 2);
+            assert_eq!(failures, 1);
+            assert_eq!(total, 2);
+        }
+        other => panic!("expected PartialResult, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_paginate_auth_failure_propagates_even_after_hosts() {
+    let cancel = AtomicBool::new(false);
+    let err = paginate(&cancel, |idx| {
+        if idx == 0 {
+            Ok(PageResult {
+                hosts: vec![ph("a")],
+                more: true,
+            })
+        } else {
+            Err(ProviderError::AuthFailed)
+        }
+    })
+    .unwrap_err();
+    // Auth failure invalidates the whole sync; never downgrade to partial.
+    assert!(matches!(err, ProviderError::AuthFailed));
+}
+
+#[test]
+fn test_paginate_rate_limit_propagates_even_after_hosts() {
+    let cancel = AtomicBool::new(false);
+    let err = paginate(&cancel, |idx| {
+        if idx == 0 {
+            Ok(PageResult {
+                hosts: vec![ph("a")],
+                more: true,
+            })
+        } else {
+            Err(ProviderError::RateLimited)
+        }
+    })
+    .unwrap_err();
+    assert!(matches!(err, ProviderError::RateLimited));
+}
+
+#[test]
+fn test_paginate_cancelled_before_first_page() {
+    let cancel = AtomicBool::new(true);
+    let calls = std::cell::Cell::new(0u64);
+    let err = paginate(&cancel, |_idx| {
+        calls.set(calls.get() + 1);
+        Ok(PageResult {
+            hosts: vec![ph("a")],
+            more: false,
+        })
+    })
+    .unwrap_err();
+    assert!(matches!(err, ProviderError::Cancelled));
+    assert_eq!(
+        calls.get(),
+        0,
+        "closure must not run when cancelled upfront"
+    );
+}
+
+#[test]
+fn test_paginate_cancelled_between_pages() {
+    let cancel = AtomicBool::new(false);
+    let err = paginate(&cancel, |idx| {
+        // First page succeeds and asks for more, then cancellation is
+        // requested before the next iteration's top-of-loop check.
+        if idx == 0 {
+            cancel.store(true, Ordering::Relaxed);
+            Ok(PageResult {
+                hosts: vec![ph("a")],
+                more: true,
+            })
+        } else {
+            panic!("must not fetch another page after cancellation");
+        }
+    })
+    .unwrap_err();
+    assert!(matches!(err, ProviderError::Cancelled));
+}
+
+#[test]
+fn test_paginate_runaway_guard_caps_pages() {
+    let cancel = AtomicBool::new(false);
+    let calls = std::cell::Cell::new(0u64);
+    // A provider that never signals the last page must not loop forever.
+    let out = paginate(&cancel, |_idx| {
+        calls.set(calls.get() + 1);
+        Ok(PageResult {
+            hosts: vec![ph("x")],
+            more: true,
+        })
+    })
+    .unwrap();
+    assert_eq!(out.len() as u64, MAX_PAGES);
+    assert_eq!(calls.get(), MAX_PAGES);
+}

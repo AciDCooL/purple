@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use serde::Deserialize;
 
@@ -105,140 +105,134 @@ impl Provider for I3d {
         cancel: &AtomicBool,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let agent = super::http_agent();
-        let mut all_hosts = Vec::new();
-
-        // Fetch dedicated/game hosts with PAGE-TOKEN pagination
-        let mut page_token: Option<String> = None;
-        let mut page_count = 0u32;
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(ProviderError::Cancelled);
-            }
-            page_count += 1;
-            if page_count > 500 {
-                break;
-            }
-            let mut req = agent
-                .get("https://api.i3d.net/v3/host")
-                .header("PRIVATE-TOKEN", token);
-            if let Some(ref pt) = page_token {
-                req = req.header("PAGE-TOKEN", pt);
-            }
-            let mut response = req.call().map_err(map_ureq_error)?;
-
-            let next_token = response
-                .headers()
-                .get("PAGE-TOKEN")
-                .and_then(|v| v.to_str().ok())
-                .filter(|s| !s.is_empty())
-                .map(String::from);
-
-            let hosts: Vec<Host> = response
-                .body_mut()
-                .read_json()
-                .map_err(|e| ProviderError::Parse(e.to_string()))?;
-
-            for host in &hosts {
-                if let Some(ip) = select_host_ip(&host.ip_addresses) {
-                    let mut metadata = Vec::with_capacity(3);
-                    if !host.category.is_empty() {
-                        metadata.push(("type".to_string(), host.category.clone()));
-                    }
-                    if let Some(ncpu) = host.num_cpu {
-                        if ncpu > 0 && !host.cpu_type.is_empty() {
-                            metadata.push((
-                                "specs".to_string(),
-                                format!("{}x {}", ncpu, host.cpu_type),
-                            ));
-                        }
-                    }
-                    let name = if host.server_name.is_empty() {
-                        host.id.to_string()
-                    } else {
-                        host.server_name.clone()
-                    };
-                    all_hosts.push(ProviderHost {
-                        server_id: format!("host-{}", host.id),
-                        name,
-                        ip,
-                        tags: Vec::new(),
-                        metadata,
-                    });
-                }
-            }
-
-            match next_token {
-                Some(t) => page_token = Some(t),
-                None => break,
-            }
-        }
-
-        // Fetch FlexMetal servers with RANGED-DATA pagination
-        let mut offset = 0u32;
         let results_per_page = 50u32;
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(ProviderError::Cancelled);
-            }
-            let ranged = format!("start={},results={}", offset, results_per_page);
-            let servers: Vec<FlexMetalServer> = agent
-                .get("https://api.i3d.net/v3/flexMetal/servers")
-                .header("PRIVATE-TOKEN", token)
-                .header("RANGED-DATA", &ranged)
-                .call()
-                .map_err(map_ureq_error)?
-                .body_mut()
-                .read_json()
-                .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
-            let count = servers.len();
-            for server in &servers {
-                if let Some(ip) = select_flex_ip(&server.ip_addresses) {
-                    let mut metadata = Vec::with_capacity(4);
-                    if !server.location.is_empty() {
-                        metadata.push(("location".to_string(), server.location.clone()));
-                    }
-                    if !server.instance_type.is_empty() {
-                        metadata.push(("type".to_string(), server.instance_type.clone()));
-                    }
-                    if let Some(ref os) = server.os {
-                        let os_val = os
-                            .slug
-                            .as_deref()
-                            .filter(|s| !s.is_empty())
-                            .or_else(|| os.name.as_deref().filter(|s| !s.is_empty()));
-                        if let Some(val) = os_val {
-                            metadata.push(("os".to_string(), val.to_string()));
-                        }
-                    }
-                    if !server.status.is_empty() {
-                        metadata.push(("status".to_string(), server.status.clone()));
-                    }
-                    let name = if server.name.is_empty() {
-                        server.uuid.clone()
-                    } else {
-                        server.name.clone()
-                    };
-                    all_hosts.push(ProviderHost {
-                        server_id: format!("flex-{}", server.uuid),
-                        name,
-                        ip,
-                        tags: server.tags.clone(),
-                        metadata,
-                    });
-                }
-            }
-
-            if count < results_per_page as usize {
-                break;
-            }
-            offset += results_per_page;
-            if offset / results_per_page >= 500 {
-                break;
-            }
+        // Two list endpoints fetched in sequence under one pagination contract:
+        // dedicated/game hosts (page-token), then FlexMetal servers (ranged-data).
+        enum Stage {
+            Hosts,
+            FlexMetal,
         }
+        let mut stage = Stage::Hosts;
+        let mut page_token: Option<String> = None;
+        let mut offset = 0u32;
 
-        Ok(all_hosts)
+        super::paginate(cancel, |_idx| match stage {
+            Stage::Hosts => {
+                let mut req = agent
+                    .get("https://api.i3d.net/v3/host")
+                    .header("PRIVATE-TOKEN", token);
+                if let Some(ref pt) = page_token {
+                    req = req.header("PAGE-TOKEN", pt);
+                }
+                let mut response = req.call().map_err(map_ureq_error)?;
+
+                let next_token = response
+                    .headers()
+                    .get("PAGE-TOKEN")
+                    .and_then(|v| v.to_str().ok())
+                    .filter(|s| !s.is_empty())
+                    .map(String::from);
+
+                let host_list: Vec<Host> = response
+                    .body_mut()
+                    .read_json()
+                    .map_err(|e| ProviderError::Parse(e.to_string()))?;
+
+                let mut hosts = Vec::new();
+                for host in &host_list {
+                    if let Some(ip) = select_host_ip(&host.ip_addresses) {
+                        let mut metadata = Vec::with_capacity(3);
+                        if !host.category.is_empty() {
+                            metadata.push(("type".to_string(), host.category.clone()));
+                        }
+                        if let Some(ncpu) = host.num_cpu {
+                            if ncpu > 0 && !host.cpu_type.is_empty() {
+                                metadata.push((
+                                    "specs".to_string(),
+                                    format!("{}x {}", ncpu, host.cpu_type),
+                                ));
+                            }
+                        }
+                        let name = if host.server_name.is_empty() {
+                            host.id.to_string()
+                        } else {
+                            host.server_name.clone()
+                        };
+                        hosts.push(ProviderHost {
+                            server_id: format!("host-{}", host.id),
+                            name,
+                            ip,
+                            tags: Vec::new(),
+                            metadata,
+                        });
+                    }
+                }
+
+                // Host endpoint paginates by PAGE-TOKEN; when it runs dry,
+                // advance to the FlexMetal endpoint.
+                match next_token {
+                    Some(t) => page_token = Some(t),
+                    None => stage = Stage::FlexMetal,
+                }
+                Ok(super::PageResult { hosts, more: true })
+            }
+            Stage::FlexMetal => {
+                let ranged = format!("start={},results={}", offset, results_per_page);
+                let servers: Vec<FlexMetalServer> = agent
+                    .get("https://api.i3d.net/v3/flexMetal/servers")
+                    .header("PRIVATE-TOKEN", token)
+                    .header("RANGED-DATA", &ranged)
+                    .call()
+                    .map_err(map_ureq_error)?
+                    .body_mut()
+                    .read_json()
+                    .map_err(|e| ProviderError::Parse(e.to_string()))?;
+
+                let count = servers.len();
+                let mut hosts = Vec::new();
+                for server in &servers {
+                    if let Some(ip) = select_flex_ip(&server.ip_addresses) {
+                        let mut metadata = Vec::with_capacity(4);
+                        if !server.location.is_empty() {
+                            metadata.push(("location".to_string(), server.location.clone()));
+                        }
+                        if !server.instance_type.is_empty() {
+                            metadata.push(("type".to_string(), server.instance_type.clone()));
+                        }
+                        if let Some(ref os) = server.os {
+                            let os_val = os
+                                .slug
+                                .as_deref()
+                                .filter(|s| !s.is_empty())
+                                .or_else(|| os.name.as_deref().filter(|s| !s.is_empty()));
+                            if let Some(val) = os_val {
+                                metadata.push(("os".to_string(), val.to_string()));
+                            }
+                        }
+                        if !server.status.is_empty() {
+                            metadata.push(("status".to_string(), server.status.clone()));
+                        }
+                        let name = if server.name.is_empty() {
+                            server.uuid.clone()
+                        } else {
+                            server.name.clone()
+                        };
+                        hosts.push(ProviderHost {
+                            server_id: format!("flex-{}", server.uuid),
+                            name,
+                            ip,
+                            tags: server.tags.clone(),
+                            metadata,
+                        });
+                    }
+                }
+
+                let more = count >= results_per_page as usize;
+                offset += results_per_page;
+                Ok(super::PageResult { hosts, more })
+            }
+        })
     }
 }
 

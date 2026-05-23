@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use serde::Deserialize;
 
@@ -75,16 +75,11 @@ impl Provider for DigitalOcean {
         token: &str,
         cancel: &AtomicBool,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        let mut all_hosts = Vec::new();
-        let mut page = 1u64;
-        let per_page = 200;
         let agent = super::http_agent();
+        let per_page = 200u64;
 
-        loop {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(ProviderError::Cancelled);
-            }
-
+        super::paginate(cancel, |idx| {
+            let page = idx + 1;
             let url = format!(
                 "https://api.digitalocean.com/v2/droplets?page={}&per_page={}",
                 page, per_page
@@ -98,10 +93,7 @@ impl Provider for DigitalOcean {
                 .read_json()
                 .map_err(|e| ProviderError::Parse(e.to_string()))?;
 
-            if resp.droplets.is_empty() {
-                break;
-            }
-
+            let mut hosts = Vec::new();
             for droplet in &resp.droplets {
                 // Prefer public IPv4, fall back to public IPv6
                 let ip = droplet
@@ -137,7 +129,7 @@ impl Provider for DigitalOcean {
                     if !droplet.status.is_empty() {
                         metadata.push(("status".to_string(), droplet.status.clone()));
                     }
-                    all_hosts.push(ProviderHost {
+                    hosts.push(ProviderHost {
                         server_id: droplet.id.to_string(),
                         name: droplet.name.clone(),
                         ip,
@@ -148,16 +140,9 @@ impl Provider for DigitalOcean {
             }
 
             let fetched = page * per_page;
-            if fetched >= resp.meta.total {
-                break;
-            }
-            page += 1;
-            if page > 500 {
-                break;
-            }
-        }
-
-        Ok(all_hosts)
+            let more = !resp.droplets.is_empty() && fetched < resp.meta.total;
+            Ok(super::PageResult { hosts, more })
+        })
     }
 }
 
