@@ -1,3 +1,10 @@
+## 3.16.0 - 2026-05-24
+
+- feat: Search your hosts by several words at once.
+- feat: Type words separated by spaces and the list keeps only hosts that match all of them, in any field and any order. "web prod" finds your production web hosts even when the two words live in different fields.
+- feat: The tag: filter works the same way, so tag:web prod narrows to hosts carrying both tags.
+- Thanks to @9d4 for suggesting this in #79
+
 ## 3.15.20 - 2026-05-23
 
 - change: Single-source versioning across the site, docs and binary.

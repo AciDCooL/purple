@@ -215,68 +215,42 @@ impl App {
                 .map(|(i, _)| i)
                 .collect();
         } else if let Some(tag_query) = query.strip_prefix("tag:") {
-            // Fuzzy tag match (manual search), includes provider name and virtual "stale"/"vault"
+            // Fuzzy tag match (manual search), includes provider name and virtual "stale"/"vault".
+            // Space-separated terms are ANDed: every term must hit a tag/provider field.
             let provider_config = &self.providers.config;
+            let terms: Vec<&str> = tag_query.split_whitespace().collect();
             self.search.filtered_indices = self
                 .hosts_state
                 .list
                 .iter()
                 .enumerate()
                 .filter(|(_, host)| {
-                    (super::contains_ci("stale", tag_query) && host.stale.is_some())
-                        || (super::contains_ci("vault-ssh", tag_query)
-                            && crate::vault_ssh::resolve_vault_role(
-                                host.vault_ssh.as_deref(),
-                                host.provider.as_deref(),
-                                host.provider_label.as_deref(),
-                                provider_config,
-                            )
-                            .is_some())
-                        || (super::contains_ci("vault-kv", tag_query)
-                            && host
-                                .askpass
-                                .as_deref()
-                                .map(|s| s.starts_with("vault:"))
-                                .unwrap_or(false))
-                        || host
-                            .provider_tags
-                            .iter()
-                            .chain(host.tags.iter())
-                            .any(|t| super::contains_ci(t, tag_query))
-                        || host
-                            .provider
-                            .as_ref()
-                            .is_some_and(|p| super::contains_ci(p, tag_query))
-                })
-                .map(|(i, _)| i)
-                .collect();
-            self.search.filtered_pattern_indices = self
-                .hosts_state
-                .patterns
-                .iter()
-                .enumerate()
-                .filter(|(_, p)| p.tags.iter().any(|t| super::contains_ci(t, tag_query)))
-                .map(|(i, _)| i)
-                .collect();
-        } else {
-            self.search.filtered_indices = self
-                .hosts_state
-                .list
-                .iter()
-                .enumerate()
-                .filter(|(_, host)| {
-                    super::contains_ci(&host.alias, &query)
-                        || super::contains_ci(&host.hostname, &query)
-                        || super::contains_ci(&host.user, &query)
-                        || host
-                            .provider_tags
-                            .iter()
-                            .chain(host.tags.iter())
-                            .any(|t| super::contains_ci(t, &query))
-                        || host
-                            .provider
-                            .as_ref()
-                            .is_some_and(|p| super::contains_ci(p, &query))
+                    terms.iter().all(|term| {
+                        (super::contains_ci("stale", term) && host.stale.is_some())
+                            || (super::contains_ci("vault-ssh", term)
+                                && crate::vault_ssh::resolve_vault_role(
+                                    host.vault_ssh.as_deref(),
+                                    host.provider.as_deref(),
+                                    host.provider_label.as_deref(),
+                                    provider_config,
+                                )
+                                .is_some())
+                            || (super::contains_ci("vault-kv", term)
+                                && host
+                                    .askpass
+                                    .as_deref()
+                                    .map(|s| s.starts_with("vault:"))
+                                    .unwrap_or(false))
+                            || host
+                                .provider_tags
+                                .iter()
+                                .chain(host.tags.iter())
+                                .any(|t| super::contains_ci(t, term))
+                            || host
+                                .provider
+                                .as_ref()
+                                .is_some_and(|p| super::contains_ci(p, term))
+                    })
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -286,8 +260,51 @@ impl App {
                 .iter()
                 .enumerate()
                 .filter(|(_, p)| {
-                    super::contains_ci(&p.pattern, &query)
-                        || p.tags.iter().any(|t| super::contains_ci(t, &query))
+                    terms
+                        .iter()
+                        .all(|term| p.tags.iter().any(|t| super::contains_ci(t, term)))
+                })
+                .map(|(i, _)| i)
+                .collect();
+        } else {
+            // Space-separated terms are ANDed: every term must match at least
+            // one field. Split once, not per host. No terms (whitespace-only
+            // query) matches everything, so a trailing space while typing does
+            // not blank the list.
+            let terms: Vec<&str> = query.split_whitespace().collect();
+            self.search.filtered_indices = self
+                .hosts_state
+                .list
+                .iter()
+                .enumerate()
+                .filter(|(_, host)| {
+                    terms.iter().all(|term| {
+                        super::contains_ci(&host.alias, term)
+                            || super::contains_ci(&host.hostname, term)
+                            || super::contains_ci(&host.user, term)
+                            || host
+                                .provider_tags
+                                .iter()
+                                .chain(host.tags.iter())
+                                .any(|t| super::contains_ci(t, term))
+                            || host
+                                .provider
+                                .as_ref()
+                                .is_some_and(|p| super::contains_ci(p, term))
+                    })
+                })
+                .map(|(i, _)| i)
+                .collect();
+            self.search.filtered_pattern_indices = self
+                .hosts_state
+                .patterns
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| {
+                    terms.iter().all(|term| {
+                        super::contains_ci(&p.pattern, term)
+                            || p.tags.iter().any(|t| super::contains_ci(t, term))
+                    })
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -311,6 +328,11 @@ impl App {
         // Reset selection
         let total_results =
             self.search.filtered_indices.len() + self.search.filtered_pattern_indices.len();
+        log::debug!(
+            "[purple] apply_filter matched: hosts={} patterns={}",
+            self.search.filtered_indices.len(),
+            self.search.filtered_pattern_indices.len()
+        );
         if total_results == 0 {
             self.ui.list_state.select(None);
         } else {

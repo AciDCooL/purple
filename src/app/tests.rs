@@ -9633,3 +9633,124 @@ fn close_jump_on_idle_state_is_noop() {
     app.close_jump();
     assert!(app.jump.is_none());
 }
+
+// ---- multi-term "/" search (issue #79) ----
+
+/// Three hosts spreading the words "web" and "prod" across different fields:
+/// web1 carries both (alias + hostname), web2 only "web", api1 only "prod".
+fn multiterm_app() -> App {
+    test_app_with_hosts(&[
+        "Host web1\n  HostName prod.example.com\n",
+        "Host web2\n  HostName dev.example.com\n",
+        "Host api1\n  HostName prod.api.com\n",
+    ])
+}
+
+fn filtered_aliases(app: &App) -> Vec<String> {
+    app.search
+        .filtered_indices()
+        .iter()
+        .map(|&i| app.hosts_state.list[i].alias.clone())
+        .collect()
+}
+
+#[test]
+fn search_multi_term_matches_terms_across_separate_fields() {
+    // "web prod" must match web1 (web in alias, prod in hostname), not require
+    // the literal contiguous substring "web prod" in a single field.
+    let mut app = multiterm_app();
+    app.start_search_with("web prod");
+    assert_eq!(filtered_aliases(&app), vec!["web1"]);
+}
+
+#[test]
+fn search_multi_term_is_order_independent() {
+    let mut app = multiterm_app();
+    app.start_search_with("prod web");
+    assert_eq!(filtered_aliases(&app), vec!["web1"]);
+}
+
+#[test]
+fn search_single_term_still_filters_as_substring() {
+    // Regression guard: a single term keeps matching across fields as before.
+    let mut app = multiterm_app();
+    app.start_search_with("prod");
+    assert_eq!(filtered_aliases(&app), vec!["web1", "api1"]);
+}
+
+#[test]
+fn search_ignores_leading_trailing_and_repeated_whitespace() {
+    // A trailing space while typing must not blank the result set.
+    let mut app = multiterm_app();
+    app.start_search_with("  web   prod  ");
+    assert_eq!(filtered_aliases(&app), vec!["web1"]);
+}
+
+#[test]
+fn search_multi_term_combines_provider_and_tag() {
+    // One term hits the provider name, the other a user tag.
+    let mut app = test_app_with_hosts(&[
+        "Host s1\n  HostName 1.1.1.1\n  # purple:provider aws:1\n  # purple:tags prod\n",
+        "Host s2\n  HostName 2.2.2.2\n  # purple:provider aws:2\n  # purple:tags dev\n",
+    ]);
+    app.start_search_with("aws prod");
+    assert_eq!(filtered_aliases(&app), vec!["s1"]);
+}
+
+#[test]
+fn tag_search_multi_term_requires_every_term_to_hit_a_tag() {
+    // "tag:prod web" keeps only hosts whose tags satisfy both terms.
+    let mut app = test_app_with_hosts(&[
+        "Host a\n  HostName 1.1.1.1\n  # purple:tags production,web\n",
+        "Host b\n  HostName 2.2.2.2\n  # purple:tags production\n",
+    ]);
+    app.start_search_with("tag:prod web");
+    assert_eq!(filtered_aliases(&app), vec!["a"]);
+}
+
+#[test]
+fn tag_exact_search_still_matches_a_single_tag() {
+    // Regression guard: tag= keeps its exact single-tag semantics.
+    let mut app = test_app_with_hosts(&[
+        "Host a\n  HostName 1.1.1.1\n  # purple:tags production\n",
+        "Host b\n  HostName 2.2.2.2\n  # purple:tags staging\n",
+    ]);
+    app.start_search_with("tag=production");
+    assert_eq!(filtered_aliases(&app), vec!["a"]);
+}
+
+#[test]
+fn tag_exact_search_does_not_split_on_whitespace() {
+    // tag= arrives from the picker as one exact tag and must never AND-split:
+    // a two-word value matches nothing even though both words exist as tags.
+    let mut app =
+        test_app_with_hosts(&["Host a\n  HostName 1.1.1.1\n  # purple:tags production,web\n"]);
+    app.start_search_with("tag=production web");
+    assert!(filtered_aliases(&app).is_empty());
+}
+
+#[test]
+fn search_multi_term_matches_pattern() {
+    // Patterns go through the same multi-term path: one term hits the pattern
+    // name, the other a pattern tag, and both must match.
+    let mut app = make_app(
+        "Host *.web.example.com\n  User deploy\n  # purple:tags prod\n\nHost *.db.example.com\n  User deploy\n  # purple:tags dev\n",
+    );
+    app.start_search_with("web prod");
+    let patterns: Vec<&str> = app
+        .search
+        .filtered_pattern_indices()
+        .iter()
+        .map(|&i| app.hosts_state.patterns[i].pattern.as_str())
+        .collect();
+    assert_eq!(patterns, vec!["*.web.example.com"]);
+}
+
+#[test]
+fn search_whitespace_only_query_matches_all_hosts() {
+    // A query of only spaces parses to zero terms and shows everything, so a
+    // stray space while typing never blanks the list.
+    let mut app = multiterm_app();
+    app.start_search_with("   ");
+    assert_eq!(filtered_aliases(&app), vec!["web1", "web2", "api1"]);
+}
