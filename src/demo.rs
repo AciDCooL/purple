@@ -1194,10 +1194,10 @@ pub fn build_demo_app() -> App {
     app.history = build_demo_history();
 
     // Provider config — replace disk-loaded config with demo-only providers
-    app.providers.config = ProviderConfig::parse(DEMO_PROVIDERS);
+    *app.providers.config_mut() = ProviderConfig::parse(DEMO_PROVIDERS);
 
     // Sync history (timestamps relative to now)
-    app.providers.sync_history = SyncRecord::load_from_content(&build_demo_sync_history());
+    *app.providers.sync_history_mut() = SyncRecord::load_from_content(&build_demo_sync_history());
 
     // Snippets
     *app.snippets.store_mut() = SnippetStore::parse(DEMO_SNIPPETS);
@@ -2353,7 +2353,7 @@ mod tests {
     fn demo_app_has_providers() {
         let (app, _guard) = demo_app();
         // aws + digitalocean:work + digitalocean:personal + proxmox = 4
-        assert_eq!(app.providers.config.configured_providers().len(), 4);
+        assert_eq!(app.providers.config().configured_providers().len(), 4);
     }
 
     #[test]
@@ -2446,7 +2446,7 @@ mod tests {
     #[test]
     fn demo_app_has_sync_history() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.providers.sync_history.len(), 3);
+        assert_eq!(app.providers.sync_history().len(), 3);
     }
 
     #[test]
@@ -2459,14 +2459,14 @@ mod tests {
     fn demo_app_has_vault_ssh_config() {
         let (app, _guard) = demo_app();
         // Two providers have vault_role (inheritance for their hosts).
-        let aws = app.providers.config.section("aws").expect("aws section");
+        let aws = app.providers.config().section("aws").expect("aws section");
         assert!(
             !aws.vault_role.is_empty(),
             "aws provider should have vault_role set"
         );
         let pve = app
             .providers
-            .config
+            .config()
             .section("proxmox")
             .expect("proxmox section");
         assert!(
@@ -2532,7 +2532,7 @@ mod tests {
         // No other provider should have a checkmark (be configured)
         for name in &names[3..] {
             assert!(
-                app.providers.config.section(name).is_none(),
+                app.providers.config().section(name).is_none(),
                 "unexpected configured provider: {}",
                 name
             );

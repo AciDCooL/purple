@@ -16,7 +16,7 @@ pub(crate) fn handle_tick(
 ) {
     app.tick_status();
     app.tick_toast();
-    let provider_syncing = !app.providers.syncing.is_empty();
+    let provider_syncing = !app.providers.syncing().is_empty();
     // Tick the spinner whenever something needs animation. Reachable hosts
     // drive the breathing online-dot pulse via `online_dot_pulsing(tick)`,
     // so they share the same monotonically-incrementing tick counter as

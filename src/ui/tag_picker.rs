@@ -39,7 +39,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 host.vault_ssh.as_deref(),
                 host.provider.as_deref(),
                 host.provider_label.as_deref(),
-                &app.providers.config,
+                app.providers.config(),
             )
             .is_some()
                 && !host

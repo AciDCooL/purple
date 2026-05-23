@@ -39,7 +39,7 @@ fn make_app(content: &str) -> App {
         bom: false,
     };
     let mut app = App::new(config);
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     app
 }
 
@@ -51,8 +51,8 @@ fn key(code: KeyCode) -> KeyEvent {
 fn make_providers_app_with_do() -> App {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
-    app.providers.config.set_section(ProviderSection {
+    *app.providers.config_mut() = test_provider_config();
+    app.providers.config_mut().set_section(ProviderSection {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "tok".to_string(),
         alias_prefix: "do".to_string(),
@@ -74,8 +74,8 @@ fn make_providers_app_with_do() -> App {
 fn make_providers_app_with_proxmox() -> App {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
-    app.providers.config.set_section(ProviderSection {
+    *app.providers.config_mut() = test_provider_config();
+    app.providers.config_mut().set_section(ProviderSection {
         id: crate::providers::config::ProviderConfigId::bare("proxmox"),
         token: "user@pam!t=secret".to_string(),
         alias_prefix: "pve".to_string(),
@@ -129,9 +129,9 @@ fn test_provider_form_init_existing_proxmox_preserves_auto_sync_false() {
 fn test_provider_form_init_existing_do_explicit_false_preserved() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     // DO met auto_sync=false (gebruiker heeft het handmatig uitgezet)
-    app.providers.config.set_section(ProviderSection {
+    app.providers.config_mut().set_section(ProviderSection {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "tok".to_string(),
         alias_prefix: "do".to_string(),
@@ -159,7 +159,7 @@ fn test_provider_form_init_new_proxmox_defaults_to_false() {
     // Proxmox zonder bestaande config: default auto_sync=false
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config(); // geen config voor proxmox
+    *app.providers.config_mut() = test_provider_config(); // geen config voor proxmox
     open_provider_form(&mut app, "proxmox");
     assert!(
         !app.providers.form.auto_sync,
@@ -171,7 +171,7 @@ fn test_provider_form_init_new_proxmox_defaults_to_false() {
 fn test_provider_form_init_new_digitalocean_defaults_to_true() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "digitalocean");
     assert!(
         app.providers.form.auto_sync,
@@ -320,7 +320,7 @@ fn test_submit_provider_form_persists_auto_sync_false() {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     app.providers.form = ProviderFormFields {
         label: String::new(),
         label_entry: false,
@@ -348,7 +348,7 @@ fn test_submit_provider_form_persists_auto_sync_false() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     // Ongeacht of save() slaagde: de sectie in provider_config is bijgewerkt.
-    if let Some(section) = app.providers.config.section("digitalocean") {
+    if let Some(section) = app.providers.config().section("digitalocean") {
         assert!(
             !section.auto_sync,
             "Opgeslagen sectie moet auto_sync=false hebben"
@@ -364,7 +364,7 @@ fn test_submit_provider_form_persists_auto_sync_true() {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     app.providers.form = ProviderFormFields {
         label: String::new(),
         label_entry: false,
@@ -389,7 +389,7 @@ fn test_submit_provider_form_persists_auto_sync_true() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
-    if let Some(section) = app.providers.config.section("digitalocean") {
+    if let Some(section) = app.providers.config().section("digitalocean") {
         assert!(
             section.auto_sync,
             "Opgeslagen sectie moet auto_sync=true hebben"
@@ -407,7 +407,7 @@ fn test_submit_provider_form_persists_vault_role() {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
     };
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     app.providers.form = ProviderFormFields {
         label: String::new(),
         label_entry: false,
@@ -432,7 +432,7 @@ fn test_submit_provider_form_persists_vault_role() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
-    if let Some(section) = app.providers.config.section("digitalocean") {
+    if let Some(section) = app.providers.config().section("digitalocean") {
         assert_eq!(
             section.vault_role, "ssh-client-signer/sign/engineer",
             "vault_role moet round-trippen via provider form submit"
@@ -683,7 +683,7 @@ fn test_gcp_form_tab_cycles_through_project() {
 fn test_provider_form_init_new_gcp_defaults() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "gcp");
     assert!(app.providers.form.project.is_empty());
     assert!(app.providers.form.auto_sync);
@@ -698,7 +698,7 @@ fn make_azure_form_app() -> App {
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("azure"),
     };
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     app.providers.form = ProviderFormFields {
         label: String::new(),
         label_entry: false,
@@ -1165,7 +1165,7 @@ fn test_provider_list_k_selects_prev() {
 fn test_provider_list_sync_unconfigured_shows_status() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     // No config for digitalocean - select it and press s
     let sorted = app.sorted_provider_names();
     let idx = sorted.iter().position(|n| n == "digitalocean").unwrap();
@@ -1190,10 +1190,10 @@ fn test_provider_list_delete_removes_config() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     // d now triggers confirmation
-    assert!(app.providers.pending_delete.is_some());
+    assert!(app.providers.pending_delete().is_some());
     // Confirm with y
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
-    assert!(app.providers.pending_delete.is_none());
+    assert!(app.providers.pending_delete().is_none());
     // Save may fail in tests (no ~/.purple), triggering rollback. Just verify handler ran.
     assert!(app.status_center.status().is_some() || app.status_center.toast().is_some());
 }
@@ -1202,7 +1202,7 @@ fn test_provider_list_delete_removes_config() {
 fn test_provider_list_delete_unconfigured_is_noop() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     let sorted = app.sorted_provider_names();
     let idx = sorted.iter().position(|n| n == "digitalocean").unwrap();
     app.ui.provider_list_state.select(Some(idx));
@@ -1225,7 +1225,7 @@ fn test_provider_list_esc_cancels_running_syncs() {
     let mut app = make_providers_app_with_do();
     let cancel = Arc::new(AtomicBool::new(false));
     app.providers
-        .syncing
+        .syncing_mut()
         .insert("digitalocean".to_string(), cancel.clone());
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
@@ -1250,7 +1250,7 @@ fn test_provider_list_enter_opens_form_with_existing_config() {
 fn test_provider_list_enter_opens_form_with_defaults() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "vultr");
     assert!(matches!(app.screen, Screen::ProviderForm { ref id } if id.provider == "vultr"));
     assert_eq!(app.providers.form.token, "");
@@ -1262,7 +1262,7 @@ fn test_provider_list_enter_opens_form_with_defaults() {
 fn test_provider_form_proxmox_default_alias_prefix() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "proxmox");
     // Proxmox short_label is "pve"
     assert_eq!(app.providers.form.alias_prefix, "pve");
@@ -1288,7 +1288,7 @@ fn test_all_cloud_providers_default_auto_sync_true() {
     ] {
         let mut app = make_app("Host test\n  HostName test.com\n");
         app.screen = Screen::Providers;
-        app.providers.config = test_provider_config();
+        *app.providers.config_mut() = test_provider_config();
         open_provider_form(&mut app, provider);
         assert!(
             app.providers.form.auto_sync,
@@ -1302,7 +1302,7 @@ fn test_all_cloud_providers_default_auto_sync_true() {
 fn test_proxmox_defaults_auto_sync_false() {
     let mut app = make_app("Host test\n  HostName test.com\n");
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     open_provider_form(&mut app, "proxmox");
     assert!(!app.providers.form.auto_sync);
 }
@@ -4088,7 +4088,7 @@ fn test_provider_form_dirty_esc_y_closes() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::Providers));
-    assert!(app.providers.form_baseline.is_none());
+    assert!(app.providers.form_baseline().is_none());
 }
 
 #[test]
@@ -4215,7 +4215,7 @@ fn test_host_form_baseline_cleared_after_submit() {
         bom: false,
     };
     let mut app = App::new(config);
-    app.providers.config = test_provider_config();
+    *app.providers.config_mut() = test_provider_config();
     crate::preferences::set_path_override(dir.path().join("preferences"));
     app.forms.host = crate::app::HostForm::new();
     app.forms.host.alias = "newhost".to_string();
@@ -4546,8 +4546,8 @@ fn test_provider_x_key_opens_scoped_purge() {
         "Host do-web\n  HostName 1.2.3.4\n  # purple:provider digitalocean:123\n  # purple:stale 1711900000\n",
     );
     app.screen = Screen::Providers;
-    app.providers.config = test_provider_config();
-    app.providers.config.set_section(ProviderSection {
+    *app.providers.config_mut() = test_provider_config();
+    app.providers.config_mut().set_section(ProviderSection {
         id: crate::providers::config::ProviderConfigId::bare("digitalocean"),
         token: "tok".to_string(),
         alias_prefix: "do".to_string(),

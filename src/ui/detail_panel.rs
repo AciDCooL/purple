@@ -648,7 +648,7 @@ fn render_vault_cert(
         host.vault_ssh.as_deref(),
         host.provider.as_deref(),
         host.provider_label.as_deref(),
-        &app.providers.config,
+        app.providers.config(),
     );
     if let Some(ref role) = effective_role {
         section_open(lines, "VAULT SSH", box_width);

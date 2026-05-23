@@ -11,7 +11,7 @@ use crate::providers;
 pub(crate) fn handle_sync_progress(app: &mut App, provider: String, message: String) {
     // Only show per-provider progress while that provider is still syncing.
     // Late progress events (arriving after SyncComplete) are discarded.
-    if app.providers.syncing.contains_key(&provider) && app.providers.sync_done.is_empty() {
+    if app.providers.syncing().contains_key(&provider) && app.providers.sync_done().is_empty() {
         let name = providers::provider_display_name(&provider);
         // Prefix with SPINNER_FRAMES[0] so handle_tick keeps the spinner
         // animating while the granular progress message is on screen.
@@ -36,7 +36,7 @@ pub(crate) fn handle_sync_complete(
     let (_msg, is_err, total, added, updated, stale) =
         app.apply_sync_result(&provider, hosts, false);
     if is_err {
-        app.providers.sync_history.insert(
+        app.providers.record_sync(
             provider.clone(),
             app::SyncRecord {
                 timestamp: now,
@@ -44,7 +44,7 @@ pub(crate) fn handle_sync_complete(
                 is_error: true,
             },
         );
-        app.providers.sync_had_errors = true;
+        app.providers.set_sync_had_errors(true);
     } else {
         let label = if total == 1 { "server" } else { "servers" };
         let message = format!(
@@ -53,7 +53,7 @@ pub(crate) fn handle_sync_complete(
             label,
             crate::format_sync_diff(added, updated, stale)
         );
-        app.providers.sync_history.insert(
+        app.providers.record_sync(
             provider.clone(),
             app::SyncRecord {
                 timestamp: now,
@@ -61,12 +61,10 @@ pub(crate) fn handle_sync_complete(
                 is_error: false,
             },
         );
-        app.providers.batch_added += added;
-        app.providers.batch_updated += updated;
-        app.providers.batch_stale += stale;
+        app.providers.add_batch_diff(added, updated, stale);
     }
-    app.providers.syncing.remove(&provider);
-    app.providers.sync_done.push(display_name.to_string());
+    app.providers.syncing_mut().remove(&provider);
+    app.providers.push_sync_done(display_name.to_string());
     crate::set_sync_summary(app);
     // Reset config check timer so auto-reload doesn't immediately
     // detect our own write as an "external" change
@@ -92,7 +90,7 @@ pub(crate) fn handle_sync_partial(
     let (msg, is_err, synced, added, updated, stale) =
         app.apply_sync_result(&provider, hosts, true);
     if is_err {
-        app.providers.sync_history.insert(
+        app.providers.record_sync(
             provider.clone(),
             app::SyncRecord {
                 timestamp: now,
@@ -102,7 +100,7 @@ pub(crate) fn handle_sync_partial(
         );
     } else {
         let label = if synced == 1 { "server" } else { "servers" };
-        app.providers.sync_history.insert(
+        app.providers.record_sync(
             provider.clone(),
             app::SyncRecord {
                 timestamp: now,
@@ -119,13 +117,11 @@ pub(crate) fn handle_sync_partial(
         );
         // Partial successes still contributed real changes to the SSH config;
         // surface them in the batch aggregate so the footer reflects reality.
-        app.providers.batch_added += added;
-        app.providers.batch_updated += updated;
-        app.providers.batch_stale += stale;
+        app.providers.add_batch_diff(added, updated, stale);
     }
-    app.providers.sync_had_errors = true;
-    app.providers.syncing.remove(&provider);
-    app.providers.sync_done.push(display_name.to_string());
+    app.providers.set_sync_had_errors(true);
+    app.providers.syncing_mut().remove(&provider);
+    app.providers.push_sync_done(display_name.to_string());
     crate::set_sync_summary(app);
     *last_config_check = Instant::now();
     app.queue_new_aliases_since(&before_aliases);
@@ -143,7 +139,7 @@ pub(crate) fn handle_sync_error(
         .unwrap_or_default()
         .as_secs();
     let display_name = providers::provider_display_name(provider.as_str());
-    app.providers.sync_history.insert(
+    app.providers.record_sync(
         provider.clone(),
         app::SyncRecord {
             timestamp: now,
@@ -151,9 +147,9 @@ pub(crate) fn handle_sync_error(
             is_error: true,
         },
     );
-    app.providers.sync_had_errors = true;
-    app.providers.syncing.remove(&provider);
-    app.providers.sync_done.push(display_name.to_string());
+    app.providers.set_sync_had_errors(true);
+    app.providers.syncing_mut().remove(&provider);
+    app.providers.push_sync_done(display_name.to_string());
     crate::set_sync_summary(app);
     *last_config_check = Instant::now();
 }

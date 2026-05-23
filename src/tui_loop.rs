@@ -60,7 +60,7 @@ pub fn run_tui(mut app: App) -> Result<()> {
         // During ping checking, use 80ms timeout for spinner.
         // Otherwise, block until the next event arrives.
         let vault_signing = app.vault.is_signing();
-        let provider_syncing = !app.providers.syncing.is_empty();
+        let provider_syncing = !app.providers.syncing().is_empty();
         // Tunnels tab drives the live chart animation. While at least
         // one tunnel is running we tick at 16ms (~60 fps) so the
         // swimlane bars and sparklines drift smoothly. The tick also
@@ -114,19 +114,16 @@ pub fn run_tui(mut app: App) -> Result<()> {
 
 /// Spawn auto-sync, auto-ping and the background version check on TUI startup.
 fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>) {
-    for section in app.providers.config.configured_providers().to_vec() {
+    for section in app.providers.config().configured_providers().to_vec() {
         if !section.auto_sync {
             continue;
         }
         let key = section.id.to_string();
-        if !app.providers.syncing.contains_key(&key) {
+        if !app.providers.syncing().contains_key(&key) {
             app.providers.reset_batch_if_idle();
             let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            app.providers.syncing.insert(key, cancel.clone());
-            app.providers.batch_total = app
-                .providers
-                .batch_total
-                .max(app.providers.sync_done.len() + app.providers.syncing.len());
+            app.providers.syncing_mut().insert(key, cancel.clone());
+            app.providers.bump_batch_total();
             handler::spawn_provider_sync(&section, events_tx.clone(), cancel);
             crate::set_sync_summary(app);
         }
@@ -400,7 +397,7 @@ fn lazy_cert_check(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>)
             selected.vault_ssh.as_deref(),
             selected.provider.as_deref(),
             selected.provider_label.as_deref(),
-            &app.providers.config,
+            app.providers.config(),
         )
         .is_some();
         // Also trigger a check when the host wires in a purple-managed cert
@@ -487,7 +484,7 @@ fn handle_pending_connect(
             let msg = ensure_vault_ssh_chain_if_needed(
                 &alias,
                 app.reload.config_path(),
-                &app.providers.config,
+                app.providers.config(),
                 app.hosts_state.ssh_config_mut(),
             );
             if msg.is_some() {
@@ -532,7 +529,7 @@ fn handle_pending_connect(
         let msg = ensure_vault_ssh_chain_if_needed(
             &alias,
             app.reload.config_path(),
-            &app.providers.config,
+            app.providers.config(),
             app.hosts_state.ssh_config_mut(),
         );
         if msg.is_some() {

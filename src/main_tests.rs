@@ -156,8 +156,10 @@ fn cache_invalid_entry_fresh_within_backoff() {
 fn test_sync_summary_still_syncing() {
     let mut app = empty_app();
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    app.providers.syncing.insert("aws".to_string(), cancel);
-    app.providers.sync_done.push("DigitalOcean".to_string());
+    app.providers
+        .syncing_mut()
+        .insert("aws".to_string(), cancel);
+    app.providers.push_sync_done("DigitalOcean".to_string());
     set_sync_summary(&mut app);
     let status = app.status_center.status().unwrap();
     // Active provider name (AWS) leads; DigitalOcean is already done so it is
@@ -165,7 +167,7 @@ fn test_sync_summary_still_syncing() {
     assert_eq!(status.text, "\u{280B} Syncing AWS EC2 \u{00B7} 1/2");
     assert!(!status.is_error());
     // sync_done should NOT be cleared while still syncing
-    assert_eq!(app.providers.sync_done.len(), 1);
+    assert_eq!(app.providers.sync_done().len(), 1);
 }
 
 #[test]
@@ -229,54 +231,54 @@ fn replace_spinner_frame_ignores_regular_status() {
 #[test]
 fn test_sync_summary_all_done() {
     let mut app = empty_app();
-    app.providers.sync_done.push("AWS".to_string());
-    app.providers.sync_done.push("Hetzner".to_string());
+    app.providers.push_sync_done("AWS".to_string());
+    app.providers.push_sync_done("Hetzner".to_string());
     set_sync_summary(&mut app);
     let status = app.status_center.status().unwrap();
     assert_eq!(status.text, "Synced 2/2 \u{00B7} AWS, Hetzner");
     assert!(!status.is_error());
     // sync_done should be cleared when all done
-    assert!(app.providers.sync_done.is_empty());
-    assert!(!app.providers.sync_had_errors);
+    assert!(app.providers.sync_done().is_empty());
+    assert!(!app.providers.sync_had_errors());
 }
 
 #[test]
 fn test_sync_summary_with_errors() {
     let mut app = empty_app();
-    app.providers.sync_done.push("AWS".to_string());
-    app.providers.sync_had_errors = true;
+    app.providers.push_sync_done("AWS".to_string());
+    app.providers.set_sync_had_errors(true);
     set_sync_summary(&mut app);
     let toast = app.status_center.toast().unwrap();
     assert_eq!(toast.text, "Synced 1/1 \u{00B7} AWS");
     assert!(toast.is_error());
     // Error flag should be reset when batch completes
-    assert!(!app.providers.sync_had_errors);
+    assert!(!app.providers.sync_had_errors());
 }
 
 #[test]
 fn test_sync_summary_includes_diff_aggregate() {
     let mut app = empty_app();
-    app.providers.sync_done.push("AWS".to_string());
-    app.providers.sync_done.push("DO".to_string());
-    app.providers.batch_added = 12;
-    app.providers.batch_updated = 3;
-    app.providers.batch_stale = 1;
+    app.providers.push_sync_done("AWS".to_string());
+    app.providers.push_sync_done("DO".to_string());
+    app.providers.add_batch_diff(12, 3, 1);
     set_sync_summary(&mut app);
     let status = app.status_center.status().unwrap();
     assert_eq!(status.text, "Synced 2/2 \u{00B7} AWS, DO (+12 ~3 -1)");
     // Aggregate must reset on batch completion so the next sync starts clean.
-    assert_eq!(app.providers.batch_added, 0);
-    assert_eq!(app.providers.batch_updated, 0);
-    assert_eq!(app.providers.batch_stale, 0);
+    assert_eq!(app.providers.batch_added(), 0);
+    assert_eq!(app.providers.batch_updated(), 0);
+    assert_eq!(app.providers.batch_stale(), 0);
 }
 
 #[test]
 fn test_sync_summary_progress_includes_diff_and_spinner() {
     let mut app = empty_app();
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    app.providers.syncing.insert("vultr".to_string(), cancel);
-    app.providers.sync_done.push("AWS".to_string());
-    app.providers.batch_added = 5;
+    app.providers
+        .syncing_mut()
+        .insert("vultr".to_string(), cancel);
+    app.providers.push_sync_done("AWS".to_string());
+    app.providers.add_batch_diff(5, 0, 0);
     set_sync_summary(&mut app);
     let status = app.status_center.status().unwrap();
     // Active name (Vultr) leads, counter follows, then diff. AWS is done so
@@ -303,9 +305,11 @@ fn test_sync_summary_progress_lists_multiple_active_providers_sorted() {
     let mut app = empty_app();
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     app.providers
-        .syncing
+        .syncing_mut()
         .insert("vultr".to_string(), cancel.clone());
-    app.providers.syncing.insert("aws".to_string(), cancel);
+    app.providers
+        .syncing_mut()
+        .insert("aws".to_string(), cancel);
     set_sync_summary(&mut app);
     let status = app.status_center.status().unwrap();
     assert_eq!(status.text, "\u{280B} Syncing AWS EC2, Vultr \u{00B7} 0/2");
@@ -315,14 +319,16 @@ fn test_sync_summary_progress_lists_multiple_active_providers_sorted() {
 fn test_sync_summary_errors_persist_while_syncing() {
     let mut app = empty_app();
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    app.providers.syncing.insert("vultr".to_string(), cancel);
-    app.providers.sync_done.push("AWS".to_string());
-    app.providers.sync_had_errors = true;
+    app.providers
+        .syncing_mut()
+        .insert("vultr".to_string(), cancel);
+    app.providers.push_sync_done("AWS".to_string());
+    app.providers.set_sync_had_errors(true);
     set_sync_summary(&mut app);
     let toast = app.status_center.toast().unwrap();
     assert!(toast.is_error());
     // Error flag should persist while still syncing
-    assert!(app.providers.sync_had_errors);
+    assert!(app.providers.sync_had_errors());
 }
 
 #[test]
@@ -336,9 +342,11 @@ fn test_sync_summary_error_while_syncing_goes_to_toast_with_active_names() {
     // text so the toast identifies which provider is still running.
     let mut app = empty_app();
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    app.providers.syncing.insert("vultr".to_string(), cancel);
-    app.providers.sync_done.push("AWS".to_string());
-    app.providers.sync_had_errors = true;
+    app.providers
+        .syncing_mut()
+        .insert("vultr".to_string(), cancel);
+    app.providers.push_sync_done("AWS".to_string());
+    app.providers.set_sync_had_errors(true);
     set_sync_summary(&mut app);
     let toast = app.status_center.toast().unwrap();
     assert!(toast.is_error(), "error route must send to toast");
@@ -365,11 +373,13 @@ fn test_sync_summary_batch_total_clamps_upward_mid_batch() {
     // to max(5, 3+1)=5 (this also verifies the arithmetic).
     let mut app = empty_app();
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    app.providers.syncing.insert("vultr".to_string(), cancel);
-    app.providers.sync_done.push("AWS".to_string());
-    app.providers.sync_done.push("DigitalOcean".to_string());
-    app.providers.sync_done.push("Hetzner".to_string());
-    app.providers.batch_total = 5;
+    app.providers
+        .syncing_mut()
+        .insert("vultr".to_string(), cancel);
+    app.providers.push_sync_done("AWS".to_string());
+    app.providers.push_sync_done("DigitalOcean".to_string());
+    app.providers.push_sync_done("Hetzner".to_string());
+    app.providers.set_batch_total(5);
     set_sync_summary(&mut app);
     let status = app.status_center.status().unwrap();
     assert!(
@@ -386,7 +396,7 @@ fn test_sync_summary_diff_suffix_omitted_when_all_zero() {
     // don't show an empty `()`. `test_sync_summary_all_done` currently
     // exercises this accidentally — this test pins the intent.
     let mut app = empty_app();
-    app.providers.sync_done.push("AWS".to_string());
+    app.providers.push_sync_done("AWS".to_string());
     // batch_* all zero by default via empty_app.
     set_sync_summary(&mut app);
     let status = app.status_center.status().unwrap();

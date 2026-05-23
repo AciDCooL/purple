@@ -558,7 +558,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
         }
         KeyCode::Char('S') => {
             if !app.demo_mode {
-                app.providers.config = crate::providers::config::ProviderConfig::load();
+                *app.providers.config_mut() = crate::providers::config::ProviderConfig::load();
             }
             app.ui.provider_list_state = ratatui::widgets::ListState::default();
             app.ui.provider_list_state.select(Some(0));

@@ -92,19 +92,19 @@ pub fn format_sync_diff(added: usize, updated: usize, stale: usize) -> String {
 /// becomes `Synced 5/5 · AWS, DO, Vultr, Hetzner, Linode (+12 ~3 -1)` and the
 /// batch state resets. Persists `sync_history.tsv` on completion.
 pub fn set_sync_summary(app: &mut App) {
-    let still_syncing = !app.providers.syncing.is_empty();
-    let done = app.providers.sync_done.len();
+    let still_syncing = !app.providers.syncing().is_empty();
+    let done = app.providers.sync_done().len();
     let total = app
         .providers
-        .batch_total
-        .max(done + app.providers.syncing.len());
-    let added = app.providers.batch_added;
-    let updated = app.providers.batch_updated;
-    let stale = app.providers.batch_stale;
+        .batch_total()
+        .max(done + app.providers.syncing().len());
+    let added = app.providers.batch_added();
+    let updated = app.providers.batch_updated();
+    let stale = app.providers.batch_stale();
     if still_syncing {
         let mut active: Vec<String> = app
             .providers
-            .syncing
+            .syncing()
             .keys()
             .map(|name| crate::providers::provider_display_name(name).to_string())
             .collect();
@@ -120,26 +120,21 @@ pub fn set_sync_summary(app: &mut App) {
             updated,
             stale,
         );
-        if app.providers.sync_had_errors {
+        if app.providers.sync_had_errors() {
             app.notify_background_error(text);
         } else {
             app.notify_background(text);
         }
     } else {
-        let names = app.providers.sync_done.join(", ");
+        let names = app.providers.sync_done().join(", ");
         let text = crate::messages::synced_done(done, total, &names, added, updated, stale);
-        if app.providers.sync_had_errors {
+        if app.providers.sync_had_errors() {
             app.notify_background_error(text);
         } else {
             app.notify_background(text);
         }
-        app.providers.sync_done.clear();
-        app.providers.sync_had_errors = false;
-        app.providers.batch_added = 0;
-        app.providers.batch_updated = 0;
-        app.providers.batch_stale = 0;
-        app.providers.batch_total = 0;
-        app::SyncRecord::save_all(&app.providers.sync_history);
+        app::SyncRecord::save_all(app.providers.sync_history());
+        app.providers.finish_batch();
     }
 }
 

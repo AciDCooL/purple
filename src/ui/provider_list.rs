@@ -62,15 +62,14 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
 
     // Footer below the block
     let footer_area = design::render_overlay_footer(frame, area);
-    if app.providers.pending_delete.is_some() {
-        let name = app.providers.pending_delete.as_deref().unwrap_or("");
+    if app.providers.pending_delete().is_some() {
+        let name = app.providers.pending_delete().unwrap_or("");
         let display = crate::providers::provider_display_name(name);
         // When removing one labeled config of a multi-config provider,
         // surface the label so the user can't mistake it for "remove all".
         let question = match app
             .providers
-            .pending_delete_id
-            .as_ref()
+            .pending_delete_id()
             .and_then(|id| id.label.as_deref())
         {
             Some(label) => {
@@ -123,7 +122,7 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         use crate::messages::footer as fl;
         let edit_label = match selected_row {
             Some(crate::app::ProviderRow::Header { config_count, name }) if *config_count >= 2 => {
-                if app.providers.expanded_providers.contains(name) {
+                if app.providers.expanded_providers().contains(name) {
                     fl::ENTER_COLLAPSE
                 } else {
                     fl::ENTER_EXPAND
@@ -164,7 +163,7 @@ fn render_header_line(
     // for siblings, or nothing at all when the list contains no
     // multi-config providers.
     let prefix = if config_count >= 2 {
-        if app.providers.expanded_providers.contains(name) {
+        if app.providers.expanded_providers().contains(name) {
             format!(" {} ", design::TREE_EXPANDED)
         } else {
             format!(" {} ", design::TREE_COLLAPSED)
@@ -194,7 +193,7 @@ fn render_header_line(
     // surface for both bare configs and labeled-but-only-one configs.
     let single_section = app
         .providers
-        .config
+        .config()
         .sections_for_provider(name)
         .first()
         .cloned()
@@ -205,7 +204,7 @@ fn render_header_line(
         .unwrap_or_else(|| name.to_string());
     let has_error = app
         .providers
-        .sync_history
+        .sync_history()
         .get(&key)
         .is_some_and(|r| r.is_error);
     if has_error {
@@ -248,7 +247,7 @@ fn render_leaf_line(
     let key = id.to_string();
     let has_error = app
         .providers
-        .sync_history
+        .sync_history()
         .get(&key)
         .is_some_and(|r| r.is_error);
     if has_error {
@@ -258,7 +257,7 @@ fn render_leaf_line(
     }
     used += 1;
 
-    if let Some(section) = app.providers.config.section_by_id(id) {
+    if let Some(section) = app.providers.config().section_by_id(id) {
         if !section.auto_sync {
             spans.push(Span::styled(" (manual)", theme::muted()));
             used += 9;
@@ -289,7 +288,7 @@ fn append_sync_detail(
     content_width: usize,
     spans: &mut Vec<Span<'static>>,
 ) {
-    if app.providers.syncing.contains_key(key) {
+    if app.providers.syncing().contains_key(key) {
         let max = content_width.saturating_sub(used + 2);
         if max > 1 {
             spans.push(Span::styled(
@@ -299,7 +298,7 @@ fn append_sync_detail(
         }
         return;
     }
-    let Some(record) = app.providers.sync_history.get(key) else {
+    let Some(record) = app.providers.sync_history().get(key) else {
         return;
     };
     let ago = ConnectionHistory::format_time_ago(record.timestamp);
@@ -353,8 +352,7 @@ pub fn render_label_migration(frame: &mut Frame, app: &mut App, provider_name: &
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let (existing, new, focused, cursor_pos) = match app.providers.pending_label_migration.as_ref()
-    {
+    let (existing, new, focused, cursor_pos) = match app.providers.pending_label_migration() {
         Some(p) => (
             p.existing_label.as_str(),
             p.new_label.as_str(),

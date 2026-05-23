@@ -127,7 +127,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 .find(|h| h.alias == *alias)
                 .and_then(|h| h.provider.as_ref())
                 .and_then(|prov| {
-                    app.providers.config.section(prov).and_then(|s| {
+                    app.providers.config().section(prov).and_then(|s| {
                         if s.vault_role.is_empty() {
                             None
                         } else {
@@ -151,7 +151,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
                 .find(|h| h.alias == *alias)
                 .and_then(|h| h.provider.as_ref())
                 .and_then(|prov| {
-                    app.providers.config.section(prov).and_then(|s| {
+                    app.providers.config().section(prov).and_then(|s| {
                         if s.vault_addr.is_empty() {
                             None
                         } else {

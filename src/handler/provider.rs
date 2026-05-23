@@ -27,48 +27,49 @@ pub(super) fn handle_provider_list_key(
     // `pending_delete_id` (Some) scopes the delete to one config; otherwise
     // `pending_delete` (legacy bare-name) deletes whatever single section
     // matches that provider name.
-    if app.providers.pending_delete.is_some() && key.code != KeyCode::Char('?') {
+    if app.providers.pending_delete().is_some() && key.code != KeyCode::Char('?') {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                let pending_id = app.providers.pending_delete_id.take();
-                let Some(name) = app.providers.pending_delete.take() else {
+                let pending_id = app.providers.take_pending_delete_id();
+                let Some(name) = app.providers.take_pending_delete() else {
                     return;
                 };
                 if let Some(id) = pending_id {
-                    let Some(old_section) = app.providers.config.section_by_id(&id).cloned() else {
+                    let Some(old_section) = app.providers.config().section_by_id(&id).cloned()
+                    else {
                         return;
                     };
-                    app.providers.config.remove_section_by_id(&id);
-                    if let Err(e) = app.providers.config.save() {
-                        app.providers.config.set_section(old_section);
+                    app.providers.config_mut().remove_section_by_id(&id);
+                    if let Err(e) = app.providers.config().save() {
+                        app.providers.config_mut().set_section(old_section);
                         app.notify_error(crate::messages::failed_to_save(&e));
                     } else {
-                        app.providers.sync_history.remove(&id.to_string());
-                        crate::app::SyncRecord::save_all(&app.providers.sync_history);
+                        app.providers.sync_history_mut().remove(&id.to_string());
+                        crate::app::SyncRecord::save_all(app.providers.sync_history());
                         // Drop the expand-state if this was the last config of
                         // its provider; otherwise a re-add would reopen expanded.
                         if app
                             .providers
-                            .config
+                            .config()
                             .sections_for_provider(&id.provider)
                             .is_empty()
                         {
-                            app.providers.expanded_providers.remove(&id.provider);
+                            app.providers.expanded_providers_mut().remove(&id.provider);
                         }
                         let display_name = crate::providers::provider_display_name(&id.provider);
                         app.notify(crate::messages::provider_removed(display_name));
                     }
                 } else if let Some(old_section) =
-                    app.providers.config.section(name.as_str()).cloned()
+                    app.providers.config().section(name.as_str()).cloned()
                 {
-                    app.providers.config.remove_section(name.as_str());
-                    if let Err(e) = app.providers.config.save() {
-                        app.providers.config.set_section(old_section);
+                    app.providers.config_mut().remove_section(name.as_str());
+                    if let Err(e) = app.providers.config().save() {
+                        app.providers.config_mut().set_section(old_section);
                         app.notify_error(crate::messages::failed_to_save(&e));
                     } else {
-                        app.providers.sync_history.remove(name.as_str());
-                        crate::app::SyncRecord::save_all(&app.providers.sync_history);
-                        app.providers.expanded_providers.remove(&name);
+                        app.providers.sync_history_mut().remove(name.as_str());
+                        crate::app::SyncRecord::save_all(app.providers.sync_history());
+                        app.providers.expanded_providers_mut().remove(&name);
                         let display_name = crate::providers::provider_display_name(name.as_str());
                         app.notify(crate::messages::provider_removed(display_name));
                     }
@@ -87,7 +88,7 @@ pub(super) fn handle_provider_list_key(
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             // Cancel all running syncs
-            for cancel_flag in app.providers.syncing.values() {
+            for cancel_flag in app.providers.syncing().values() {
                 cancel_flag.store(true, Ordering::Relaxed);
             }
             app.set_screen(Screen::HostList);
@@ -167,7 +168,7 @@ pub(super) fn handle_provider_list_key(
                     crate::app::ProviderRow::Header { name, config_count } => {
                         if *config_count == 1 {
                             app.providers
-                                .config
+                                .config()
                                 .sections_for_provider(name)
                                 .first()
                                 .map(|s| s.id.clone())
@@ -200,14 +201,14 @@ pub(super) fn handle_provider_list_key(
             let sections_to_sync: Vec<providers::config::ProviderSection> = match &row {
                 crate::app::ProviderRow::Header { name, .. } => app
                     .providers
-                    .config
+                    .config()
                     .sections_for_provider(name)
                     .into_iter()
                     .cloned()
                     .collect(),
                 crate::app::ProviderRow::Leaf { id } => app
                     .providers
-                    .config
+                    .config()
                     .section_by_id(id)
                     .cloned()
                     .into_iter()
@@ -221,16 +222,13 @@ pub(super) fn handle_provider_list_key(
             }
             for section in sections_to_sync {
                 let key = section.id.to_string();
-                if app.providers.syncing.contains_key(&key) {
+                if app.providers.syncing().contains_key(&key) {
                     continue;
                 }
                 app.providers.reset_batch_if_idle();
                 let cancel = Arc::new(AtomicBool::new(false));
-                app.providers.syncing.insert(key, cancel.clone());
-                app.providers.batch_total = app
-                    .providers
-                    .batch_total
-                    .max(app.providers.sync_done.len() + app.providers.syncing.len());
+                app.providers.syncing_mut().insert(key, cancel.clone());
+                app.providers.bump_batch_total();
                 super::sync::spawn_provider_sync(&section, events_tx.clone(), cancel);
             }
             crate::set_sync_summary(app);
@@ -247,7 +245,7 @@ pub(super) fn handle_provider_list_key(
             };
             match &row {
                 crate::app::ProviderRow::Leaf { id } => {
-                    if app.providers.config.section_by_id(id).is_some() {
+                    if app.providers.config().section_by_id(id).is_some() {
                         app.providers.request_delete(id.clone());
                     }
                 }
@@ -261,7 +259,7 @@ pub(super) fn handle_provider_list_key(
                         app.notify(crate::messages::EXPAND_TO_REMOVE_CONFIG.to_string());
                     } else {
                         // Single config: scope the confirm to that exact id.
-                        if let Some(section) = app.providers.config.section(name) {
+                        if let Some(section) = app.providers.config().section(name) {
                             app.providers.request_delete(section.id.clone());
                         }
                     }
@@ -360,7 +358,7 @@ pub fn handle_label_migration_key(
             app.set_screen(Screen::Providers);
         }
         KeyCode::Tab | KeyCode::Down => {
-            if let Some(p) = &mut app.providers.pending_label_migration {
+            if let Some(p) = app.providers.pending_label_migration_mut() {
                 p.focused = match p.focused {
                     crate::app::LabelMigrationField::Existing => {
                         crate::app::LabelMigrationField::New
@@ -373,7 +371,7 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::BackTab | KeyCode::Up => {
-            if let Some(p) = &mut app.providers.pending_label_migration {
+            if let Some(p) = app.providers.pending_label_migration_mut() {
                 p.focused = match p.focused {
                     crate::app::LabelMigrationField::Existing => {
                         crate::app::LabelMigrationField::New
@@ -386,14 +384,14 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::Left => {
-            if let Some(p) = &mut app.providers.pending_label_migration {
+            if let Some(p) = app.providers.pending_label_migration_mut() {
                 if p.cursor_pos > 0 {
                     p.cursor_pos -= 1;
                 }
             }
         }
         KeyCode::Right => {
-            if let Some(p) = &mut app.providers.pending_label_migration {
+            if let Some(p) = app.providers.pending_label_migration_mut() {
                 let max = p.focused_value().chars().count();
                 if p.cursor_pos < max {
                     p.cursor_pos += 1;
@@ -401,17 +399,17 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::Home => {
-            if let Some(p) = &mut app.providers.pending_label_migration {
+            if let Some(p) = app.providers.pending_label_migration_mut() {
                 p.cursor_pos = 0;
             }
         }
         KeyCode::End => {
-            if let Some(p) = &mut app.providers.pending_label_migration {
+            if let Some(p) = app.providers.pending_label_migration_mut() {
                 p.cursor_pos = p.focused_value().chars().count();
             }
         }
         KeyCode::Backspace => {
-            if let Some(p) = &mut app.providers.pending_label_migration {
+            if let Some(p) = app.providers.pending_label_migration_mut() {
                 if p.cursor_pos > 0 {
                     let cursor_pos = p.cursor_pos;
                     let target = p.focused_value_mut();
@@ -423,7 +421,7 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::Delete => {
-            if let Some(p) = &mut app.providers.pending_label_migration {
+            if let Some(p) = app.providers.pending_label_migration_mut() {
                 let len = p.focused_value().chars().count();
                 if p.cursor_pos < len {
                     let cursor_pos = p.cursor_pos;
@@ -439,7 +437,7 @@ pub fn handle_label_migration_key(
             if !allowed {
                 return;
             }
-            if let Some(p) = &mut app.providers.pending_label_migration {
+            if let Some(p) = app.providers.pending_label_migration_mut() {
                 let cursor_pos = p.cursor_pos;
                 let target = p.focused_value_mut();
                 if target.len() < 32 {
@@ -451,7 +449,7 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::Enter => {
-            let (existing, new) = match app.providers.pending_label_migration.as_ref() {
+            let (existing, new) = match app.providers.pending_label_migration() {
                 Some(p) => (p.existing_label.clone(), p.new_label.clone()),
                 None => return,
             };
@@ -484,7 +482,7 @@ pub fn handle_label_migration_key(
 /// - 1 existing bare config: prompt for a label for the existing one (Y step 1).
 /// - 1+ existing labeled configs: open form for a new labeled config directly.
 fn open_add_config_flow(app: &mut App, provider_name: &str) {
-    let existing = app.providers.config.sections_for_provider(provider_name);
+    let existing = app.providers.config().sections_for_provider(provider_name);
     match existing.len() {
         0 => {
             app.open_provider_form(crate::providers::config::ProviderConfigId::bare(
@@ -496,17 +494,16 @@ fn open_add_config_flow(app: &mut App, provider_name: &str) {
             // labels (existing + new) on one screen so step 2 is the
             // standard provider form without an extra label field.
             log::debug!("provider lazy migration: started for '{}'", provider_name);
-            app.providers.pending_label_migration = Some(crate::app::PendingLabelMigration {
-                provider: provider_name.to_string(),
-                existing_label: "default".to_string(),
-                new_label: String::new(),
-                // Focus the FIRST field (current config). It's the surprise
-                // — users didn't ask to rename their existing config —
-                // so the cursor lands there to force engagement instead
-                // of letting them blindly accept "default" by tabbing past.
-                focused: crate::app::LabelMigrationField::Existing,
-                cursor_pos: "default".chars().count(),
-            });
+            app.providers
+                .set_pending_label_migration(Some(crate::app::PendingLabelMigration {
+                    provider: provider_name.to_string(),
+                    existing_label: "default".to_string(),
+                    new_label: String::new(),
+                    // Focus the existing-config field so the unexpected rename
+                    // gets attention instead of a blind tab-past "default".
+                    focused: crate::app::LabelMigrationField::Existing,
+                    cursor_pos: "default".chars().count(),
+                }));
             app.set_screen(Screen::ProviderLabelMigration {
                 provider: provider_name.to_string(),
             });
@@ -784,7 +781,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         // would have been rejected by the dedup pass in validate().
         let candidate =
             providers::config::ProviderConfigId::labeled(provider_name.clone(), typed.clone());
-        if app.providers.config.section_by_id(&candidate).is_some() {
+        if app.providers.config().section_by_id(&candidate).is_some() {
             app.notify_error(crate::messages::label_already_in_use(&typed));
             app.providers.form.focused_field = crate::app::ProviderFormField::Label;
             return;
@@ -938,11 +935,11 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
 
     // Snapshot for rollback. When migrating from bare to labeled, we have
     // an extra rename step on the existing section as well. Capture it.
-    let old_section_by_id = app.providers.config.section_by_id(&form_id).cloned();
+    let old_section_by_id = app.providers.config().section_by_id(&form_id).cloned();
     let bare_id = providers::config::ProviderConfigId::bare(provider_name.clone());
-    let old_bare_section = app.providers.config.section_by_id(&bare_id).cloned();
+    let old_bare_section = app.providers.config().section_by_id(&bare_id).cloned();
 
-    let pending_migration = app.providers.pending_label_migration.clone();
+    let pending_migration = app.providers.pending_label_migration().cloned();
 
     // Step 1: if a lazy migration is pending, rewrite the existing bare
     // section to its new labeled id BEFORE inserting the new section.
@@ -964,14 +961,14 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
                 if existing.alias_prefix == short {
                     existing.alias_prefix = format!("{}-{}", short, migration.existing_label);
                 }
-                app.providers.config.remove_section_by_id(&bare_id);
-                app.providers.config.set_section(existing);
+                app.providers.config_mut().remove_section_by_id(&bare_id);
+                app.providers.config_mut().set_section(existing);
             }
         }
     }
 
-    app.providers.config.set_section(section);
-    if let Err(e) = app.providers.config.save() {
+    app.providers.config_mut().set_section(section);
+    if let Err(e) = app.providers.config().save() {
         log::warn!(
             "[config] Save failed for [{}]: {}; rolling back in-memory state",
             form_id,
@@ -980,8 +977,8 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         // Rollback: restore the previous section state for the form id
         // AND any migration-time relabel of the existing bare section.
         match old_section_by_id {
-            Some(old) => app.providers.config.set_section(old),
-            None => app.providers.config.remove_section_by_id(&form_id),
+            Some(old) => app.providers.config_mut().set_section(old),
+            None => app.providers.config_mut().remove_section_by_id(&form_id),
         }
         if let Some(old_bare) = old_bare_section {
             // Drop any new labeled section the migration may have inserted,
@@ -991,9 +988,11 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
                     migration.provider.clone(),
                     migration.existing_label.clone(),
                 );
-                app.providers.config.remove_section_by_id(&migrated_id);
+                app.providers
+                    .config_mut()
+                    .remove_section_by_id(&migrated_id);
             }
-            app.providers.config.set_section(old_bare);
+            app.providers.config_mut().set_section(old_bare);
         }
         // Drop pending migration state on failure too, so a retry doesn't
         // pick up half-applied input.
@@ -1031,20 +1030,17 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     // Look up by the EXACT id we just saved, not the bare provider name.
     // Otherwise a labeled save like `do:personal` would auto-sync `do:work`
     // (the first-found section for that provider).
-    let sync_section = app.providers.config.section_by_id(&form_id).cloned();
+    let sync_section = app.providers.config().section_by_id(&form_id).cloned();
     let sync_key = sync_section
         .as_ref()
         .map(|s| s.id.to_string())
         .unwrap_or_else(|| form_id.to_string());
-    if !app.providers.syncing.contains_key(&sync_key) {
+    if !app.providers.syncing().contains_key(&sync_key) {
         if let Some(sync_section) = sync_section {
             app.providers.reset_batch_if_idle();
             let cancel = Arc::new(AtomicBool::new(false));
-            app.providers.syncing.insert(sync_key, cancel.clone());
-            app.providers.batch_total = app
-                .providers
-                .batch_total
-                .max(app.providers.sync_done.len() + app.providers.syncing.len());
+            app.providers.syncing_mut().insert(sync_key, cancel.clone());
+            app.providers.bump_batch_total();
             app.notify(crate::messages::provider_saved_syncing(display_name));
             super::sync::spawn_provider_sync(&sync_section, events_tx.clone(), cancel);
             crate::set_sync_summary(app);
@@ -1075,13 +1071,14 @@ mod label_migration_tests {
         app.screen = Screen::ProviderLabelMigration {
             provider: "aws".to_string(),
         };
-        app.providers.pending_label_migration = Some(crate::app::PendingLabelMigration {
-            provider: "aws".to_string(),
-            existing_label: "default".to_string(),
-            new_label: String::new(),
-            focused: LabelMigrationField::New,
-            cursor_pos: 0,
-        });
+        app.providers
+            .set_pending_label_migration(Some(crate::app::PendingLabelMigration {
+                provider: "aws".to_string(),
+                existing_label: "default".to_string(),
+                new_label: String::new(),
+                focused: LabelMigrationField::New,
+                cursor_pos: 0,
+            }));
         app
     }
 
@@ -1096,7 +1093,7 @@ mod label_migration_tests {
         let (tx, _rx) = mpsc::channel();
         handle_label_migration_key(&mut app, k(KeyCode::Esc), &tx);
         assert!(matches!(app.screen, Screen::Providers));
-        assert!(app.providers.pending_label_migration.is_none());
+        assert!(app.providers.pending_label_migration().is_none());
     }
 
     #[test]
@@ -1105,7 +1102,7 @@ mod label_migration_tests {
         let mut app = make_app();
         let (tx, _rx) = mpsc::channel();
         handle_label_migration_key(&mut app, k(KeyCode::Tab), &tx);
-        let p = app.providers.pending_label_migration.as_ref().unwrap();
+        let p = app.providers.pending_label_migration().unwrap();
         assert!(matches!(p.focused, LabelMigrationField::Existing));
     }
 }
@@ -1137,7 +1134,7 @@ mod labeled_add_tests {
         };
         let mut app = App::new(config);
         let providers_path = scratch.join("providers");
-        app.providers.config = crate::providers::config::ProviderConfig {
+        *app.providers.config_mut() = crate::providers::config::ProviderConfig {
             sections: Vec::new(),
             path_override: Some(providers_path),
         };
@@ -1175,7 +1172,7 @@ mod labeled_add_tests {
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app();
         app.providers
-            .config
+            .config_mut()
             .set_section(proxmox_section(Some("server1")));
         open_add_config_flow(&mut app, "proxmox");
         assert!(matches!(app.screen, Screen::ProviderForm { ref id }
@@ -1195,7 +1192,9 @@ mod labeled_add_tests {
         // don't double-prompt for a name.
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app();
-        app.providers.config.set_section(proxmox_section(None));
+        app.providers
+            .config_mut()
+            .set_section(proxmox_section(None));
         open_add_config_flow(&mut app, "proxmox");
         assert!(matches!(
             app.screen,
@@ -1222,7 +1221,7 @@ mod labeled_add_tests {
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app();
         app.providers
-            .config
+            .config_mut()
             .set_section(proxmox_section(Some("server1")));
         app.open_provider_form(ProviderConfigId::labeled("proxmox", "server1"));
         assert!(!app.providers.form.label_entry);
@@ -1253,7 +1252,7 @@ mod labeled_add_tests {
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app();
         app.providers
-            .config
+            .config_mut()
             .set_section(proxmox_section(Some("server1")));
         open_add_config_flow(&mut app, "proxmox");
         let (tx, _rx) = mpsc::channel();
@@ -1274,7 +1273,7 @@ mod labeled_add_tests {
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app();
         app.providers
-            .config
+            .config_mut()
             .set_section(proxmox_section(Some("server1")));
         open_add_config_flow(&mut app, "proxmox");
         let (tx, _rx) = mpsc::channel();
@@ -1289,7 +1288,7 @@ mod labeled_add_tests {
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app();
         app.providers
-            .config
+            .config_mut()
             .set_section(proxmox_section(Some("server1")));
         open_add_config_flow(&mut app, "proxmox");
         let (tx, _rx) = mpsc::channel();
@@ -1302,7 +1301,10 @@ mod labeled_add_tests {
         );
         // Original section still alone in the config.
         assert_eq!(
-            app.providers.config.sections_for_provider("proxmox").len(),
+            app.providers
+                .config()
+                .sections_for_provider("proxmox")
+                .len(),
             1
         );
     }
@@ -1317,7 +1319,7 @@ mod labeled_add_tests {
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app();
         app.providers
-            .config
+            .config_mut()
             .set_section(proxmox_section(Some("server1")));
         open_add_config_flow(&mut app, "proxmox");
         let (tx, _rx) = mpsc::channel();
@@ -1342,7 +1344,7 @@ mod labeled_add_tests {
         // Both labeled sections must coexist after submit.
         let names: Vec<String> = app
             .providers
-            .config
+            .config()
             .sections_for_provider("proxmox")
             .iter()
             .map(|s| s.id.to_string())
@@ -1372,16 +1374,19 @@ mod labeled_add_tests {
         // the same id with full provider data.
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app();
-        app.providers.config.set_section(ProviderSection {
+        app.providers.config_mut().set_section(ProviderSection {
             alias_prefix: "pve-server1".to_string(),
             ..proxmox_section(Some("server1"))
         });
-        app.providers.config.set_section(ProviderSection {
+        app.providers.config_mut().set_section(ProviderSection {
             alias_prefix: "pve-server2".to_string(),
             ..proxmox_section(Some("server2"))
         });
         assert_eq!(
-            app.providers.config.sections_for_provider("proxmox").len(),
+            app.providers
+                .config()
+                .sections_for_provider("proxmox")
+                .len(),
             2
         );
 
@@ -1389,10 +1394,13 @@ mod labeled_add_tests {
         // the same after the confirm step; routing it through the keystroke
         // sequence would not exercise additional code relevant here.
         app.providers
-            .config
+            .config_mut()
             .remove_section_by_id(&ProviderConfigId::labeled("proxmox", "server2"));
         assert_eq!(
-            app.providers.config.sections_for_provider("proxmox").len(),
+            app.providers
+                .config()
+                .sections_for_provider("proxmox")
+                .len(),
             1
         );
 
@@ -1419,7 +1427,7 @@ mod labeled_add_tests {
 
         let names: Vec<String> = app
             .providers
-            .config
+            .config()
             .sections_for_provider("proxmox")
             .iter()
             .map(|s| s.id.to_string())
@@ -1434,7 +1442,7 @@ mod labeled_add_tests {
         );
         let readded = app
             .providers
-            .config
+            .config()
             .section_by_id(&ProviderConfigId::labeled("proxmox", "server2"))
             .expect("readded section must be present");
         assert_eq!(readded.url, "https://pve-readd.example.com:8006");
@@ -1445,7 +1453,7 @@ mod labeled_add_tests {
         let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
         let mut app = make_app();
         app.providers
-            .config
+            .config_mut()
             .set_section(proxmox_section(Some("server1")));
         open_add_config_flow(&mut app, "proxmox");
         let (tx, _rx) = mpsc::channel();
@@ -1467,7 +1475,10 @@ mod labeled_add_tests {
         );
         // No duplicate inserted.
         assert_eq!(
-            app.providers.config.sections_for_provider("proxmox").len(),
+            app.providers
+                .config()
+                .sections_for_provider("proxmox")
+                .len(),
             1
         );
     }

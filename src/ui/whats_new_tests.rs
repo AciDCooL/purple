@@ -22,7 +22,7 @@ fn build_app() -> App {
         bom: false,
     };
     let mut app = App::new(config);
-    app.providers.config = crate::providers::config::ProviderConfig::default();
+    *app.providers.config_mut() = crate::providers::config::ProviderConfig::default();
     app
 }
 

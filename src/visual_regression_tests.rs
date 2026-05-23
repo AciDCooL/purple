@@ -1473,13 +1473,14 @@ fn visual_provider_label_migration() {
     let mut app = demo::build_demo_app();
     // Seed pending state as if the user just hit `a` on a single-bare-config
     // provider; the screen prompts for both labels with focus on the new one.
-    app.providers.pending_label_migration = Some(crate::app::PendingLabelMigration {
-        provider: "hetzner".to_string(),
-        existing_label: "default".to_string(),
-        new_label: String::new(),
-        focused: crate::app::LabelMigrationField::Existing,
-        cursor_pos: "default".chars().count(),
-    });
+    app.providers
+        .set_pending_label_migration(Some(crate::app::PendingLabelMigration {
+            provider: "hetzner".to_string(),
+            existing_label: "default".to_string(),
+            new_label: String::new(),
+            focused: crate::app::LabelMigrationField::Existing,
+            cursor_pos: "default".chars().count(),
+        }));
     app.screen = Screen::ProviderLabelMigration {
         provider: "hetzner".to_string(),
     };

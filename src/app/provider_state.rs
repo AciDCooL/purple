@@ -104,39 +104,42 @@ impl SyncRecord {
 /// delete alias, the on-disk sync history and the dirty-check baseline.
 /// Pure state container.
 pub struct ProviderState {
-    pub config: ProviderConfig,
-    pub form: ProviderFormFields,
-    pub syncing: HashMap<String, Arc<AtomicBool>>,
+    pub(in crate::app) config: ProviderConfig,
+    // Held at `pub(crate)` until the dedicated forms seal lands; the
+    // provider form has too many per-field mutations to wrap behind
+    // methods in this commit.
+    pub(crate) form: ProviderFormFields,
+    pub(in crate::app) syncing: HashMap<String, Arc<AtomicBool>>,
     /// Names of providers that completed during this sync batch.
-    pub sync_done: Vec<String>,
+    pub(in crate::app) sync_done: Vec<String>,
     /// Whether any provider in the current batch had errors.
-    pub sync_had_errors: bool,
+    pub(in crate::app) sync_had_errors: bool,
     /// Aggregate diff counts across the current sync batch. Reset when the
     /// batch finishes (no providers left in `syncing`). Used by the footer
     /// background status to render `(+3 ~1 -2)` next to the provider list.
-    pub batch_added: usize,
-    pub batch_updated: usize,
-    pub batch_stale: usize,
+    pub(in crate::app) batch_added: usize,
+    pub(in crate::app) batch_updated: usize,
+    pub(in crate::app) batch_stale: usize,
     /// Total provider count for the current batch (done + still syncing).
     /// Captured when sync starts so the `n/total` counter does not jump
     /// when providers complete and leave `syncing`.
-    pub batch_total: usize,
-    pub pending_delete: Option<String>,
+    pub(in crate::app) batch_total: usize,
+    pub(in crate::app) pending_delete: Option<String>,
     /// When deleting a single labeled config, this carries the full id.
     /// `pending_delete` is used for whole-provider delete (header confirm).
-    pub pending_delete_id: Option<ProviderConfigId>,
-    pub sync_history: HashMap<String, SyncRecord>,
-    pub form_baseline: Option<ProviderFormBaseline>,
+    pub(in crate::app) pending_delete_id: Option<ProviderConfigId>,
+    pub(in crate::app) sync_history: HashMap<String, SyncRecord>,
+    pub(in crate::app) form_baseline: Option<ProviderFormBaseline>,
     /// Provider names that are expanded in the tree-style provider list.
     /// Only matters when a provider has 2+ labeled configs.
-    pub expanded_providers: HashSet<String>,
+    pub(in crate::app) expanded_providers: HashSet<String>,
     /// In-progress lazy migration: when adding a 2nd config of a provider
     /// that currently has a single bare config, we first prompt for a label
     /// for the existing config. The chosen label lives here until the new
     /// config form is saved (then both writes happen atomically). When the
     /// user cancels the new config form, this is dropped and nothing is
     /// written.
-    pub pending_label_migration: Option<PendingLabelMigration>,
+    pub(in crate::app) pending_label_migration: Option<PendingLabelMigration>,
 }
 
 /// State carried between step 1 (label both configs) and step 2
@@ -217,6 +220,18 @@ impl ProviderState {
         }
     }
 
+    /// Clear all batch tracking once a sync run has fully completed (no
+    /// providers left in `syncing`). Drops the completed-name list, the
+    /// error flag and every batch counter so the next run starts clean.
+    pub fn finish_batch(&mut self) {
+        self.sync_done.clear();
+        self.sync_had_errors = false;
+        self.batch_added = 0;
+        self.batch_updated = 0;
+        self.batch_stale = 0;
+        self.batch_total = 0;
+    }
+
     /// Open a delete confirmation for a provider config. `pending_delete`
     /// carries the bare provider name for the renderer; `pending_delete_id`
     /// carries the full id (including optional label) used by the confirm
@@ -250,6 +265,137 @@ impl ProviderState {
     /// Dismiss an in-progress lazy label-migration. Idempotent.
     pub fn cancel_label_migration(&mut self) {
         self.pending_label_migration = None;
+    }
+
+    pub fn config(&self) -> &ProviderConfig {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut ProviderConfig {
+        &mut self.config
+    }
+
+    pub fn syncing(&self) -> &HashMap<String, Arc<AtomicBool>> {
+        &self.syncing
+    }
+
+    pub fn syncing_mut(&mut self) -> &mut HashMap<String, Arc<AtomicBool>> {
+        &mut self.syncing
+    }
+
+    pub fn sync_done(&self) -> &[String] {
+        &self.sync_done
+    }
+
+    pub fn push_sync_done(&mut self, name: String) {
+        self.sync_done.push(name);
+    }
+
+    pub fn clear_sync_done(&mut self) {
+        self.sync_done.clear();
+    }
+
+    pub fn sync_had_errors(&self) -> bool {
+        self.sync_had_errors
+    }
+
+    pub fn set_sync_had_errors(&mut self, value: bool) {
+        self.sync_had_errors = value;
+    }
+
+    pub fn batch_added(&self) -> usize {
+        self.batch_added
+    }
+
+    pub fn batch_updated(&self) -> usize {
+        self.batch_updated
+    }
+
+    pub fn batch_stale(&self) -> usize {
+        self.batch_stale
+    }
+
+    /// Fold one provider's diff counts into the current batch aggregate
+    /// rendered by the footer summary.
+    pub fn add_batch_diff(&mut self, added: usize, updated: usize, stale: usize) {
+        self.batch_added += added;
+        self.batch_updated += updated;
+        self.batch_stale += stale;
+    }
+
+    pub fn batch_total(&self) -> usize {
+        self.batch_total
+    }
+
+    pub fn set_batch_total(&mut self, value: usize) {
+        self.batch_total = value;
+    }
+
+    /// Raise `batch_total` to at least the number of providers known to be
+    /// part of the current batch (done plus still syncing). Never lowers it
+    /// so the `n/total` counter stays stable as providers complete.
+    pub fn bump_batch_total(&mut self) {
+        self.batch_total = self
+            .batch_total
+            .max(self.sync_done.len() + self.syncing.len());
+    }
+
+    pub fn pending_delete(&self) -> Option<&str> {
+        self.pending_delete.as_deref()
+    }
+
+    pub fn take_pending_delete(&mut self) -> Option<String> {
+        self.pending_delete.take()
+    }
+
+    pub fn pending_delete_id(&self) -> Option<&ProviderConfigId> {
+        self.pending_delete_id.as_ref()
+    }
+
+    pub fn take_pending_delete_id(&mut self) -> Option<ProviderConfigId> {
+        self.pending_delete_id.take()
+    }
+
+    pub fn sync_history(&self) -> &HashMap<String, SyncRecord> {
+        &self.sync_history
+    }
+
+    pub fn sync_history_mut(&mut self) -> &mut HashMap<String, SyncRecord> {
+        &mut self.sync_history
+    }
+
+    /// Record a provider's sync outcome in the on-disk-backed history map,
+    /// overwriting any previous record for the same key.
+    pub fn record_sync(&mut self, key: String, record: SyncRecord) {
+        self.sync_history.insert(key, record);
+    }
+
+    pub fn form_baseline(&self) -> Option<&ProviderFormBaseline> {
+        self.form_baseline.as_ref()
+    }
+
+    pub fn set_form_baseline(&mut self, baseline: Option<ProviderFormBaseline>) {
+        self.form_baseline = baseline;
+    }
+
+    pub fn expanded_providers(&self) -> &HashSet<String> {
+        &self.expanded_providers
+    }
+
+    pub fn expanded_providers_mut(&mut self) -> &mut HashSet<String> {
+        &mut self.expanded_providers
+    }
+
+    pub fn pending_label_migration(&self) -> Option<&PendingLabelMigration> {
+        self.pending_label_migration.as_ref()
+    }
+
+    pub fn pending_label_migration_mut(&mut self) -> Option<&mut PendingLabelMigration> {
+        self.pending_label_migration.as_mut()
+    }
+
+    pub fn set_pending_label_migration(&mut self, migration: Option<PendingLabelMigration>) {
+        self.pending_label_migration = migration;
     }
 }
 
@@ -531,5 +677,50 @@ mod tests {
         s.cancel_label_migration();
         s.cancel_label_migration();
         assert!(s.pending_label_migration.is_none());
+    }
+
+    #[test]
+    fn add_batch_diff_accumulates_each_counter() {
+        let mut s = ProviderState::default();
+        s.add_batch_diff(3, 1, 2);
+        s.add_batch_diff(1, 0, 4);
+        assert_eq!(s.batch_added(), 4);
+        assert_eq!(s.batch_updated(), 1);
+        assert_eq!(s.batch_stale(), 6);
+    }
+
+    #[test]
+    fn bump_batch_total_raises_to_done_plus_syncing() {
+        let mut s = ProviderState::default();
+        s.push_sync_done("aws".to_string());
+        s.syncing_mut()
+            .insert("vultr".to_string(), Arc::new(AtomicBool::new(false)));
+        s.bump_batch_total();
+        assert_eq!(s.batch_total(), 2);
+    }
+
+    #[test]
+    fn bump_batch_total_never_lowers_existing_peak() {
+        let mut s = ProviderState::default();
+        s.set_batch_total(5);
+        s.push_sync_done("aws".to_string());
+        s.bump_batch_total();
+        assert_eq!(s.batch_total(), 5);
+    }
+
+    #[test]
+    fn finish_batch_clears_all_batch_state() {
+        let mut s = ProviderState::default();
+        s.push_sync_done("aws".to_string());
+        s.set_sync_had_errors(true);
+        s.add_batch_diff(2, 3, 4);
+        s.set_batch_total(7);
+        s.finish_batch();
+        assert!(s.sync_done().is_empty());
+        assert!(!s.sync_had_errors());
+        assert_eq!(s.batch_added(), 0);
+        assert_eq!(s.batch_updated(), 0);
+        assert_eq!(s.batch_stale(), 0);
+        assert_eq!(s.batch_total(), 0);
     }
 }
