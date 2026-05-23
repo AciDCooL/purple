@@ -103,7 +103,7 @@ pub fn run_tui(mut app: App) -> Result<()> {
         // fetch (form save, sync, external edit, restore). The
         // helper drains the queue itself and routes the items into
         // the existing `RefreshBatch` driver.
-        if !!app.container_state.has_pending_fetches() {
+        if app.container_state.has_pending_fetches() {
             handler::containers_overview::auto_fetch_new_hosts(&mut app, &events_tx);
         }
         handle_pending_snippet(&mut app, &mut terminal, &events, &mut last_config_check)?;
@@ -855,7 +855,7 @@ fn handle_pending_snippet(
     events: &EventHandler,
     last_config_check: &mut std::time::Instant,
 ) -> Result<()> {
-    let Some((snip, aliases)) = app.snippets.pending.take() else {
+    let Some((snip, aliases)) = app.snippets.take_pending() else {
         return Ok(());
     };
     events.pause();

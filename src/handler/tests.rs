@@ -3269,8 +3269,8 @@ fn make_snippet_app() -> App {
         std::thread::current().id()
     ));
     let _ = std::fs::create_dir_all(&dir);
-    app.snippets.store.path_override = Some(dir.join("snippets"));
-    app.snippets.store.snippets = vec![
+    app.snippets.store_mut().path_override = Some(dir.join("snippets"));
+    app.snippets.store_mut().snippets = vec![
         crate::snippet::Snippet {
             name: "check-disk".to_string(),
             command: "df -h".to_string(),
@@ -3282,7 +3282,7 @@ fn make_snippet_app() -> App {
             description: String::new(),
         },
     ];
-    let _ = app.snippets.store.save();
+    let _ = app.snippets.store_mut().save();
     app.ui.snippet_picker_state.select(Some(0));
     app.screen = Screen::SnippetPicker {
         target_aliases: vec!["myserver".to_string()],
@@ -3382,39 +3382,39 @@ fn test_snippet_picker_e_opens_edit_form() {
 #[test]
 fn test_snippet_picker_d_deletes_and_saves() {
     let mut app = make_snippet_app();
-    let _ = app.snippets.store.save(); // ensure file exists
+    let _ = app.snippets.store_mut().save(); // ensure file exists
     let (tx, _rx) = mpsc::channel();
 
     // d sets pending confirmation
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     assert_eq!(app.snippets.pending_delete, Some(0));
-    assert_eq!(app.snippets.store.snippets.len(), 2); // not yet deleted
+    assert_eq!(app.snippets.store().snippets.len(), 2); // not yet deleted
 
     // y confirms deletion
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert_eq!(app.snippets.pending_delete, None);
-    assert_eq!(app.snippets.store.snippets.len(), 1);
-    assert_eq!(app.snippets.store.snippets[0].name, "uptime");
+    assert_eq!(app.snippets.store().snippets.len(), 1);
+    assert_eq!(app.snippets.store().snippets[0].name, "uptime");
     assert_eq!(app.ui.snippet_picker_state.selected(), Some(0));
 }
 
 #[test]
 fn test_snippet_picker_d_last_item_selects_none() {
     let mut app = make_snippet_app();
-    app.snippets.store.snippets = vec![crate::snippet::Snippet {
+    app.snippets.store_mut().snippets = vec![crate::snippet::Snippet {
         name: "only".to_string(),
         command: "ls".to_string(),
         description: String::new(),
     }];
     app.ui.snippet_picker_state.select(Some(0));
-    let _ = app.snippets.store.save();
+    let _ = app.snippets.store_mut().save();
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     assert_eq!(app.snippets.pending_delete, Some(0));
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
-    assert!(app.snippets.store.snippets.is_empty());
+    assert!(app.snippets.store().snippets.is_empty());
     assert_eq!(app.ui.snippet_picker_state.selected(), None);
 }
 
@@ -3430,7 +3430,7 @@ fn test_snippet_picker_d_rollback_on_save_failure() {
     }
     let mut app = make_snippet_app();
     // Point to a non-writable path to force save failure
-    app.snippets.store.path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
+    app.snippets.store_mut().path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
@@ -3438,8 +3438,8 @@ fn test_snippet_picker_d_rollback_on_save_failure() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     // Rollback: snippet should still be there
-    assert_eq!(app.snippets.store.snippets.len(), 2);
-    assert_eq!(app.snippets.store.snippets[0].name, "check-disk");
+    assert_eq!(app.snippets.store().snippets.len(), 2);
+    assert_eq!(app.snippets.store().snippets[0].name, "check-disk");
     assert!(app.status_center.toast().unwrap().is_error());
 }
 
@@ -3531,7 +3531,7 @@ fn test_snippet_form_backspace() {
 #[test]
 fn test_snippet_form_submit_add() {
     let mut app = make_snippet_app();
-    let _ = app.snippets.store.save();
+    let _ = app.snippets.store_mut().save();
     app.snippets.form = crate::app::SnippetForm::new();
     app.snippets.form.name = "new-cmd".to_string();
     app.snippets.form.command = "whoami".to_string();
@@ -3544,16 +3544,16 @@ fn test_snippet_form_submit_add() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
-    assert_eq!(app.snippets.store.snippets.len(), 3);
-    assert!(app.snippets.store.get("new-cmd").is_some());
+    assert_eq!(app.snippets.store().snippets.len(), 3);
+    assert!(app.snippets.store().get("new-cmd").is_some());
 }
 
 #[test]
 fn test_snippet_form_submit_edit() {
     let mut app = make_snippet_app();
-    let _ = app.snippets.store.save();
+    let _ = app.snippets.store_mut().save();
     app.snippets.form =
-        crate::app::SnippetForm::from_snippet(&app.snippets.store.snippets[0].clone());
+        crate::app::SnippetForm::from_snippet(&app.snippets.store().snippets[0].clone());
     app.snippets.form.command = "df -hT".to_string();
     app.screen = Screen::SnippetForm {
         target_aliases: vec!["myserver".to_string()],
@@ -3563,7 +3563,7 @@ fn test_snippet_form_submit_edit() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
-    assert_eq!(app.snippets.store.snippets[0].command, "df -hT");
+    assert_eq!(app.snippets.store().snippets[0].command, "df -hT");
 }
 
 #[test]
@@ -3586,7 +3586,7 @@ fn test_snippet_form_submit_rejects_empty_name() {
 #[test]
 fn test_snippet_form_submit_rejects_duplicate_name() {
     let mut app = make_snippet_app();
-    let _ = app.snippets.store.save();
+    let _ = app.snippets.store_mut().save();
     app.snippets.form = crate::app::SnippetForm::new();
     app.snippets.form.name = "uptime".to_string();
     app.snippets.form.command = "uptime -s".to_string();
@@ -3612,7 +3612,7 @@ fn test_snippet_form_submit_rollback_on_save_failure() {
     }
     let mut app = make_snippet_app();
     // Force save failure
-    app.snippets.store.path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
+    app.snippets.store_mut().path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
     app.snippets.form = crate::app::SnippetForm::new();
     app.snippets.form.name = "new-cmd".to_string();
     app.snippets.form.command = "whoami".to_string();
@@ -3625,8 +3625,8 @@ fn test_snippet_form_submit_rollback_on_save_failure() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Rollback: new snippet should not be in the store
-    assert_eq!(app.snippets.store.snippets.len(), 2);
-    assert!(app.snippets.store.get("new-cmd").is_none());
+    assert_eq!(app.snippets.store().snippets.len(), 2);
+    assert!(app.snippets.store().get("new-cmd").is_none());
     assert!(app.status_center.toast().unwrap().is_error());
 }
 
@@ -3640,9 +3640,9 @@ fn test_snippet_form_edit_rename_rollback_on_save_failure() {
     }
     let mut app = make_snippet_app();
     // Force save failure
-    app.snippets.store.path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
+    app.snippets.store_mut().path_override = Some(PathBuf::from("/nonexistent/dir/snippets"));
     app.snippets.form =
-        crate::app::SnippetForm::from_snippet(&app.snippets.store.snippets[0].clone());
+        crate::app::SnippetForm::from_snippet(&app.snippets.store().snippets[0].clone());
     app.snippets.form.name = "renamed".to_string();
     app.snippets.form.cursor_pos = 7;
     app.screen = Screen::SnippetForm {
@@ -3653,22 +3653,22 @@ fn test_snippet_form_edit_rename_rollback_on_save_failure() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Rollback: original snippets should still be there
-    assert_eq!(app.snippets.store.snippets.len(), 2);
-    assert!(app.snippets.store.get("check-disk").is_some());
-    assert!(app.snippets.store.get("renamed").is_none());
+    assert_eq!(app.snippets.store().snippets.len(), 2);
+    assert!(app.snippets.store().get("check-disk").is_some());
+    assert!(app.snippets.store().get("renamed").is_none());
 }
 
 #[test]
 fn test_snippet_picker_enter_with_no_selection() {
     let mut app = make_snippet_app();
-    app.snippets.store.snippets.clear();
+    app.snippets.store_mut().snippets.clear();
     app.ui.snippet_picker_state.select(None);
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Should remain on picker, no pending snippet
     assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
-    assert!(app.snippets.pending.is_none());
+    assert!(app.snippets.pending().is_none());
 }
 
 #[test]
@@ -3677,7 +3677,7 @@ fn test_host_list_r_opens_snippet_picker() {
     app.ui.list_state.select(Some(0));
     let dir = std::env::temp_dir().join(format!("purple_handler_snip_r_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
-    app.snippets.store.path_override = Some(dir.join("snippets"));
+    app.snippets.store_mut().path_override = Some(dir.join("snippets"));
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
@@ -3695,7 +3695,7 @@ fn test_host_list_r_shift_opens_snippet_picker_all() {
     app.ui.list_state.select(Some(0));
     let dir = std::env::temp_dir().join(format!("purple_handler_snip_R_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
-    app.snippets.store.path_override = Some(dir.join("snippets"));
+    app.snippets.store_mut().path_override = Some(dir.join("snippets"));
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
@@ -3904,35 +3904,35 @@ fn test_tunnel_form_clean_esc_closes() {
 #[test]
 fn test_snippet_picker_d_esc_cancels_delete() {
     let mut app = make_snippet_app();
-    let _ = app.snippets.store.save();
+    let _ = app.snippets.store_mut().save();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     assert_eq!(app.snippets.pending_delete, Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert_eq!(app.snippets.pending_delete, None);
-    assert_eq!(app.snippets.store.snippets.len(), 2);
+    assert_eq!(app.snippets.store().snippets.len(), 2);
 }
 
 #[test]
 fn test_snippet_picker_d_n_cancels_delete() {
     let mut app = make_snippet_app();
-    let _ = app.snippets.store.save();
+    let _ = app.snippets.store_mut().save();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert_eq!(app.snippets.pending_delete, None);
-    assert_eq!(app.snippets.store.snippets.len(), 2);
+    assert_eq!(app.snippets.store().snippets.len(), 2);
 }
 
 #[test]
 fn test_snippet_picker_d_other_key_ignored() {
     let mut app = make_snippet_app();
-    let _ = app.snippets.store.save();
+    let _ = app.snippets.store_mut().save();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     assert_eq!(app.snippets.pending_delete, Some(0));
-    assert_eq!(app.snippets.store.snippets.len(), 2);
+    assert_eq!(app.snippets.store().snippets.len(), 2);
 }
 
 #[test]
@@ -4144,7 +4144,7 @@ fn test_snippet_form_dirty_esc_y_closes() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
-    assert!(app.snippets.form_baseline.is_none());
+    assert!(app.snippets.form_baseline().is_none());
 }
 
 // --- Tunnel delete: d/y/Esc/n ---
@@ -7346,11 +7346,14 @@ fn jump_enter_on_snippet_hit_with_no_host_warns() {
     // host selected (empty config = no host list = no selection), Enter
     // should surface a warning toast and NOT open the picker screen.
     let mut app = make_app("");
-    app.snippets.store.snippets.push(crate::snippet::Snippet {
-        name: "deploy".into(),
-        command: "curl example".into(),
-        description: String::new(),
-    });
+    app.snippets
+        .store_mut()
+        .snippets
+        .push(crate::snippet::Snippet {
+            name: "deploy".into(),
+            command: "curl example".into(),
+            description: String::new(),
+        });
     app.jump = Some(crate::app::JumpState::default());
     if let Some(p) = app.jump.as_mut() {
         for c in "deploy".chars() {

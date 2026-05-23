@@ -7,14 +7,22 @@ use crate::snippet::{Snippet, SnippetStore};
 /// screen state, the param form, the terminal-submit flag, the dirty-check
 /// baseline and the pending-delete index. Pure state container.
 pub struct SnippetState {
-    pub store: SnippetStore,
-    pub form: SnippetForm,
-    pub pending: Option<(Snippet, Vec<String>)>,
-    pub output: Option<SnippetOutputState>,
-    pub param_form: Option<SnippetParamFormState>,
-    pub pending_terminal: bool,
-    pub form_baseline: Option<SnippetFormBaseline>,
-    pub pending_delete: Option<usize>,
+    pub(in crate::app) store: SnippetStore,
+    // Held at `pub(crate)` until the dedicated forms seal lands; the
+    // SnippetForm has too many per-field mutations to wrap behind
+    // methods in this commit.
+    pub(crate) form: SnippetForm,
+    pub(in crate::app) pending: Option<(Snippet, Vec<String>)>,
+    // Held at `pub(crate)` because the output state is mutated through
+    // multi-line patterns the forthcoming forms seal will route through
+    // dedicated methods.
+    pub(crate) output: Option<SnippetOutputState>,
+    pub(crate) param_form: Option<SnippetParamFormState>,
+    pub(in crate::app) pending_terminal: bool,
+    pub(in crate::app) form_baseline: Option<SnippetFormBaseline>,
+    // Held at `pub(crate)` so `if let Some(idx) = ...pending_delete`
+    // multi-line patterns continue to compile.
+    pub(crate) pending_delete: Option<usize>,
 }
 
 impl Default for SnippetState {
@@ -33,6 +41,42 @@ impl Default for SnippetState {
 }
 
 impl SnippetState {
+    pub fn store(&self) -> &SnippetStore {
+        &self.store
+    }
+
+    pub fn store_mut(&mut self) -> &mut SnippetStore {
+        &mut self.store
+    }
+
+    pub fn pending(&self) -> Option<&(Snippet, Vec<String>)> {
+        self.pending.as_ref()
+    }
+
+    pub fn take_pending(&mut self) -> Option<(Snippet, Vec<String>)> {
+        self.pending.take()
+    }
+
+    pub fn set_pending(&mut self, value: Option<(Snippet, Vec<String>)>) {
+        self.pending = value;
+    }
+
+    pub fn pending_terminal(&self) -> bool {
+        self.pending_terminal
+    }
+
+    pub fn set_pending_terminal(&mut self, value: bool) {
+        self.pending_terminal = value;
+    }
+
+    pub fn form_baseline(&self) -> Option<&SnippetFormBaseline> {
+        self.form_baseline.as_ref()
+    }
+
+    pub fn set_form_baseline(&mut self, baseline: Option<SnippetFormBaseline>) {
+        self.form_baseline = baseline;
+    }
+
     /// Construct with snippet store loaded from disk.
     pub fn with_store_loaded() -> Self {
         Self {

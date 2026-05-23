@@ -11,9 +11,9 @@ use crate::event::AppEvent;
 use crate::preferences;
 
 pub(super) fn open_snippet_picker(app: &mut App, aliases: Vec<String>) {
-    app.snippets.store = crate::snippet::SnippetStore::load();
+    *app.snippets.store_mut() = crate::snippet::SnippetStore::load();
     app.ui.snippet_picker_state = ratatui::widgets::ListState::default();
-    if !app.snippets.store.snippets.is_empty() {
+    if !app.snippets.store().snippets.is_empty() {
         app.ui.snippet_picker_state.select(Some(0));
     }
     app.set_screen(Screen::SnippetPicker {
@@ -49,18 +49,18 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
                 let Some(sel) = app.snippets.pending_delete.take() else {
                     return;
                 };
-                if sel < app.snippets.store.snippets.len() {
-                    let removed = app.snippets.store.snippets.remove(sel);
-                    if let Err(e) = app.snippets.store.save() {
-                        app.snippets.store.snippets.insert(sel, removed);
+                if sel < app.snippets.store().snippets.len() {
+                    let removed = app.snippets.store_mut().snippets.remove(sel);
+                    if let Err(e) = app.snippets.store_mut().save() {
+                        app.snippets.store_mut().snippets.insert(sel, removed);
                         app.notify_error(crate::messages::failed_to_save(&e));
                     } else {
-                        if app.snippets.store.snippets.is_empty() {
+                        if app.snippets.store().snippets.is_empty() {
                             app.ui.snippet_picker_state.select(None);
-                        } else if sel >= app.snippets.store.snippets.len() {
+                        } else if sel >= app.snippets.store().snippets.len() {
                             app.ui
                                 .snippet_picker_state
-                                .select(Some(app.snippets.store.snippets.len() - 1));
+                                .select(Some(app.snippets.store().snippets.len() - 1));
                         }
                         app.notify(crate::messages::snippet_removed(&removed.name));
                     }
@@ -92,14 +92,14 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
         KeyCode::PageDown => {
             crate::app::page_down(
                 &mut app.ui.snippet_picker_state,
-                app.snippets.store.snippets.len(),
+                app.snippets.store().snippets.len(),
                 10,
             );
         }
         KeyCode::PageUp => {
             crate::app::page_up(
                 &mut app.ui.snippet_picker_state,
-                app.snippets.store.snippets.len(),
+                app.snippets.store().snippets.len(),
                 10,
             );
         }
@@ -108,28 +108,28 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
         }
         KeyCode::Char('e') => {
             if let Some(sel) = app.ui.snippet_picker_state.selected() {
-                if let Some(snippet) = app.snippets.store.snippets.get(sel).cloned() {
+                if let Some(snippet) = app.snippets.store().snippets.get(sel).cloned() {
                     app.open_snippet_edit_form(&snippet, target_aliases.clone(), sel);
                 }
             }
         }
         KeyCode::Char('d') => {
             if let Some(sel) = app.ui.snippet_picker_state.selected() {
-                if sel < app.snippets.store.snippets.len() {
+                if sel < app.snippets.store().snippets.len() {
                     app.snippets.request_delete(sel);
                 }
             }
         }
         KeyCode::Enter => {
             if let Some(sel) = app.ui.snippet_picker_state.selected() {
-                if let Some(snippet) = app.snippets.store.snippets.get(sel).cloned() {
+                if let Some(snippet) = app.snippets.store().snippets.get(sel).cloned() {
                     run_or_prompt_params(app, snippet, target_aliases, false, events_tx);
                 }
             }
         }
         KeyCode::Char('!') => {
             if let Some(sel) = app.ui.snippet_picker_state.selected() {
-                if let Some(snippet) = app.snippets.store.snippets.get(sel).cloned() {
+                if let Some(snippet) = app.snippets.store().snippets.get(sel).cloned() {
                     run_or_prompt_params(app, snippet, target_aliases, true, events_tx);
                 }
             }
@@ -153,13 +153,13 @@ fn run_or_prompt_params(
     let params = crate::snippet::parse_params(&snippet.command);
     if !params.is_empty() {
         app.snippets.param_form = Some(crate::app::SnippetParamFormState::new(&params));
-        app.snippets.pending_terminal = terminal_mode;
+        app.snippets.set_pending_terminal(terminal_mode);
         app.set_screen(Screen::SnippetParamForm {
             snippet,
             target_aliases,
         });
     } else if terminal_mode {
-        app.snippets.pending = Some((snippet, target_aliases));
+        app.snippets.set_pending(Some((snippet, target_aliases)));
         app.hosts_state.multi_select.clear();
         app.set_screen(Screen::HostList);
     } else {
@@ -388,7 +388,7 @@ pub(super) fn handle_snippet_picker_search(
         KeyCode::Esc => {
             app.ui.close_snippet_search();
             // Restore selection to full list
-            if !app.snippets.store.snippets.is_empty()
+            if !app.snippets.store().snippets.is_empty()
                 && app.ui.snippet_picker_state.selected().is_none()
             {
                 app.ui.snippet_picker_state.select(Some(0));
@@ -399,7 +399,7 @@ pub(super) fn handle_snippet_picker_search(
             if let Some(sel) = app.ui.snippet_picker_state.selected() {
                 if sel < filtered.len() {
                     let real_idx = filtered[sel];
-                    if let Some(snippet) = app.snippets.store.snippets.get(real_idx).cloned() {
+                    if let Some(snippet) = app.snippets.store().snippets.get(real_idx).cloned() {
                         app.ui.close_snippet_search();
                         run_or_prompt_params(
                             app,
@@ -423,7 +423,7 @@ pub(super) fn handle_snippet_picker_search(
                 query.pop();
                 if query.is_empty() {
                     app.ui.close_snippet_search();
-                    if !app.snippets.store.snippets.is_empty() {
+                    if !app.snippets.store().snippets.is_empty() {
                         app.ui.snippet_picker_state.select(Some(0));
                     }
                     return;
@@ -522,11 +522,11 @@ pub(super) fn handle_param_form_key(
             let mut resolved = snippet.clone();
             resolved.command = crate::snippet::substitute_params(&snippet.command, &values_map);
 
-            let terminal_mode = app.snippets.pending_terminal;
+            let terminal_mode = app.snippets.pending_terminal();
             app.snippets.close_param_form();
 
             if terminal_mode {
-                app.snippets.pending = Some((resolved, target_aliases));
+                app.snippets.set_pending(Some((resolved, target_aliases)));
                 app.hosts_state.multi_select.clear();
                 app.set_screen(Screen::HostList);
             } else {
@@ -624,11 +624,16 @@ fn submit_snippet_form(app: &mut App, target_aliases: &[String], editing: Option
     let new_description = app.snippets.form.description.trim().to_string();
 
     // Check for duplicate name (skip the snippet being edited)
-    let old_name =
-        editing.and_then(|idx| app.snippets.store.snippets.get(idx).map(|s| s.name.clone()));
+    let old_name = editing.and_then(|idx| {
+        app.snippets
+            .store()
+            .snippets
+            .get(idx)
+            .map(|s| s.name.clone())
+    });
     let name_taken = app
         .snippets
-        .store
+        .store()
         .snippets
         .iter()
         .any(|s| s.name == new_name && Some(&s.name) != old_name.as_ref());
@@ -644,21 +649,21 @@ fn submit_snippet_form(app: &mut App, target_aliases: &[String], editing: Option
     };
 
     // Save a snapshot for rollback
-    let snapshot = app.snippets.store.snippets.clone();
+    let snapshot = app.snippets.store().snippets.clone();
 
     // If editing and name changed, remove the old one
     if let Some(old_name) = &old_name {
         if *old_name != snippet.name {
-            app.snippets.store.remove(old_name);
+            app.snippets.store_mut().remove(old_name);
         }
     }
 
     let is_new = editing.is_none();
-    app.snippets.store.set(snippet);
+    app.snippets.store_mut().set(snippet);
 
-    if let Err(e) = app.snippets.store.save() {
+    if let Err(e) = app.snippets.store_mut().save() {
         warn!("[config] snippet store save failed, rolling back: {e}");
-        app.snippets.store.snippets = snapshot;
+        app.snippets.store_mut().snippets = snapshot;
         app.notify_error(crate::messages::failed_to_save(&e));
         return;
     }
@@ -667,7 +672,7 @@ fn submit_snippet_form(app: &mut App, target_aliases: &[String], editing: Option
     let name = app.snippets.form.name.trim().to_string();
     let new_idx = app
         .snippets
-        .store
+        .store()
         .snippets
         .iter()
         .position(|s| s.name == name);
@@ -762,7 +767,7 @@ mod param_form_tests {
         // Pre-set pending_terminal so the y-branch reset is observable;
         // without this the assertion in discard_confirm_y_... would pass
         // vacuously against the default false value.
-        app.snippets.pending_terminal = true;
+        app.snippets.set_pending_terminal(true);
         app
     }
 
@@ -785,7 +790,7 @@ mod param_form_tests {
         handle_param_form_key(&mut app, k(KeyCode::Char('y')), &tx);
         assert!(!app.forms.is_discard_pending());
         assert!(app.snippets.param_form.is_none());
-        assert!(!app.snippets.pending_terminal);
+        assert!(!app.snippets.pending_terminal());
         assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
     }
 

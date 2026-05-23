@@ -781,7 +781,7 @@ fn render_tunnels(
 
 /// Renders the SNIPPETS hint when snippets are available.
 fn render_snippets(lines: &mut Vec<Line<'static>>, app: &App, box_width: usize) {
-    let snippet_count = app.snippets.store.snippets.len();
+    let snippet_count = app.snippets.store().snippets.len();
     if snippet_count > 0 {
         section_open(lines, "SNIPPETS", box_width);
         let msg = format!("{} available (r to run)", snippet_count);

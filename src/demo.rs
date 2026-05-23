@@ -1200,7 +1200,7 @@ pub fn build_demo_app() -> App {
     app.providers.sync_history = SyncRecord::load_from_content(&build_demo_sync_history());
 
     // Snippets
-    app.snippets.store = SnippetStore::parse(DEMO_SNIPPETS);
+    *app.snippets.store_mut() = SnippetStore::parse(DEMO_SNIPPETS);
 
     // Container cache (timestamps relative to now)
     app.container_state
@@ -2367,7 +2367,7 @@ mod tests {
     fn demo_app_has_snippets() {
         let (app, _guard) = demo_app();
         // 5 original + 5 new (deploy, backup-db, log-rotate, container-prune, certbot-renew) = 10
-        assert_eq!(app.snippets.store.snippets.len(), 10);
+        assert_eq!(app.snippets.store().snippets.len(), 10);
     }
 
     #[test]
