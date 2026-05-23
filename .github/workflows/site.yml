@@ -3,120 +3,40 @@ name: Deploy site
 on:
   push:
     branches: [master]
-    paths: [site/**, llms.txt, .github/workflows/site.yml]
+    paths: [site/**, llms.txt, Cargo.toml, scripts/site/build.mjs, .github/workflows/site.yml]
   pull_request:
-    paths: [site/**, llms.txt, .github/workflows/site.yml]
+    paths: [site/**, llms.txt, Cargo.toml, scripts/site/build.mjs, .github/workflows/site.yml]
 
 permissions:
   contents: read
 
 jobs:
-  check:
+  build:
     runs-on: ubuntu-latest
-    name: Check embedded content sync
+    name: Build worker from source
     steps:
       - uses: actions/checkout@v6
 
-      - name: Verify install.sh matches embedded script in worker.ts
-        run: |
-          node -e "
-          const fs = require('fs');
-          const src = fs.readFileSync('site/worker.ts', 'utf8');
-          const start = src.indexOf('const INSTALL_SCRIPT = \x60');
-          if (start === -1) { console.error('INSTALL_SCRIPT not found in worker.ts'); process.exit(1); }
-          const bodyStart = src.indexOf('\x60', start) + 1;
-          const bodyEnd = src.indexOf('\x60;', bodyStart);
-          if (bodyEnd === -1) { console.error('Closing backtick not found'); process.exit(1); }
-          const raw = src.substring(bodyStart, bodyEnd);
-          // Unescape JS template literal: \\\\ → \\, \\$ → $ (no eval)
-          let embedded = '';
-          for (let i = 0; i < raw.length; i++) {
-            if (raw[i] === '\\\\' && i + 1 < raw.length) {
-              const next = raw[i + 1];
-              if (next === '\\\\' || next === '$' || next === '\x60') { embedded += next; i++; continue; }
-            }
-            embedded += raw[i];
-          }
-          const standalone = fs.readFileSync('site/install.sh', 'utf8');
-          if (embedded === standalone) {
-            console.log('install.sh and worker.ts INSTALL_SCRIPT are in sync.');
-          } else {
-            console.error('install.sh and worker.ts INSTALL_SCRIPT have drifted!');
-            console.error('Update the embedded script in worker.ts to match install.sh.');
-            process.exit(1);
-          }
-          "
-
-      - name: Verify llms.txt matches embedded content in worker.ts
-        run: |
-          node -e "
-          const fs = require('fs');
-          const src = fs.readFileSync('site/worker.ts', 'utf8');
-          const start = src.indexOf('const LLMS_TXT = \x60');
-          if (start === -1) { console.error('LLMS_TXT not found in worker.ts'); process.exit(1); }
-          const bodyStart = src.indexOf('\x60', start) + 1;
-          const bodyEnd = src.indexOf('\x60;', bodyStart);
-          if (bodyEnd === -1) { console.error('Closing backtick not found'); process.exit(1); }
-          const raw = src.substring(bodyStart, bodyEnd);
-          // Unescape JS template literal: \\\\ → \\, \\$ → $ (no eval)
-          let embedded = '';
-          for (let i = 0; i < raw.length; i++) {
-            if (raw[i] === '\\\\' && i + 1 < raw.length) {
-              const next = raw[i + 1];
-              if (next === '\\\\' || next === '$' || next === '\x60') { embedded += next; i++; continue; }
-            }
-            embedded += raw[i];
-          }
-          const standalone = fs.readFileSync('llms.txt', 'utf8');
-          if (embedded === standalone) {
-            console.log('llms.txt and worker.ts LLMS_TXT are in sync.');
-          } else {
-            console.error('llms.txt and worker.ts LLMS_TXT have drifted!');
-            console.error('Update the embedded LLMS_TXT in worker.ts to match llms.txt.');
-            process.exit(1);
-          }
-          "
-
-      - name: Verify page.html matches embedded content in worker.ts
-        run: |
-          node -e "
-          const fs = require('fs');
-          const src = fs.readFileSync('site/worker.ts', 'utf8');
-          const start = src.indexOf('const LANDING_PAGE = \x60');
-          if (start === -1) { console.error('LANDING_PAGE not found in worker.ts'); process.exit(1); }
-          const bodyStart = src.indexOf('\x60', start) + 1;
-          const bodyEnd = src.indexOf('\x60;', bodyStart);
-          if (bodyEnd === -1) { console.error('Closing backtick not found'); process.exit(1); }
-          const raw = src.substring(bodyStart, bodyEnd);
-          // Unescape JS template literal: \\\\ → \\, \\$ → $ (no eval)
-          let embedded = '';
-          for (let i = 0; i < raw.length; i++) {
-            if (raw[i] === '\\\\' && i + 1 < raw.length) {
-              const next = raw[i + 1];
-              if (next === '\\\\' || next === '$' || next === '\x60') { embedded += next; i++; continue; }
-            }
-            embedded += raw[i];
-          }
-          const standalone = fs.readFileSync('site/page.html', 'utf8');
-          if (embedded === standalone) {
-            console.log('page.html and worker.ts LANDING_PAGE are in sync.');
-          } else {
-            console.error('page.html and worker.ts LANDING_PAGE have drifted!');
-            console.error('Update the embedded LANDING_PAGE in worker.ts to match page.html.');
-            process.exit(1);
-          }
-          "
+      # build.mjs injects the Cargo.toml version + build date into the source
+      # documents and embeds them into the worker template. It throws on an
+      # unresolved placeholder or an empty document, so this job is the
+      # pre-deploy validation: a bad build fails here, never on the edge.
+      - name: Generate and validate worker.generated.ts
+        run: node scripts/site/build.mjs
 
   deploy:
     runs-on: ubuntu-latest
     name: Deploy to Bunny Edge Scripting
-    needs: check
+    needs: build
     if: github.event_name == 'push'
     steps:
       - uses: actions/checkout@v6
+
+      - name: Generate worker.generated.ts from source
+        run: node scripts/site/build.mjs
 
       - uses: BunnyWay/actions/deploy-script@main
         with:
           script_id: ${{ vars.BUNNY_SCRIPT_ID }}
           deploy_key: ${{ secrets.BUNNY_DEPLOY_KEY }}
-          file: site/worker.ts
+          file: site/worker.generated.ts

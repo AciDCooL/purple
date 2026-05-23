@@ -74,6 +74,10 @@ fn setup() -> VisualGuard {
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     ui::theme::init_with_mode(1);
+    // Reset the theme too. `init_with_mode` only sets the color mode; the
+    // theme itself is `get_or_init` and never reset, so a non-Purple theme
+    // left behind by another test would otherwise bleed into goldens.
+    ui::theme::set_theme(ui::theme::ThemeDef::purple());
     // Point at a path that does not exist so load_* returns None. We
     // intentionally do NOT create the file — individual tests may override
     // this if they need canned preference values.

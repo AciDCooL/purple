@@ -33,7 +33,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     let inner = block.inner(area);
 
     let sections = changelog::current_for_render();
-    let current = semver::Version::parse(env!("CARGO_PKG_VERSION")).ok();
+    let current = semver::Version::parse(super::pkg_version()).ok();
     let last = crate::preferences::load_last_seen_version()
         .ok()
         .flatten()

@@ -71,6 +71,9 @@ fn theme_def_purple_default_accent() {
 
 #[test]
 fn theme_error_returns_bold_red_truecolor() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     init_with_mode(2);
     let style = error();
@@ -81,6 +84,9 @@ fn theme_error_returns_bold_red_truecolor() {
 
 #[test]
 fn theme_selected_row_removes_dim() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     init_with_mode(2);
     set_theme(ThemeDef::purple());
@@ -94,6 +100,9 @@ fn theme_selected_row_removes_dim() {
 
 #[test]
 fn theme_no_color_mode_ignores_colors() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     init_with_mode(0);
     let style = error();
@@ -334,6 +343,9 @@ fn parse_toml_empty_lines_and_comments() {
 
 #[test]
 fn catppuccin_mocha_selected_row_has_dark_fg() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     init_with_mode(2);
     set_theme(ThemeDef::catppuccin_mocha());
@@ -347,6 +359,9 @@ fn catppuccin_mocha_selected_row_has_dark_fg() {
 
 #[test]
 fn catppuccin_latte_footer_key_has_dark_fg() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     init_with_mode(2);
     set_theme(ThemeDef::catppuccin_latte());
@@ -368,6 +383,9 @@ fn gruvbox_accent_warning_ansi16_differ() {
 
 #[test]
 fn no_color_mode_forces_no_color_theme() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     COLOR_MODE.store(0, Ordering::Release);
     set_theme(ThemeDef::no_color());
@@ -394,6 +412,9 @@ fn no_color_mode_forces_no_color_theme() {
 
 #[test]
 fn online_dot_pulsing_starts_at_regular_mid_brightness() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // Visual regression goldens render at tick=0; verify tick=0 produces
     // the Regular (mid) state — neither BOLD nor DIM — so the pulse cycle
     // begins at the visually neutral point and goldens stay reproducible.
@@ -408,6 +429,9 @@ fn online_dot_pulsing_starts_at_regular_mid_brightness() {
 
 #[test]
 fn online_dot_pulsing_cycles_through_peak_mid_and_trough() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // 30-tick period. tick=0 is verified by the dedicated mid-baseline
     // test above; here we cover the three OTHER cardinal phases so
     // together the suite pins all four quadrants of the sine curve
@@ -430,6 +454,9 @@ fn online_dot_pulsing_cycles_through_peak_mid_and_trough() {
 
 #[test]
 fn online_dot_pulsing_repeats_every_period() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     COLOR_MODE.store(1, Ordering::Release);
     set_theme(ThemeDef::purple());
@@ -440,6 +467,9 @@ fn online_dot_pulsing_repeats_every_period() {
 
 #[test]
 fn online_dot_pulsing_truecolor_lerps_brightness() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     // In truecolor mode the pulse path returns a smooth per-channel RGB
     // lerp instead of BOLD/DIM modifier flips. Verify:
     //   1. Output is a truecolor `Rgb(r,g,b)` foreground, not a palette colour.
@@ -501,6 +531,9 @@ fn detects_colored_underline_defaults_true_for_unknown_or_modern() {
 
 #[test]
 fn accent_reads_from_accent_slot_not_border() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     init_with_mode(2);
     set_theme(ThemeDef::purple());
@@ -524,6 +557,9 @@ fn accent_reads_from_accent_slot_not_border() {
 
 #[test]
 fn accent_bold_matches_accent_with_bold_modifier() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     init_with_mode(2);
     set_theme(ThemeDef::purple());
@@ -537,6 +573,9 @@ fn accent_bold_matches_accent_with_bold_modifier() {
 
 #[test]
 fn tunnel_active_and_tag_user_match_accent() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     init_with_mode(2);
     set_theme(ThemeDef::purple());
@@ -548,6 +587,9 @@ fn tunnel_active_and_tag_user_match_accent() {
 
 #[test]
 fn healthy_matches_online_dot() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let _lock = TEST_MUTEX.lock().unwrap();
     init_with_mode(2);
     set_theme(ThemeDef::purple());

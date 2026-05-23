@@ -1075,6 +1075,9 @@ mod top_bar {
 
     #[test]
     fn nav_active_uses_colored_underline_when_supported() {
+        let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let _guard = THEME_CAPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         // Pin to ANSI 16 so the accent.ansi16 branch is exercised (default in
         // most CI / dev shells) and the assertion is deterministic.
@@ -1095,6 +1098,9 @@ mod top_bar {
 
     #[test]
     fn nav_active_falls_back_to_plain_underline_when_unsupported() {
+        let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let _guard = THEME_CAPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         theme::init_with_mode(1);
         theme::set_colored_underline_support(false);
@@ -1118,6 +1124,9 @@ mod top_bar {
 
     #[test]
     fn nav_active_no_color_mode_skips_accent_in_both_paths() {
+        let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let _guard = THEME_CAPS_LOCK.lock().unwrap_or_else(|p| p.into_inner());
         theme::init_with_mode(0);
         for supported in [true, false] {

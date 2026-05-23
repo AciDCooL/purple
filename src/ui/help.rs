@@ -113,7 +113,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let mut block = design::overlay_block(title_text);
     if is_main_view {
         let version = Line::from(vec![
-            Span::styled(format!(" v{}", env!("CARGO_PKG_VERSION")), theme::version()),
+            Span::styled(format!(" v{}", super::pkg_version()), theme::version()),
             Span::styled(format!(" (built {}) ", build_date()), theme::muted()),
         ]);
         block = block.title_bottom(version.right_aligned());

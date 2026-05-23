@@ -1,3 +1,10 @@
+## 3.15.20 - 2026-05-23
+
+- change: Single-source versioning across the site, docs and binary.
+- change: The version lives only in Cargo.toml and is injected into the landing page and llms.txt at deploy, so the site, docs and binary can never show different versions.
+- change: The landing page, installer and LLM doc build from their source files at deploy, with no hand-maintained embedded copy to drift.
+- change: Version bumps no longer disturb the visual test goldens, and theme-mutating tests are serialized against the snapshot suite for steadier parallel runs.
+
 ## 3.15.19 - 2026-05-23
 
 - change: Sturdier internals across containers and key handling.

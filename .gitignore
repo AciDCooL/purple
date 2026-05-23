@@ -5,6 +5,9 @@
 /purple-*.tar.gz
 /purple-*.tar.gz.sha256
 
+# Generated at deploy time by scripts/site/build.mjs from the source docs.
+/site/worker.generated.ts
+
 # macOS
 .DS_Store
 .AppleDouble

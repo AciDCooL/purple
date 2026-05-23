@@ -75,10 +75,6 @@ step 'RUSTDOCFLAGS="-D warnings" cargo doc --no-deps'
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
 pass
 
-step "sh scripts/site/check-sync.sh"
-sh scripts/site/check-sync.sh
-pass
-
 step "./tests/smoke_tui.sh"
 ./tests/smoke_tui.sh
 pass

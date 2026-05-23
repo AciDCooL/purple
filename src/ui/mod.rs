@@ -50,6 +50,19 @@ use crate::app::{App, Screen, TopPage};
 const MIN_WIDTH: u16 = 50;
 const MIN_HEIGHT: u16 = 14;
 
+/// App version string for display. Pinned in test builds, like `build_date`,
+/// so a `Cargo.toml` version bump does not invalidate the help and What's New
+/// goldens. Non-display version logic keeps reading `CARGO_PKG_VERSION`.
+#[cfg(not(test))]
+pub(crate) fn pkg_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+#[cfg(test)]
+pub(crate) fn pkg_version() -> &'static str {
+    "0.0.0-test"
+}
+
 /// Top-level render dispatcher.
 pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::AnimationState) {
     anim.tick_overlay_anim();
