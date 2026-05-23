@@ -735,7 +735,7 @@ fn render_display_list(
             }
             HostListItem::Host { index } => {
                 if let Some(host) = app.hosts_state.list.get(*index) {
-                    let tunnel_active = app.tunnels.active.contains_key(&host.alias);
+                    let tunnel_active = app.tunnels.active_contains(&host.alias);
                     let item_ctx = HostItemContext {
                         ping_status: app.ping.status_map(),
                         history: &app.history,
@@ -872,7 +872,7 @@ fn render_search_list(
     );
     for &idx in app.search.filtered_indices().iter() {
         if let Some(host) = app.hosts_state.list.get(idx) {
-            let tunnel_active = app.tunnels.active.contains_key(&host.alias);
+            let tunnel_active = app.tunnels.active_contains(&host.alias);
             let item_ctx = HostItemContext {
                 ping_status: app.ping.status_map(),
                 history: &app.history,

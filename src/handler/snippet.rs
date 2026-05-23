@@ -195,7 +195,7 @@ fn start_snippet_output(
         .collect();
 
     let tunnel_aliases: std::collections::HashSet<String> =
-        app.tunnels.active.keys().cloned().collect();
+        app.tunnels.active().keys().cloned().collect();
 
     let run_id = SNIPPET_RUN_COUNTER.fetch_add(1, Ordering::Relaxed);
     debug!(

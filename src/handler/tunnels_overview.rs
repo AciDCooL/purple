@@ -51,8 +51,8 @@ fn toggle_tunnel(app: &mut App) {
     let Some((alias, rule)) = selected_row(app) else {
         return;
     };
-    if app.tunnels.active.contains_key(&alias) {
-        if let Some(mut tunnel) = app.tunnels.active.remove(&alias) {
+    if app.tunnels.active_contains(&alias) {
+        if let Some(mut tunnel) = app.tunnels.active_remove(&alias) {
             if let Err(e) = tunnel.child.kill() {
                 debug!("[external] Failed to kill tunnel process for {alias}: {e}");
             }
@@ -95,9 +95,9 @@ fn toggle_tunnel(app: &mut App) {
                 );
             }
             app.tunnels.ensure_lsof_poller();
-            let parser_tx = app.tunnels.parser_tx.clone();
+            let parser_tx = app.tunnels.parser_tx();
             let active = crate::tunnel::ActiveTunnel::spawn(child, &alias, parser_tx);
-            app.tunnels.active.insert(alias.clone(), active);
+            app.tunnels.active_insert(alias.clone(), active);
             app.refresh_tunnel_bind_ports();
             // Tunnel start spawns a real ssh session, same as a shell
             // connect, so record it in connection history.
@@ -150,7 +150,7 @@ fn selected_row_is_included(app: &App) -> bool {
 /// per-host TunnelList delete path so behaviour is identical regardless of
 /// which screen launched the deletion.
 fn confirm_delete_selected(app: &mut App) {
-    let Some(sel) = app.tunnels.pending_delete.take() else {
+    let Some(sel) = app.tunnels.take_pending_delete() else {
         return;
     };
     // Resolve the host + rule pair anew: the data is rebuilt every frame so
@@ -256,12 +256,12 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             // have a different active state than the previously-selected
             // one.
             let pinned = selected_row(app);
-            app.tunnels.sort_mode = app.tunnels.sort_mode.next();
+            app.tunnels.set_sort_mode(app.tunnels.sort_mode().next());
             match pinned {
                 Some((alias, rule)) => reposition_cursor_on(app, &alias, &rule),
                 None => app.ui.tunnels_overview_state.select(Some(0)),
             }
-            app.notify(crate::messages::sorted_by(app.tunnels.sort_mode.label()));
+            app.notify(crate::messages::sorted_by(app.tunnels.sort_mode().label()));
         }
         KeyCode::Char(':') => {
             log::debug!("jump: opened from tunnels overview");
@@ -296,11 +296,11 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                 return;
             }
             // The TunnelForm uses an `editing: Option<usize>` index into
-            // `app.tunnels.list` (the per-host tunnel list). Refresh that
+            // `app.tunnels.list()` (the per-host tunnel list). Refresh that
             // list for the chosen host and resolve the matching index so
             // the form's edit/save path operates on the right rule.
             app.refresh_tunnel_list(&alias);
-            let editing_idx = app.tunnels.list.iter().position(|r| r == &rule);
+            let editing_idx = app.tunnels.list().iter().position(|r| r == &rule);
             let Some(idx) = editing_idx else {
                 app.notify_warning(crate::messages::TUNNEL_NOT_FOUND);
                 return;

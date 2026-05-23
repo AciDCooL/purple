@@ -417,7 +417,7 @@ pub(crate) fn handle_container_action_complete(
     };
     if let Some((refresh_alias, askpass, cached_runtime)) = should_refresh {
         app.notify(crate::messages::container_action_complete(action.as_str()));
-        let has_tunnel = app.tunnels.active.contains_key(&refresh_alias);
+        let has_tunnel = app.tunnels.active_contains(&refresh_alias);
         // Mark in-flight so the scroll-driven auto-refresh does not
         // double-spawn for the same alias while this post-action
         // listing is still pending.

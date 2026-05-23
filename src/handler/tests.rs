@@ -4177,7 +4177,7 @@ fn test_tunnel_list_d_esc_cancels_delete() {
     assert_eq!(app.tunnels.pending_delete, Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.tunnels.pending_delete.is_none());
-    assert_eq!(app.tunnels.list.len(), 1);
+    assert_eq!(app.tunnels.list().len(), 1);
 }
 
 #[test]
@@ -4192,7 +4192,7 @@ fn test_tunnel_list_d_n_cancels_delete() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert!(app.tunnels.pending_delete.is_none());
-    assert_eq!(app.tunnels.list.len(), 1);
+    assert_eq!(app.tunnels.list().len(), 1);
 }
 
 // --- Host form: baseline cleared after submit ---
@@ -4293,7 +4293,7 @@ fn test_tunnel_form_dirty_esc_y_closes() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::TunnelList { .. }));
-    assert!(app.tunnels.form_baseline.is_none());
+    assert!(app.tunnels.form_baseline().is_none());
 }
 
 #[test]
@@ -9070,14 +9070,14 @@ fn tunnel_form_esc_from_host_detail_still_returns_to_tunnel_list() {
 fn tunnels_overview_s_cycles_sort_mode() {
     use crate::app::TunnelSortMode;
     let mut app = make_tunnels_overview_app();
-    assert_eq!(app.tunnels.sort_mode, TunnelSortMode::MostRecent);
+    assert_eq!(app.tunnels.sort_mode(), TunnelSortMode::MostRecent);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
-    assert_eq!(app.tunnels.sort_mode, TunnelSortMode::AlphaHostname);
+    assert_eq!(app.tunnels.sort_mode(), TunnelSortMode::AlphaHostname);
     let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("A-Z hostname"));
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
-    assert_eq!(app.tunnels.sort_mode, TunnelSortMode::MostRecent);
+    assert_eq!(app.tunnels.sort_mode(), TunnelSortMode::MostRecent);
     let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("most recent"));
 }
@@ -9116,7 +9116,7 @@ fn tunnels_overview_jump_enter_dispatches_sort() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(app.jump.is_none(), "jump bar should close after Enter");
     assert_eq!(
-        app.tunnels.sort_mode,
+        app.tunnels.sort_mode(),
         crate::app::TunnelSortMode::AlphaHostname,
         "sort cycled via jump dispatch"
     );
@@ -9150,7 +9150,8 @@ fn tunnels_overview_edit_after_sort_targets_visible_row() {
     );
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::HostList;
-    app.tunnels.sort_mode = crate::app::TunnelSortMode::AlphaHostname;
+    app.tunnels
+        .set_sort_mode(crate::app::TunnelSortMode::AlphaHostname);
     app.ui.tunnels_overview_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
@@ -9178,7 +9179,8 @@ fn tunnels_overview_reposition_cursor_follows_row_to_new_index() {
     );
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::HostList;
-    app.tunnels.sort_mode = crate::app::TunnelSortMode::MostRecent;
+    app.tunnels
+        .set_sort_mode(crate::app::TunnelSortMode::MostRecent);
     app.ui.tunnels_overview_state.select(Some(1));
     let zzz_rule = TunnelRule {
         tunnel_type: TunnelType::Local,
@@ -9210,7 +9212,8 @@ fn tunnels_overview_delete_after_sort_targets_visible_row() {
     );
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::HostList;
-    app.tunnels.sort_mode = crate::app::TunnelSortMode::AlphaHostname;
+    app.tunnels
+        .set_sort_mode(crate::app::TunnelSortMode::AlphaHostname);
     app.ui.tunnels_overview_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
@@ -10573,17 +10576,17 @@ fn empty_tunnel_live_snapshot() -> crate::tunnel_live::TunnelLiveSnapshot {
 fn reload_hosts_drops_orphan_demo_live_snapshots() {
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
     app.tunnels
-        .demo_live_snapshots
+        .demo_live_snapshots_mut()
         .insert("alive".to_string(), empty_tunnel_live_snapshot());
     app.tunnels
-        .demo_live_snapshots
+        .demo_live_snapshots_mut()
         .insert("ghost".to_string(), empty_tunnel_live_snapshot());
 
     app.reload_hosts();
 
-    assert!(app.tunnels.demo_live_snapshots.contains_key("alive"));
+    assert!(app.tunnels.demo_live_snapshots().contains_key("alive"));
     assert!(
-        !app.tunnels.demo_live_snapshots.contains_key("ghost"),
+        !app.tunnels.demo_live_snapshots().contains_key("ghost"),
         "demo_live_snapshots entry for a removed host must be pruned"
     );
 }
@@ -10633,7 +10636,7 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
     let ghost = "ghost".to_string();
 
     app.tunnels
-        .summaries_cache
+        .summaries_cache_mut()
         .insert(ghost.clone(), String::new());
     app.vault.insert_cert(
         ghost.clone(),
@@ -10682,13 +10685,13 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
     app.ping
         .record_check(ghost.clone(), std::time::Instant::now());
     app.tunnels
-        .demo_live_snapshots
+        .demo_live_snapshots_mut()
         .insert(ghost.clone(), empty_tunnel_live_snapshot());
 
     app.reload_hosts();
 
     assert!(
-        !app.tunnels.summaries_cache.contains_key(&ghost),
+        !app.tunnels.summaries_cache().contains_key(&ghost),
         "tunnels.summaries_cache"
     );
     assert!(!app.vault.has_cert(&ghost), "vault.cert_cache");
@@ -10728,7 +10731,7 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
         "ping.last_checked"
     );
     assert!(
-        !app.tunnels.demo_live_snapshots.contains_key(&ghost),
+        !app.tunnels.demo_live_snapshots().contains_key(&ghost),
         "tunnels.demo_live_snapshots"
     );
 }

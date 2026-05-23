@@ -105,11 +105,11 @@ pub(crate) fn visible_pairs(app: &App) -> Vec<(String, TunnelRule)> {
 /// last-connected desc. AlphaHostname sorts by alias ascending. Stable
 /// sort preserves the per-host directive order within a tie.
 fn sort_pairs(pairs: &mut [(String, TunnelRule)], app: &App) {
-    match app.tunnels.sort_mode {
+    match app.tunnels.sort_mode() {
         TunnelSortMode::MostRecent => {
             pairs.sort_by(|a, b| {
-                let a_started = app.tunnels.active.get(&a.0).map(|t| t.started_at);
-                let b_started = app.tunnels.active.get(&b.0).map(|t| t.started_at);
+                let a_started = app.tunnels.active_get(&a.0).map(|t| t.started_at);
+                let b_started = app.tunnels.active_get(&b.0).map(|t| t.started_at);
                 match (a_started, b_started) {
                     (Some(ax), Some(bx)) => bx.cmp(&ax),
                     (Some(_), None) => std::cmp::Ordering::Less,
@@ -135,13 +135,13 @@ fn build_rows(app: &App) -> Vec<TunnelRow> {
     visible_pairs(app)
         .into_iter()
         .map(|(alias, rule)| {
-            let runtime = app.tunnels.active.get(&alias);
+            let runtime = app.tunnels.active_get(&alias);
             // In demo mode the runtime map is empty (no real ssh
             // children), so a host is "active" when it has a seeded
             // snapshot. That keeps the SPEED column live for snapshot
             // hosts and the open-dot for the rest.
             let demo_snapshot = if app.demo_mode {
-                app.tunnels.demo_live_snapshots.get(&alias)
+                app.tunnels.demo_live_snapshots().get(&alias)
             } else {
                 None
             };
@@ -626,7 +626,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
     let content_w = (inner.width as usize).saturating_sub(1);
     let cols = compute_columns(&rows, content_w);
 
-    render_header(frame, header_area, &cols, app.tunnels.sort_mode);
+    render_header(frame, header_area, &cols, app.tunnels.sort_mode());
     frame.render_widget(
         Paragraph::new(Span::styled(
             "\u{2500}".repeat(underline_area.width as usize),
@@ -729,11 +729,10 @@ fn is_selected_tunnel_active(app: &App, rows: &[TunnelRow]) -> bool {
         None => return false,
     };
     if app.demo_mode {
-        return app.tunnels.demo_live_snapshots.contains_key(&alias);
+        return app.tunnels.demo_live_snapshots().contains_key(&alias);
     }
     app.tunnels
-        .active
-        .get(&alias)
+        .active_get(&alias)
         .map(|t| t.live.last_exit.is_none())
         .unwrap_or(false)
 }

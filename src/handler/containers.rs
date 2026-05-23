@@ -44,7 +44,7 @@ pub(super) fn open_overlay_for_host(
         alias: alias.clone(),
     });
     if !app.demo_mode {
-        let has_tunnel = app.tunnels.active.contains_key(&alias);
+        let has_tunnel = app.tunnels.active_contains(&alias);
         // Mark in-flight so `ensure_list_for_selected_host` will not
         // double-spawn if the user Tabs to the Containers tab before
         // this listing returns.
@@ -204,7 +204,7 @@ pub(super) fn handle_key(
                     config_path: app.reload.config_path().to_path_buf(),
                     askpass: state.askpass.clone(),
                     bw_session: app.bw_session.clone(),
-                    has_tunnel: app.tunnels.active.contains_key(&alias),
+                    has_tunnel: app.tunnels.active_contains(&alias),
                 };
                 let tx = events_tx.clone();
                 crate::containers::spawn_container_listing(
@@ -263,7 +263,7 @@ fn container_action(
         config_path: app.reload.config_path().to_path_buf(),
         askpass: state.askpass.clone(),
         bw_session: app.bw_session.clone(),
-        has_tunnel: app.tunnels.active.contains_key(&alias),
+        has_tunnel: app.tunnels.active_contains(&alias),
     };
     let tx = events_tx.clone();
     crate::containers::spawn_container_action(

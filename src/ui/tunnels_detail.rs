@@ -71,7 +71,7 @@ fn selected_row(app: &App) -> Option<SelectedRow> {
     let sel = app.ui.tunnels_overview_state.selected()?;
     let pairs = super::tunnels_overview::visible_pairs(app);
     let (alias, rule) = pairs.into_iter().nth(sel)?;
-    let started_at = app.tunnels.active.get(&alias).map(|a| a.started_at);
+    let started_at = app.tunnels.active_get(&alias).map(|a| a.started_at);
     Some(SelectedRow {
         alias,
         rule,
@@ -125,13 +125,13 @@ impl LiveView {
     }
 
     fn from_runtime(app: &App, alias: &str, rule: &TunnelRule) -> Option<Self> {
-        let tunnel = app.tunnels.active.get(alias)?;
+        let tunnel = app.tunnels.active_get(alias)?;
         let now = Instant::now();
         let uptime_secs = now.saturating_duration_since(tunnel.started_at).as_secs();
 
         let mut clients: Vec<DisplayClient> = app
             .tunnels
-            .clients
+            .clients()
             .get(&rule.bind_port)
             .map(|peers| {
                 peers
@@ -146,7 +146,7 @@ impl LiveView {
                         current_tx_bps: p.current_tx_bps,
                         viz_history: app
                             .tunnels
-                            .peer_viz
+                            .peer_viz()
                             .get(&(rule.bind_port, p.src.clone()))
                             .copied()
                             .unwrap_or([0u64; crate::tunnel_live::PEER_VIZ_BUCKETS]),
@@ -267,7 +267,7 @@ pub fn render(frame: &mut Frame, app: &mut App, area: Rect, spinner_tick: u64) {
 
     let live: Option<LiveView> = if app.demo_mode {
         app.tunnels
-            .demo_live_snapshots
+            .demo_live_snapshots()
             .get(&row.alias)
             .map(LiveView::from_snapshot)
     } else {
@@ -354,13 +354,13 @@ fn sparkline_phase(app: &App) -> f64 {
     if app.demo_mode {
         return 0.0;
     }
-    let Some(last) = app.tunnels.peer_viz_last_push else {
+    let Some(last) = app.tunnels.peer_viz_last_push() else {
         return 0.0;
     };
     // Without a previous push we cannot estimate the interval. Falling
     // back to phase=0 keeps the wave anchored until the second push
     // gives us a real interval to drift across.
-    let Some(prev) = app.tunnels.peer_viz_prev_push else {
+    let Some(prev) = app.tunnels.peer_viz_prev_push() else {
         return 0.0;
     };
     let interval_ms = last.saturating_duration_since(prev).as_millis() as f64;

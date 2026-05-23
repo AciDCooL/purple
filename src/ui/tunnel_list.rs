@@ -7,7 +7,7 @@ use super::theme;
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
-    let is_active = app.tunnels.active.contains_key(alias);
+    let is_active = app.tunnels.active_contains(alias);
     let is_readonly = app
         .hosts_state
         .list
@@ -16,7 +16,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
 
     // Overlay: percentage-based width, height fits content. Reserve 1 row
     // below the block for the external footer.
-    let item_count = app.tunnels.list.len().max(1);
+    let item_count = app.tunnels.list().len().max(1);
     let height = (item_count as u16 + 4).min(frame.area().height.saturating_sub(5));
     let area = design::overlay_area(frame, design::OVERLAY_W, design::OVERLAY_H, height);
     frame.render_widget(Clear, area);
@@ -32,7 +32,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if app.tunnels.list.is_empty() {
+    if app.tunnels.list().is_empty() {
         if is_readonly {
             design::render_empty(frame, inner, "Read-only (included file).");
         } else {
@@ -41,7 +41,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     } else {
         let items: Vec<ListItem> = app
             .tunnels
-            .list
+            .list()
             .iter()
             .map(|rule| {
                 let type_label = format!(" {:<10}", rule.tunnel_type.label());
@@ -100,12 +100,12 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
         let mut f = design::Footer::new();
         if is_active {
             f = f.primary("Enter", fl::ENTER_STOP);
-        } else if !app.tunnels.list.is_empty() {
+        } else if !app.tunnels.list().is_empty() {
             f = f.primary("Enter", fl::ENTER_START);
         }
         if !is_readonly {
             f = f.action("a", fl::ACTION_ADD);
-            if !app.tunnels.list.is_empty() {
+            if !app.tunnels.list().is_empty() {
                 f = f.action("e", fl::ACTION_EDIT).action("d", fl::ACTION_DEL);
             }
         }

@@ -85,7 +85,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                 }
                 app.refresh_tunnel_list(&alias);
                 app.ui.tunnel_list_state = ratatui::widgets::ListState::default();
-                if !app.tunnels.list.is_empty() {
+                if !app.tunnels.list().is_empty() {
                     app.ui.tunnel_list_state.select(Some(0));
                 }
                 app.set_screen(Screen::TunnelList { alias });

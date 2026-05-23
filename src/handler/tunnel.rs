@@ -28,13 +28,13 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
     // confirm-key router so the y/n/Esc contract is uniform across all
     // confirm dialogs. Stray keys (including `_ => {}`) must not silently
     // cancel destructive operations; route_confirm_key narrows to y/Y/n/N/Esc.
-    if app.tunnels.pending_delete.is_some() && key.code != KeyCode::Char('?') {
+    if app.tunnels.pending_delete().is_some() && key.code != KeyCode::Char('?') {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                let Some(sel) = app.tunnels.pending_delete.take() else {
+                let Some(sel) = app.tunnels.take_pending_delete() else {
                     return;
                 };
-                if let Some(rule) = app.tunnels.list.get(sel) {
+                if let Some(rule) = app.tunnels.list().get(sel) {
                     let key = rule.tunnel_type.directive_key().to_string();
                     let value = rule.to_directive_value();
                     let config_backup = app.hosts_state.ssh_config.clone();
@@ -53,12 +53,12 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                         app.update_last_modified();
                         app.refresh_tunnel_list(&alias);
                         app.reload_hosts();
-                        if app.tunnels.list.is_empty() {
+                        if app.tunnels.list().is_empty() {
                             app.ui.tunnel_list_state.select(None);
-                        } else if sel >= app.tunnels.list.len() {
+                        } else if sel >= app.tunnels.list().len() {
                             app.ui
                                 .tunnel_list_state
-                                .select(Some(app.tunnels.list.len() - 1));
+                                .select(Some(app.tunnels.list().len() - 1));
                         }
                         app.notify(crate::messages::TUNNEL_REMOVED);
                     }
@@ -83,10 +83,10 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
             app.select_prev_tunnel();
         }
         KeyCode::PageDown => {
-            crate::app::page_down(&mut app.ui.tunnel_list_state, app.tunnels.list.len(), 10);
+            crate::app::page_down(&mut app.ui.tunnel_list_state, app.tunnels.list().len(), 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(&mut app.ui.tunnel_list_state, app.tunnels.list.len(), 10);
+            crate::app::page_up(&mut app.ui.tunnel_list_state, app.tunnels.list().len(), 10);
         }
         KeyCode::Char('a') => {
             // Check if host is from an included file (read-only)
@@ -107,7 +107,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                 }
             }
             if let Some(sel) = app.ui.tunnel_list_state.selected() {
-                if let Some(rule) = app.tunnels.list.get(sel).cloned() {
+                if let Some(rule) = app.tunnels.list().get(sel).cloned() {
                     app.open_tunnel_edit_form(alias.clone(), &rule, sel);
                 }
             }
@@ -121,16 +121,16 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                 }
             }
             if let Some(sel) = app.ui.tunnel_list_state.selected() {
-                if sel < app.tunnels.list.len() {
+                if sel < app.tunnels.list().len() {
                     app.tunnels.request_delete(sel);
                 }
             }
         }
         KeyCode::Enter => {
             // Start/stop tunnel
-            if app.tunnels.active.contains_key(&alias) {
+            if app.tunnels.active_contains(&alias) {
                 // Stop
-                if let Some(mut tunnel) = app.tunnels.active.remove(&alias) {
+                if let Some(mut tunnel) = app.tunnels.active_remove(&alias) {
                     if let Err(e) = tunnel.child.kill() {
                         debug!("[external] Failed to kill tunnel process for {alias}: {e}");
                     }
@@ -139,7 +139,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                     app.refresh_tunnel_bind_ports();
                     app.notify(crate::messages::tunnel_stopped(&alias));
                 }
-            } else if !app.tunnels.list.is_empty() {
+            } else if !app.tunnels.list().is_empty() {
                 // Start
                 if app.demo_mode {
                     app.notify_warning(crate::messages::DEMO_TUNNELS_DISABLED);
@@ -158,7 +158,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                     app.bw_session.as_deref(),
                 ) {
                     Ok(child) => {
-                        for rule in &app.tunnels.list {
+                        for rule in app.tunnels.list() {
                             info!(
                                 "Tunnel started: type={} local={} remote={}:{} alias={alias}",
                                 rule.tunnel_type.label(),
@@ -168,9 +168,9 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                             );
                         }
                         app.tunnels.ensure_lsof_poller();
-                        let parser_tx = app.tunnels.parser_tx.clone();
+                        let parser_tx = app.tunnels.parser_tx();
                         let active = crate::tunnel::ActiveTunnel::spawn(child, &alias, parser_tx);
-                        app.tunnels.active.insert(alias.clone(), active);
+                        app.tunnels.active_insert(alias.clone(), active);
                         app.refresh_tunnel_bind_ports();
                         // Tunnel start spawns a real ssh session, same as a
                         // shell connect, so record it in connection history.
@@ -291,7 +291,7 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
 
     // If editing, remove the old directive first
     if let Some(idx) = editing {
-        if let Some(old_rule) = app.tunnels.list.get(idx) {
+        if let Some(old_rule) = app.tunnels.list().get(idx) {
             let old_key = old_rule.tunnel_type.directive_key().to_string();
             let old_value = old_rule.to_directive_value();
             if !app
@@ -335,13 +335,13 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
     app.refresh_tunnel_list(alias);
     app.reload_hosts();
     // Fix selection after list change
-    if app.tunnels.list.is_empty() {
+    if app.tunnels.list().is_empty() {
         app.ui.tunnel_list_state.select(None);
     } else if let Some(sel) = app.ui.tunnel_list_state.selected() {
-        if sel >= app.tunnels.list.len() {
+        if sel >= app.tunnels.list().len() {
             app.ui
                 .tunnel_list_state
-                .select(Some(app.tunnels.list.len() - 1));
+                .select(Some(app.tunnels.list().len() - 1));
         }
     } else {
         // First tunnel added to empty list — initialize selection

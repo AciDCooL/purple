@@ -1800,7 +1800,7 @@ pub fn seed_tunnel_live_snapshots(app: &mut App) {
         last_exit: None,
     };
     app.tunnels
-        .demo_live_snapshots
+        .demo_live_snapshots_mut()
         .insert("bastion-ams".to_string(), snapshot);
 
     // db-primary: sustained OLTP workload through a Postgres tunnel.
@@ -1808,7 +1808,7 @@ pub fn seed_tunnel_live_snapshots(app: &mut App) {
     // of uptime — the canonical "this tunnel has been carrying real
     // production traffic for a while" snapshot. Profile contrasts with
     // bastion-ams (which is a fresher, burstier replication-style host).
-    app.tunnels.demo_live_snapshots.insert(
+    app.tunnels.demo_live_snapshots_mut().insert(
         "db-primary".to_string(),
         TunnelLiveSnapshot {
             uptime_secs: 47 * 60 + 12,
@@ -1914,7 +1914,7 @@ pub fn seed_tunnel_live_snapshots(app: &mut App) {
     // Just-started tunnel (8m), one of the clients still in the
     // "sampling…" warmup window so the renderer exercises the
     // not-yet-throughput-ready branch alongside live ones.
-    app.tunnels.demo_live_snapshots.insert(
+    app.tunnels.demo_live_snapshots_mut().insert(
         "pve-redis".to_string(),
         TunnelLiveSnapshot {
             uptime_secs: 8 * 60 + 33,
@@ -2010,7 +2010,7 @@ pub fn seed_tunnel_live_snapshots(app: &mut App) {
     // dashboard tab keeping a steady ~5 KB/s of websocket chatter. The
     // detail panel exercises the "active but quiet" rendering — bps
     // values muted, single open channel, hours of uptime.
-    app.tunnels.demo_live_snapshots.insert(
+    app.tunnels.demo_live_snapshots_mut().insert(
         "monitoring".to_string(),
         TunnelLiveSnapshot {
             uptime_secs: 2 * 3600 + 14 * 60 + 8,
@@ -2057,7 +2057,7 @@ pub fn seed_tunnel_live_snapshots(app: &mut App) {
     // a migration, so the panel exercises the "fresh tunnel + active
     // psql session" combination. Lower throughput than db-primary, fewer
     // clients, no decay trail yet (uptime < 1 channel rotation).
-    app.tunnels.demo_live_snapshots.insert(
+    app.tunnels.demo_live_snapshots_mut().insert(
         "do-work-staging-ams".to_string(),
         TunnelLiveSnapshot {
             uptime_secs: 5 * 60 + 22,
@@ -2130,7 +2130,7 @@ pub fn seed_tunnel_live_snapshots(app: &mut App) {
     // an Elixir/BEAM application server holds a persistent pool while a
     // human is poking around in DataGrip. Showcases mixed long-lived
     // (BEAM) and short-lived (DataGrip) channel patterns.
-    app.tunnels.demo_live_snapshots.insert(
+    app.tunnels.demo_live_snapshots_mut().insert(
         "pve-db-01".to_string(),
         TunnelLiveSnapshot {
             uptime_secs: 22 * 60 + 4,
@@ -2222,7 +2222,7 @@ pub fn seed_tunnel_live_snapshots(app: &mut App) {
     // the federation endpoint every 15s. Demonstrates a forward used by
     // multiple humans simultaneously, with periodic spikes when panels
     // refresh. Both directives (3000, 9090) share this one snapshot.
-    app.tunnels.demo_live_snapshots.insert(
+    app.tunnels.demo_live_snapshots_mut().insert(
         "pve-monitor".to_string(),
         TunnelLiveSnapshot {
             uptime_secs: 18 * 60 + 41,

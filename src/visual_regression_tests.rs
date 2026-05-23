@@ -646,8 +646,8 @@ fn visual_host_list_empty() {
     app.hosts_state.patterns.clear();
     app.hosts_state.display_list.clear();
     app.hosts_state.ssh_config.elements = Vec::new();
-    app.tunnels.active.clear();
-    app.tunnels.demo_live_snapshots.clear();
+    app.tunnels.clear_active();
+    app.tunnels.demo_live_snapshots_mut().clear();
     let actual = render_screen(&mut app);
     assert_golden("host_list_empty", &actual);
 }
@@ -676,8 +676,8 @@ fn visual_tunnels_overview_empty() {
     app.top_page = crate::app::TopPage::Tunnels;
     app.hosts_state.ssh_config.elements = Vec::new();
     app.hosts_state.list.clear();
-    app.tunnels.active.clear();
-    app.tunnels.demo_live_snapshots.clear();
+    app.tunnels.clear_active();
+    app.tunnels.demo_live_snapshots_mut().clear();
     let actual = render_screen(&mut app);
     assert_golden("tunnels_overview_empty", &actual);
 }

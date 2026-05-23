@@ -129,7 +129,7 @@ pub(crate) fn handle_scp_complete(
         app.apply_sort();
     }
     if let Some((fb_alias, askpass_fb, path, show_hidden, sort)) = refresh_remote {
-        let has_tunnel = app.tunnels.active.contains_key(&fb_alias);
+        let has_tunnel = app.tunnels.active_contains(&fb_alias);
         let ctx = crate::ssh_context::OwnedSshContext {
             alias: fb_alias,
             config_path: app.reload.config_path().to_path_buf(),

@@ -114,7 +114,7 @@ fn spawn_initial_listing(app: &mut App, alias: String, events_tx: &mpsc::Sender<
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
-    let has_tunnel = app.tunnels.active.contains_key(&alias);
+    let has_tunnel = app.tunnels.active_contains(&alias);
     log::debug!("[purple] container cache add: alias={}", alias);
     app.notify(crate::messages::container_refreshing(&alias));
     // Mark in-flight so the post-key auto-refresh does not spawn a

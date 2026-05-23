@@ -942,7 +942,7 @@ mod top_bar {
     }
 
     fn add_tunnel_rule(app: &mut App, bind_port: u16) {
-        app.tunnels.list.push(TunnelRule {
+        app.tunnels.list_mut().push(TunnelRule {
             tunnel_type: TunnelType::Local,
             bind_address: String::new(),
             bind_port,

@@ -23,7 +23,7 @@ pub(crate) fn handle_tick(
     // the spinner. saves a parallel tick driver. Active tunnels also
     // tick the spinner so the live chart wave has a continuous phase.
     let tunnels_animating =
-        matches!(app.top_page, crate::app::TopPage::Tunnels) && !app.tunnels.active.is_empty();
+        matches!(app.top_page, crate::app::TopPage::Tunnels) && !app.tunnels.active().is_empty();
     if anim.has_checking_hosts(app)
         || vault_signing
         || provider_syncing

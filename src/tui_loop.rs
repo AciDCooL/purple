@@ -66,7 +66,7 @@ pub fn run_tui(mut app: App) -> Result<()> {
         // swimlane bars and sparklines drift smoothly. The tick also
         // refreshes the uptime readout every frame.
         let tunnels_anim_tick =
-            matches!(app.top_page, app::TopPage::Tunnels) && !app.tunnels.active.is_empty();
+            matches!(app.top_page, app::TopPage::Tunnels) && !app.tunnels.active().is_empty();
         let event = if anim.is_animating(&app) || tunnels_anim_tick {
             events.next_timeout(std::time::Duration::from_millis(16))?
         } else if anim.has_checking_hosts(&app)
@@ -474,7 +474,7 @@ fn handle_pending_connect(
         .find(|h| h.alias == alias)
         .cloned();
     let askpass = host_askpass.or_else(preferences::load_askpass_default);
-    let has_active_tunnel = app.tunnels.active.contains_key(&alias);
+    let has_active_tunnel = app.tunnels.active_contains(&alias);
     let use_tmux = connection::is_in_tmux() && askpass.is_none();
 
     if use_tmux {
@@ -648,7 +648,7 @@ fn handle_pending_container_exec(
     }
 
     let askpass = req.askpass.or_else(preferences::load_askpass_default);
-    let has_active_tunnel = app.tunnels.active.contains_key(&req.alias);
+    let has_active_tunnel = app.tunnels.active_contains(&req.alias);
     let use_tmux = connection::is_in_tmux() && askpass.is_none();
 
     let remote_cmd = if let Some(ref user_cmd) = req.command {
@@ -770,7 +770,7 @@ fn handle_pending_container_logs(app: &mut App, events_tx: &std::sync::mpsc::Sen
         return;
     };
     let askpass = req.askpass.or_else(preferences::load_askpass_default);
-    let has_tunnel = app.tunnels.active.contains_key(&req.alias);
+    let has_tunnel = app.tunnels.active_contains(&req.alias);
     let ctx = crate::ssh_context::OwnedSshContext {
         alias: req.alias,
         config_path: app.reload.config_path().to_path_buf(),
@@ -815,7 +815,7 @@ fn handle_pending_container_action(app: &mut App, events_tx: &std::sync::mpsc::S
         return;
     };
     let askpass = req.askpass.or_else(preferences::load_askpass_default);
-    let has_tunnel = app.tunnels.active.contains_key(&req.alias);
+    let has_tunnel = app.tunnels.active_contains(&req.alias);
     let ctx = crate::ssh_context::OwnedSshContext {
         alias: req.alias.clone(),
         config_path: app.reload.config_path().to_path_buf(),
@@ -884,7 +884,7 @@ fn handle_pending_snippet(
                 crate::messages::cli::running_snippet_on(&snip.name, alias)
             );
         }
-        let has_tunnel = app.tunnels.active.contains_key(alias);
+        let has_tunnel = app.tunnels.active_contains(alias);
         match snippet::run_snippet(
             alias,
             app.reload.config_path(),
@@ -947,7 +947,7 @@ fn tui_teardown(app: &mut App, terminal: &mut tui::Tui) -> Result<()> {
         let _ = handle.join();
     }
 
-    for (_, mut tunnel) in app.tunnels.active.drain() {
+    for (_, mut tunnel) in app.tunnels.drain_active() {
         let _ = tunnel.child.kill();
         let _ = tunnel.child.wait();
     }

@@ -1170,7 +1170,7 @@ fn build_host_detail_lines(
             );
         }
     }
-    let tunnel_active = app.tunnels.active.contains_key(alias);
+    let tunnel_active = app.tunnels.active_contains(alias);
     if tunnel_active {
         design::section_field_styled(
             &mut lines,
@@ -4219,7 +4219,7 @@ mod tests {
         assert!(!text.contains("ATTENTION"));
     }
 
-    // The "tunnels active" branch (`app.tunnels.active.contains_key`)
+    // The "tunnels active" branch (`app.tunnels.active().contains_key`)
     // cannot be exercised cleanly from a unit test: `ActiveTunnel` owns
     // a `std::process::Child` for the live ssh tunnel and has no test
     // constructor. Coverage for that branch lives in the demo flow and

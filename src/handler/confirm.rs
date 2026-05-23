@@ -131,7 +131,7 @@ fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
     }
     // Kill active tunnels only after successful write (no rollback needed).
     for (alias, _) in &targets {
-        if let Some(mut tunnel) = app.tunnels.active.remove(alias) {
+        if let Some(mut tunnel) = app.tunnels.active_remove(alias) {
             let _ = tunnel.child.kill();
             let _ = tunnel.child.wait();
         }
@@ -184,7 +184,7 @@ pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
                     app.notify_error(crate::messages::failed_to_save(&e));
                     app.reload_hosts();
                 } else {
-                    if let Some(mut tunnel) = app.tunnels.active.remove(&alias) {
+                    if let Some(mut tunnel) = app.tunnels.active_remove(&alias) {
                         let _ = tunnel.child.kill();
                         let _ = tunnel.child.wait();
                     }
@@ -201,7 +201,7 @@ pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
                     app.notify_error(crate::messages::failed_to_save(&e));
                 } else {
                     // Stop active tunnel for the deleted host
-                    if let Some(mut tunnel) = app.tunnels.active.remove(&alias) {
+                    if let Some(mut tunnel) = app.tunnels.active_remove(&alias) {
                         let _ = tunnel.child.kill();
                         let _ = tunnel.child.wait();
                     }

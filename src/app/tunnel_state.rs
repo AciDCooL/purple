@@ -45,28 +45,34 @@ use crate::tunnel_live::{
 /// strings. Pure state container; behaviour lives on `App` or on dedicated
 /// methods here.
 pub struct TunnelState {
-    pub list: Vec<TunnelRule>,
-    pub form: TunnelForm,
-    pub active: HashMap<String, ActiveTunnel>,
-    pub form_baseline: Option<TunnelFormBaseline>,
-    pub pending_delete: Option<usize>,
-    pub summaries_cache: HashMap<String, String>,
+    pub(in crate::app) list: Vec<TunnelRule>,
+    // Held at `pub(crate)` because the form sub-state lives on its own
+    // axis (handled by the forthcoming `forms` seal); per-field tunnel
+    // form mutations are too numerous to wrap behind methods here.
+    pub(crate) form: TunnelForm,
+    pub(in crate::app) active: HashMap<String, ActiveTunnel>,
+    pub(in crate::app) form_baseline: Option<TunnelFormBaseline>,
+    // Held at `pub(crate)` so the existing `if let Some(idx) = ...pending_delete`
+    // multi-line patterns continue to compile; explicit accessor returns
+    // a copy.
+    pub(crate) pending_delete: Option<usize>,
+    pub(in crate::app) summaries_cache: HashMap<String, String>,
     /// Sort mode for the tunnels overview screen. Cycled by `s`.
-    pub sort_mode: TunnelSortMode,
+    pub(in crate::app) sort_mode: TunnelSortMode,
 
     // Live-data layer. Receivers are drained from `poll()`. The Sender
     // halves are cloned into per-tunnel parser threads when start_tunnel
     // succeeds.
-    pub parser_tx: Sender<ParserMessage>,
-    pub parser_rx: Receiver<ParserMessage>,
-    pub lsof_tx: Sender<LsofMessage>,
-    pub lsof_rx: Receiver<LsofMessage>,
+    pub(in crate::app) parser_tx: Sender<ParserMessage>,
+    pub(in crate::app) parser_rx: Receiver<ParserMessage>,
+    pub(in crate::app) lsof_tx: Sender<LsofMessage>,
+    pub(in crate::app) lsof_rx: Receiver<LsofMessage>,
 
     // Last lsof snapshot, keyed by tunnel bind port. Replaced wholesale
     // on every successful poll so closed sockets disappear.
-    pub clients: HashMap<u16, Vec<ClientPeer>>,
-    pub conflicts: HashMap<u16, PortConflict>,
-    pub last_lsof_at: Option<Instant>,
+    pub(in crate::app) clients: HashMap<u16, Vec<ClientPeer>>,
+    pub(in crate::app) conflicts: HashMap<u16, PortConflict>,
+    pub(in crate::app) last_lsof_at: Option<Instant>,
 
     /// Per-peer rolling braille history, pushed once per lsof poll
     /// arrival from `poll()`. Keyed by `(bind_port, peer.src)` so it
@@ -75,25 +81,25 @@ pub struct TunnelState {
     /// `current_rx_bps + current_tx_bps` snapshot from a single lsof
     /// poll, so the visible window covers `PEER_VIZ_BUCKETS` polls
     /// (~24-48s on Linux/macOS).
-    pub peer_viz: HashMap<(u16, String), [u64; PEER_VIZ_BUCKETS]>,
+    pub(in crate::app) peer_viz: HashMap<(u16, String), [u64; PEER_VIZ_BUCKETS]>,
     /// Wall-clock of the most recent `push_peer_viz` rotation, and the
     /// one before it. The renderer divides `(now - last) / (last - prev)`
     /// to derive a smooth phase in `[0, 1]` that drifts the wave
     /// leftward by exactly one bucket between pushes — adaptive to the
     /// actual poll interval (which varies on macOS due to nettop
     /// overhead).
-    pub peer_viz_last_push: Option<Instant>,
-    pub peer_viz_prev_push: Option<Instant>,
+    pub(in crate::app) peer_viz_last_push: Option<Instant>,
+    pub(in crate::app) peer_viz_prev_push: Option<Instant>,
 
     // The single shared lsof poller. Lazily started on first tunnel
     // start; lives until App::Drop. The bind_ports list is cloned on
     // every poll iteration so updates are eventually consistent.
-    pub lsof: Option<LsofPollerHandle>,
+    pub(in crate::app) lsof: Option<LsofPollerHandle>,
 
     /// Demo / test seed. When `App.demo_mode == true` the detail panel
     /// reads from this map instead of the live counters, so visual
     /// regression tests are byte-deterministic.
-    pub demo_live_snapshots: HashMap<String, TunnelLiveSnapshot>,
+    pub(in crate::app) demo_live_snapshots: HashMap<String, TunnelLiveSnapshot>,
 }
 
 impl Default for TunnelState {
@@ -133,6 +139,120 @@ impl Drop for TunnelState {
 }
 
 impl TunnelState {
+    pub fn list(&self) -> &[TunnelRule] {
+        &self.list
+    }
+
+    pub fn list_mut(&mut self) -> &mut Vec<TunnelRule> {
+        &mut self.list
+    }
+
+    pub fn form(&self) -> &TunnelForm {
+        &self.form
+    }
+
+    pub fn form_mut(&mut self) -> &mut TunnelForm {
+        &mut self.form
+    }
+
+    pub fn reset_form(&mut self) {
+        self.form = TunnelForm::new();
+    }
+
+    pub fn active(&self) -> &HashMap<String, ActiveTunnel> {
+        &self.active
+    }
+
+    pub fn active_get(&self, alias: &str) -> Option<&ActiveTunnel> {
+        self.active.get(alias)
+    }
+
+    pub fn active_get_mut(&mut self, alias: &str) -> Option<&mut ActiveTunnel> {
+        self.active.get_mut(alias)
+    }
+
+    pub fn active_contains(&self, alias: &str) -> bool {
+        self.active.contains_key(alias)
+    }
+
+    pub fn active_insert(&mut self, alias: String, tunnel: ActiveTunnel) {
+        self.active.insert(alias, tunnel);
+    }
+
+    pub fn active_remove(&mut self, alias: &str) -> Option<ActiveTunnel> {
+        self.active.remove(alias)
+    }
+
+    pub fn drain_active(&mut self) -> std::collections::hash_map::Drain<'_, String, ActiveTunnel> {
+        self.active.drain()
+    }
+
+    pub fn clear_active(&mut self) {
+        self.active.clear();
+    }
+
+    pub fn pending_delete(&self) -> Option<usize> {
+        self.pending_delete
+    }
+
+    pub fn take_pending_delete(&mut self) -> Option<usize> {
+        self.pending_delete.take()
+    }
+
+    pub fn sort_mode(&self) -> TunnelSortMode {
+        self.sort_mode
+    }
+
+    pub fn set_sort_mode(&mut self, mode: TunnelSortMode) {
+        self.sort_mode = mode;
+    }
+
+    pub fn form_baseline(&self) -> Option<&TunnelFormBaseline> {
+        self.form_baseline.as_ref()
+    }
+
+    pub fn set_form_baseline(&mut self, baseline: Option<TunnelFormBaseline>) {
+        self.form_baseline = baseline;
+    }
+
+    pub fn demo_live_snapshots(&self) -> &HashMap<String, crate::tunnel_live::TunnelLiveSnapshot> {
+        &self.demo_live_snapshots
+    }
+
+    pub fn demo_live_snapshots_mut(
+        &mut self,
+    ) -> &mut HashMap<String, crate::tunnel_live::TunnelLiveSnapshot> {
+        &mut self.demo_live_snapshots
+    }
+
+    pub fn parser_tx(&self) -> Sender<ParserMessage> {
+        self.parser_tx.clone()
+    }
+
+    pub fn clients(&self) -> &HashMap<u16, Vec<ClientPeer>> {
+        &self.clients
+    }
+
+    pub fn peer_viz(&self) -> &HashMap<(u16, String), [u64; PEER_VIZ_BUCKETS]> {
+        &self.peer_viz
+    }
+
+    pub fn peer_viz_last_push(&self) -> Option<Instant> {
+        self.peer_viz_last_push
+    }
+
+    pub fn peer_viz_prev_push(&self) -> Option<Instant> {
+        self.peer_viz_prev_push
+    }
+
+    pub fn summaries_cache(&self) -> &HashMap<String, String> {
+        &self.summaries_cache
+    }
+
+    pub fn summaries_cache_mut(&mut self) -> &mut HashMap<String, String> {
+        &mut self.summaries_cache
+    }
+
     /// Open a delete confirmation for the tunnel at `idx`. The renderer
     /// reads `pending_delete` to draw the confirm overlay.
     pub fn request_delete(&mut self, idx: usize) {

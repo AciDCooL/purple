@@ -754,7 +754,7 @@ fn render_tunnels(
     host: &crate::ssh_config::model::HostEntry,
     box_width: usize,
 ) {
-    let tunnel_active = app.tunnels.active.contains_key(&host.alias);
+    let tunnel_active = app.tunnels.active_contains(&host.alias);
     if host.tunnel_count > 0 {
         let tunnel_label = if tunnel_active {
             "TUNNELS (active)"

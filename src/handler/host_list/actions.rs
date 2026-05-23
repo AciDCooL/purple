@@ -180,7 +180,7 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
     if let Some(hint) = stale_hint {
         app.notify_warning(crate::messages::stale_host(&hint));
     }
-    let has_tunnel = app.tunnels.active.contains_key(&alias);
+    let has_tunnel = app.tunnels.active_contains(&alias);
     let (local_path, remote_path) = app
         .file_browser_state
         .host_path(&alias)
