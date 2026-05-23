@@ -7,7 +7,7 @@ use crate::app::{App, Screen};
 use crate::event::AppEvent;
 
 pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
-    use crate::file_browser::{BrowserPane, CopyRequest};
+    use crate::file_browser::BrowserPane;
 
     let fb = match app.file_browser_session.as_mut() {
         Some(fb) => fb,
@@ -182,173 +182,16 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             }
         },
         KeyCode::Enter => {
-            match fb.active_pane {
-                BrowserPane::Local => {
-                    let idx = fb.local_list_state.selected().unwrap_or(0);
-                    if idx == 0 {
-                        // ".." - go up
-                        if let Some(parent) = fb.local_path.parent() {
-                            fb.local_path = parent.to_path_buf();
-                            match crate::file_browser::list_local(
-                                &fb.local_path,
-                                fb.show_hidden,
-                                fb.sort,
-                            ) {
-                                Ok(entries) => {
-                                    fb.local_entries = entries;
-                                    fb.local_error = None;
-                                }
-                                Err(e) => {
-                                    fb.local_entries = Vec::new();
-                                    fb.local_error = Some(e.to_string());
-                                }
-                            }
-                            fb.local_list_state.select(Some(0));
-                            fb.local_selected.clear();
-                        }
-                    } else if let Some(entry) = fb.local_entries.get(idx - 1).cloned() {
-                        if !fb.local_selected.is_empty() {
-                            // Multi-select active: copy all selected items
-                            if fb.remote_path.is_empty() {
-                                return;
-                            }
-                            let sources: Vec<String> = fb.local_selected.iter().cloned().collect();
-                            let has_dirs = sources
-                                .iter()
-                                .any(|n| fb.local_entries.iter().any(|e| e.name == *n && e.is_dir));
-                            fb.confirm_copy = Some(CopyRequest {
-                                sources,
-                                source_pane: BrowserPane::Local,
-                                has_dirs,
-                            });
-                        } else if entry.is_dir {
-                            // No selection: navigate into directory
-                            fb.local_path = fb.local_path.join(&entry.name);
-                            match crate::file_browser::list_local(
-                                &fb.local_path,
-                                fb.show_hidden,
-                                fb.sort,
-                            ) {
-                                Ok(entries) => {
-                                    fb.local_entries = entries;
-                                    fb.local_error = None;
-                                }
-                                Err(e) => {
-                                    fb.local_entries = Vec::new();
-                                    fb.local_error = Some(e.to_string());
-                                }
-                            }
-                            fb.local_list_state.select(Some(0));
-                            fb.local_selected.clear();
-                        } else {
-                            // No selection, cursor on file: copy single file
-                            if fb.remote_path.is_empty() {
-                                return;
-                            }
-                            fb.confirm_copy = Some(CopyRequest {
-                                sources: vec![entry.name.clone()],
-                                source_pane: BrowserPane::Local,
-                                has_dirs: false,
-                            });
-                        }
-                    }
-                }
-                BrowserPane::Remote => {
-                    if fb.remote_loading || fb.remote_error.is_some() {
-                        return;
-                    }
-                    let idx = fb.remote_list_state.selected().unwrap_or(0);
-                    if idx == 0 {
-                        // ".." - go up
-                        let path = fb.remote_path.clone();
-                        let parent = if path == "/" {
-                            "/".to_string()
-                        } else {
-                            let trimmed = path.trim_end_matches('/');
-                            match trimmed.rfind('/') {
-                                Some(0) => "/".to_string(),
-                                Some(pos) => trimmed[..pos].to_string(),
-                                None => "/".to_string(),
-                            }
-                        };
-                        if parent != fb.remote_path {
-                            fb.remote_path = parent.clone();
-                            fb.remote_loading = true;
-                            fb.remote_entries.clear();
-                            fb.remote_selected.clear();
-                            fb.remote_error = None;
-                            fb.remote_list_state = ratatui::widgets::ListState::default();
-                            let alias = fb.alias.clone();
-                            let ctx = crate::ssh_context::OwnedSshContext {
-                                alias,
-                                config_path: app.reload.config_path().to_path_buf(),
-                                askpass: fb.askpass.clone(),
-                                bw_session: app.bw_session.clone(),
-                                has_tunnel: app.tunnels.active_contains(&fb.alias),
-                            };
-                            let show_hidden = fb.show_hidden;
-                            let sort = fb.sort;
-                            crate::file_browser::spawn_remote_listing(
-                                ctx,
-                                parent,
-                                show_hidden,
-                                sort,
-                                fb_send(events_tx.clone()),
-                            );
-                        }
-                    } else if let Some(entry) = fb.remote_entries.get(idx - 1).cloned() {
-                        if !fb.remote_selected.is_empty() {
-                            // Multi-select active: copy all selected items
-                            let sources: Vec<String> = fb.remote_selected.iter().cloned().collect();
-                            let has_dirs = sources.iter().any(|n| {
-                                fb.remote_entries.iter().any(|e| e.name == *n && e.is_dir)
-                            });
-                            fb.confirm_copy = Some(CopyRequest {
-                                sources,
-                                source_pane: BrowserPane::Remote,
-                                has_dirs,
-                            });
-                        } else if entry.is_dir {
-                            // No selection: navigate into directory
-                            let new_path = if fb.remote_path.ends_with('/') {
-                                format!("{}{}", fb.remote_path, entry.name)
-                            } else {
-                                format!("{}/{}", fb.remote_path, entry.name)
-                            };
-                            fb.remote_path = new_path.clone();
-                            fb.remote_loading = true;
-                            fb.remote_entries.clear();
-                            fb.remote_selected.clear();
-                            fb.remote_error = None;
-                            fb.remote_list_state = ratatui::widgets::ListState::default();
-                            let alias = fb.alias.clone();
-                            let ctx = crate::ssh_context::OwnedSshContext {
-                                alias,
-                                config_path: app.reload.config_path().to_path_buf(),
-                                askpass: fb.askpass.clone(),
-                                bw_session: app.bw_session.clone(),
-                                has_tunnel: app.tunnels.active_contains(&fb.alias),
-                            };
-                            let show_hidden = fb.show_hidden;
-                            let sort = fb.sort;
-                            crate::file_browser::spawn_remote_listing(
-                                ctx,
-                                new_path,
-                                show_hidden,
-                                sort,
-                                fb_send(events_tx.clone()),
-                            );
-                        } else {
-                            // No selection, cursor on file: copy single file
-                            fb.confirm_copy = Some(CopyRequest {
-                                sources: vec![entry.name.clone()],
-                                source_pane: BrowserPane::Remote,
-                                has_dirs: false,
-                            });
-                        }
-                    }
-                }
-            }
+            let config_path = app.reload.config_path().to_path_buf();
+            let bw_session = app.bw_session.clone();
+            let has_tunnel = app.tunnels.active_contains(&fb.alias);
+            fb_enter(
+                fb,
+                &config_path,
+                bw_session.as_deref(),
+                has_tunnel,
+                events_tx,
+            );
         }
         KeyCode::Backspace => {
             // Go up in the active pane
@@ -585,5 +428,178 @@ pub(super) fn fb_send(
             path,
             entries,
         });
+    }
+}
+
+/// `Enter` in the file browser: navigate into a directory, ascend via the
+/// `..` row, or stage an scp copy of the selection. `config_path`,
+/// `bw_session` and `has_tunnel` are resolved by the caller because `fb`
+/// borrows the same `App`.
+fn fb_enter(
+    fb: &mut crate::file_browser::FileBrowserSession,
+    config_path: &std::path::Path,
+    bw_session: Option<&str>,
+    has_tunnel: bool,
+    events_tx: &mpsc::Sender<AppEvent>,
+) {
+    use crate::file_browser::{BrowserPane, CopyRequest};
+    match fb.active_pane {
+        BrowserPane::Local => {
+            let idx = fb.local_list_state.selected().unwrap_or(0);
+            if idx == 0 {
+                // ".." - go up
+                if let Some(parent) = fb.local_path.parent() {
+                    fb.local_path = parent.to_path_buf();
+                    match crate::file_browser::list_local(&fb.local_path, fb.show_hidden, fb.sort) {
+                        Ok(entries) => {
+                            fb.local_entries = entries;
+                            fb.local_error = None;
+                        }
+                        Err(e) => {
+                            fb.local_entries = Vec::new();
+                            fb.local_error = Some(e.to_string());
+                        }
+                    }
+                    fb.local_list_state.select(Some(0));
+                    fb.local_selected.clear();
+                }
+            } else if let Some(entry) = fb.local_entries.get(idx - 1).cloned() {
+                if !fb.local_selected.is_empty() {
+                    // Multi-select active: copy all selected items
+                    if fb.remote_path.is_empty() {
+                        return;
+                    }
+                    let sources: Vec<String> = fb.local_selected.iter().cloned().collect();
+                    let has_dirs = sources
+                        .iter()
+                        .any(|n| fb.local_entries.iter().any(|e| e.name == *n && e.is_dir));
+                    fb.confirm_copy = Some(CopyRequest {
+                        sources,
+                        source_pane: BrowserPane::Local,
+                        has_dirs,
+                    });
+                } else if entry.is_dir {
+                    // No selection: navigate into directory
+                    fb.local_path = fb.local_path.join(&entry.name);
+                    match crate::file_browser::list_local(&fb.local_path, fb.show_hidden, fb.sort) {
+                        Ok(entries) => {
+                            fb.local_entries = entries;
+                            fb.local_error = None;
+                        }
+                        Err(e) => {
+                            fb.local_entries = Vec::new();
+                            fb.local_error = Some(e.to_string());
+                        }
+                    }
+                    fb.local_list_state.select(Some(0));
+                    fb.local_selected.clear();
+                } else {
+                    // No selection, cursor on file: copy single file
+                    if fb.remote_path.is_empty() {
+                        return;
+                    }
+                    fb.confirm_copy = Some(CopyRequest {
+                        sources: vec![entry.name.clone()],
+                        source_pane: BrowserPane::Local,
+                        has_dirs: false,
+                    });
+                }
+            }
+        }
+        BrowserPane::Remote => {
+            if fb.remote_loading || fb.remote_error.is_some() {
+                return;
+            }
+            let idx = fb.remote_list_state.selected().unwrap_or(0);
+            if idx == 0 {
+                // ".." - go up
+                let path = fb.remote_path.clone();
+                let parent = if path == "/" {
+                    "/".to_string()
+                } else {
+                    let trimmed = path.trim_end_matches('/');
+                    match trimmed.rfind('/') {
+                        Some(0) => "/".to_string(),
+                        Some(pos) => trimmed[..pos].to_string(),
+                        None => "/".to_string(),
+                    }
+                };
+                if parent != fb.remote_path {
+                    fb.remote_path = parent.clone();
+                    fb.remote_loading = true;
+                    fb.remote_entries.clear();
+                    fb.remote_selected.clear();
+                    fb.remote_error = None;
+                    fb.remote_list_state = ratatui::widgets::ListState::default();
+                    let alias = fb.alias.clone();
+                    let ctx = crate::ssh_context::OwnedSshContext {
+                        alias,
+                        config_path: config_path.to_path_buf(),
+                        askpass: fb.askpass.clone(),
+                        bw_session: bw_session.map(str::to_string),
+                        has_tunnel,
+                    };
+                    let show_hidden = fb.show_hidden;
+                    let sort = fb.sort;
+                    crate::file_browser::spawn_remote_listing(
+                        ctx,
+                        parent,
+                        show_hidden,
+                        sort,
+                        fb_send(events_tx.clone()),
+                    );
+                }
+            } else if let Some(entry) = fb.remote_entries.get(idx - 1).cloned() {
+                if !fb.remote_selected.is_empty() {
+                    // Multi-select active: copy all selected items
+                    let sources: Vec<String> = fb.remote_selected.iter().cloned().collect();
+                    let has_dirs = sources
+                        .iter()
+                        .any(|n| fb.remote_entries.iter().any(|e| e.name == *n && e.is_dir));
+                    fb.confirm_copy = Some(CopyRequest {
+                        sources,
+                        source_pane: BrowserPane::Remote,
+                        has_dirs,
+                    });
+                } else if entry.is_dir {
+                    // No selection: navigate into directory
+                    let new_path = if fb.remote_path.ends_with('/') {
+                        format!("{}{}", fb.remote_path, entry.name)
+                    } else {
+                        format!("{}/{}", fb.remote_path, entry.name)
+                    };
+                    fb.remote_path = new_path.clone();
+                    fb.remote_loading = true;
+                    fb.remote_entries.clear();
+                    fb.remote_selected.clear();
+                    fb.remote_error = None;
+                    fb.remote_list_state = ratatui::widgets::ListState::default();
+                    let alias = fb.alias.clone();
+                    let ctx = crate::ssh_context::OwnedSshContext {
+                        alias,
+                        config_path: config_path.to_path_buf(),
+                        askpass: fb.askpass.clone(),
+                        bw_session: bw_session.map(str::to_string),
+                        has_tunnel,
+                    };
+                    let show_hidden = fb.show_hidden;
+                    let sort = fb.sort;
+                    crate::file_browser::spawn_remote_listing(
+                        ctx,
+                        new_path,
+                        show_hidden,
+                        sort,
+                        fb_send(events_tx.clone()),
+                    );
+                } else {
+                    // No selection, cursor on file: copy single file
+                    fb.confirm_copy = Some(CopyRequest {
+                        sources: vec![entry.name.clone()],
+                        source_pane: BrowserPane::Remote,
+                        has_dirs: false,
+                    });
+                }
+            }
+        }
     }
 }

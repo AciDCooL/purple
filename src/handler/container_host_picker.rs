@@ -120,8 +120,7 @@ fn spawn_initial_listing(app: &mut App, alias: String, events_tx: &mpsc::Sender<
     // Mark in-flight so the post-key auto-refresh does not spawn a
     // second `docker ps` for the same alias before this one returns.
     app.containers_overview
-        .auto_list_in_flight
-        .insert(alias.clone());
+        .mark_auto_list_pending(alias.clone());
     let ctx = crate::ssh_context::OwnedSshContext {
         alias,
         config_path: app.reload.config_path().to_path_buf(),

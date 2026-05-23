@@ -300,6 +300,27 @@ mod tests {
         ("vultr", ProviderKind::Vultr),
     ];
 
+    /// Marketing copy hardcodes the provider count in prose ("16 cloud
+    /// providers"). This guard fails when a provider is added to `ALL`
+    /// without updating the headline count in `llms.txt` and
+    /// `site/page.html`, so the marketing sweep cannot be silently skipped.
+    #[test]
+    fn marketing_provider_count_matches_all() {
+        let phrase = format!("{} cloud provider", ALL.len());
+        let llms = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/llms.txt"));
+        let page = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/site/page.html"));
+        assert!(
+            llms.contains(&phrase),
+            "llms.txt must mention \"{phrase}\" (ProviderKind has {} variants); update marketing when adding a provider",
+            ALL.len()
+        );
+        assert!(
+            page.contains(&phrase),
+            "site/page.html must mention \"{phrase}\" (ProviderKind has {} variants); update marketing when adding a provider",
+            ALL.len()
+        );
+    }
+
     #[test]
     fn round_trip_string_to_kind_to_string() {
         for (name, kind) in ALL {

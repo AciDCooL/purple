@@ -605,7 +605,7 @@ fn seed_demo_inspect_cache(app: &mut App) {
                     None
                 },
             };
-            app.containers_overview.inspect_cache.entries.insert(
+            app.containers_overview.inspect_cache_mut().entries.insert(
                 c.id.clone(),
                 InspectCacheEntry {
                     timestamp: now,
@@ -613,7 +613,7 @@ fn seed_demo_inspect_cache(app: &mut App) {
                 },
             );
             let log_lines = container_demo_logs(&c.names, running);
-            app.containers_overview.logs_cache.entries.insert(
+            app.containers_overview.logs_cache_mut().entries.insert(
                 c.id.clone(),
                 LogsCacheEntry {
                     timestamp: now,
@@ -1214,8 +1214,7 @@ pub fn build_demo_app() -> App {
     // is mid-list (not the first group) and homogeneous (all running),
     // so the folded summary reads cleanly.
     app.containers_overview
-        .collapsed_hosts
-        .insert("aws-batch-us".to_string());
+        .toggle_host_collapsed("aws-batch-us");
 
     // Ping status (deterministic)
     let reachable = |ms| PingStatus::Reachable { rtt_ms: ms };
@@ -1383,7 +1382,8 @@ pub fn build_demo_app() -> App {
     // the Containers tab so screenshots and the demo recording land on a
     // fully-populated detail panel without an extra `v` keystroke.
     app.hosts_state.set_view_mode(ViewMode::Detailed);
-    app.containers_overview.view_mode = ViewMode::Detailed;
+    app.containers_overview
+        .set_view_mode_ephemeral(ViewMode::Detailed);
     app.hosts_state.set_sort_mode(SortMode::MostRecent);
     app.hosts_state.set_group_by_raw(GroupBy::None);
     app.ping.set_auto_ping(true);
@@ -1617,6 +1617,7 @@ fn demo_key_activity() -> crate::key_activity::KeyActivityLog {
 ///
 /// Currently seeds one host (`bastion-ams`) with a representative
 /// active state: a fresh open, two clients, a small history bump.
+#[allow(clippy::too_many_lines)] // one long hand-written deterministic data literal
 pub fn seed_tunnel_live_snapshots(app: &mut App) {
     use crate::tunnel_live::{
         ChannelEventKind, ChannelKind, DisplayClient, DisplayEvent, HISTORY_BUCKETS,
@@ -2543,7 +2544,7 @@ mod tests {
     fn demo_app_has_correct_preferences() {
         let (app, _guard) = demo_app();
         assert_eq!(app.hosts_state.view_mode(), ViewMode::Detailed);
-        assert_eq!(app.containers_overview.view_mode, ViewMode::Detailed);
+        assert_eq!(app.containers_overview.view_mode(), ViewMode::Detailed);
         assert_eq!(app.hosts_state.sort_mode(), SortMode::MostRecent);
         assert_eq!(app.hosts_state.group_by(), &GroupBy::None);
         assert!(app.ping.auto_ping());

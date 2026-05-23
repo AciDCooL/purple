@@ -201,24 +201,24 @@ pub const LIST_CACHE_TTL_SECS: u64 = 30;
 
 #[derive(Debug)]
 pub struct ContainersOverviewState {
-    pub sort_mode: ContainersSortMode,
-    pub inspect_cache: InspectCache,
-    pub logs_cache: LogsCache,
+    pub(in crate::app) sort_mode: ContainersSortMode,
+    pub(in crate::app) inspect_cache: InspectCache,
+    pub(in crate::app) logs_cache: LogsCache,
     /// Currently-running `R` batch, if any. `None` when idle.
-    pub refresh_batch: Option<RefreshBatch>,
+    pub(in crate::app) refresh_batch: Option<RefreshBatch>,
     /// Aliases whose `docker ps` listing was kicked off by the
     /// scroll-driven auto-refresh helper and has not yet returned.
     /// Lets the helper skip a re-spawn while one is already pending.
     /// Cleared by `handle_container_listing` on arrival.
-    pub auto_list_in_flight: HashSet<String>,
+    pub(in crate::app) auto_list_in_flight: HashSet<String>,
     /// Toggle for the per-row detail panel on the right. Mirrors the
     /// host-list `v` toggle. Default `Detailed` so the panel is visible
     /// whenever the terminal is wide enough.
-    pub view_mode: ViewMode,
+    pub(in crate::app) view_mode: ViewMode,
     /// Aliases whose container group is currently collapsed in the
     /// AlphaHost rendering. Persisted across sessions via preferences
     /// so a folded group stays folded after restart.
-    pub collapsed_hosts: HashSet<String>,
+    pub(in crate::app) collapsed_hosts: HashSet<String>,
     /// Memoized render list. The render and handler paths call
     /// `visible_items` repeatedly (24 call sites, several per key
     /// event) and each call cloned 6 String fields per container. The
@@ -229,7 +229,7 @@ pub struct ContainersOverviewState {
     /// return a clone of the cached vec. The fingerprint walks all
     /// hosts but only reads a few fields each, so it is dramatically
     /// cheaper than rebuilding the row set.
-    pub view_cache:
+    pub(in crate::app) view_cache:
         std::cell::RefCell<Option<(u64, Vec<crate::ui::containers_overview::ContainerListItem>)>>,
 }
 
@@ -260,6 +260,94 @@ impl ContainersOverviewState {
     /// in-flight count returns to zero.
     pub fn clear_refresh(&mut self) {
         self.refresh_batch = None;
+    }
+
+    // Sealed-field accessors. Fields are `pub(in crate::app)`; callers
+    // outside the app module reach state through these.
+
+    pub fn sort_mode(&self) -> ContainersSortMode {
+        self.sort_mode
+    }
+
+    /// Set the sort mode without persisting to preferences. Demo mode and
+    /// tests only; the persisting path is `set_sort_mode`.
+    pub fn set_sort_mode_ephemeral(&mut self, mode: ContainersSortMode) {
+        self.sort_mode = mode;
+    }
+
+    pub fn view_mode(&self) -> ViewMode {
+        self.view_mode
+    }
+
+    /// Set the view mode without persisting to preferences. Demo mode and
+    /// tests only; the persisting path is `set_view_mode`.
+    pub fn set_view_mode_ephemeral(&mut self, mode: ViewMode) {
+        self.view_mode = mode;
+    }
+
+    pub fn collapsed_hosts(&self) -> &HashSet<String> {
+        &self.collapsed_hosts
+    }
+
+    /// Fold or unfold a host group; returns the new collapsed state.
+    pub fn toggle_host_collapsed(&mut self, alias: &str) -> bool {
+        if self.collapsed_hosts.remove(alias) {
+            false
+        } else {
+            self.collapsed_hosts.insert(alias.to_string());
+            true
+        }
+    }
+
+    pub fn refresh_batch(&self) -> Option<&RefreshBatch> {
+        self.refresh_batch.as_ref()
+    }
+
+    pub fn refresh_batch_mut(&mut self) -> Option<&mut RefreshBatch> {
+        self.refresh_batch.as_mut()
+    }
+
+    pub fn auto_list_in_flight(&self) -> &HashSet<String> {
+        &self.auto_list_in_flight
+    }
+
+    /// True when a scroll-driven auto-listing is already in flight for
+    /// `alias`, so the helper skips a re-spawn.
+    pub fn auto_list_pending(&self, alias: &str) -> bool {
+        self.auto_list_in_flight.contains(alias)
+    }
+
+    /// Mark a scroll-driven auto-listing as in flight for `alias`.
+    pub fn mark_auto_list_pending(&mut self, alias: String) {
+        self.auto_list_in_flight.insert(alias);
+    }
+
+    /// Clear the in-flight marker once an auto-listing arrives.
+    pub fn clear_auto_list_pending(&mut self, alias: &str) {
+        self.auto_list_in_flight.remove(alias);
+    }
+
+    pub fn inspect_cache(&self) -> &InspectCache {
+        &self.inspect_cache
+    }
+
+    pub fn inspect_cache_mut(&mut self) -> &mut InspectCache {
+        &mut self.inspect_cache
+    }
+
+    pub fn logs_cache(&self) -> &LogsCache {
+        &self.logs_cache
+    }
+
+    pub fn logs_cache_mut(&mut self) -> &mut LogsCache {
+        &mut self.logs_cache
+    }
+
+    pub fn view_cache(
+        &self,
+    ) -> &std::cell::RefCell<Option<(u64, Vec<crate::ui::containers_overview::ContainerListItem>)>>
+    {
+        &self.view_cache
     }
 
     /// Load the persisted overview fields from `preferences`. Startup only:

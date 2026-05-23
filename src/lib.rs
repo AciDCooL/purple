@@ -1,5 +1,11 @@
 // Library crate root. Hosts every module so the binary entry (src/main.rs)
 // becomes a thin shim and integration tests can reach the same surface.
+
+// `too_many_lines` (threshold 400 via clippy.toml) gates production functions
+// against bloat. Test builds are exempt: long test bodies and fixtures are
+// normal and splitting them adds noise, not clarity.
+#![cfg_attr(test, allow(clippy::too_many_lines))]
+
 pub mod animation;
 pub mod app;
 pub mod askpass;

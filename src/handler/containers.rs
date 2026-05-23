@@ -49,8 +49,7 @@ pub(super) fn open_overlay_for_host(
         // double-spawn if the user Tabs to the Containers tab before
         // this listing returns.
         app.containers_overview
-            .auto_list_in_flight
-            .insert(alias.clone());
+            .mark_auto_list_pending(alias.clone());
         let ctx = crate::ssh_context::OwnedSshContext {
             alias,
             config_path: app.reload.config_path().to_path_buf(),

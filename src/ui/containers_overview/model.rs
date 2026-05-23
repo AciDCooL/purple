@@ -113,7 +113,7 @@ pub(crate) fn visible_items(app: &App) -> Vec<ContainerListItem> {
     // extract-then-drop guarantees the panic class is unreachable.
     let cached = app
         .containers_overview
-        .view_cache
+        .view_cache()
         .borrow()
         .as_ref()
         .filter(|(cached_fp, _)| *cached_fp == fp)
@@ -122,17 +122,17 @@ pub(crate) fn visible_items(app: &App) -> Vec<ContainerListItem> {
         return items;
     }
     let items = build_visible_items(app);
-    *app.containers_overview.view_cache.borrow_mut() = Some((fp, items.clone()));
+    *app.containers_overview.view_cache().borrow_mut() = Some((fp, items.clone()));
     items
 }
 
 pub(crate) fn build_visible_items(app: &App) -> Vec<ContainerListItem> {
     let mut rows = collect_rows(app);
-    sort_rows(&mut rows, app.containers_overview.sort_mode);
+    sort_rows(&mut rows, app.containers_overview.sort_mode());
 
-    match app.containers_overview.sort_mode {
+    match app.containers_overview.sort_mode() {
         ContainersSortMode::AlphaHost => {
-            intersperse_host_headers(rows, &app.containers_overview.collapsed_hosts)
+            intersperse_host_headers(rows, app.containers_overview.collapsed_hosts())
         }
         ContainersSortMode::AlphaContainer => {
             rows.into_iter().map(ContainerListItem::Container).collect()
@@ -149,10 +149,10 @@ pub(crate) fn view_fingerprint(app: &App) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
 
-    (app.containers_overview.sort_mode as u8).hash(&mut hasher);
+    (app.containers_overview.sort_mode() as u8).hash(&mut hasher);
     app.search.query().hash(&mut hasher);
 
-    let mut collapsed: Vec<&String> = app.containers_overview.collapsed_hosts.iter().collect();
+    let mut collapsed: Vec<&String> = app.containers_overview.collapsed_hosts().iter().collect();
     collapsed.sort();
     collapsed.len().hash(&mut hasher);
     for c in collapsed {

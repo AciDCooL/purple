@@ -3006,9 +3006,7 @@ fn test_submit_form_rename_migrates_per_host_state() {
         count: 12,
         timestamps: vec![1_700_000_000],
     });
-    app.containers_overview
-        .collapsed_hosts
-        .insert("web-old".to_string());
+    app.containers_overview.toggle_host_collapsed("web-old");
     // Seed a host recent for web-old on disk so the rename pulls it in.
     let mut seeded = crate::app::jump::RecentsFile::default();
     seeded.entries.push(crate::app::jump::RecentEntry {
@@ -3041,11 +3039,15 @@ fn test_submit_form_rename_migrates_per_host_state() {
     assert_eq!(migrated.timestamps, vec![1_700_000_000]);
 
     assert!(
-        !app.containers_overview.collapsed_hosts.contains("web-old"),
+        !app.containers_overview
+            .collapsed_hosts()
+            .contains("web-old"),
         "collapsed-fleet preference must drop the old alias"
     );
     assert!(
-        app.containers_overview.collapsed_hosts.contains("web-new"),
+        app.containers_overview
+            .collapsed_hosts()
+            .contains("web-new"),
         "collapsed-fleet preference must carry over to the new alias"
     );
 
@@ -3185,8 +3187,7 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
         },
     );
     app.containers_overview
-        .auto_list_in_flight
-        .insert("web-old".to_string());
+        .mark_auto_list_pending("web-old".to_string());
     app.vault.mark_cert_check_started("web-old".to_string());
 
     app.screen = Screen::EditHost {
@@ -3231,13 +3232,8 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
 
     // Alias-keyed in-flight dedup sets carried over.
     assert!(
-        !app.containers_overview
-            .auto_list_in_flight
-            .contains("web-old")
-            && app
-                .containers_overview
-                .auto_list_in_flight
-                .contains("web-new"),
+        !app.containers_overview.auto_list_pending("web-old")
+            && app.containers_overview.auto_list_pending("web-new"),
         "auto_list_in_flight must follow the rename"
     );
     assert!(
@@ -5464,6 +5460,56 @@ fn test_file_browser_confirm_stray_key_is_ignored() {
         fb.transferring.is_none(),
         "stray key must NOT start a transfer"
     );
+}
+
+#[test]
+fn file_browser_enter_on_local_file_stages_copy() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::FileBrowser {
+        alias: "web".to_string(),
+    };
+    let mut local_list_state = ratatui::widgets::ListState::default();
+    local_list_state.select(Some(1)); // idx 0 is "..", idx 1 is the first entry
+    app.file_browser_session = Some(crate::file_browser::FileBrowserSession {
+        alias: "web".to_string(),
+        askpass: None,
+        active_pane: crate::file_browser::BrowserPane::Local,
+        local_path: std::path::PathBuf::from("/tmp"),
+        local_entries: vec![crate::file_browser::FileEntry {
+            name: "data.txt".to_string(),
+            is_dir: false,
+            size: Some(10),
+            modified: None,
+        }],
+        local_list_state,
+        local_selected: std::collections::HashSet::new(),
+        local_error: None,
+        remote_path: "/home".to_string(),
+        remote_entries: Vec::new(),
+        remote_list_state: ratatui::widgets::ListState::default(),
+        remote_selected: std::collections::HashSet::new(),
+        remote_error: None,
+        remote_loading: false,
+        show_hidden: false,
+        sort: crate::file_browser::BrowserSort::Name,
+        confirm_copy: None,
+        transferring: None,
+        transfer_error: None,
+        connection_recorded: false,
+    });
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    let req = fb
+        .confirm_copy
+        .as_ref()
+        .expect("Enter on a local file with a remote target must stage a copy");
+    assert_eq!(req.sources, vec!["data.txt".to_string()]);
+    assert!(matches!(
+        req.source_pane,
+        crate::file_browser::BrowserPane::Local
+    ));
+    assert!(!req.has_dirs);
 }
 
 #[test]
@@ -9437,18 +9483,18 @@ fn containers_overview_capital_g_jumps_to_bottom() {
 fn containers_overview_s_cycles_sort_mode() {
     let mut app = make_containers_overview_app();
     assert_eq!(
-        app.containers_overview.sort_mode,
+        app.containers_overview.sort_mode(),
         crate::app::ContainersSortMode::AlphaHost
     );
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert_eq!(
-        app.containers_overview.sort_mode,
+        app.containers_overview.sort_mode(),
         crate::app::ContainersSortMode::AlphaContainer
     );
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert_eq!(
-        app.containers_overview.sort_mode,
+        app.containers_overview.sort_mode(),
         crate::app::ContainersSortMode::AlphaHost
     );
 }
@@ -9588,7 +9634,7 @@ fn containers_overview_search_enter_on_header_is_noop() {
         .select(Some(header_idx));
     let was_collapsed = app
         .containers_overview
-        .collapsed_hosts
+        .collapsed_hosts()
         .contains(&header_alias);
 
     let (tx, _rx) = mpsc::channel();
@@ -9600,7 +9646,7 @@ fn containers_overview_search_enter_on_header_is_noop() {
     );
     let now_collapsed = app
         .containers_overview
-        .collapsed_hosts
+        .collapsed_hosts()
         .contains(&header_alias);
     assert_eq!(
         was_collapsed, now_collapsed,
@@ -9634,7 +9680,7 @@ fn containers_overview_enter_on_host_header_is_noop() {
         .select(Some(header_idx));
     let was_collapsed = app
         .containers_overview
-        .collapsed_hosts
+        .collapsed_hosts()
         .contains(&header_alias);
 
     let (tx, _rx) = mpsc::channel();
@@ -9642,7 +9688,7 @@ fn containers_overview_enter_on_host_header_is_noop() {
 
     let now_collapsed = app
         .containers_overview
-        .collapsed_hosts
+        .collapsed_hosts()
         .contains(&header_alias);
     assert_eq!(
         was_collapsed, now_collapsed,
@@ -9850,7 +9896,7 @@ fn containers_overview_inspect_complete_caches_result() {
         ..Default::default()
     };
     app.containers_overview
-        .inspect_cache
+        .inspect_cache_mut()
         .in_flight
         .insert("c1".to_string());
 
@@ -9863,7 +9909,7 @@ fn containers_overview_inspect_complete_caches_result() {
 
     let entry = app
         .containers_overview
-        .inspect_cache
+        .inspect_cache()
         .entries
         .get("c1")
         .expect("cached");
@@ -9873,7 +9919,7 @@ fn containers_overview_inspect_complete_caches_result() {
     );
     assert!(
         !app.containers_overview
-            .inspect_cache
+            .inspect_cache()
             .in_flight
             .contains("c1"),
         "in_flight marker must be cleared on completion"
@@ -9884,7 +9930,7 @@ fn containers_overview_inspect_complete_caches_result() {
 fn containers_overview_inspect_complete_stores_error() {
     let mut app = make_containers_overview_app();
     app.containers_overview
-        .inspect_cache
+        .inspect_cache_mut()
         .in_flight
         .insert("c2".to_string());
 
@@ -9897,7 +9943,7 @@ fn containers_overview_inspect_complete_stores_error() {
 
     let entry = app
         .containers_overview
-        .inspect_cache
+        .inspect_cache()
         .entries
         .get("c2")
         .expect("cached");
@@ -9907,7 +9953,7 @@ fn containers_overview_inspect_complete_stores_error() {
     );
     assert!(
         !app.containers_overview
-            .inspect_cache
+            .inspect_cache()
             .in_flight
             .contains("c2")
     );
@@ -9917,7 +9963,7 @@ fn containers_overview_inspect_complete_stores_error() {
 fn containers_overview_logs_tail_complete_caches_result() {
     let mut app = make_containers_overview_app();
     app.containers_overview
-        .logs_cache
+        .logs_cache_mut()
         .in_flight
         .insert("c1".to_string());
 
@@ -9930,13 +9976,16 @@ fn containers_overview_logs_tail_complete_caches_result() {
 
     let entry = app
         .containers_overview
-        .logs_cache
+        .logs_cache()
         .entries
         .get("c1")
         .expect("cached");
     assert_eq!(entry.result.as_ref().unwrap().len(), 2);
     assert!(
-        !app.containers_overview.logs_cache.in_flight.contains("c1"),
+        !app.containers_overview
+            .logs_cache()
+            .in_flight
+            .contains("c1"),
         "in_flight marker must be cleared on completion"
     );
 }
@@ -9945,7 +9994,7 @@ fn containers_overview_logs_tail_complete_caches_result() {
 fn containers_overview_logs_tail_complete_stores_error() {
     let mut app = make_containers_overview_app();
     app.containers_overview
-        .logs_cache
+        .logs_cache_mut()
         .in_flight
         .insert("c2".to_string());
 
@@ -9958,7 +10007,7 @@ fn containers_overview_logs_tail_complete_stores_error() {
 
     let entry = app
         .containers_overview
-        .logs_cache
+        .logs_cache()
         .entries
         .get("c2")
         .expect("cached");
@@ -9966,7 +10015,12 @@ fn containers_overview_logs_tail_complete_stores_error() {
         entry.result.as_ref().err().map(|s| s.as_str()),
         Some("permission denied")
     );
-    assert!(!app.containers_overview.logs_cache.in_flight.contains("c2"));
+    assert!(
+        !app.containers_overview
+            .logs_cache()
+            .in_flight
+            .contains("c2")
+    );
 }
 
 #[test]
@@ -9976,7 +10030,7 @@ fn containers_overview_logs_tail_complete_drops_orphan_host() {
     // land in the cache, but the in-flight marker must clear.
     let mut app = make_containers_overview_app();
     app.containers_overview
-        .logs_cache
+        .logs_cache_mut()
         .in_flight
         .insert("orphan".to_string());
 
@@ -9989,14 +10043,14 @@ fn containers_overview_logs_tail_complete_drops_orphan_host() {
 
     assert!(
         !app.containers_overview
-            .logs_cache
+            .logs_cache()
             .entries
             .contains_key("orphan"),
         "orphan result must not be cached"
     );
     assert!(
         !app.containers_overview
-            .logs_cache
+            .logs_cache()
             .in_flight
             .contains("orphan"),
         "in_flight marker still cleared even when result dropped"
@@ -10036,7 +10090,7 @@ fn containers_overview_inspect_cache_fresh_within_ttl() {
         compose_service: None,
         ..Default::default()
     };
-    app.containers_overview.inspect_cache.entries.insert(
+    app.containers_overview.inspect_cache_mut().entries.insert(
         "c3".to_string(),
         crate::app::InspectCacheEntry {
             timestamp: now,
@@ -10045,14 +10099,14 @@ fn containers_overview_inspect_cache_fresh_within_ttl() {
     );
     assert!(
         app.containers_overview
-            .inspect_cache
+            .inspect_cache()
             .fresh("c3", now)
             .is_some(),
         "cache should be fresh at t=0"
     );
     assert!(
         app.containers_overview
-            .inspect_cache
+            .inspect_cache()
             .fresh("c3", now + 60)
             .is_none(),
         "cache should be stale after TTL window"
@@ -10079,8 +10133,7 @@ fn containers_overview_refresh_all_starts_capped_batch() {
 
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("R must start a batch");
     assert_eq!(batch.total, 2);
     assert_eq!(batch.completed, 0);
@@ -10112,8 +10165,7 @@ fn containers_overview_refresh_all_caps_in_flight_at_max_parallel() {
 
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("R must start a batch");
     assert_eq!(batch.total, 10);
     assert_eq!(batch.in_flight, crate::app::REFRESH_MAX_PARALLEL);
@@ -10132,8 +10184,7 @@ fn containers_overview_refresh_all_in_demo_mode_starts_synthetic_batch() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("synthetic batch staged");
     assert_eq!(batch.in_flight, batch.total);
     assert!(batch.total > 0);
@@ -10151,7 +10202,7 @@ fn containers_overview_refresh_all_on_empty_cache_warns() {
     app.screen = Screen::HostList;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
-    assert!(app.containers_overview.refresh_batch.is_none());
+    assert!(app.containers_overview.refresh_batch().is_none());
     let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("No cached hosts"));
 }
@@ -10161,7 +10212,7 @@ fn containers_overview_refresh_all_rejects_concurrent_batch() {
     let mut app = make_containers_overview_app();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
-    assert!(app.containers_overview.refresh_batch.is_some());
+    assert!(app.containers_overview.refresh_batch().is_some());
 
     // Press R again while batch active.
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
@@ -10225,18 +10276,19 @@ fn refresh_batch_completes_cleanly_on_last_listing() {
     // Final listing of a 2-host batch: queue empty, last in-flight
     // alias arrives, batch should clear and emit the success toast.
     let mut app = make_containers_overview_app();
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue: std::collections::VecDeque::new(),
-        in_flight: 1,
-        total: 2,
-        completed: 1,
-        in_flight_aliases: ["web".to_string()].into_iter().collect(),
-    });
+    app.containers_overview
+        .start_refresh(crate::app::RefreshBatch {
+            queue: std::collections::VecDeque::new(),
+            in_flight: 1,
+            total: 2,
+            completed: 1,
+            in_flight_aliases: ["web".to_string()].into_iter().collect(),
+        });
     let (tx, _rx) = mpsc::channel();
     crate::handler::event_loop::drive_refresh_batch(&mut app, "web", &tx);
 
     assert!(
-        app.containers_overview.refresh_batch.is_none(),
+        app.containers_overview.refresh_batch().is_none(),
         "batch must clear after last listing"
     );
     let toast = app.status_center.toast().expect("completion toast");
@@ -10274,13 +10326,14 @@ fn refresh_batch_completion_clears_sticky_progress_and_uses_success_toast() {
     // user does not see a stale "Refreshing" line sitting next to the
     // success toast.
     let mut app = make_containers_overview_app();
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue: std::collections::VecDeque::new(),
-        in_flight: 1,
-        total: 2,
-        completed: 1,
-        in_flight_aliases: ["web".to_string()].into_iter().collect(),
-    });
+    app.containers_overview
+        .start_refresh(crate::app::RefreshBatch {
+            queue: std::collections::VecDeque::new(),
+            in_flight: 1,
+            total: 2,
+            completed: 1,
+            in_flight_aliases: ["web".to_string()].into_iter().collect(),
+        });
     // Seed the sticky progress message as the live batch would.
     app.notify_progress(crate::messages::container_refresh_progress(1, 2));
     let (tx, _rx) = mpsc::channel();
@@ -10300,20 +10353,20 @@ fn refresh_batch_ignores_non_batch_listing() {
     // (e.g. host-list `C` or `a`-add running in parallel) must not
     // touch the batch counters.
     let mut app = make_containers_overview_app();
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue: std::collections::VecDeque::new(),
-        in_flight: 1,
-        total: 2,
-        completed: 1,
-        in_flight_aliases: ["web".to_string()].into_iter().collect(),
-    });
+    app.containers_overview
+        .start_refresh(crate::app::RefreshBatch {
+            queue: std::collections::VecDeque::new(),
+            in_flight: 1,
+            total: 2,
+            completed: 1,
+            in_flight_aliases: ["web".to_string()].into_iter().collect(),
+        });
     let (tx, _rx) = mpsc::channel();
     crate::handler::event_loop::drive_refresh_batch(&mut app, "intruder", &tx);
 
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("batch must NOT clear");
     assert_eq!(batch.in_flight, 1);
     assert_eq!(batch.completed, 1);
@@ -10328,20 +10381,20 @@ fn refresh_batch_decrements_completed_increments_on_match() {
     // empty so we exercise just the decrement+complete count path
     // without triggering a spawn.
     let mut app = make_containers_overview_app();
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue: std::collections::VecDeque::new(),
-        in_flight: 2,
-        total: 2,
-        completed: 0,
-        in_flight_aliases: ["web".to_string(), "db".to_string()].into_iter().collect(),
-    });
+    app.containers_overview
+        .start_refresh(crate::app::RefreshBatch {
+            queue: std::collections::VecDeque::new(),
+            in_flight: 2,
+            total: 2,
+            completed: 0,
+            in_flight_aliases: ["web".to_string(), "db".to_string()].into_iter().collect(),
+        });
     let (tx, _rx) = mpsc::channel();
     crate::handler::event_loop::drive_refresh_batch(&mut app, "web", &tx);
 
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("batch still active (db pending)");
     assert_eq!(batch.in_flight, 1);
     assert_eq!(batch.completed, 1);
@@ -10352,10 +10405,10 @@ fn refresh_batch_decrements_completed_increments_on_match() {
 #[test]
 fn refresh_batch_no_op_when_no_batch_active() {
     let mut app = make_containers_overview_app();
-    assert!(app.containers_overview.refresh_batch.is_none());
+    assert!(app.containers_overview.refresh_batch().is_none());
     let (tx, _rx) = mpsc::channel();
     crate::handler::event_loop::drive_refresh_batch(&mut app, "web", &tx);
-    assert!(app.containers_overview.refresh_batch.is_none());
+    assert!(app.containers_overview.refresh_batch().is_none());
 }
 
 #[test]
@@ -10423,7 +10476,7 @@ fn container_inspect_complete_dropped_for_alias_no_longer_in_config() {
     );
     assert!(
         !app.containers_overview
-            .inspect_cache
+            .inspect_cache()
             .entries
             .contains_key("c1"),
         "late inspect for a removed host must not be cached"
@@ -10507,14 +10560,14 @@ fn reload_hosts_drops_orphan_inspect_cache_entries() {
         compose_service: None,
         ..Default::default()
     };
-    app.containers_overview.inspect_cache.entries.insert(
+    app.containers_overview.inspect_cache_mut().entries.insert(
         "alive-c1".to_string(),
         crate::app::InspectCacheEntry {
             timestamp: 0,
             result: Ok(inspect.clone()),
         },
     );
-    app.containers_overview.inspect_cache.entries.insert(
+    app.containers_overview.inspect_cache_mut().entries.insert(
         "ghost-c1".to_string(),
         crate::app::InspectCacheEntry {
             timestamp: 0,
@@ -10526,13 +10579,13 @@ fn reload_hosts_drops_orphan_inspect_cache_entries() {
 
     assert!(
         app.containers_overview
-            .inspect_cache
+            .inspect_cache()
             .entries
             .contains_key("alive-c1")
     );
     assert!(
         !app.containers_overview
-            .inspect_cache
+            .inspect_cache()
             .entries
             .contains_key("ghost-c1"),
         "inspect entries with no container in the host cache must be pruned"
@@ -10574,20 +10627,20 @@ fn reload_hosts_drops_orphan_refresh_batch_in_flight_aliases() {
     let mut in_flight = std::collections::HashSet::new();
     in_flight.insert("alive".to_string());
     in_flight.insert("ghost".to_string());
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue: std::collections::VecDeque::new(),
-        in_flight: 2,
-        total: 2,
-        completed: 0,
-        in_flight_aliases: in_flight,
-    });
+    app.containers_overview
+        .start_refresh(crate::app::RefreshBatch {
+            queue: std::collections::VecDeque::new(),
+            in_flight: 2,
+            total: 2,
+            completed: 0,
+            in_flight_aliases: in_flight,
+        });
 
     app.reload_hosts();
 
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("batch must still exist after reload");
     assert!(batch.in_flight_aliases.contains("alive"));
     assert!(
@@ -10645,20 +10698,16 @@ fn reload_hosts_drops_orphan_collapsed_hosts_and_persists() {
     let pref_dir = tempfile::tempdir().expect("tempdir");
     crate::preferences::set_path_override(pref_dir.path().join("preferences"));
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
-    app.containers_overview
-        .collapsed_hosts
-        .insert("alive".to_string());
-    app.containers_overview
-        .collapsed_hosts
-        .insert("ghost".to_string());
-    crate::preferences::save_containers_collapsed_hosts(&app.containers_overview.collapsed_hosts)
+    app.containers_overview.toggle_host_collapsed("alive");
+    app.containers_overview.toggle_host_collapsed("ghost");
+    crate::preferences::save_containers_collapsed_hosts(app.containers_overview.collapsed_hosts())
         .expect("seed");
 
     app.reload_hosts();
 
-    assert!(app.containers_overview.collapsed_hosts.contains("alive"));
+    assert!(app.containers_overview.collapsed_hosts().contains("alive"));
     assert!(
-        !app.containers_overview.collapsed_hosts.contains("ghost"),
+        !app.containers_overview.collapsed_hosts().contains("ghost"),
         "collapsed_hosts entry for a removed host must be pruned"
     );
     let on_disk = crate::preferences::load_containers_collapsed_hosts();
@@ -10707,18 +10756,16 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
         },
     );
     app.containers_overview
-        .auto_list_in_flight
-        .insert(ghost.clone());
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue: std::collections::VecDeque::new(),
-        in_flight: 1,
-        total: 1,
-        completed: 0,
-        in_flight_aliases: [ghost.clone()].into_iter().collect(),
-    });
+        .mark_auto_list_pending(ghost.clone());
     app.containers_overview
-        .collapsed_hosts
-        .insert(ghost.clone());
+        .start_refresh(crate::app::RefreshBatch {
+            queue: std::collections::VecDeque::new(),
+            in_flight: 1,
+            total: 1,
+            completed: 0,
+            in_flight_aliases: [ghost.clone()].into_iter().collect(),
+        });
+    app.containers_overview.toggle_host_collapsed(&ghost);
     app.file_browser_state.set_host_path(
         ghost.clone(),
         std::path::PathBuf::from("/etc"),
@@ -10754,18 +10801,18 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
         "container_state.cache"
     );
     assert!(
-        !app.containers_overview.auto_list_in_flight.contains(&ghost),
-        "containers_overview.auto_list_in_flight"
+        !app.containers_overview.auto_list_pending(&ghost),
+        "containers_overview.auto_list_in_flight()"
     );
-    if let Some(batch) = app.containers_overview.refresh_batch.as_ref() {
+    if let Some(batch) = app.containers_overview.refresh_batch() {
         assert!(
             !batch.in_flight_aliases.contains(&ghost),
             "containers_overview.refresh_batch.in_flight_aliases"
         );
     }
     assert!(
-        !app.containers_overview.collapsed_hosts.contains(&ghost),
-        "containers_overview.collapsed_hosts"
+        !app.containers_overview.collapsed_hosts().contains(&ghost),
+        "containers_overview.collapsed_hosts()"
     );
     assert!(
         !app.file_browser_state.contains_host(&ghost),
@@ -10819,8 +10866,7 @@ fn auto_fetch_new_hosts_only_fetches_queued_aliases() {
 
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("auto-fetch must start a batch for the queued alias");
     assert_eq!(batch.total, 1);
     assert_eq!(batch.in_flight, 1);
@@ -10851,8 +10897,7 @@ fn auto_fetch_new_hosts_dedupes_aliases() {
 
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("auto-fetch must start a batch for the queued alias");
     assert_eq!(batch.total, 1);
     assert_eq!(batch.in_flight, 1);
@@ -10876,7 +10921,7 @@ fn auto_fetch_new_hosts_skips_alias_with_existing_cache() {
     app.container_state.queue_fetch("already".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
-    assert!(app.containers_overview.refresh_batch.is_none());
+    assert!(app.containers_overview.refresh_batch().is_none());
 }
 
 #[test]
@@ -10888,7 +10933,7 @@ fn auto_fetch_new_hosts_skips_unknown_alias() {
     app.container_state.queue_fetch("ghost".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
-    assert!(app.containers_overview.refresh_batch.is_none());
+    assert!(app.containers_overview.refresh_batch().is_none());
 }
 
 #[test]
@@ -10899,7 +10944,7 @@ fn auto_fetch_new_hosts_skips_host_without_hostname() {
     app.container_state.queue_fetch("placeholder".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
-    assert!(app.containers_overview.refresh_batch.is_none());
+    assert!(app.containers_overview.refresh_batch().is_none());
 }
 
 #[test]
@@ -10910,7 +10955,7 @@ fn auto_fetch_new_hosts_no_op_in_demo_mode() {
     app.container_state.queue_fetch("a".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
-    assert!(app.containers_overview.refresh_batch.is_none());
+    assert!(app.containers_overview.refresh_batch().is_none());
     // Queue is still drained (cleared) so a second tick does not retry.
     assert!(!app.container_state.has_pending_fetches());
 }
@@ -10924,7 +10969,7 @@ fn auto_fetch_new_hosts_no_op_when_queue_empty() {
     app.container_state.clear_cache();
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
-    assert!(app.containers_overview.refresh_batch.is_none());
+    assert!(app.containers_overview.refresh_batch().is_none());
 }
 
 #[test]
@@ -10940,8 +10985,7 @@ fn auto_fetch_new_hosts_dedupes_mixed_queue() {
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("auto-fetch must start a batch for unique aliases");
     assert_eq!(batch.total, 2);
     assert!(batch.in_flight_aliases.contains("a"));
@@ -10991,7 +11035,7 @@ fn refresh_selected_host_marks_alias_in_flight() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
     // Cursor parks on idx 1 = postgres on host db.
     assert!(
-        app.containers_overview.auto_list_in_flight.contains("db"),
+        app.containers_overview.auto_list_pending("db"),
         "`r` must mark the alias in-flight to dedup the auto-list helper"
     );
 }
@@ -11007,7 +11051,7 @@ fn ensure_list_for_selected_host_marks_in_flight_for_stale_cache() {
     super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
     // Cursor parks on idx 1 = postgres on host db.
     assert!(
-        app.containers_overview.auto_list_in_flight.contains("db"),
+        app.containers_overview.auto_list_pending("db"),
         "stale cache must trigger an in-flight marker"
     );
 }
@@ -11027,7 +11071,7 @@ fn ensure_list_for_selected_host_skips_when_fresh() {
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
     assert!(
-        !app.containers_overview.auto_list_in_flight.contains("db"),
+        !app.containers_overview.auto_list_pending("db"),
         "fresh cache must not trigger a refresh"
     );
 }
@@ -11039,12 +11083,11 @@ fn ensure_list_for_selected_host_dedupes_in_flight() {
     let mut app = make_containers_overview_app();
     app.demo_mode = false;
     app.containers_overview
-        .auto_list_in_flight
-        .insert("db".to_string());
+        .mark_auto_list_pending("db".to_string());
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
     // Still exactly one entry — the helper did not double-insert.
-    assert_eq!(app.containers_overview.auto_list_in_flight.len(), 1);
+    assert_eq!(app.containers_overview.auto_list_in_flight().len(), 1);
 }
 
 #[test]
@@ -11056,17 +11099,18 @@ fn ensure_list_for_selected_host_skips_when_alias_in_batch() {
     app.demo_mode = false;
     let mut in_flight_aliases = std::collections::HashSet::new();
     in_flight_aliases.insert("db".to_string());
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue: std::collections::VecDeque::new(),
-        in_flight: 1,
-        total: 1,
-        completed: 0,
-        in_flight_aliases,
-    });
+    app.containers_overview
+        .start_refresh(crate::app::RefreshBatch {
+            queue: std::collections::VecDeque::new(),
+            in_flight: 1,
+            total: 1,
+            completed: 0,
+            in_flight_aliases,
+        });
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
     assert!(
-        !app.containers_overview.auto_list_in_flight.contains("db"),
+        !app.containers_overview.auto_list_pending("db"),
         "auto helper must not spawn while batch already covers the alias"
     );
 }
@@ -11077,7 +11121,7 @@ fn ensure_list_for_selected_host_no_op_in_demo_mode() {
     app.demo_mode = true;
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
-    assert!(app.containers_overview.auto_list_in_flight.is_empty());
+    assert!(app.containers_overview.auto_list_in_flight().is_empty());
 }
 
 #[test]
@@ -11087,7 +11131,7 @@ fn ensure_list_for_selected_host_no_op_during_shutdown() {
     app.running = false;
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
-    assert!(app.containers_overview.auto_list_in_flight.is_empty());
+    assert!(app.containers_overview.auto_list_in_flight().is_empty());
 }
 
 #[test]
@@ -11098,8 +11142,7 @@ fn handle_container_listing_clears_auto_list_in_flight() {
     // helper's POV.
     let mut app = make_containers_overview_app();
     app.containers_overview
-        .auto_list_in_flight
-        .insert("db".to_string());
+        .mark_auto_list_pending("db".to_string());
     let (tx, _rx) = mpsc::channel();
     super::event_loop::handle_container_listing(
         &mut app,
@@ -11112,7 +11155,7 @@ fn handle_container_listing_clears_auto_list_in_flight() {
         &tx,
     );
     assert!(
-        !app.containers_overview.auto_list_in_flight.contains("db"),
+        !app.containers_overview.auto_list_pending("db"),
         "in-flight marker must be cleared on listing arrival"
     );
 }
@@ -11124,8 +11167,7 @@ fn handle_container_listing_clears_auto_list_in_flight_on_error() {
     // out of future scroll-driven refreshes.
     let mut app = make_containers_overview_app();
     app.containers_overview
-        .auto_list_in_flight
-        .insert("db".to_string());
+        .mark_auto_list_pending("db".to_string());
     let (tx, _rx) = mpsc::channel();
     super::event_loop::handle_container_listing(
         &mut app,
@@ -11137,7 +11179,7 @@ fn handle_container_listing_clears_auto_list_in_flight_on_error() {
         &tx,
     );
     assert!(
-        !app.containers_overview.auto_list_in_flight.contains("db"),
+        !app.containers_overview.auto_list_pending("db"),
         "Err result must also clear the in-flight marker"
     );
 }
@@ -11148,7 +11190,7 @@ fn handle_container_listing_no_panic_when_alias_not_in_flight() {
     // never marked (e.g. a stray result from a deleted host or an
     // unrelated trigger) must not crash the handler.
     let mut app = make_containers_overview_app();
-    assert!(app.containers_overview.auto_list_in_flight.is_empty());
+    assert!(app.containers_overview.auto_list_in_flight().is_empty());
     let (tx, _rx) = mpsc::channel();
     super::event_loop::handle_container_listing(
         &mut app,
@@ -11160,7 +11202,7 @@ fn handle_container_listing_no_panic_when_alias_not_in_flight() {
         }),
         &tx,
     );
-    assert!(app.containers_overview.auto_list_in_flight.is_empty());
+    assert!(app.containers_overview.auto_list_in_flight().is_empty());
 }
 
 #[test]
@@ -11180,7 +11222,7 @@ fn ensure_list_for_selected_host_refreshes_when_cursor_on_header() {
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
     assert!(
-        app.containers_overview.auto_list_in_flight.contains("db"),
+        app.containers_overview.auto_list_pending("db"),
         "header rows must trigger a refresh for their host"
     );
 }
@@ -11197,7 +11239,7 @@ fn ensure_inspect_for_host_header_marks_running_first_then_others() {
     app.ui.containers_overview_state_mut().select(Some(2));
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
-    let in_flight = &app.containers_overview.inspect_cache.in_flight;
+    let in_flight = &app.containers_overview.inspect_cache().in_flight;
     assert!(
         in_flight.contains("c1"),
         "running container must be enqueued for inspect on host-header land"
@@ -11220,7 +11262,7 @@ fn ensure_inspect_for_host_header_skips_when_cursor_not_on_header() {
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
     assert!(
-        app.containers_overview.inspect_cache.in_flight.is_empty(),
+        app.containers_overview.inspect_cache().in_flight.is_empty(),
         "no inspect threads must spawn when cursor is on a container row"
     );
 }
@@ -11232,7 +11274,7 @@ fn ensure_inspect_for_host_header_no_op_in_demo_mode() {
     app.ui.containers_overview_state_mut().select(Some(2));
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
-    assert!(app.containers_overview.inspect_cache.in_flight.is_empty());
+    assert!(app.containers_overview.inspect_cache().in_flight.is_empty());
 }
 
 #[test]
@@ -11246,9 +11288,9 @@ fn ensure_inspect_for_host_header_dedups_on_repeated_call() {
     app.ui.containers_overview_state_mut().select(Some(2));
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
-    let first = app.containers_overview.inspect_cache.in_flight.len();
+    let first = app.containers_overview.inspect_cache().in_flight.len();
     super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
-    let second = app.containers_overview.inspect_cache.in_flight.len();
+    let second = app.containers_overview.inspect_cache().in_flight.len();
     assert_eq!(
         first, second,
         "in_flight set must not grow on a repeated call against the same host"
@@ -11397,13 +11439,13 @@ fn containers_overview_space_on_header_toggles_collapse() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
-        app.containers_overview.collapsed_hosts.contains("db"),
+        app.containers_overview.collapsed_hosts().contains("db"),
         "first Space folds the group"
     );
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
-        !app.containers_overview.collapsed_hosts.contains("db"),
+        !app.containers_overview.collapsed_hosts().contains("db"),
         "second Space unfolds the group"
     );
 }
@@ -11417,14 +11459,14 @@ fn containers_overview_v_toggles_view_mode_and_arms_animation() {
     // disk-write path.
     let mut app = make_containers_overview_app();
     assert_eq!(
-        app.containers_overview.view_mode,
+        app.containers_overview.view_mode(),
         crate::app::ViewMode::Detailed
     );
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('v')), &tx);
     assert_eq!(
-        app.containers_overview.view_mode,
+        app.containers_overview.view_mode(),
         crate::app::ViewMode::Compact
     );
     assert!(
@@ -11434,7 +11476,7 @@ fn containers_overview_v_toggles_view_mode_and_arms_animation() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('v')), &tx);
     assert_eq!(
-        app.containers_overview.view_mode,
+        app.containers_overview.view_mode(),
         crate::app::ViewMode::Detailed,
         "v toggles back"
     );
@@ -11507,7 +11549,7 @@ fn containers_overview_ctrl_k_with_compose_label_opens_stack_confirm() {
         compose_service: None,
         ..Default::default()
     };
-    app.containers_overview.inspect_cache.entries.insert(
+    app.containers_overview.inspect_cache_mut().entries.insert(
         "c3".to_string(),
         crate::app::InspectCacheEntry {
             timestamp: 100,
@@ -11685,6 +11727,80 @@ fn confirm_stack_restart_stray_key_ignored() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
     assert!(matches!(app.screen, Screen::ConfirmStackRestart { .. }));
+}
+
+#[test]
+fn confirm_host_restart_all_y_enqueues_restart_per_member() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmHostRestartAll {
+        alias: "web".to_string(),
+        members: vec![
+            crate::app::StackMember {
+                container_id: "c1".to_string(),
+                container_name: "nginx".to_string(),
+                uptime: Some("5d".to_string()),
+            },
+            crate::app::StackMember {
+                container_id: "cextra".to_string(),
+                container_name: "sidecar".to_string(),
+                uptime: None,
+            },
+        ],
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert_eq!(app.container_state.pending_actions_len(), 2);
+    for i in 0..2 {
+        assert_eq!(
+            app.container_state.pending_actions_at(i).unwrap().action,
+            crate::containers::ContainerAction::Restart
+        );
+    }
+    assert_eq!(
+        app.container_state
+            .pending_actions_at(0)
+            .unwrap()
+            .container_id,
+        "c1"
+    );
+    assert_eq!(
+        app.container_state
+            .pending_actions_at(1)
+            .unwrap()
+            .container_id,
+        "cextra"
+    );
+}
+
+#[test]
+fn confirm_host_stop_all_y_enqueues_stop_per_member() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmHostStopAll {
+        alias: "web".to_string(),
+        members: vec![
+            crate::app::StackMember {
+                container_id: "c1".to_string(),
+                container_name: "nginx".to_string(),
+                uptime: Some("5d".to_string()),
+            },
+            crate::app::StackMember {
+                container_id: "c2".to_string(),
+                container_name: "redis".to_string(),
+                uptime: None,
+            },
+        ],
+    };
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert_eq!(app.container_state.pending_actions_len(), 2);
+    for i in 0..2 {
+        assert_eq!(
+            app.container_state.pending_actions_at(i).unwrap().action,
+            crate::containers::ContainerAction::Stop
+        );
+    }
 }
 
 // --- Exec prompt -----------------------------------------------------

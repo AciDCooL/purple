@@ -38,7 +38,7 @@ pub(crate) fn build_host_detail_lines(
 
     let entry = app.container_state.cache_entry(alias);
     let host = app.hosts_state.list().iter().find(|h| h.alias == alias);
-    let collapsed = app.containers_overview.collapsed_hosts.contains(alias);
+    let collapsed = app.containers_overview.collapsed_hosts().contains(alias);
     let now = current_unix_secs();
 
     // STATUS card -----------------------------------------------------
@@ -534,7 +534,7 @@ pub(crate) fn container_has_nonzero_exit(app: &App, c: &crate::containers::Conta
         return false;
     }
     app.containers_overview
-        .inspect_cache
+        .inspect_cache()
         .entries
         .get(&c.id)
         .and_then(|e| e.result.as_ref().ok())
@@ -568,7 +568,7 @@ pub(crate) fn collect_inspect_signals(
 ) -> InspectSignals {
     let mut out = InspectSignals::default();
     for c in containers {
-        let Some(entry) = app.containers_overview.inspect_cache.entries.get(&c.id) else {
+        let Some(entry) = app.containers_overview.inspect_cache().entries.get(&c.id) else {
             continue;
         };
         let Ok(insp) = entry.result.as_ref() else {

@@ -18,24 +18,24 @@ pub(crate) fn render_detail(
 
     let inspect = app
         .containers_overview
-        .inspect_cache
+        .inspect_cache()
         .entries
         .get(&row.id)
         .map(|e| &e.result);
     let inspect_in_flight = app
         .containers_overview
-        .inspect_cache
+        .inspect_cache()
         .in_flight
         .contains(&row.id);
     let logs = app
         .containers_overview
-        .logs_cache
+        .logs_cache()
         .entries
         .get(&row.id)
         .map(|e| &e.result);
     let logs_in_flight = app
         .containers_overview
-        .logs_cache
+        .logs_cache()
         .in_flight
         .contains(&row.id);
 
@@ -166,6 +166,9 @@ pub(crate) fn build_logs_card(
 /// Compose the detail panel as a stack of section cards. Conditional cards
 /// only materialise when they have content, mirroring host detail's
 /// VAULT SSH / SNIPPETS pattern.
+// Linear card composition: a flat sequence of conditional pushes onto one
+// buffer. Splitting per card would fragment a single render with no gain.
+#[allow(clippy::too_many_lines)]
 pub(crate) fn build_detail_lines(
     row: &ContainerRow,
     inspect: Option<&Result<crate::containers::ContainerInspect, String>>,

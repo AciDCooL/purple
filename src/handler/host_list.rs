@@ -266,66 +266,8 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 super::ping::ping_selected_host(app, events_tx, true);
             }
         }
-        KeyCode::Char('P') => {
-            if !app.ping.status_is_empty() {
-                log::debug!(
-                    "[purple] P: clearing {} ping result(s) + timestamps",
-                    app.ping.status_len()
-                );
-                app.ping.clear_results();
-                app.clear_status();
-            } else {
-                let hosts_to_ping: Vec<(String, String, u16)> = app
-                    .hosts_state
-                    .list()
-                    .iter()
-                    .filter(|h| !h.hostname.is_empty() && h.proxy_jump.is_empty())
-                    .map(|h| (h.alias.clone(), h.hostname.clone(), h.port))
-                    .collect();
-                // Mark ProxyJump hosts as Checking (their status will be
-                // inherited from the bastion once it responds).
-                for h in app.hosts_state.list() {
-                    if !h.proxy_jump.is_empty() {
-                        app.ping
-                            .insert_status(h.alias.clone(), crate::app::PingStatus::Checking);
-                    }
-                }
-                if !hosts_to_ping.is_empty() {
-                    for (alias, _, _) in &hosts_to_ping {
-                        app.ping
-                            .insert_status(alias.clone(), crate::app::PingStatus::Checking);
-                    }
-                    app.notify_info(crate::messages::PINGING_ALL);
-                    crate::ping::ping_all(&hosts_to_ping, events_tx.clone(), app.ping.generation());
-                }
-            }
-        }
-        KeyCode::Char('!') => {
-            if app.ping.status_is_empty() {
-                app.notify_warning(crate::messages::PING_FIRST);
-            } else {
-                app.ping.set_filter_down_only(!app.ping.filter_down_only());
-                if app.ping.filter_down_only() {
-                    // Activate search mode to trigger filtering
-                    if app.search.query().is_none() {
-                        app.search.set_query(Some(String::new()));
-                    }
-                    app.apply_filter();
-                    let count = app.search.filtered_indices().len();
-                    app.notify(crate::messages::showing_unreachable(count));
-                } else {
-                    // If search was only active for down-only, clear it
-                    if app.search.query().is_some_and(|q| q.is_empty()) {
-                        app.search.set_query(None);
-                        app.search.clear_filtered_indices();
-                        app.search.clear_filtered_pattern_indices();
-                    } else {
-                        app.apply_filter();
-                    }
-                    app.clear_status();
-                }
-            }
-        }
+        KeyCode::Char('P') => actions::ping_all_hosts(app, events_tx),
+        KeyCode::Char('!') => actions::toggle_down_filter(app),
         KeyCode::Char('/') => {
             app.start_search();
         }
@@ -372,68 +314,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 ));
             }
         }
-        KeyCode::Char('g') => {
-            use crate::app::GroupBy;
-            match app.hosts_state.group_by() {
-                GroupBy::None => {
-                    app.hosts_state.set_group_by(GroupBy::Provider);
-                    app.apply_sort();
-                    if let Err(e) = preferences::save_group_by(app.hosts_state.group_by()) {
-                        app.notify_error(crate::messages::grouped_by_save_failed(
-                            &app.hosts_state.group_by().label(),
-                            &e,
-                        ));
-                    } else {
-                        app.notify(crate::messages::grouped_by(
-                            &app.hosts_state.group_by().label(),
-                        ));
-                    }
-                }
-                GroupBy::Provider => {
-                    let user_tags: Vec<String> = {
-                        let mut seen = std::collections::HashSet::new();
-                        let mut tags = Vec::new();
-                        for host in app.hosts_state.list() {
-                            for tag in &host.tags {
-                                if seen.insert(tag.clone()) {
-                                    tags.push(tag.clone());
-                                }
-                            }
-                        }
-                        tags.sort_by_cached_key(|a| a.to_lowercase());
-                        tags
-                    };
-                    if user_tags.is_empty() {
-                        app.hosts_state.set_group_by(GroupBy::None);
-                        app.apply_sort();
-                        if let Err(e) = preferences::save_group_by(app.hosts_state.group_by()) {
-                            app.notify_error(crate::messages::ungrouped_save_failed(&e));
-                        } else {
-                            app.notify(crate::messages::UNGROUPED);
-                        }
-                    } else {
-                        // Switch to tag mode directly. The nav bar shows all
-                        // tags as tabs, no picker needed.
-                        app.hosts_state.set_group_by(GroupBy::Tag(String::new()));
-                        app.apply_sort();
-                        if let Err(e) = preferences::save_group_by(app.hosts_state.group_by()) {
-                            app.notify_error(crate::messages::grouped_by_tag_save_failed(&e));
-                        } else {
-                            app.notify(crate::messages::GROUPED_BY_TAG);
-                        }
-                    }
-                }
-                GroupBy::Tag(_) => {
-                    app.hosts_state.set_group_by(GroupBy::None);
-                    app.apply_sort();
-                    if let Err(e) = preferences::save_group_by(app.hosts_state.group_by()) {
-                        app.notify_error(crate::messages::ungrouped_save_failed(&e));
-                    } else {
-                        app.notify(crate::messages::UNGROUPED);
-                    }
-                }
-            }
-        }
+        KeyCode::Char('g') => actions::cycle_group_by(app),
         KeyCode::Char('i') => {
             if app.is_pattern_selected() {
                 return;
@@ -458,88 +339,11 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             app.ui
                 .set_detail_scroll(app.ui.detail_scroll().saturating_sub(1));
         }
-        KeyCode::Char('u') => {
-            // Bulk-tag undo takes priority: the most recent bulk-tag apply
-            // can be reverted in one keystroke by restoring each host's
-            // previous tag list. After a successful undo the snapshot is
-            // cleared so the next `u` falls through to the deleted-host
-            // stack as usual.
-            if let Some(snapshot) = app.forms.take_bulk_tag_undo() {
-                let config_backup = app.hosts_state.ssh_config().clone();
-                for (alias, tags) in &snapshot {
-                    let _ = app.hosts_state.ssh_config_mut().set_host_tags(alias, tags);
-                }
-                if let Err(e) = app.hosts_state.ssh_config().write() {
-                    app.hosts_state.set_ssh_config(config_backup);
-                    app.forms.set_bulk_tag_undo(Some(snapshot));
-                    app.notify_error(crate::messages::failed_to_save(&e));
-                } else {
-                    let count = snapshot.len();
-                    app.update_last_modified();
-                    app.reload_hosts();
-                    app.notify(crate::messages::restored_tags(count));
-                }
-            } else if let Some(deleted) = app.hosts_state.pop_undo() {
-                let alias = match &deleted.element {
-                    ConfigElement::HostBlock(block) => block.host_pattern.clone(),
-                    _ => "host".to_string(),
-                };
-                app.hosts_state
-                    .ssh_config_mut()
-                    .insert_host_at(deleted.element, deleted.position);
-                if let Err(e) = app.hosts_state.ssh_config().write() {
-                    // Rollback: remove re-inserted host and restore undo buffer
-                    if let Some((element, position)) = app
-                        .hosts_state
-                        .ssh_config_mut()
-                        .delete_host_undoable(&alias)
-                    {
-                        app.hosts_state
-                            .undo_stack_mut()
-                            .push(crate::app::DeletedHost { element, position });
-                    }
-                    app.notify_error(crate::messages::failed_to_save(&e));
-                } else {
-                    app.update_last_modified();
-                    app.reload_hosts();
-                    // Restored host has no container_cache entry,
-                    // queue an initial fetch for THIS alias only.
-                    app.container_state.queue_fetch(alias.clone());
-                    app.notify(crate::messages::host_restored(&alias));
-                }
-            } else {
-                app.notify_warning(crate::messages::NOTHING_TO_UNDO);
-            }
-        }
+        KeyCode::Char('u') => actions::undo_last(app),
         KeyCode::Char('#') => {
             app.open_tag_picker();
         }
-        KeyCode::Char('m') => {
-            let current = crate::ui::theme::current_theme().name;
-            let builtins = crate::ui::theme::ThemeDef::builtins();
-            let custom = crate::ui::theme::ThemeDef::load_custom();
-            let idx = builtins
-                .iter()
-                .position(|t| t.name.eq_ignore_ascii_case(&current))
-                .or_else(|| {
-                    if custom.is_empty() {
-                        None
-                    } else {
-                        custom
-                            .iter()
-                            .position(|t| t.name.eq_ignore_ascii_case(&current))
-                            .map(|i| builtins.len() + 1 + i) // +1 for divider
-                    }
-                })
-                .unwrap_or(0);
-            app.ui.theme_picker_mut().list.select(Some(idx));
-            app.ui.theme_picker_mut().builtins = builtins;
-            app.ui.theme_picker_mut().custom = custom;
-            app.ui.theme_picker_mut().saved_name =
-                crate::preferences::load_theme().unwrap_or_else(|| "Purple".to_string());
-            app.ui.theme_picker_mut().original = Some(crate::ui::theme::current_theme());
-            app.set_screen(Screen::ThemePicker);
-        }
+        KeyCode::Char('m') => actions::open_theme_picker(app),
         KeyCode::Char('T') => {
             if app.is_pattern_selected() {
                 return;
@@ -609,49 +413,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 app.hosts_state.toggle_multi_select(idx);
             }
         }
-        KeyCode::Char('r') => {
-            if app.is_pattern_selected() {
-                return;
-            }
-            let (aliases, stale_hint): (Vec<String>, Option<String>) =
-                if app.hosts_state.multi_select().is_empty() {
-                    if let Some(host) = app.selected_host() {
-                        let hint = super::host_form::stale_hint_for(host);
-                        (vec![host.alias.clone()], hint)
-                    } else {
-                        (Vec::new(), None)
-                    }
-                } else {
-                    let has_stale = app.hosts_state.multi_select().iter().any(|&idx| {
-                        app.hosts_state
-                            .list()
-                            .get(idx)
-                            .is_some_and(|h| h.stale.is_some())
-                    });
-                    (
-                        app.hosts_state
-                            .multi_select()
-                            .iter()
-                            .filter_map(|&idx| {
-                                app.hosts_state.list().get(idx).map(|h| h.alias.clone())
-                            })
-                            .collect(),
-                        if has_stale {
-                            Some(" Selection includes stale hosts.".to_string())
-                        } else {
-                            None
-                        },
-                    )
-                };
-            if let Some(hint) = stale_hint {
-                app.notify_warning(crate::messages::stale_host(&hint));
-            }
-            if aliases.is_empty() {
-                app.notify_warning(crate::messages::NO_HOST_SELECTED);
-            } else {
-                super::snippet::open_snippet_picker(app, aliases);
-            }
-        }
+        KeyCode::Char('r') => actions::run_snippet_on_selection(app),
         KeyCode::Char('R') => {
             if app.is_pattern_selected() {
                 return;

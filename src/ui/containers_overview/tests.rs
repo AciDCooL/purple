@@ -67,7 +67,8 @@ fn alpha_container_sort_orders_by_name_then_host() {
         ("apollo", &[("2", "zebra", "img", "running")]),
     ]);
     let mut app = app_with_cache(cache);
-    app.containers_overview.sort_mode = ContainersSortMode::AlphaContainer;
+    app.containers_overview
+        .set_sort_mode_ephemeral(ContainersSortMode::AlphaContainer);
     let rows = visible_rows(&app);
     assert_eq!(rows[0].name, "alpha");
     assert_eq!(rows[1].name, "zebra");
@@ -302,7 +303,7 @@ fn make_container_info(id: &str, state: &str, status: &str) -> crate::containers
 
 fn seed_inspect_exit_code(app: &mut App, id: &str, exit_code: i32) {
     use crate::app::InspectCacheEntry;
-    app.containers_overview.inspect_cache.entries.insert(
+    app.containers_overview.inspect_cache_mut().entries.insert(
         id.to_string(),
         InspectCacheEntry {
             timestamp: 0,
@@ -331,7 +332,7 @@ fn container_has_nonzero_exit_docker_status_zero() {
 #[test]
 fn container_has_nonzero_exit_podman_empty_status_with_inspect_nonzero() {
     let mut app = app_with_cache(HashMap::new());
-    app.containers_overview.inspect_cache.entries.clear();
+    app.containers_overview.inspect_cache_mut().entries.clear();
     seed_inspect_exit_code(&mut app, "c3", 137);
     let c = make_container_info("c3", "exited", "");
     assert!(container_has_nonzero_exit(&app, &c));
@@ -341,7 +342,7 @@ fn container_has_nonzero_exit_podman_empty_status_with_inspect_nonzero() {
 fn container_has_nonzero_exit_podman_empty_status_no_inspect_is_false() {
     // No false alarm when we have no exit signal yet.
     let mut app = app_with_cache(HashMap::new());
-    app.containers_overview.inspect_cache.entries.clear();
+    app.containers_overview.inspect_cache_mut().entries.clear();
     let c = make_container_info("c4", "exited", "");
     assert!(!container_has_nonzero_exit(&app, &c));
 }
@@ -351,7 +352,7 @@ fn container_has_nonzero_exit_running_state_blocks_inspect_fallback() {
     // A stale inspect saying exit=137 must not flag a currently
     // running container as failed.
     let mut app = app_with_cache(HashMap::new());
-    app.containers_overview.inspect_cache.entries.clear();
+    app.containers_overview.inspect_cache_mut().entries.clear();
     seed_inspect_exit_code(&mut app, "c5", 137);
     let c = make_container_info("c5", "running", "");
     assert!(!container_has_nonzero_exit(&app, &c));
@@ -362,7 +363,7 @@ fn container_has_nonzero_exit_podman3_stopped_state_uses_fallback() {
     // Podman 3.x uses state="stopped" where podman 5.x / docker use
     // "exited". Both must accept the inspect fallback.
     let mut app = app_with_cache(HashMap::new());
-    app.containers_overview.inspect_cache.entries.clear();
+    app.containers_overview.inspect_cache_mut().entries.clear();
     seed_inspect_exit_code(&mut app, "c6", 1);
     let c = make_container_info("c6", "stopped", "");
     assert!(container_has_nonzero_exit(&app, &c));
@@ -375,7 +376,7 @@ fn container_has_nonzero_exit_podman3_stopped_state_uses_fallback() {
 
 fn cached_fp(app: &App) -> Option<u64> {
     app.containers_overview
-        .view_cache
+        .view_cache()
         .borrow()
         .as_ref()
         .map(|(fp, _)| *fp)
@@ -388,7 +389,7 @@ fn view_cache_starts_empty_and_populates_on_first_call() {
     // Demo build_demo_app pre-populates and the assignment of a new
     // cache map does NOT clear view_cache. Reset it for the test so
     // we can assert the populate-from-empty transition.
-    *app.containers_overview.view_cache.borrow_mut() = None;
+    *app.containers_overview.view_cache().borrow_mut() = None;
 
     assert!(cached_fp(&app).is_none());
     let _ = visible_rows(&app);
@@ -399,7 +400,7 @@ fn view_cache_starts_empty_and_populates_on_first_call() {
 fn view_cache_hits_on_identical_state() {
     let cache = cache_with(&[("h", &[("i", "a", "img", "running")])]);
     let app = app_with_cache(cache);
-    *app.containers_overview.view_cache.borrow_mut() = None;
+    *app.containers_overview.view_cache().borrow_mut() = None;
     let rows1 = visible_rows(&app);
     let fp1 = cached_fp(&app).unwrap();
     let rows2 = visible_rows(&app);
@@ -412,10 +413,11 @@ fn view_cache_hits_on_identical_state() {
 fn view_cache_invalidates_on_sort_mode_change() {
     let cache = cache_with(&[("h", &[("i", "a", "img", "running")])]);
     let mut app = app_with_cache(cache);
-    *app.containers_overview.view_cache.borrow_mut() = None;
+    *app.containers_overview.view_cache().borrow_mut() = None;
     let _ = visible_rows(&app);
     let fp_before = cached_fp(&app).unwrap();
-    app.containers_overview.sort_mode = ContainersSortMode::AlphaContainer;
+    app.containers_overview
+        .set_sort_mode_ephemeral(ContainersSortMode::AlphaContainer);
     let _ = visible_rows(&app);
     assert_ne!(fp_before, cached_fp(&app).unwrap());
 }
@@ -424,7 +426,7 @@ fn view_cache_invalidates_on_sort_mode_change() {
 fn view_cache_invalidates_on_search_query_change() {
     let cache = cache_with(&[("h", &[("i", "web", "img", "running")])]);
     let mut app = app_with_cache(cache);
-    *app.containers_overview.view_cache.borrow_mut() = None;
+    *app.containers_overview.view_cache().borrow_mut() = None;
     let _ = visible_rows(&app);
     let fp_before = cached_fp(&app).unwrap();
     app.search.set_query(Some("web".to_string()));
@@ -435,7 +437,7 @@ fn view_cache_invalidates_on_search_query_change() {
 #[test]
 fn view_cache_invalidates_on_container_cache_timestamp_bump() {
     let mut app = app_with_cache(cache_with(&[("h", &[("i", "web", "img", "running")])]));
-    *app.containers_overview.view_cache.borrow_mut() = None;
+    *app.containers_overview.view_cache().borrow_mut() = None;
     let _ = visible_rows(&app);
     let fp_before = cached_fp(&app).unwrap();
     if let Some(entry) = app.container_state.cache_entry_mut("h") {
@@ -449,12 +451,10 @@ fn view_cache_invalidates_on_container_cache_timestamp_bump() {
 fn view_cache_invalidates_on_collapsed_hosts_toggle() {
     let cache = cache_with(&[("h", &[("i", "web", "img", "running")])]);
     let mut app = app_with_cache(cache);
-    *app.containers_overview.view_cache.borrow_mut() = None;
+    *app.containers_overview.view_cache().borrow_mut() = None;
     let _ = visible_rows(&app);
     let fp_before = cached_fp(&app).unwrap();
-    app.containers_overview
-        .collapsed_hosts
-        .insert("h".to_string());
+    app.containers_overview.toggle_host_collapsed("h");
     let _ = visible_rows(&app);
     assert_ne!(fp_before, cached_fp(&app).unwrap());
 }
@@ -1688,9 +1688,7 @@ fn host_detail_fleet_shows_count_when_tunnel_count_is_set_but_inactive() {
 fn host_detail_fleet_marks_group_folded_when_collapsed() {
     let cache = cache_with(&[("host-fold", &[("1", "n", "img", "running")])]);
     let mut app = app_with_cache(cache);
-    app.containers_overview
-        .collapsed_hosts
-        .insert("host-fold".to_string());
+    app.containers_overview.toggle_host_collapsed("host-fold");
     let text = host_detail_text(&app, "host-fold", 1, 1);
     assert!(text.contains("Group"));
     assert!(text.contains("folded"));
@@ -1700,9 +1698,7 @@ fn host_detail_fleet_marks_group_folded_when_collapsed() {
 fn host_detail_actions_label_changes_when_group_collapsed() {
     let cache = cache_with(&[("host-ex", &[("1", "n", "img", "running")])]);
     let mut app = app_with_cache(cache);
-    app.containers_overview
-        .collapsed_hosts
-        .insert("host-ex".to_string());
+    app.containers_overview.toggle_host_collapsed("host-ex");
     let text = host_detail_text(&app, "host-ex", 1, 1);
     assert!(text.contains("Expand group"));
     assert!(!text.contains("Collapse group"));
@@ -1760,7 +1756,11 @@ fn restart_loop_threshold_boundary_at_five_excludes_six_includes() {
         (info, restart_count)
     };
     let mut probe = app;
-    probe.containers_overview.inspect_cache.entries.clear();
+    probe
+        .containers_overview
+        .inspect_cache_mut()
+        .entries
+        .clear();
     let (info_at_5, _) = make(5);
     let (info_at_6, _) = make(6);
     // Insert two synthetic inspects keyed by the same id, swapping
@@ -1771,13 +1771,17 @@ fn restart_loop_threshold_boundary_at_five_excludes_six_includes() {
             restart_count: rc,
             ..Default::default()
         };
-        probe.containers_overview.inspect_cache.entries.insert(
-            "boundary-id".into(),
-            crate::app::InspectCacheEntry {
-                timestamp: 0,
-                result: Ok(inspect),
-            },
-        );
+        probe
+            .containers_overview
+            .inspect_cache_mut()
+            .entries
+            .insert(
+                "boundary-id".into(),
+                crate::app::InspectCacheEntry {
+                    timestamp: 0,
+                    result: Ok(inspect),
+                },
+            );
         let containers = if rc == 5 {
             vec![info_at_5.clone()]
         } else {
@@ -1806,7 +1810,7 @@ fn host_detail_truncates_restart_loop_rows_at_attention_cap() {
     // The ATTENTION card must render at most ATTENTION_RESTART_LOOP_CAP
     // (= 3) restart-loop rows; the rest are dropped silently.
     let mut app = crate::demo::build_demo_app();
-    app.containers_overview.inspect_cache.entries.clear();
+    app.containers_overview.inspect_cache_mut().entries.clear();
     let mut containers: Vec<ContainerInfo> = Vec::new();
     for i in 0..5 {
         let id = format!("loopy-{}", i);
@@ -1823,7 +1827,7 @@ fn host_detail_truncates_restart_loop_rows_at_attention_cap() {
             restart_count: 20,
             ..Default::default()
         };
-        app.containers_overview.inspect_cache.entries.insert(
+        app.containers_overview.inspect_cache_mut().entries.insert(
             id,
             crate::app::InspectCacheEntry {
                 timestamp: 0,

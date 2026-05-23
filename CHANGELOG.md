@@ -1,3 +1,11 @@
+## 3.15.19 - 2026-05-23
+
+- change: Sturdier internals across containers and key handling.
+- change: Restart or stop a single container or a whole host's containers at once, with the same consistent, reliable behaviour.
+- change: The Containers overview manages its caches and view state through named operations, so future changes to that view stay consistent.
+- change: Host-list and file-browser key handling split into focused operations, so changes land in one place and stay predictable.
+- change: Release checks pin the provider count to the code and derive their own test counts, so docs and coverage cannot quietly fall out of step.
+
 ## 3.15.18 - 2026-05-23
 
 - feat: Provider sync keeps your hosts when a cloud API hiccups.

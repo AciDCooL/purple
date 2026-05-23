@@ -99,7 +99,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
     // suppressed regardless of preference. Width animates between
     // 0 and DETAIL_PANEL_WIDTH using `detail_progress`, matching the
     // host-list cubic ease-out.
-    let target_detail = app.containers_overview.view_mode == ViewMode::Detailed
+    let target_detail = app.containers_overview.view_mode() == ViewMode::Detailed
         && body_area.width >= DETAIL_MIN_TOTAL_WIDTH;
     let detail_width = if body_area.width >= DETAIL_MIN_TOTAL_WIDTH {
         if let Some(progress) = detail_progress {
@@ -199,7 +199,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
     // AlphaContainer mode shows it per-row so users keep cross-host
     // context when sorted by name.
     let show_host = matches!(
-        app.containers_overview.sort_mode,
+        app.containers_overview.sort_mode(),
         ContainersSortMode::AlphaContainer
     );
     let cols = compute_columns(containers_only.iter().copied(), content_w, show_host);
@@ -210,7 +210,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
         frame,
         col_header_area,
         &cols,
-        app.containers_overview.sort_mode,
+        app.containers_overview.sort_mode(),
     );
     frame.render_widget(
         Paragraph::new(Span::styled(
@@ -230,7 +230,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
                 // populates it within a frame or two of selection.
                 let inspect = app
                     .containers_overview
-                    .inspect_cache
+                    .inspect_cache()
                     .entries
                     .get(&row.id)
                     .and_then(|e| e.result.as_ref().ok());
@@ -325,7 +325,7 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &mut App) {
     // s (sort) and r/R (refresh) stay as keybindings and are documented
     // in the help screen, but live outside the always-visible footer to
     // keep it readable on narrow terminals.
-    let view_label = if app.containers_overview.view_mode == ViewMode::Detailed {
+    let view_label = if app.containers_overview.view_mode() == ViewMode::Detailed {
         " compact "
     } else {
         fl::ACTION_DETAIL

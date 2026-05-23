@@ -1,6 +1,6 @@
 [package]
 name = "purple-ssh"
-version = "3.15.18"
+version = "3.15.19"
 edition = "2024"
 description = "Open-source terminal SSH manager that keeps ~/.ssh/config in sync with your cloud infra. Spin up a VM on AWS, GCP, Azure, Hetzner or 12 other cloud providers and it appears in your host list. Destroy it and the entry dims. Search hundreds of hosts, transfer files, manage Docker and Podman over SSH, sign Vault SSH certs. Rust TUI, MIT licensed."
 license = "MIT"
@@ -63,6 +63,12 @@ openssl = { version = "0.10", features = ["vendored"] }
 mockito = "1.7.2"
 proptest = "1"
 tempfile = "3"
+
+[lints.clippy]
+# Gate production functions against length bloat. Threshold lives in
+# clippy.toml (400). Test builds are exempt via a crate-level cfg_attr in
+# lib.rs and main.rs.
+too_many_lines = "warn"
 
 [profile.release]
 strip = true

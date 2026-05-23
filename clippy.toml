@@ -1,0 +1,6 @@
+# Functions longer than this trip clippy::too_many_lines (enabled in
+# Cargo.toml [lints.clippy]). Set high so only genuinely egregious functions
+# are flagged: this codebase favours long match/dispatch and data-builder
+# functions that are clearer kept whole. Test builds are exempt via a
+# crate-level cfg_attr in lib.rs and main.rs.
+too-many-lines-threshold = 400

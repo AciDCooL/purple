@@ -162,12 +162,15 @@ if [ -n "$INLINE_FOOTER_HITS" ]; then
     exit 1
 fi
 
-# 9. Golden file count matches expected screen count.
+# 9. Golden file count matches the number of visual_ test functions.
+# Derived from the test source rather than a hardcoded constant, so adding a
+# visual test no longer needs a manual bump. The invariant is 1:1 (each
+# `fn visual_*` renders exactly one golden).
 GOLDEN_COUNT=$(ls tests/visual_golden/*.golden 2>/dev/null | wc -l | tr -d ' ')
-EXPECTED_GOLDEN=82
-if [ "$GOLDEN_COUNT" != "$EXPECTED_GOLDEN" ]; then
-    echo "ERROR: Expected $EXPECTED_GOLDEN golden files, found $GOLDEN_COUNT."
-    echo "If you added a new Screen variant, add a visual regression test and update EXPECTED_GOLDEN."
+VISUAL_TEST_COUNT=$(grep -cE '^[[:space:]]*fn visual_' src/visual_regression_tests.rs | tr -d ' ')
+if [ "$GOLDEN_COUNT" != "$VISUAL_TEST_COUNT" ]; then
+    echo "ERROR: $VISUAL_TEST_COUNT visual_ test functions but $GOLDEN_COUNT golden files."
+    echo "Each visual_ test must render exactly one golden. Run scripts/update-golden.sh."
     exit 1
 fi
 
@@ -396,8 +399,9 @@ fi
 # contract: the no-side reads like "abandon" instead of like the action
 # that will happen on the system if the user picks it.
 #
-# Canonical pairs: (delete,keep), (sign,skip), (purge,keep), (reset,keep),
-# (import,skip), (restart,keep), (stop,keep), (copy,skip), (discard,keep).
+# Canonical pairs: (delete,keep), (sign,skip), (push,keep), (purge,keep),
+# (reset,keep), (import,skip), (restart,keep), (stop,keep), (copy,skip),
+# (discard,keep).
 python3 - <<'PY' || exit 1
 import re, sys, os
 
@@ -480,9 +484,8 @@ fi
 # 20. Every Screen variant must have a visual_<snake_case_name> test.
 #
 # Rule: adding a new `Screen` variant requires adding a `visual_<name>`
-# test and bumping `EXPECTED_GOLDEN`. Catches the trap where the count
-# check (9) passes only because both the test AND the golden file are
-# missing.
+# test. Catches the trap where the count check (9) passes only because
+# both the test AND the golden file are missing.
 python3 - <<'PY' || exit 1
 import re, sys
 
@@ -532,7 +535,7 @@ if missing:
         print("  Screen::" + v)
     print()
     print("  Add `visual_<snake_case_name>` in src/visual_regression_tests.rs,")
-    print("  run scripts/update-golden.sh, and bump EXPECTED_GOLDEN in this script.")
+    print("  then run scripts/update-golden.sh.")
     sys.exit(1)
 PY
 

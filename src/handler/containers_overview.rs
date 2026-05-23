@@ -95,19 +95,10 @@ fn toggle_collapse_for_selected_host(app: &mut App) {
     let Some(alias) = selected_header_alias(app) else {
         return;
     };
-    let was_collapsed = app
-        .containers_overview
-        .collapsed_hosts
-        .contains(alias.as_str());
-    if was_collapsed {
-        app.containers_overview.collapsed_hosts.remove(&alias);
-    } else {
-        app.containers_overview
-            .collapsed_hosts
-            .insert(alias.clone());
-    }
+    let collapsed = app.containers_overview.toggle_host_collapsed(&alias);
+    log::debug!("[purple] containers fold toggle: alias={alias} collapsed={collapsed}");
     if let Err(e) =
-        preferences::save_containers_collapsed_hosts(&app.containers_overview.collapsed_hosts)
+        preferences::save_containers_collapsed_hosts(app.containers_overview.collapsed_hosts())
     {
         log::warn!("[config] Failed to persist containers collapsed hosts: {e}");
     }
@@ -186,8 +177,7 @@ fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         };
         app.notify(crate::messages::container_refreshing(&alias));
         app.containers_overview
-            .auto_list_in_flight
-            .insert(alias.clone());
+            .mark_auto_list_pending(alias.clone());
         let tx = events_tx.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(600));
@@ -217,8 +207,7 @@ fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     // `ensure_list_for_selected_host` does not spawn a second
     // `docker ps` for the same host on the very same keystroke.
     app.containers_overview
-        .auto_list_in_flight
-        .insert(alias.clone());
+        .mark_auto_list_pending(alias.clone());
     spawn_refresh(
         app.reload.config_path().to_path_buf(),
         app.bw_session.clone(),
@@ -276,7 +265,7 @@ pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEv
         new_items.len()
     );
 
-    if let Some(batch) = app.containers_overview.refresh_batch.as_mut() {
+    if let Some(batch) = app.containers_overview.refresh_batch_mut() {
         // Concurrent batch in flight (manual `R` already running):
         // append the new hosts to the existing queue. The driver
         // picks them up as in-flight slots free. `total` becomes
@@ -317,7 +306,7 @@ pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEv
 /// completion handler in `event_loop.rs`, which pops the next queued
 /// item every time a listing returns.
 fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
-    if app.containers_overview.refresh_batch.is_some() {
+    if app.containers_overview.refresh_batch().is_some() {
         app.notify_warning(crate::messages::REFRESH_BATCH_ALREADY_RUNNING);
         return;
     }
@@ -543,7 +532,7 @@ fn open_restart_confirm(app: &mut App) {
     };
     let project = app
         .containers_overview
-        .inspect_cache
+        .inspect_cache()
         .entries
         .get(&row.id)
         .and_then(|e| e.result.as_ref().ok())
@@ -572,7 +561,7 @@ fn open_stop_confirm(app: &mut App) {
     };
     let project = app
         .containers_overview
-        .inspect_cache
+        .inspect_cache()
         .entries
         .get(&row.id)
         .and_then(|e| e.result.as_ref().ok())
@@ -655,7 +644,7 @@ fn open_stack_restart_confirm(app: &mut App) {
     // toast rather than guessing a project name.
     let Some(project) = app
         .containers_overview
-        .inspect_cache
+        .inspect_cache()
         .entries
         .get(&row.id)
         .and_then(|e| e.result.as_ref().ok())
@@ -677,7 +666,7 @@ fn open_stack_restart_confirm(app: &mut App) {
         .filter_map(|c| {
             let inspect = app
                 .containers_overview
-                .inspect_cache
+                .inspect_cache()
                 .entries
                 .get(&c.id)?
                 .result
@@ -796,7 +785,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             // back to the alias's first container.
             let was_header = selected_header_alias(app).is_some();
             let pinned = selected_container_alias(app).or_else(|| selected_header_alias(app));
-            let new_mode = app.containers_overview.sort_mode.next();
+            let new_mode = app.containers_overview.sort_mode().next();
             let save_result = app.containers_overview.set_sort_mode(new_mode);
             match pinned {
                 Some(alias) => reposition_cursor_on(app, &alias, was_header),
@@ -887,7 +876,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             app.set_screen(Screen::WhatsNew(crate::app::WhatsNewState::default()));
         }
         KeyCode::Char('v') => {
-            let new_mode = if app.containers_overview.view_mode == ViewMode::Compact {
+            let new_mode = if app.containers_overview.view_mode() == ViewMode::Compact {
                 ViewMode::Detailed
             } else {
                 ViewMode::Compact
@@ -983,7 +972,7 @@ pub(super) fn ensure_inspect_for_selected(app: &mut App, events_tx: &mpsc::Sende
         .as_secs();
     if app
         .containers_overview
-        .inspect_cache
+        .inspect_cache()
         .fresh(&container_id, now)
         .is_some()
     {
@@ -991,14 +980,14 @@ pub(super) fn ensure_inspect_for_selected(app: &mut App, events_tx: &mpsc::Sende
     }
     if app
         .containers_overview
-        .inspect_cache
+        .inspect_cache()
         .in_flight
         .contains(&container_id)
     {
         return;
     }
     app.containers_overview
-        .inspect_cache
+        .inspect_cache_mut()
         .in_flight
         .insert(container_id.clone());
 
@@ -1074,7 +1063,7 @@ pub(crate) fn prefetch_inspect_for_listing(
         // when the existing trigger already covers it.
         if app
             .containers_overview
-            .inspect_cache
+            .inspect_cache()
             .fresh(&c.id, now)
             .is_some()
         {
@@ -1082,14 +1071,14 @@ pub(crate) fn prefetch_inspect_for_listing(
         }
         if app
             .containers_overview
-            .inspect_cache
+            .inspect_cache()
             .in_flight
             .contains(&c.id)
         {
             continue;
         }
         app.containers_overview
-            .inspect_cache
+            .inspect_cache_mut()
             .in_flight
             .insert(c.id.clone());
         let ctx = crate::ssh_context::OwnedSshContext {
@@ -1140,7 +1129,7 @@ pub(super) fn ensure_logs_for_selected(app: &mut App, events_tx: &mpsc::Sender<A
         .as_secs();
     if app
         .containers_overview
-        .logs_cache
+        .logs_cache()
         .fresh(&container_id, now)
         .is_some()
     {
@@ -1148,14 +1137,14 @@ pub(super) fn ensure_logs_for_selected(app: &mut App, events_tx: &mpsc::Sender<A
     }
     if app
         .containers_overview
-        .logs_cache
+        .logs_cache()
         .in_flight
         .contains(&container_id)
     {
         return;
     }
     app.containers_overview
-        .logs_cache
+        .logs_cache_mut()
         .in_flight
         .insert(container_id.clone());
 
@@ -1253,7 +1242,7 @@ pub(super) fn ensure_inspect_for_host_header(app: &mut App, events_tx: &mpsc::Se
     for container_id in ordered {
         if app
             .containers_overview
-            .inspect_cache
+            .inspect_cache()
             .fresh(&container_id, now)
             .is_some()
         {
@@ -1261,14 +1250,14 @@ pub(super) fn ensure_inspect_for_host_header(app: &mut App, events_tx: &mpsc::Se
         }
         if app
             .containers_overview
-            .inspect_cache
+            .inspect_cache()
             .in_flight
             .contains(&container_id)
         {
             continue;
         }
         app.containers_overview
-            .inspect_cache
+            .inspect_cache_mut()
             .in_flight
             .insert(container_id.clone());
         let ctx = crate::ssh_context::OwnedSshContext {
@@ -1332,17 +1321,16 @@ pub(super) fn ensure_list_for_selected_host(app: &mut App, events_tx: &mpsc::Sen
         // backed by a cache entry. but treat as "no cached runtime".
         None
     };
-    if app.containers_overview.auto_list_in_flight.contains(&alias) {
+    if app.containers_overview.auto_list_pending(&alias) {
         return;
     }
-    if let Some(batch) = app.containers_overview.refresh_batch.as_ref() {
+    if let Some(batch) = app.containers_overview.refresh_batch() {
         if batch.in_flight_aliases.contains(&alias) {
             return;
         }
     }
     app.containers_overview
-        .auto_list_in_flight
-        .insert(alias.clone());
+        .mark_auto_list_pending(alias.clone());
 
     let askpass = app
         .hosts_state

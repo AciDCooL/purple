@@ -520,10 +520,39 @@ pub(super) fn handle_host_key_reset_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Confirm handler for `K` (kick = restart). On Yes, queues a
-/// `ContainerActionKind::Restart` request; the main loop picks it
-/// up, fires the SSH command, and emits a result event. On No or
-/// Esc, the screen drops without side effects.
+/// A confirmed container action plus its target(s). Single-container
+/// confirms carry one target; stack and host-wide confirms carry many.
+struct ContainerConfirm {
+    alias: String,
+    targets: Vec<(String, String)>,
+    action: crate::containers::ContainerAction,
+}
+
+/// Shared y/n/Esc routing for every container action confirm. Yes
+/// queues the action for each target then drops to the host list; No
+/// and Esc drop without side effects; anything else is ignored.
+fn apply_container_confirm(app: &mut App, key: KeyEvent, confirm: ContainerConfirm) {
+    match route_confirm_key(key) {
+        ConfirmAction::Yes => {
+            for (container_id, container_name) in confirm.targets {
+                queue_container_action(
+                    app,
+                    confirm.alias.clone(),
+                    container_id,
+                    container_name,
+                    confirm.action,
+                );
+            }
+            app.set_screen(Screen::HostList);
+        }
+        ConfirmAction::No => {
+            app.set_screen(Screen::HostList);
+        }
+        ConfirmAction::Ignored => {}
+    }
+}
+
+/// Confirm handler for `K` (kick = restart): restart a single container.
 pub(super) fn handle_container_restart_key(app: &mut App, key: KeyEvent) {
     let Screen::ConfirmContainerRestart {
         alias,
@@ -534,30 +563,15 @@ pub(super) fn handle_container_restart_key(app: &mut App, key: KeyEvent) {
     else {
         return;
     };
-    let alias = alias.clone();
-    let container_id = container_id.clone();
-    let container_name = container_name.clone();
-    match route_confirm_key(key) {
-        ConfirmAction::Yes => {
-            queue_container_action(
-                app,
-                alias,
-                container_id,
-                container_name,
-                crate::containers::ContainerAction::Restart,
-            );
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::Ignored => {}
-    }
+    let confirm = ContainerConfirm {
+        alias: alias.clone(),
+        targets: vec![(container_id.clone(), container_name.clone())],
+        action: crate::containers::ContainerAction::Restart,
+    };
+    apply_container_confirm(app, key, confirm);
 }
 
-/// Confirm handler for `S` (stop). Same shape as restart; the action
-/// kind differs and so does the destructive wording in the dialog
-/// body.
+/// Confirm handler for `S` (stop): stop a single container.
 pub(super) fn handle_container_stop_key(app: &mut App, key: KeyEvent) {
     let Screen::ConfirmContainerStop {
         alias,
@@ -568,113 +582,64 @@ pub(super) fn handle_container_stop_key(app: &mut App, key: KeyEvent) {
     else {
         return;
     };
-    let alias = alias.clone();
-    let container_id = container_id.clone();
-    let container_name = container_name.clone();
-    match route_confirm_key(key) {
-        ConfirmAction::Yes => {
-            queue_container_action(
-                app,
-                alias,
-                container_id,
-                container_name,
-                crate::containers::ContainerAction::Stop,
-            );
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::Ignored => {}
-    }
+    let confirm = ContainerConfirm {
+        alias: alias.clone(),
+        targets: vec![(container_id.clone(), container_name.clone())],
+        action: crate::containers::ContainerAction::Stop,
+    };
+    apply_container_confirm(app, key, confirm);
 }
 
-/// Confirm handler for `Ctrl-K` (stack kick). Iterates the stored
-/// member list and queues a Restart for each through the same drain
-/// mechanism that powers single-container restart. The drain
-/// processes one request per tick, giving a sequential cadence.
+/// Confirm handler for `Ctrl-K` (stack kick): restart every member of a
+/// compose stack. The drain queue processes one request per tick, so the
+/// restarts run sequentially.
 pub(super) fn handle_stack_restart_key(app: &mut App, key: KeyEvent) {
     let Screen::ConfirmStackRestart { alias, members, .. } = &app.screen else {
         return;
     };
-    let alias = alias.clone();
-    let members = members.clone();
-    match route_confirm_key(key) {
-        ConfirmAction::Yes => {
-            for m in members {
-                queue_container_action(
-                    app,
-                    alias.clone(),
-                    m.container_id,
-                    m.container_name,
-                    crate::containers::ContainerAction::Restart,
-                );
-            }
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::Ignored => {}
-    }
+    let confirm = ContainerConfirm {
+        alias: alias.clone(),
+        targets: members
+            .iter()
+            .map(|m| (m.container_id.clone(), m.container_name.clone()))
+            .collect(),
+        action: crate::containers::ContainerAction::Restart,
+    };
+    apply_container_confirm(app, key, confirm);
 }
 
-/// Confirm handler for `K` on a host-divider row in the containers
-/// overview. Iterates every running container of the host and queues
-/// a Restart, regardless of compose project. Mirrors the stack-restart
-/// drain. one request per tick keeps remote SSH sane.
+/// Confirm handler for `K` on a host-divider row: restart every running
+/// container on the host, ignoring compose-project boundaries.
 pub(super) fn handle_host_restart_all_key(app: &mut App, key: KeyEvent) {
     let Screen::ConfirmHostRestartAll { alias, members } = &app.screen else {
         return;
     };
-    let alias = alias.clone();
-    let members = members.clone();
-    match route_confirm_key(key) {
-        ConfirmAction::Yes => {
-            for m in members {
-                queue_container_action(
-                    app,
-                    alias.clone(),
-                    m.container_id,
-                    m.container_name,
-                    crate::containers::ContainerAction::Restart,
-                );
-            }
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::Ignored => {}
-    }
+    let confirm = ContainerConfirm {
+        alias: alias.clone(),
+        targets: members
+            .iter()
+            .map(|m| (m.container_id.clone(), m.container_name.clone()))
+            .collect(),
+        action: crate::containers::ContainerAction::Restart,
+    };
+    apply_container_confirm(app, key, confirm);
 }
 
-/// Confirm handler for `S` on a host-divider row. Stops every running
-/// container on the host. Same drain shape as host-restart.
+/// Confirm handler for `S` on a host-divider row: stop every running
+/// container on the host.
 pub(super) fn handle_host_stop_all_key(app: &mut App, key: KeyEvent) {
     let Screen::ConfirmHostStopAll { alias, members } = &app.screen else {
         return;
     };
-    let alias = alias.clone();
-    let members = members.clone();
-    match route_confirm_key(key) {
-        ConfirmAction::Yes => {
-            for m in members {
-                queue_container_action(
-                    app,
-                    alias.clone(),
-                    m.container_id,
-                    m.container_name,
-                    crate::containers::ContainerAction::Stop,
-                );
-            }
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::Ignored => {}
-    }
+    let confirm = ContainerConfirm {
+        alias: alias.clone(),
+        targets: members
+            .iter()
+            .map(|m| (m.container_id.clone(), m.container_name.clone()))
+            .collect(),
+        action: crate::containers::ContainerAction::Stop,
+    };
+    apply_container_confirm(app, key, confirm);
 }
 
 fn queue_container_action(

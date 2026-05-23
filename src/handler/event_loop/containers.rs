@@ -30,7 +30,7 @@ pub(crate) fn handle_container_listing(
             alias
         );
         crate::askpass::cleanup_marker(&alias);
-        app.containers_overview.auto_list_in_flight.remove(&alias);
+        app.containers_overview.clear_auto_list_pending(&alias);
         drive_refresh_batch(app, &alias, events_tx);
         return;
     }
@@ -100,7 +100,7 @@ pub(crate) fn handle_container_listing(
         }
     }
     crate::askpass::cleanup_marker(&alias);
-    app.containers_overview.auto_list_in_flight.remove(&alias);
+    app.containers_overview.clear_auto_list_pending(&alias);
 
     // Drive the `R` batch refresh: a listing whose alias is in the
     // batch's in_flight set decrements the counter and pops the next
@@ -117,7 +117,7 @@ pub(crate) fn handle_container_listing(
 /// without that guard the counter would corrupt and the batch could
 /// either complete prematurely or hang.
 pub(crate) fn drive_refresh_batch(app: &mut App, alias: &str, events_tx: &mpsc::Sender<AppEvent>) {
-    let Some(batch) = app.containers_overview.refresh_batch.as_mut() else {
+    let Some(batch) = app.containers_overview.refresh_batch_mut() else {
         return;
     };
     if !batch.in_flight_aliases.remove(alias) {
@@ -162,8 +162,7 @@ pub(crate) fn drive_refresh_batch(app: &mut App, alias: &str, events_tx: &mpsc::
     // counters are post-pop-and-respawn.
     let still_in_flight = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .map(|b| b.in_flight)
         .unwrap_or(0);
 
@@ -209,7 +208,7 @@ pub(crate) fn handle_container_inspect_complete(
             alias
         );
         app.containers_overview
-            .inspect_cache
+            .inspect_cache_mut()
             .in_flight
             .remove(&container_id);
         return;
@@ -231,7 +230,7 @@ pub(crate) fn handle_container_inspect_complete(
             msg,
         ),
     }
-    app.containers_overview.inspect_cache.entries.insert(
+    app.containers_overview.inspect_cache_mut().entries.insert(
         container_id.clone(),
         crate::app::InspectCacheEntry {
             timestamp: now,
@@ -239,7 +238,7 @@ pub(crate) fn handle_container_inspect_complete(
         },
     );
     app.containers_overview
-        .inspect_cache
+        .inspect_cache_mut()
         .in_flight
         .remove(&container_id);
 }
@@ -260,7 +259,7 @@ pub(crate) fn handle_container_logs_tail_complete(
             alias
         );
         app.containers_overview
-            .logs_cache
+            .logs_cache_mut()
             .in_flight
             .remove(&container_id);
         return;
@@ -282,7 +281,7 @@ pub(crate) fn handle_container_logs_tail_complete(
             msg,
         ),
     }
-    app.containers_overview.logs_cache.entries.insert(
+    app.containers_overview.logs_cache_mut().entries.insert(
         container_id.clone(),
         crate::app::LogsCacheEntry {
             timestamp: now,
@@ -290,7 +289,7 @@ pub(crate) fn handle_container_logs_tail_complete(
         },
     );
     app.containers_overview
-        .logs_cache
+        .logs_cache_mut()
         .in_flight
         .remove(&container_id);
 }
@@ -422,8 +421,7 @@ pub(crate) fn handle_container_action_complete(
         // double-spawn for the same alias while this post-action
         // listing is still pending.
         app.containers_overview
-            .auto_list_in_flight
-            .insert(refresh_alias.clone());
+            .mark_auto_list_pending(refresh_alias.clone());
         let ctx = crate::ssh_context::OwnedSshContext {
             alias: refresh_alias,
             config_path: app.reload.config_path().to_path_buf(),

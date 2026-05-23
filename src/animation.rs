@@ -242,7 +242,7 @@ impl AnimationState {
             app.ui.set_detail_toggle_pending(false);
             let opening = match app.top_page {
                 crate::app::TopPage::Containers => {
-                    app.containers_overview.view_mode == crate::app::ViewMode::Detailed
+                    app.containers_overview.view_mode() == crate::app::ViewMode::Detailed
                 }
                 _ => app.hosts_state.view_mode() == crate::app::ViewMode::Detailed,
             };

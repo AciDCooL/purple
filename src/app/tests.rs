@@ -8873,8 +8873,7 @@ fn migrate_alias_keyed_caches_moves_ping_container_and_in_flight_sets() {
         },
     );
     app.containers_overview
-        .auto_list_in_flight
-        .insert("a".to_string());
+        .mark_auto_list_pending("a".to_string());
     app.vault.cert_checks_in_flight.insert("a".to_string());
     // Pre-seed a stale cert_cache entry to prove it is left alone (the
     // caller refreshes it via `refresh_cert_cache` after the rename).
@@ -8898,8 +8897,8 @@ fn migrate_alias_keyed_caches_moves_ping_container_and_in_flight_sets() {
     assert!(app.ping.last_checked.contains_key("b"));
     assert!(!app.container_state.cache.contains_key("a"));
     assert!(app.container_state.cache.contains_key("b"));
-    assert!(!app.containers_overview.auto_list_in_flight.contains("a"));
-    assert!(app.containers_overview.auto_list_in_flight.contains("b"));
+    assert!(!app.containers_overview.auto_list_pending("a"));
+    assert!(app.containers_overview.auto_list_pending("b"));
     assert!(!app.vault.cert_checks_in_flight.contains("a"));
     assert!(app.vault.cert_checks_in_flight.contains("b"));
     // cert_cache MUST stay under the old key. The caller (edit_host_from_form)
@@ -8925,13 +8924,14 @@ fn migrate_alias_keyed_caches_moves_host_paths_refresh_batch_and_sign_in_flight(
         "a".to_string(),
         (std::path::PathBuf::from("/var/log"), "/var/log".to_string()),
     );
-    app.containers_overview.refresh_batch = Some(crate::app::RefreshBatch {
-        queue: std::collections::VecDeque::new(),
-        in_flight: 1,
-        total: 1,
-        completed: 0,
-        in_flight_aliases: ["a".to_string()].into_iter().collect(),
-    });
+    app.containers_overview
+        .start_refresh(crate::app::RefreshBatch {
+            queue: std::collections::VecDeque::new(),
+            in_flight: 1,
+            total: 1,
+            completed: 0,
+            in_flight_aliases: ["a".to_string()].into_iter().collect(),
+        });
     {
         let mut sign = app.vault.sign_in_flight.lock().expect("lock");
         sign.insert("a".to_string());
@@ -8943,8 +8943,7 @@ fn migrate_alias_keyed_caches_moves_host_paths_refresh_batch_and_sign_in_flight(
     assert!(app.file_browser_state.host_paths.contains_key("b"));
     let batch = app
         .containers_overview
-        .refresh_batch
-        .as_ref()
+        .refresh_batch()
         .expect("batch must still exist");
     assert!(!batch.in_flight_aliases.contains("a"));
     assert!(batch.in_flight_aliases.contains("b"));
@@ -9030,9 +9029,7 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
             containers: vec![],
         },
     );
-    app.containers_overview
-        .collapsed_hosts
-        .insert("top-old".to_string());
+    app.containers_overview.toggle_host_collapsed("top-old");
     app.hosts_state.sort_mode = crate::app::SortMode::MostRecent;
 
     app.rename_aliases(&[("top-old".to_string(), "top-new".to_string())]);
@@ -9051,7 +9048,11 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
     // History migrated (would stay under top-old without apply_alias_renames).
     assert!(app.history.entry("top-old").is_none());
     assert_eq!(app.history.entry("top-new").unwrap().count, 30);
-    assert!(app.containers_overview.collapsed_hosts.contains("top-new"));
+    assert!(
+        app.containers_overview
+            .collapsed_hosts()
+            .contains("top-new")
+    );
 
     // Re-sort happened: top-new sits at index 0 of the display list
     // (would be at the bottom without the trailing apply_sort).

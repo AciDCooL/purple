@@ -703,7 +703,8 @@ fn visual_containers_overview_alpha_container_mode() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    app.containers_overview.sort_mode = crate::app::ContainersSortMode::AlphaContainer;
+    app.containers_overview
+        .set_sort_mode_ephemeral(crate::app::ContainersSortMode::AlphaContainer);
     app.ui.containers_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_alpha_container", &actual);
@@ -1026,7 +1027,8 @@ fn visual_containers_overview_compact() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    app.containers_overview.view_mode = crate::app::ViewMode::Compact;
+    app.containers_overview
+        .set_view_mode_ephemeral(crate::app::ViewMode::Compact);
     app.ui.containers_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_compact", &actual);
@@ -1041,8 +1043,7 @@ fn visual_containers_overview_collapsed_group() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
     app.containers_overview
-        .collapsed_hosts
-        .insert("aws-api-staging".to_string());
+        .toggle_host_collapsed("aws-api-staging");
     app.ui.containers_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_collapsed_group", &actual);
