@@ -16,32 +16,17 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
         }
         KeyCode::Down => {
             if let Some(p) = app.jump.as_mut() {
-                let count = p.visible_hits().len();
-                if count > 0 {
-                    if !p.cursor_revealed {
-                        // First Down on a fresh empty state: just reveal
-                        // the cursor on row 0. Subsequent Downs increment.
-                        p.cursor_revealed = true;
-                        p.selected = 0;
-                    } else {
-                        p.selected = (p.selected + 1).min(count - 1);
-                    }
-                }
+                p.move_down();
             }
         }
         KeyCode::Up => {
             if let Some(p) = app.jump.as_mut() {
-                if !p.cursor_revealed {
-                    p.cursor_revealed = true;
-                    p.selected = 0;
-                } else {
-                    p.selected = p.selected.saturating_sub(1);
-                }
+                p.move_up();
             }
         }
         KeyCode::Tab => {
             if let Some(p) = app.jump.as_mut() {
-                p.cursor_revealed = true;
+                p.reveal_cursor();
                 p.jump_next_section();
             }
         }
@@ -53,11 +38,15 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             let chosen = app
                 .jump
                 .as_ref()
-                .and_then(|p| p.visible_hits().get(p.selected).cloned());
+                .and_then(|p| p.visible_hits().get(p.selected()).cloned());
             if let Some(hit) = chosen {
                 log::debug!("jump: dispatching {:?} via Enter", hit.identity());
                 app.record_jump_hit(&hit);
-                let mode = app.jump.as_ref().map(|p| p.mode).unwrap_or(JumpMode::Hosts);
+                let mode = app
+                    .jump
+                    .as_ref()
+                    .map(|p| p.mode())
+                    .unwrap_or(JumpMode::Hosts);
                 app.close_jump();
                 dispatch_hit(app, &hit, mode, events_tx);
             }
@@ -66,18 +55,15 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             let close = app
                 .jump
                 .as_ref()
-                .map(|p| p.query.is_empty())
+                .map(|p| p.query().is_empty())
                 .unwrap_or(true);
             if close {
                 log::debug!("jump: closed via Backspace on empty query");
                 app.close_jump();
             } else if let Some(p) = app.jump.as_mut() {
                 p.pop_query();
-                if p.query.is_empty() {
-                    // Backspaced back to empty — re-hide the selection
-                    // cue so the user re-lands on the input field.
-                    p.cursor_revealed = false;
-                    p.selected = 0;
+                if p.query().is_empty() {
+                    p.reset_after_clear_query();
                 }
                 app.recompute_jump_hits();
             }
@@ -88,7 +74,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 // Typing reveals the cursor — once a query exists the
                 // selection IS meaningful again. Empty-query state
                 // re-suppresses the cursor on next render.
-                p.cursor_revealed = true;
+                p.reveal_cursor();
             }
             app.recompute_jump_hits();
         }

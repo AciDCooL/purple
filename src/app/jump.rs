@@ -513,24 +513,24 @@ fn round_robin_actions_with_bias(
 
 #[derive(Debug, Default)]
 pub struct JumpState {
-    pub query: String,
-    pub selected: usize,
-    pub mode: JumpMode,
+    pub(in crate::app) query: String,
+    pub(in crate::app) selected: usize,
+    pub(in crate::app) mode: JumpMode,
     /// Computed result list, recomputed on every query change. Empty until
     /// `App::recompute_jump_hits` runs.
-    pub hits: Vec<JumpHit>,
+    pub(in crate::app) hits: Vec<JumpHit>,
     /// MRU snapshot loaded on jump bar open, used by the empty-query state.
-    pub recents: Vec<JumpHit>,
+    pub(in crate::app) recents: Vec<JumpHit>,
     /// True once the user has navigated (Down/Up/Tab) at least once. The
     /// renderer keeps the selection invisible on the empty state until
     /// this flips, so the eye stays on the input field on first open.
     /// Also makes the FIRST Down keystroke land on row 0 instead of
     /// skipping to row 1.
-    pub cursor_revealed: bool,
+    pub(in crate::app) cursor_revealed: bool,
     /// Reused matcher with growable scratch buffers. Populated lazily on
     /// the first scoring pass and kept across keystrokes so nucleo's
     /// internal vectors do not reallocate every recompute.
-    pub matcher: Option<nucleo_matcher::Matcher>,
+    pub(in crate::app) matcher: Option<nucleo_matcher::Matcher>,
 }
 
 // Manual `Clone` because `nucleo_matcher::Matcher` is not `Clone`. State
@@ -557,6 +557,79 @@ impl JumpState {
             mode,
             ..Self::default()
         }
+    }
+
+    pub fn query(&self) -> &str {
+        &self.query
+    }
+
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    pub fn mode(&self) -> JumpMode {
+        self.mode
+    }
+
+    pub fn cursor_revealed(&self) -> bool {
+        self.cursor_revealed
+    }
+
+    pub fn hits(&self) -> &[JumpHit] {
+        &self.hits
+    }
+
+    pub fn recents(&self) -> &[JumpHit] {
+        &self.recents
+    }
+
+    pub fn set_selected(&mut self, n: usize) {
+        self.selected = n;
+    }
+
+    pub fn set_hits(&mut self, hits: Vec<JumpHit>) {
+        self.hits = hits;
+    }
+
+    pub fn set_recents(&mut self, recents: Vec<JumpHit>) {
+        self.recents = recents;
+    }
+
+    /// Down arrow: on first navigation reveal the cursor on row 0;
+    /// thereafter advance by one, capped at the last visible row.
+    pub fn move_down(&mut self) {
+        let count = self.visible_hits().len();
+        if count == 0 {
+            return;
+        }
+        if !self.cursor_revealed {
+            self.cursor_revealed = true;
+            self.selected = 0;
+        } else {
+            self.selected = (self.selected + 1).min(count - 1);
+        }
+    }
+
+    /// Up arrow: on first navigation reveal the cursor on row 0;
+    /// thereafter step back saturating at row 0.
+    pub fn move_up(&mut self) {
+        if !self.cursor_revealed {
+            self.cursor_revealed = true;
+            self.selected = 0;
+        } else {
+            self.selected = self.selected.saturating_sub(1);
+        }
+    }
+
+    pub fn reveal_cursor(&mut self) {
+        self.cursor_revealed = true;
+    }
+
+    /// Backspace cleared the query: re-hide the selection cue and re-park
+    /// the cursor on row 0 so the eye lands back on the input field.
+    pub fn reset_after_clear_query(&mut self) {
+        self.cursor_revealed = false;
+        self.selected = 0;
     }
 
     pub fn push_query(&mut self, c: char) {

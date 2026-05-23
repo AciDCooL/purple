@@ -7158,7 +7158,7 @@ fn jump_char_always_filters() {
     let (tx, _rx) = mpsc::channel();
     handle_key_event(&mut app, key(KeyCode::Char('K')), &tx).unwrap();
     assert!(app.jump.is_some(), "jump bar should stay open");
-    assert_eq!(app.jump.as_ref().unwrap().query, "K");
+    assert_eq!(app.jump.as_ref().unwrap().query(), "K");
     assert!(
         matches!(app.screen, Screen::HostList),
         "should not navigate away"
@@ -7193,13 +7193,13 @@ fn jump_up_down_navigates() {
     // First Down reveals the cursor on row 0 (NOT row 1) so the user
     // does not skip past the first item on a fresh open.
     handle_key_event(&mut app, key(KeyCode::Down), &tx).unwrap();
-    assert_eq!(app.jump.as_ref().unwrap().selected, 0);
-    assert!(app.jump.as_ref().unwrap().cursor_revealed);
+    assert_eq!(app.jump.as_ref().unwrap().selected(), 0);
+    assert!(app.jump.as_ref().unwrap().cursor_revealed());
     // Subsequent Downs increment normally.
     handle_key_event(&mut app, key(KeyCode::Down), &tx).unwrap();
-    assert_eq!(app.jump.as_ref().unwrap().selected, 1);
+    assert_eq!(app.jump.as_ref().unwrap().selected(), 1);
     handle_key_event(&mut app, key(KeyCode::Up), &tx).unwrap();
-    assert_eq!(app.jump.as_ref().unwrap().selected, 0);
+    assert_eq!(app.jump.as_ref().unwrap().selected(), 0);
 }
 
 #[test]
@@ -7209,7 +7209,7 @@ fn jump_any_char_appends_to_filter() {
     let (tx, _rx) = mpsc::channel();
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert!(app.jump.is_some());
-    assert_eq!(app.jump.as_ref().unwrap().query, "t");
+    assert_eq!(app.jump.as_ref().unwrap().query(), "t");
     // 't' is a command key (tag inline), but should filter, not execute
     assert!(matches!(app.screen, Screen::HostList));
 }
@@ -7243,7 +7243,7 @@ fn jump_backspace_removes_filter_char() {
     app.jump.as_mut().unwrap().push_query('u');
     let (tx, _rx) = mpsc::channel();
     handle_key_event(&mut app, key(KeyCode::Backspace), &tx).unwrap();
-    assert_eq!(app.jump.as_ref().unwrap().query, "t");
+    assert_eq!(app.jump.as_ref().unwrap().query(), "t");
 }
 
 #[test]
@@ -7255,7 +7255,7 @@ fn jump_navigate_then_enter_executes() {
     handle_key_event(&mut app, key(KeyCode::Down), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Down), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Down), &tx).unwrap();
-    assert_eq!(app.jump.as_ref().unwrap().selected, 2);
+    assert_eq!(app.jump.as_ref().unwrap().selected(), 2);
     // Enter on index 2 should dispatch the third action — with no host
     // selected the action's handler does nothing visible (no crash).
     // Jump bar closes either way.
@@ -7267,10 +7267,8 @@ fn jump_navigate_then_enter_executes() {
 fn jump_filter_shrink_then_enter_clamps_selected() {
     let mut app = make_app("");
     // Set selected to a high index, then add a filter that reduces the list
-    let mut state = crate::app::JumpState {
-        selected: 10,
-        ..Default::default()
-    };
+    let mut state = crate::app::JumpState::default();
+    state.set_selected(10);
     state.push_query('S'); // push_query resets selected to 0
     state.push_query('S');
     state.push_query('H');
@@ -7279,7 +7277,7 @@ fn jump_filter_shrink_then_enter_clamps_selected() {
     assert!(!filtered.is_empty(), "filter should have results");
     assert!(filtered.len() < crate::app::PaletteCommand::all().len());
     // Force selected to way out-of-bounds to test clamping in Enter handler
-    state.selected = 50;
+    state.set_selected(50);
     app.jump = Some(state);
     let (tx, _rx) = mpsc::channel();
     // Enter should clamp selected to last item, execute it, and close the jump bar
@@ -7307,7 +7305,7 @@ fn jump_enter_on_host_hit_jumps_to_host_list_and_selects() {
         vault_ssh: None,
     });
     if let Some(p) = app.jump.as_mut() {
-        p.hits = vec![host_hit];
+        p.set_hits(vec![host_hit]);
         // Force the visible_hits fast path even with empty query.
         for c in "alpha".chars() {
             p.push_query(c);
@@ -7334,7 +7332,7 @@ fn jump_enter_on_tunnel_hit_switches_to_tunnels_page_and_selects_row() {
         active: false,
     });
     if let Some(p) = app.jump.as_mut() {
-        p.hits = vec![tunnel_hit];
+        p.set_hits(vec![tunnel_hit]);
         for c in "alpha".chars() {
             p.push_query(c);
         }
@@ -7387,7 +7385,7 @@ fn jump_enter_on_container_hit_lands_on_global_containers_tab() {
             .iter()
             .position(|h| matches!(h, crate::app::JumpHit::Container(_)))
         {
-            p.selected = idx;
+            p.set_selected(idx);
         }
     }
     let (tx, _rx) = mpsc::channel();
@@ -7438,7 +7436,7 @@ fn jump_enter_on_snippet_hit_with_no_host_warns() {
             .iter()
             .position(|h| matches!(h, crate::app::JumpHit::Snippet(_)))
         {
-            p.selected = idx;
+            p.set_selected(idx);
         }
     }
     let (tx, _rx) = mpsc::channel();
@@ -7474,7 +7472,7 @@ fn jump_tab_jumps_to_next_section() {
     let after_kind = app
         .jump
         .as_ref()
-        .map(|p| p.visible_hits()[p.selected].kind());
+        .map(|p| p.visible_hits()[p.selected()].kind());
     if let (Some(a), Some(b)) = (starting_kind, after_kind) {
         if a != b {
             // Confirmed: Tab moved to a different kind. Pass.
@@ -7491,7 +7489,11 @@ fn jump_query_capped_at_64() {
     for _ in 0..100 {
         state.push_query('a');
     }
-    assert_eq!(state.query.len(), 64, "query should be capped at 64 chars");
+    assert_eq!(
+        state.query().len(),
+        64,
+        "query should be capped at 64 chars"
+    );
 }
 
 // --- ProxyJump picker handler tests ---
@@ -9158,7 +9160,7 @@ fn tunnels_overview_colon_opens_jump_in_tunnels_mode() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(':')), &tx);
     let jump = app.jump.as_ref().expect("jump bar open");
-    assert_eq!(jump.mode, crate::app::JumpMode::Tunnels);
+    assert_eq!(jump.mode(), crate::app::JumpMode::Tunnels);
     let cmds = jump.filtered_commands();
     assert!(
         cmds.iter()
@@ -9489,7 +9491,7 @@ fn containers_overview_colon_opens_jump_in_containers_mode() {
     let mode = app
         .jump
         .as_ref()
-        .map(|p| p.mode)
+        .map(|p| p.mode())
         .expect("jump bar must be open");
     assert_eq!(mode, crate::app::JumpMode::Containers);
 }

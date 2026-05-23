@@ -1351,7 +1351,7 @@ fn visual_jump_with_recents() {
         .find(|a| a.key == 'n')
         .copied()
         .expect("'n' (What's new) action present");
-    state.recents = vec![
+    state.set_recents(vec![
         crate::app::JumpHit::Host(crate::app::HostHit {
             alias: "bastion-ams".into(),
             hostname: "bastion.ams.example".into(),
@@ -1363,7 +1363,7 @@ fn visual_jump_with_recents() {
             vault_ssh: None,
         }),
         crate::app::JumpHit::Action(n_action),
-    ];
+    ]);
     app.jump = Some(state);
     app.recompute_jump_hits();
     let actual = render_screen(&mut app);

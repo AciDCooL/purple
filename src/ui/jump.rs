@@ -24,7 +24,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let visible_full = jump.visible_hits();
-    let empty_query = jump.query.is_empty();
+    let empty_query = jump.query().is_empty();
 
     // The data layer applies the empty-state cap, so the groups returned
     // here are already trimmed. The renderer just reflects them.
@@ -122,7 +122,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let input_inner = input_block.inner(input_box_area);
     frame.render_widget(input_block, input_box_area);
 
-    let input_line = if jump.query.is_empty() {
+    let input_line = if jump.query().is_empty() {
         Line::from(vec![
             Span::raw(" "),
             Span::styled("\u{2588}", theme::accent_bold()),
@@ -132,7 +132,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         Line::from(vec![
             Span::raw(" "),
-            Span::styled(jump.query.clone(), theme::brand()),
+            Span::styled(jump.query().to_string(), theme::brand()),
             Span::styled("\u{2588}", theme::accent_bold()),
         ])
     };
@@ -166,7 +166,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         items.push(ListItem::new(header));
         row_to_hit.push(None);
         for hit in group {
-            let line = render_hit_row(hit, &jump.query, inner_width, false);
+            let line = render_hit_row(hit, jump.query(), inner_width, false);
             items.push(ListItem::new(line));
             row_to_hit.push(Some(hit_cursor));
             hit_cursor += 1;
@@ -176,13 +176,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // Selection visibility tracks `cursor_revealed`. On a fresh empty
     // open the eye stays on the input field. Once the user navigates
     // (Down/Up/Tab) or types, the selection cue appears.
-    let selected_row: Option<usize> = if !jump.cursor_revealed {
+    let selected_row: Option<usize> = if !jump.cursor_revealed() {
         None
     } else {
         Some(
             row_to_hit
                 .iter()
-                .position(|r| matches!(r, Some(i) if *i == jump.selected))
+                .position(|r| matches!(r, Some(i) if *i == jump.selected()))
                 .unwrap_or(0),
         )
     };
@@ -626,7 +626,7 @@ mod tests {
         let backend = ratatui::backend::TestBackend::new(120, 40);
         let mut terminal = ratatui::Terminal::new(backend).unwrap();
         terminal.draw(|frame| render(frame, &mut app)).unwrap();
-        assert!(!app.jump.as_ref().unwrap().cursor_revealed);
+        assert!(!app.jump.as_ref().unwrap().cursor_revealed());
     }
 
     #[test]
