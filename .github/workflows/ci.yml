@@ -140,14 +140,16 @@ jobs:
       - name: Cargo doc
         run: cargo doc --no-deps --locked
 
-  site-sync:
-    name: Site sync
+  site-build:
+    name: Site build
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
 
-      - name: Verify embedded copies match sources
-        run: sh scripts/site/check-sync.sh
+      # build.mjs assembles worker.generated.ts from the source docs and
+      # throws on an unresolved placeholder or empty document.
+      - name: Build site worker from source
+        run: node scripts/site/build.mjs
 
   design-checks:
     name: Design / messages / keybindings

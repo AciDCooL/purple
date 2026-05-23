@@ -40,8 +40,8 @@ rustup run "$MSRV" cargo check --locked
 printf "\n=== 7/13 Doc ===\n"
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --locked
 
-printf "\n=== 8/13 Site sync ===\n"
-sh scripts/site/check-sync.sh
+printf "\n=== 8/13 Site build ===\n"
+node scripts/site/build.mjs
 
 printf "\n=== 9/13 TUI smoke ===\n"
 if command -v tmux >/dev/null 2>&1; then
