@@ -290,8 +290,7 @@ fn render_header(
     // `online` pulses to match the host-list dot rhythm; other tiers use static styles.
     let mut status_spans: Vec<Span<'static>> = app
         .ping
-        .status
-        .get(&host.alias)
+        .status_of(&host.alias)
         .and_then(|status| {
             let glyph = crate::app::status_glyph(Some(status), spinner_tick);
             let payload = match status {
@@ -310,7 +309,7 @@ fn render_header(
         })
         .unwrap_or_default();
     let stable = matches!(
-        app.ping.status.get(&host.alias),
+        app.ping.status_of(&host.alias),
         Some(
             crate::app::PingStatus::Reachable { .. }
                 | crate::app::PingStatus::Slow { .. }
@@ -318,7 +317,7 @@ fn render_header(
         )
     );
     if stable && !status_spans.is_empty() {
-        if let Some(t) = app.ping.last_checked.get(&host.alias) {
+        if let Some(t) = app.ping.last_checked_at(&host.alias) {
             status_spans.push(Span::styled(
                 format!("  checked {}", crate::messages::relative_age(t.elapsed())),
                 theme::muted(),
@@ -377,7 +376,7 @@ fn render_connection(
         );
     }
 
-    if let Some(status) = app.ping.status.get(&host.alias) {
+    if let Some(status) = app.ping.status_of(&host.alias) {
         let ping_text = match status {
             crate::app::PingStatus::Reachable { rtt_ms }
             | crate::app::PingStatus::Slow { rtt_ms } => format_rtt(*rtt_ms),

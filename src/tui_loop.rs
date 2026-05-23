@@ -132,7 +132,7 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
         }
     }
 
-    if app.ping.auto_ping {
+    if app.ping.auto_ping() {
         let hosts_to_ping: Vec<(String, String, u16)> = app
             .hosts_state
             .list
@@ -143,17 +143,15 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
         for h in &app.hosts_state.list {
             if !h.proxy_jump.is_empty() {
                 app.ping
-                    .status
-                    .insert(h.alias.clone(), app::PingStatus::Skipped);
+                    .insert_status(h.alias.clone(), app::PingStatus::Skipped);
             }
         }
         if !hosts_to_ping.is_empty() {
             for (alias, _, _) in &hosts_to_ping {
                 app.ping
-                    .status
-                    .insert(alias.clone(), app::PingStatus::Checking);
+                    .insert_status(alias.clone(), app::PingStatus::Checking);
             }
-            ping::ping_all(&hosts_to_ping, events_tx.clone(), app.ping.generation);
+            ping::ping_all(&hosts_to_ping, events_tx.clone(), app.ping.generation());
         }
     }
 

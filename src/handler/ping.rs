@@ -9,7 +9,7 @@ use crate::ping;
 /// status to `Checking` and schedules a single-host TCP probe. Skips when
 /// `auto_ping` is off so the user's "no network noise" intent is respected.
 pub(crate) fn refresh_selected_if_stale(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
-    if !app.ping.auto_ping {
+    if !app.ping.auto_ping() {
         return;
     }
     let Some(host) = app.selected_host() else {
@@ -36,7 +36,7 @@ pub(crate) fn refresh_selected_if_stale(app: &mut App, events_tx: &mpsc::Sender<
         (alias, host.hostname.clone(), host.port)
     };
     if matches!(
-        app.ping.status.get(&ping_alias),
+        app.ping.status_of(&ping_alias),
         Some(crate::app::PingStatus::Checking)
     ) {
         return;
@@ -48,14 +48,13 @@ pub(crate) fn refresh_selected_if_stale(app: &mut App, events_tx: &mpsc::Sender<
         port
     );
     app.ping
-        .status
-        .insert(ping_alias.clone(), crate::app::PingStatus::Checking);
+        .insert_status(ping_alias.clone(), crate::app::PingStatus::Checking);
     ping::ping_host(
         ping_alias,
         hostname,
         port,
         events_tx.clone(),
-        app.ping.generation,
+        app.ping.generation(),
     );
 }
 
@@ -78,8 +77,7 @@ pub(super) fn ping_selected_host(
                 .find(|h| h.alias == bastion_alias)
             {
                 app.ping
-                    .status
-                    .insert(alias.clone(), crate::app::PingStatus::Checking);
+                    .insert_status(alias.clone(), crate::app::PingStatus::Checking);
                 (
                     bastion.alias.clone(),
                     bastion.hostname.clone(),
@@ -93,11 +91,10 @@ pub(super) fn ping_selected_host(
             (alias.clone(), host.hostname.clone(), host.port)
         };
         app.ping
-            .status
-            .insert(ping_alias.clone(), crate::app::PingStatus::Checking);
-        if show_hint && !app.ping.has_pinged {
+            .insert_status(ping_alias.clone(), crate::app::PingStatus::Checking);
+        if show_hint && !app.ping.has_pinged() {
             app.notify(crate::messages::pinging_host(&ping_alias, true));
-            app.ping.has_pinged = true;
+            app.ping.set_has_pinged(true);
         } else {
             app.notify(crate::messages::pinging_host(&ping_alias, false));
         }
@@ -106,7 +103,7 @@ pub(super) fn ping_selected_host(
             hostname,
             port,
             events_tx.clone(),
-            app.ping.generation,
+            app.ping.generation(),
         );
     }
 }

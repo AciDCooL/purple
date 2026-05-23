@@ -97,7 +97,7 @@ impl AnimationState {
     /// Whether any host has PingStatus::Checking (spinner needs ticking).
     pub fn has_checking_hosts(&self, app: &App) -> bool {
         app.ping
-            .status
+            .status_map()
             .values()
             .any(|s| matches!(s, PingStatus::Checking))
     }
@@ -109,7 +109,7 @@ impl AnimationState {
     /// pulse — only confirmed-online gets the subtle live signal.
     pub fn has_reachable_hosts(&self, app: &App) -> bool {
         app.ping
-            .status
+            .status_map()
             .values()
             .any(|s| matches!(s, PingStatus::Reachable { .. }))
     }
@@ -362,11 +362,9 @@ mod tests {
     fn has_checking_hosts_only_reachable() {
         let mut app = make_app();
         app.ping
-            .status
-            .insert("host1".to_string(), PingStatus::Reachable { rtt_ms: 10 });
+            .insert_status("host1".to_string(), PingStatus::Reachable { rtt_ms: 10 });
         app.ping
-            .status
-            .insert("host2".to_string(), PingStatus::Unreachable);
+            .insert_status("host2".to_string(), PingStatus::Unreachable);
         let anim = AnimationState::new();
         assert!(!anim.has_checking_hosts(&app));
     }
@@ -375,8 +373,7 @@ mod tests {
     fn has_checking_hosts_with_checking() {
         let mut app = make_app();
         app.ping
-            .status
-            .insert("host2".to_string(), PingStatus::Checking);
+            .insert_status("host2".to_string(), PingStatus::Checking);
         let anim = AnimationState::new();
         assert!(anim.has_checking_hosts(&app));
     }

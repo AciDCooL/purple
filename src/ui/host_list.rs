@@ -363,7 +363,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
         } else {
             footer_spans(
                 target_detail,
-                app.ping.filter_down_only,
+                app.ping.filter_down_only(),
                 !app.hosts_state.multi_select.is_empty(),
             )
         };
@@ -504,9 +504,9 @@ fn render_display_list(
                         }
                         _ => None,
                     });
-            app::health_summary_spans_for(&app.ping.status, visible_aliases)
+            app::health_summary_spans_for(app.ping.status_map(), visible_aliases)
         } else {
-            app::health_summary_spans(&app.ping.status, &app.hosts_state.list)
+            app::health_summary_spans(app.ping.status_map(), &app.hosts_state.list)
         };
         if !health.is_empty() {
             title_spans.push(Span::styled("── ", theme::muted()));
@@ -701,7 +701,7 @@ fn render_display_list(
                     .map(|v| v.as_slice())
                     .unwrap_or(&[]);
                 let health_spans = app::health_summary_spans_for(
-                    &app.ping.status,
+                    app.ping.status_map(),
                     aliases.iter().map(String::as_str),
                 );
 
@@ -737,7 +737,7 @@ fn render_display_list(
                 if let Some(host) = app.hosts_state.list.get(*index) {
                     let tunnel_active = app.tunnels.active.contains_key(&host.alias);
                     let item_ctx = HostItemContext {
-                        ping_status: &app.ping.status,
+                        ping_status: app.ping.status_map(),
                         history: &app.history,
                         tunnel_active,
                         query: None,
@@ -874,7 +874,7 @@ fn render_search_list(
         if let Some(host) = app.hosts_state.list.get(idx) {
             let tunnel_active = app.tunnels.active.contains_key(&host.alias);
             let item_ctx = HostItemContext {
-                ping_status: &app.ping.status,
+                ping_status: app.ping.status_map(),
                 history: &app.history,
                 tunnel_active,
                 query,

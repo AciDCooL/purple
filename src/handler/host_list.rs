@@ -255,10 +255,10 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             if app.is_pattern_selected() {
                 return;
             }
-            if !app.ping.status.is_empty() {
+            if !app.ping.status_is_empty() {
                 log::debug!(
                     "[purple] p: clearing {} ping result(s) + timestamps",
-                    app.ping.status.len()
+                    app.ping.status_len()
                 );
                 app.ping.clear_results();
                 app.clear_status();
@@ -267,10 +267,10 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             }
         }
         KeyCode::Char('P') => {
-            if !app.ping.status.is_empty() {
+            if !app.ping.status_is_empty() {
                 log::debug!(
                     "[purple] P: clearing {} ping result(s) + timestamps",
-                    app.ping.status.len()
+                    app.ping.status_len()
                 );
                 app.ping.clear_results();
                 app.clear_status();
@@ -287,27 +287,25 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 for h in &app.hosts_state.list {
                     if !h.proxy_jump.is_empty() {
                         app.ping
-                            .status
-                            .insert(h.alias.clone(), crate::app::PingStatus::Checking);
+                            .insert_status(h.alias.clone(), crate::app::PingStatus::Checking);
                     }
                 }
                 if !hosts_to_ping.is_empty() {
                     for (alias, _, _) in &hosts_to_ping {
                         app.ping
-                            .status
-                            .insert(alias.clone(), crate::app::PingStatus::Checking);
+                            .insert_status(alias.clone(), crate::app::PingStatus::Checking);
                     }
                     app.notify_info(crate::messages::PINGING_ALL);
-                    crate::ping::ping_all(&hosts_to_ping, events_tx.clone(), app.ping.generation);
+                    crate::ping::ping_all(&hosts_to_ping, events_tx.clone(), app.ping.generation());
                 }
             }
         }
         KeyCode::Char('!') => {
-            if app.ping.status.is_empty() {
+            if app.ping.status_is_empty() {
                 app.notify_warning(crate::messages::PING_FIRST);
             } else {
-                app.ping.filter_down_only = !app.ping.filter_down_only;
-                if app.ping.filter_down_only {
+                app.ping.set_filter_down_only(!app.ping.filter_down_only());
+                if app.ping.filter_down_only() {
                     // Activate search mode to trigger filtering
                     if app.search.query().is_none() {
                         app.search.set_query(Some(String::new()));
@@ -730,12 +728,12 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
             super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            if !app.ping.status.is_empty() {
+            if !app.ping.status_is_empty() {
                 log::debug!(
                     "[purple] ctrl+p: clearing {} ping result(s) + timestamps",
-                    app.ping.status.len()
+                    app.ping.status_len()
                 );
-                let was_filtering = app.ping.filter_down_only;
+                let was_filtering = app.ping.filter_down_only();
                 app.ping.clear_results();
                 if was_filtering {
                     app.cancel_search();
@@ -770,8 +768,8 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
                 app.open_host_edit_form(host, hint);
             }
         }
-        KeyCode::Char('!') if app.ping.filter_down_only => {
-            app.ping.filter_down_only = false;
+        KeyCode::Char('!') if app.ping.filter_down_only() => {
+            app.ping.set_filter_down_only(false);
             if app.search.query().is_some_and(|q| q.is_empty()) {
                 app.cancel_search();
             } else {

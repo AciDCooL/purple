@@ -55,7 +55,7 @@ pub(super) fn render_linked_hosts(frame: &mut Frame, app: &App, key: &SshKeyInfo
                 .find(|h| h.alias == *alias)
                 .map(|h| h.hostname.clone())
                 .unwrap_or_default();
-            let status = app.ping.status.get(alias).cloned();
+            let status = app.ping.status_of(alias).cloned();
             let last_connected = app
                 .history
                 .entry(alias)

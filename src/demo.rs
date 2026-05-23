@@ -1220,75 +1220,62 @@ pub fn build_demo_app() -> App {
     // Ping status (deterministic)
     let reachable = |ms| PingStatus::Reachable { rtt_ms: ms };
     // Ungrouped hosts
-    app.ping.status.insert("bastion-ams".into(), reachable(7));
-    app.ping.status.insert("gateway-vpn".into(), reachable(11));
-    app.ping.status.insert("podman-edge".into(), reachable(28));
+    app.ping.insert_status("bastion-ams".into(), reachable(7));
+    app.ping.insert_status("gateway-vpn".into(), reachable(11));
+    app.ping.insert_status("podman-edge".into(), reachable(28));
     // ProxyJump hosts (normally skipped by pinger, forced reachable for demo)
-    app.ping.status.insert("db-primary".into(), reachable(5));
-    app.ping.status.insert("monitoring".into(), reachable(8));
+    app.ping.insert_status("db-primary".into(), reachable(5));
+    app.ping.insert_status("monitoring".into(), reachable(8));
     // AWS
-    app.ping.status.insert("aws-api-prod".into(), reachable(89));
+    app.ping.insert_status("aws-api-prod".into(), reachable(89));
     app.ping
-        .status
-        .insert("aws-api-staging".into(), reachable(92));
+        .insert_status("aws-api-staging".into(), reachable(92));
     app.ping
-        .status
-        .insert("aws-worker-eu".into(), reachable(23));
-    app.ping.status.insert("aws-batch-us".into(), reachable(18));
-    app.ping.status.insert("aws-ml-eu".into(), reachable(25));
+        .insert_status("aws-worker-eu".into(), reachable(23));
+    app.ping.insert_status("aws-batch-us".into(), reachable(18));
+    app.ping.insert_status("aws-ml-eu".into(), reachable(25));
     app.ping
-        .status
-        .insert("aws-cache-eu".into(), PingStatus::Unreachable);
+        .insert_status("aws-cache-eu".into(), PingStatus::Unreachable);
     // EU production (work yubikey)
-    app.ping.status.insert("prod-eu1".into(), reachable(34));
-    app.ping.status.insert("prod-eu2".into(), reachable(36));
+    app.ping.insert_status("prod-eu1".into(), reachable(34));
+    app.ping.insert_status("prod-eu2".into(), reachable(36));
     // Customer environment
     app.ping
-        .status
-        .insert("customer-jump".into(), reachable(48));
+        .insert_status("customer-jump".into(), reachable(48));
     app.ping
-        .status
-        .insert("customer-db-1".into(), reachable(51));
+        .insert_status("customer-db-1".into(), reachable(51));
     // Legacy
     app.ping
-        .status
-        .insert("legacy-prod".into(), PingStatus::Unreachable);
+        .insert_status("legacy-prod".into(), PingStatus::Unreachable);
     // DigitalOcean (work + personal)
     app.ping
-        .status
-        .insert("do-work-web-ams".into(), reachable(12));
+        .insert_status("do-work-web-ams".into(), reachable(12));
     app.ping
-        .status
-        .insert("do-work-staging-ams".into(), reachable(14));
+        .insert_status("do-work-staging-ams".into(), reachable(14));
     app.ping
-        .status
-        .insert("do-work-worker-ams".into(), reachable(15));
+        .insert_status("do-work-worker-ams".into(), reachable(15));
     app.ping
-        .status
-        .insert("do-work-ci-runner".into(), reachable(42));
+        .insert_status("do-work-ci-runner".into(), reachable(42));
     app.ping
-        .status
-        .insert("do-personal-blog".into(), reachable(19));
+        .insert_status("do-personal-blog".into(), reachable(19));
     app.ping
-        .status
-        .insert("do-personal-mail".into(), reachable(21));
+        .insert_status("do-personal-mail".into(), reachable(21));
     // Proxmox
-    app.ping.status.insert("pve-web-01".into(), reachable(3));
-    app.ping.status.insert("pve-web-02".into(), reachable(3));
-    app.ping.status.insert("pve-db-01".into(), reachable(2));
-    app.ping.status.insert("pve-db-02".into(), reachable(2));
-    app.ping.status.insert("pve-redis".into(), reachable(2));
-    app.ping.status.insert("pve-mail".into(), reachable(3));
-    app.ping.status.insert("pve-monitor".into(), reachable(3));
+    app.ping.insert_status("pve-web-01".into(), reachable(3));
+    app.ping.insert_status("pve-web-02".into(), reachable(3));
+    app.ping.insert_status("pve-db-01".into(), reachable(2));
+    app.ping.insert_status("pve-db-02".into(), reachable(2));
+    app.ping.insert_status("pve-redis".into(), reachable(2));
+    app.ping.insert_status("pve-mail".into(), reachable(3));
+    app.ping.insert_status("pve-monitor".into(), reachable(3));
     app.ping
-        .status
-        .insert("pve-backup".into(), PingStatus::Unreachable);
+        .insert_status("pve-backup".into(), PingStatus::Unreachable);
 
-    app.ping.has_pinged = true;
+    app.ping.set_has_pinged(true);
     let now = std::time::Instant::now();
-    app.ping.checked_at = Some(now);
-    for alias in app.ping.status.keys().cloned().collect::<Vec<_>>() {
-        app.ping.last_checked.insert(alias, now);
+    app.ping.set_checked_at(Some(now));
+    for alias in app.ping.status_map().keys().cloned().collect::<Vec<_>>() {
+        app.ping.record_check(alias, now);
     }
 
     // Vault SSH cert status (deterministic demo data)
@@ -1399,7 +1386,7 @@ pub fn build_demo_app() -> App {
     app.containers_overview.view_mode = ViewMode::Detailed;
     app.hosts_state.sort_mode = SortMode::MostRecent;
     app.hosts_state.group_by = GroupBy::None;
-    app.ping.auto_ping = true;
+    app.ping.set_auto_ping(true);
 
     // Rebuild display list with sort/group applied
     app.apply_sort();
@@ -2407,22 +2394,22 @@ mod tests {
     #[test]
     fn demo_app_has_ping_status() {
         let (app, _guard) = demo_app();
-        assert!(app.ping.has_pinged);
-        assert!(app.ping.checked_at.is_some());
+        assert!(app.ping.has_pinged());
+        assert!(app.ping.checked_at().is_some());
         assert_eq!(
-            app.ping.status.get("bastion-ams"),
+            app.ping.status_of("bastion-ams"),
             Some(&PingStatus::Reachable { rtt_ms: 7 })
         );
         assert_eq!(
-            app.ping.status.get("aws-cache-eu"),
+            app.ping.status_of("aws-cache-eu"),
             Some(&PingStatus::Unreachable)
         );
         assert_eq!(
-            app.ping.status.get("pve-backup"),
+            app.ping.status_of("pve-backup"),
             Some(&PingStatus::Unreachable)
         );
         assert_eq!(
-            app.ping.status.get("monitoring"),
+            app.ping.status_of("monitoring"),
             Some(&PingStatus::Reachable { rtt_ms: 8 })
         );
     }
@@ -2559,7 +2546,7 @@ mod tests {
         assert_eq!(app.containers_overview.view_mode, ViewMode::Detailed);
         assert_eq!(app.hosts_state.sort_mode, SortMode::MostRecent);
         assert_eq!(app.hosts_state.group_by, GroupBy::None);
-        assert!(app.ping.auto_ping);
+        assert!(app.ping.auto_ping());
         assert!(!app.hosts_state.display_list.is_empty());
     }
 }

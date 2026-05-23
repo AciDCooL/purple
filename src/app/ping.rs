@@ -8,14 +8,14 @@ pub const STALE_REFRESH_AFTER: Duration = Duration::from_secs(120);
 
 /// Ping/health-check state for all hosts.
 pub struct PingState {
-    pub status: HashMap<String, PingStatus>,
-    pub last_checked: HashMap<String, Instant>,
-    pub has_pinged: bool,
-    pub generation: u64,
-    pub slow_threshold_ms: u16,
-    pub auto_ping: bool,
-    pub filter_down_only: bool,
-    pub checked_at: Option<Instant>,
+    pub(in crate::app) status: HashMap<String, PingStatus>,
+    pub(in crate::app) last_checked: HashMap<String, Instant>,
+    pub(in crate::app) has_pinged: bool,
+    pub(in crate::app) generation: u64,
+    pub(in crate::app) slow_threshold_ms: u16,
+    pub(in crate::app) auto_ping: bool,
+    pub(in crate::app) filter_down_only: bool,
+    pub(in crate::app) checked_at: Option<Instant>,
 }
 
 impl Default for PingState {
@@ -34,6 +34,98 @@ impl Default for PingState {
 }
 
 impl PingState {
+    pub fn status_map(&self) -> &HashMap<String, PingStatus> {
+        &self.status
+    }
+
+    pub fn status_map_mut(&mut self) -> &mut HashMap<String, PingStatus> {
+        &mut self.status
+    }
+
+    pub fn status_of(&self, alias: &str) -> Option<&PingStatus> {
+        self.status.get(alias)
+    }
+
+    pub fn status_contains(&self, alias: &str) -> bool {
+        self.status.contains_key(alias)
+    }
+
+    pub fn status_len(&self) -> usize {
+        self.status.len()
+    }
+
+    pub fn status_is_empty(&self) -> bool {
+        self.status.is_empty()
+    }
+
+    pub fn insert_status(&mut self, alias: String, status: PingStatus) {
+        self.status.insert(alias, status);
+    }
+
+    pub fn remove_status(&mut self, alias: &str) {
+        self.status.remove(alias);
+    }
+
+    pub fn last_checked(&self) -> &HashMap<String, Instant> {
+        &self.last_checked
+    }
+
+    pub fn last_checked_at(&self, alias: &str) -> Option<&Instant> {
+        self.last_checked.get(alias)
+    }
+
+    pub fn record_check(&mut self, alias: String, at: Instant) {
+        self.last_checked.insert(alias, at);
+    }
+
+    pub fn has_pinged(&self) -> bool {
+        self.has_pinged
+    }
+
+    pub fn set_has_pinged(&mut self, value: bool) {
+        self.has_pinged = value;
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn set_generation(&mut self, value: u64) {
+        self.generation = value;
+    }
+
+    pub fn slow_threshold_ms(&self) -> u16 {
+        self.slow_threshold_ms
+    }
+
+    pub fn set_slow_threshold_ms(&mut self, value: u16) {
+        self.slow_threshold_ms = value;
+    }
+
+    pub fn auto_ping(&self) -> bool {
+        self.auto_ping
+    }
+
+    pub fn set_auto_ping(&mut self, value: bool) {
+        self.auto_ping = value;
+    }
+
+    pub fn filter_down_only(&self) -> bool {
+        self.filter_down_only
+    }
+
+    pub fn set_filter_down_only(&mut self, value: bool) {
+        self.filter_down_only = value;
+    }
+
+    pub fn checked_at(&self) -> Option<Instant> {
+        self.checked_at
+    }
+
+    pub fn set_checked_at(&mut self, value: Option<Instant>) {
+        self.checked_at = value;
+    }
+
     /// Construct with slow threshold + auto-ping loaded from preferences.
     pub fn from_preferences() -> Self {
         Self {

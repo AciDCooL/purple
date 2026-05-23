@@ -87,8 +87,8 @@ pub(crate) fn handle_ping_result(
     rtt_ms: Option<u32>,
     generation: u64,
 ) {
-    if generation == app.ping.generation {
-        let status = app::classify_ping(rtt_ms, app.ping.slow_threshold_ms);
+    if generation == app.ping.generation() {
+        let status = app::classify_ping(rtt_ms, app.ping.slow_threshold_ms());
         let now = Instant::now();
         log::debug!(
             "ping-result: {} → {:?} (rtt={:?}ms, gen={})",
@@ -97,19 +97,19 @@ pub(crate) fn handle_ping_result(
             rtt_ms,
             generation
         );
-        app.ping.status.insert(alias.clone(), status.clone());
-        app.ping.last_checked.insert(alias.clone(), now);
+        app.ping.insert_status(alias.clone(), status.clone());
+        app.ping.record_check(alias.clone(), now);
         // Propagate bastion status to all ProxyJump dependents.
         app::propagate_ping_to_dependents(
             &app.hosts_state.list,
-            &mut app.ping.status,
+            app.ping.status_map_mut(),
             &alias,
             &status,
         );
         let mut propagated = 0usize;
         for h in &app.hosts_state.list {
             if h.proxy_jump == alias {
-                app.ping.last_checked.insert(h.alias.clone(), now);
+                app.ping.record_check(h.alias.clone(), now);
                 propagated += 1;
             }
         }
@@ -121,21 +121,21 @@ pub(crate) fn handle_ping_result(
             );
         }
         // Update live filter/sort as results arrive
-        if app.ping.filter_down_only {
+        if app.ping.filter_down_only() {
             app.apply_filter();
         }
         if app.hosts_state.sort_mode == app::SortMode::Status {
             app.apply_sort();
         }
         // Update "last checked" timestamp when all pings are done
-        if !app.ping.status.is_empty()
+        if !app.ping.status_is_empty()
             && app
                 .ping
-                .status
+                .status_map()
                 .values()
                 .all(|s| !matches!(s, app::PingStatus::Checking))
         {
-            app.ping.checked_at = Some(Instant::now());
+            app.ping.set_checked_at(Some(Instant::now()));
         }
     }
 }

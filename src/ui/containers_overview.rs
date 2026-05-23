@@ -1449,7 +1449,7 @@ fn push_ping_field(
         ),
         theme::muted(),
     );
-    let value_spans: Vec<Span<'static>> = match app.ping.status.get(alias) {
+    let value_spans: Vec<Span<'static>> = match app.ping.status_of(alias) {
         Some(crate::app::PingStatus::Reachable { rtt_ms }) => vec![
             Span::styled(format!("{} ", design::ICON_ONLINE), theme::online_dot()),
             Span::styled(host_list::format_rtt(*rtt_ms), theme::online_dot()),
@@ -4276,13 +4276,13 @@ mod tests {
         let cache = cache_with(&[("host-p", &[("1", "n", "img", "running")])]);
         let mut app = app_with_cache(cache);
 
-        app.ping.status.insert(
+        app.ping.insert_status(
             "host-p".into(),
             crate::app::PingStatus::Reachable { rtt_ms: 38 },
         );
         assert!(host_detail_text(&app, "host-p", 1, 1).contains("38ms"));
 
-        app.ping.status.insert(
+        app.ping.insert_status(
             "host-p".into(),
             crate::app::PingStatus::Slow { rtt_ms: 812 },
         );
@@ -4291,21 +4291,18 @@ mod tests {
         assert!(slow.contains("812ms"));
 
         app.ping
-            .status
-            .insert("host-p".into(), crate::app::PingStatus::Unreachable);
+            .insert_status("host-p".into(), crate::app::PingStatus::Unreachable);
         assert!(host_detail_text(&app, "host-p", 1, 1).contains("unreachable"));
 
         app.ping
-            .status
-            .insert("host-p".into(), crate::app::PingStatus::Checking);
+            .insert_status("host-p".into(), crate::app::PingStatus::Checking);
         assert!(host_detail_text(&app, "host-p", 1, 1).contains("checking"));
 
         app.ping
-            .status
-            .insert("host-p".into(), crate::app::PingStatus::Skipped);
+            .insert_status("host-p".into(), crate::app::PingStatus::Skipped);
         assert!(host_detail_text(&app, "host-p", 1, 1).contains("--"));
 
-        app.ping.status.remove("host-p");
+        app.ping.remove_status("host-p");
         assert!(host_detail_text(&app, "host-p", 1, 1).contains("--"));
     }
 
