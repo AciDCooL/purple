@@ -35,7 +35,7 @@ pub(crate) fn handle_tick(
     // Update the spinner character in the signing status text
     // so the spinner animates between VaultSignProgress events.
     if vault_signing {
-        if let Some(ref mut status) = app.status_center.status {
+        if let Some(status) = app.status_center.status_mut() {
             if status.sticky && !status.is_error() {
                 let frame = crate::animation::SPINNER_FRAMES
                     [anim.spinner_tick as usize % crate::animation::SPINNER_FRAMES.len()];
@@ -50,7 +50,7 @@ pub(crate) fn handle_tick(
     // so we match by spinner-prefix instead of the sticky flag like
     // vault_signing does.
     if provider_syncing {
-        if let Some(ref mut status) = app.status_center.status {
+        if let Some(status) = app.status_center.status_mut() {
             let frame = crate::animation::SPINNER_FRAMES
                 [anim.spinner_tick as usize % crate::animation::SPINNER_FRAMES.len()];
             if let Some(updated) = crate::replace_spinner_frame(&status.text, frame) {

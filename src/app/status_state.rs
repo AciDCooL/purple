@@ -8,12 +8,49 @@ use std::time::Instant;
 /// suppress expiry during in-flight provider syncs.
 #[derive(Default)]
 pub struct StatusCenter {
-    pub status: Option<StatusMessage>,
-    pub toast: Option<StatusMessage>,
-    pub toast_queue: VecDeque<StatusMessage>,
+    pub(in crate::app) status: Option<StatusMessage>,
+    pub(in crate::app) toast: Option<StatusMessage>,
+    pub(in crate::app) toast_queue: VecDeque<StatusMessage>,
 }
 
 impl StatusCenter {
+    pub fn status(&self) -> Option<&StatusMessage> {
+        self.status.as_ref()
+    }
+
+    pub fn status_mut(&mut self) -> Option<&mut StatusMessage> {
+        self.status.as_mut()
+    }
+
+    pub fn toast(&self) -> Option<&StatusMessage> {
+        self.toast.as_ref()
+    }
+
+    pub fn toast_mut(&mut self) -> Option<&mut StatusMessage> {
+        self.toast.as_mut()
+    }
+
+    pub fn take_status(&mut self) -> Option<StatusMessage> {
+        self.status.take()
+    }
+
+    pub fn set_status_message(&mut self, message: Option<StatusMessage>) {
+        self.status = message;
+    }
+
+    pub fn set_toast_message(&mut self, message: Option<StatusMessage>) {
+        self.toast = message;
+    }
+
+    /// Drop the active toast and queued entries whose body matches the
+    /// predicate. The active slot is refilled from the head of the queue.
+    pub fn drop_toasts_where(&mut self, mut matches: impl FnMut(&StatusMessage) -> bool) {
+        if self.toast.as_ref().is_some_and(&mut matches) {
+            self.toast = self.toast_queue.pop_front();
+        }
+        self.toast_queue.retain(|t| !matches(t));
+    }
+
     pub fn set_status(&mut self, text: impl Into<String>, is_error: bool) {
         let class = if is_error {
             MessageClass::Error

@@ -202,7 +202,7 @@ mod tests {
         assert!(app.keys.push.results.is_empty());
         assert!(app.keys.push.selected.is_empty());
         // Last status should be a non-sticky (toast) success.
-        let toast = app.status_center.toast.as_ref().expect("toast set");
+        let toast = app.status_center.toast().expect("toast set");
         assert!(!toast.sticky, "fully-successful run is a plain toast");
     }
 
@@ -220,7 +220,7 @@ mod tests {
             result("h2", KeyPushOutcome::Failed("also bad".into())),
         );
         assert_eq!(app.keys.push.expected_count, 0);
-        let status = app.status_center.status.as_ref().expect("sticky status");
+        let status = app.status_center.status().expect("sticky status");
         assert!(
             status.sticky && status.is_error(),
             "all-failed should be sticky-error"
@@ -241,11 +241,7 @@ mod tests {
             .push(result("h2", KeyPushOutcome::Failed("bad".into())));
         handle_key_push_result(&mut app, 1, result("h3", KeyPushOutcome::AlreadyPresent));
         assert_eq!(app.keys.push.expected_count, 0);
-        let status = app
-            .status_center
-            .status
-            .as_ref()
-            .expect("sticky status set");
+        let status = app.status_center.status().expect("sticky status set");
         assert!(
             status.sticky && status.is_error(),
             "partial failure is sticky so the user sees which hosts failed"

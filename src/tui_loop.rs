@@ -19,7 +19,7 @@ use crate::{
 
 pub fn run_tui(mut app: App) -> Result<()> {
     // First-launch welcome hint (one-shot: creates .purple/ so it won't show again)
-    if app.status_center.status.is_none() && !app.demo_mode {
+    if app.status_center.status().is_none() && !app.demo_mode {
         if let Some(home) = dirs::home_dir() {
             let purple_dir = home.join(".purple");
             if let Some(has_backup) = first_launch_init(&purple_dir, app.reload.config_path()) {

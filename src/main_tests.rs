@@ -159,7 +159,7 @@ fn test_sync_summary_still_syncing() {
     app.providers.syncing.insert("aws".to_string(), cancel);
     app.providers.sync_done.push("DigitalOcean".to_string());
     set_sync_summary(&mut app);
-    let status = app.status_center.status.as_ref().unwrap();
+    let status = app.status_center.status().unwrap();
     // Active provider name (AWS) leads; DigitalOcean is already done so it is
     // not in the active list, only in the counter.
     assert_eq!(status.text, "\u{280B} Syncing AWS EC2 \u{00B7} 1/2");
@@ -232,7 +232,7 @@ fn test_sync_summary_all_done() {
     app.providers.sync_done.push("AWS".to_string());
     app.providers.sync_done.push("Hetzner".to_string());
     set_sync_summary(&mut app);
-    let status = app.status_center.status.as_ref().unwrap();
+    let status = app.status_center.status().unwrap();
     assert_eq!(status.text, "Synced 2/2 \u{00B7} AWS, Hetzner");
     assert!(!status.is_error());
     // sync_done should be cleared when all done
@@ -246,7 +246,7 @@ fn test_sync_summary_with_errors() {
     app.providers.sync_done.push("AWS".to_string());
     app.providers.sync_had_errors = true;
     set_sync_summary(&mut app);
-    let toast = app.status_center.toast.as_ref().unwrap();
+    let toast = app.status_center.toast().unwrap();
     assert_eq!(toast.text, "Synced 1/1 \u{00B7} AWS");
     assert!(toast.is_error());
     // Error flag should be reset when batch completes
@@ -262,7 +262,7 @@ fn test_sync_summary_includes_diff_aggregate() {
     app.providers.batch_updated = 3;
     app.providers.batch_stale = 1;
     set_sync_summary(&mut app);
-    let status = app.status_center.status.as_ref().unwrap();
+    let status = app.status_center.status().unwrap();
     assert_eq!(status.text, "Synced 2/2 \u{00B7} AWS, DO (+12 ~3 -1)");
     // Aggregate must reset on batch completion so the next sync starts clean.
     assert_eq!(app.providers.batch_added, 0);
@@ -278,7 +278,7 @@ fn test_sync_summary_progress_includes_diff_and_spinner() {
     app.providers.sync_done.push("AWS".to_string());
     app.providers.batch_added = 5;
     set_sync_summary(&mut app);
-    let status = app.status_center.status.as_ref().unwrap();
+    let status = app.status_center.status().unwrap();
     // Active name (Vultr) leads, counter follows, then diff. AWS is done so
     // it does not appear in the active list.
     assert_eq!(status.text, "\u{280B} Syncing Vultr \u{00B7} 1/2 (+5)");
@@ -307,7 +307,7 @@ fn test_sync_summary_progress_lists_multiple_active_providers_sorted() {
         .insert("vultr".to_string(), cancel.clone());
     app.providers.syncing.insert("aws".to_string(), cancel);
     set_sync_summary(&mut app);
-    let status = app.status_center.status.as_ref().unwrap();
+    let status = app.status_center.status().unwrap();
     assert_eq!(status.text, "\u{280B} Syncing AWS EC2, Vultr \u{00B7} 0/2");
 }
 
@@ -319,7 +319,7 @@ fn test_sync_summary_errors_persist_while_syncing() {
     app.providers.sync_done.push("AWS".to_string());
     app.providers.sync_had_errors = true;
     set_sync_summary(&mut app);
-    let toast = app.status_center.toast.as_ref().unwrap();
+    let toast = app.status_center.toast().unwrap();
     assert!(toast.is_error());
     // Error flag should persist while still syncing
     assert!(app.providers.sync_had_errors);
@@ -340,7 +340,7 @@ fn test_sync_summary_error_while_syncing_goes_to_toast_with_active_names() {
     app.providers.sync_done.push("AWS".to_string());
     app.providers.sync_had_errors = true;
     set_sync_summary(&mut app);
-    let toast = app.status_center.toast.as_ref().unwrap();
+    let toast = app.status_center.toast().unwrap();
     assert!(toast.is_error(), "error route must send to toast");
     assert!(
         toast.text.contains("Vultr"),
@@ -371,7 +371,7 @@ fn test_sync_summary_batch_total_clamps_upward_mid_batch() {
     app.providers.sync_done.push("Hetzner".to_string());
     app.providers.batch_total = 5;
     set_sync_summary(&mut app);
-    let status = app.status_center.status.as_ref().unwrap();
+    let status = app.status_center.status().unwrap();
     assert!(
         status.text.contains("3/5"),
         "batch_total must stay at captured peak (5), got: {}",
@@ -389,7 +389,7 @@ fn test_sync_summary_diff_suffix_omitted_when_all_zero() {
     app.providers.sync_done.push("AWS".to_string());
     // batch_* all zero by default via empty_app.
     set_sync_summary(&mut app);
-    let status = app.status_center.status.as_ref().unwrap();
+    let status = app.status_center.status().unwrap();
     assert!(
         !status.text.contains('('),
         "diff suffix must be absent when all counters are zero, got: {}",
@@ -799,11 +799,7 @@ fn host_list_i_key_sets_error_when_no_hosts_available() {
     // If we got ConfirmImport, known_hosts had entries (can't control that)
     // If we stayed on HostList, verify error status was set
     if matches!(app.screen, app::Screen::HostList) {
-        let toast = app
-            .status_center
-            .toast
-            .as_ref()
-            .expect("toast should be set");
+        let toast = app.status_center.toast().expect("toast should be set");
         assert!(toast.is_error());
         assert_eq!(toast.text, "No importable hosts in known_hosts.");
     }
@@ -894,7 +890,7 @@ fn confirm_import_y_transitions_to_host_list() {
     // Should transition to HostList regardless of import result
     assert!(matches!(app.screen, app::Screen::HostList));
     // Status or toast should be set (either success or error)
-    assert!(app.status_center.status.is_some() || app.status_center.toast.is_some());
+    assert!(app.status_center.status().is_some() || app.status_center.toast().is_some());
 }
 
 // =========================================================================
@@ -1115,7 +1111,7 @@ fn welcome_i_with_known_hosts_transitions_to_host_list() {
     let _ = crate::handler::handle_key_event(&mut app, key, &tx);
     assert!(matches!(app.screen, app::Screen::HostList));
     // Status or toast should be set (import attempted)
-    assert!(app.status_center.status.is_some() || app.status_center.toast.is_some());
+    assert!(app.status_center.status().is_some() || app.status_center.toast().is_some());
 }
 
 // =========================================================================

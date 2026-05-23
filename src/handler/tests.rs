@@ -222,8 +222,8 @@ fn submit_form(app: &mut App) {
 /// check fires before validation and the test is inconclusive (not a bug).
 fn assert_status_contains(app: &App, expected: &str) {
     // Check both footer status and toast (messages route to different destinations)
-    let status_text = app.status_center.status.as_ref().map(|s| s.text.as_str());
-    let toast_text = app.status_center.toast.as_ref().map(|t| t.text.as_str());
+    let status_text = app.status_center.status().map(|s| s.text.as_str());
+    let toast_text = app.status_center.toast().map(|t| t.text.as_str());
     let msg = status_text
         .or(toast_text)
         .expect("status or toast should be set");
@@ -241,14 +241,12 @@ fn assert_status_contains(app: &App, expected: &str) {
 fn assert_status_not_contains(app: &App, not_expected: &str) {
     let status_msg = app
         .status_center
-        .status
-        .as_ref()
+        .status()
         .map(|s| s.text.as_str())
         .unwrap_or("");
     let toast_msg = app
         .status_center
-        .toast
-        .as_ref()
+        .toast()
         .map(|t| t.text.as_str())
         .unwrap_or("");
     if status_msg.contains("changed externally") || toast_msg.contains("changed externally") {
@@ -1176,8 +1174,7 @@ fn test_provider_list_sync_unconfigured_shows_status() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert!(
         app.status_center
-            .toast
-            .as_ref()
+            .toast()
             .unwrap()
             .text
             .contains("Configure")
@@ -1198,7 +1195,7 @@ fn test_provider_list_delete_removes_config() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(app.providers.pending_delete.is_none());
     // Save may fail in tests (no ~/.purple), triggering rollback. Just verify handler ran.
-    assert!(app.status_center.status.is_some() || app.status_center.toast.is_some());
+    assert!(app.status_center.status().is_some() || app.status_center.toast().is_some());
 }
 
 #[test]
@@ -1214,13 +1211,11 @@ fn test_provider_list_delete_unconfigured_is_noop() {
     // No status/toast message because no section existed to delete
     let has_removed = app
         .status_center
-        .toast
-        .as_ref()
+        .toast()
         .is_some_and(|t| t.text.contains("Removed"))
         || app
             .status_center
-            .status
-            .as_ref()
+            .status()
             .is_some_and(|s| s.text.contains("Removed"));
     assert!(!has_removed);
 }
@@ -1353,9 +1348,8 @@ fn test_submit_provider_form_rejects_space_in_alias_prefix() {
     assert!(matches!(app.screen, Screen::ProviderForm { .. }));
     let msg = &app
         .status_center
-        .status
-        .as_ref()
-        .or(app.status_center.toast.as_ref())
+        .status()
+        .or(app.status_center.toast())
         .unwrap()
         .text;
     if !msg.contains("changed externally") {
@@ -1843,7 +1837,7 @@ fn test_search_ctrl_e_blocks_included_host() {
     let _ = handle_key_event(&mut app, ctrl_key('e'), &tx);
     // Should remain in search mode (not open edit form)
     assert!(matches!(app.screen, Screen::HostList));
-    assert!(app.status_center.status.is_some() || app.status_center.toast.is_some());
+    assert!(app.status_center.status().is_some() || app.status_center.toast().is_some());
 }
 
 // =========================================================================
@@ -2031,8 +2025,7 @@ fn test_picker_keychain_sets_status_message() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(
         app.status_center
-            .toast
-            .as_ref()
+            .toast()
             .unwrap()
             .text
             .contains("OS Keychain")
@@ -2046,32 +2039,18 @@ fn test_picker_none_sets_cleared_status() {
     app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(
-        app.status_center
-            .toast
-            .as_ref()
-            .unwrap()
-            .text
-            .contains("cleared")
-    );
+    assert!(app.status_center.toast().unwrap().text.contains("cleared"));
 }
 
 #[test]
 fn test_picker_prefix_source_shows_guidance() {
     // Prefix sources (op://, bw:, etc.) show a guidance message
     let mut app = make_form_app();
-    app.status_center.toast = None;
+    app.status_center.set_toast_message(None);
     app.ui.password_picker.open_at(1); // 1Password (op://)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(
-        app.status_center
-            .toast
-            .as_ref()
-            .unwrap()
-            .text
-            .contains("Complete")
-    );
+    assert!(app.status_center.toast().unwrap().text.contains("Complete"));
     assert_eq!(app.forms.host.focused_field, FormField::AskPass);
 }
 
@@ -2678,7 +2657,7 @@ fn test_password_picker_keychain_sets_status_message() {
     app.ui.password_picker.open_at(0); // Keychain
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let toast = app.status_center.toast.as_ref().unwrap();
+    let toast = app.status_center.toast().unwrap();
     assert!(
         toast.text.contains("OS Keychain"),
         "Toast should mention OS Keychain, got: {}",
@@ -2693,7 +2672,7 @@ fn test_password_picker_none_sets_cleared_status() {
     app.ui.password_picker.open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let toast = app.status_center.toast.as_ref().unwrap();
+    let toast = app.status_center.toast().unwrap();
     assert!(
         toast.text.contains("cleared"),
         "Toast should say cleared, got: {}",
@@ -2714,14 +2693,8 @@ fn test_password_picker_prefix_source_focuses_askpass_field() {
     );
     // No status message for prefix sources (user needs to keep typing)
     assert!(
-        app.status_center.status.is_none()
-            || !app
-                .status_center
-                .status
-                .as_ref()
-                .unwrap()
-                .text
-                .contains("set to")
+        app.status_center.status().is_none()
+            || !app.status_center.status().unwrap().text.contains("set to")
     );
 }
 
@@ -2908,7 +2881,7 @@ fn test_password_picker_ctrl_d_none_sets_status() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('d'), &tx);
     // Shows "cleared" on success or "Failed to save" if ~/.purple doesn't exist
-    assert!(app.status_center.status.is_some() || app.status_center.toast.is_some());
+    assert!(app.status_center.status().is_some() || app.status_center.toast().is_some());
     assert!(!app.ui.password_picker.open);
 }
 
@@ -3469,7 +3442,7 @@ fn test_snippet_picker_d_rollback_on_save_failure() {
     // Rollback: snippet should still be there
     assert_eq!(app.snippets.store.snippets.len(), 2);
     assert_eq!(app.snippets.store.snippets[0].name, "check-disk");
-    assert!(app.status_center.toast.as_ref().unwrap().is_error());
+    assert!(app.status_center.toast().unwrap().is_error());
 }
 
 // =========================================================================
@@ -3609,7 +3582,7 @@ fn test_snippet_form_submit_rejects_empty_name() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Should stay on the form with an error
     assert!(matches!(app.screen, Screen::SnippetForm { .. }));
-    assert!(app.status_center.toast.as_ref().unwrap().is_error());
+    assert!(app.status_center.toast().unwrap().is_error());
 }
 
 #[test]
@@ -3628,7 +3601,7 @@ fn test_snippet_form_submit_rejects_duplicate_name() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(matches!(app.screen, Screen::SnippetForm { .. }));
-    assert!(app.status_center.toast.as_ref().unwrap().is_error());
+    assert!(app.status_center.toast().unwrap().is_error());
 }
 
 #[test]
@@ -3656,7 +3629,7 @@ fn test_snippet_form_submit_rollback_on_save_failure() {
     // Rollback: new snippet should not be in the store
     assert_eq!(app.snippets.store.snippets.len(), 2);
     assert!(app.snippets.store.get("new-cmd").is_none());
-    assert!(app.status_center.toast.as_ref().unwrap().is_error());
+    assert!(app.status_center.toast().unwrap().is_error());
 }
 
 #[test]
@@ -4038,7 +4011,7 @@ fn test_host_detail_e_on_included_host_stays() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     assert!(matches!(app.screen, Screen::HostDetail { .. }));
-    assert!(app.status_center.toast.as_ref().unwrap().is_error());
+    assert!(app.status_center.toast().unwrap().is_error());
 }
 
 // --- Provider form: Left/Right on toggle fields does NOT toggle ---
@@ -4397,11 +4370,7 @@ fn test_x_key_no_stale_shows_status() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('X')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    let toast = app
-        .status_center
-        .toast
-        .as_ref()
-        .expect("toast should be set");
+    let toast = app.status_center.toast().expect("toast should be set");
     assert!(
         toast.text.contains("No stale hosts"),
         "expected 'No stale hosts' in toast, got: {}",
@@ -4458,11 +4427,7 @@ fn test_e_key_warns_on_stale_host() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     // Edit form should open (warning, not block)
     assert!(matches!(app.screen, Screen::EditHost { .. }));
-    let toast = app
-        .status_center
-        .toast
-        .as_ref()
-        .expect("toast should be set");
+    let toast = app.status_center.toast().expect("toast should be set");
     assert!(toast.text.contains("Stale host"));
     assert!(toast.text.contains("DigitalOcean"));
     assert!(toast.is_error());
@@ -4477,11 +4442,7 @@ fn test_d_key_warns_on_stale_host() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     // Delete confirm should open (warning, not block)
     assert!(matches!(app.screen, Screen::ConfirmDelete { .. }));
-    let toast = app
-        .status_center
-        .toast
-        .as_ref()
-        .expect("toast should be set");
+    let toast = app.status_center.toast().expect("toast should be set");
     assert!(toast.text.contains("Stale host"));
     assert!(toast.is_error());
 }
@@ -4496,11 +4457,7 @@ fn test_enter_on_stale_host_shows_warning() {
     // Connection should still be pending
     assert!(app.ui.pending_connect.is_some());
     // But toast should show stale warning
-    let toast = app
-        .status_center
-        .toast
-        .as_ref()
-        .expect("toast should be set");
+    let toast = app.status_center.toast().expect("toast should be set");
     assert!(
         toast.text.contains("Stale host"),
         "expected stale warning, got: {}",
@@ -4517,14 +4474,8 @@ fn test_enter_on_normal_host_no_stale_warning() {
     assert!(app.ui.pending_connect.is_some());
     // No stale warning
     assert!(
-        app.status_center.toast.is_none()
-            || !app
-                .status_center
-                .toast
-                .as_ref()
-                .unwrap()
-                .text
-                .contains("Stale"),
+        app.status_center.toast().is_none()
+            || !app.status_center.toast().unwrap().text.contains("Stale"),
     );
 }
 
@@ -4539,11 +4490,7 @@ fn test_search_enter_on_stale_host_shows_warning() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(app.ui.pending_connect.is_some());
-    let toast = app
-        .status_center
-        .toast
-        .as_ref()
-        .expect("toast should be set");
+    let toast = app.status_center.toast().expect("toast should be set");
     assert!(
         toast.text.contains("Stale host"),
         "expected stale warning in search mode, got: {}",
@@ -4559,11 +4506,7 @@ fn test_c_key_warns_on_stale_host() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('c')), &tx);
     assert!(matches!(app.screen, Screen::AddHost));
-    let toast = app
-        .status_center
-        .toast
-        .as_ref()
-        .expect("toast should be set");
+    let toast = app.status_center.toast().expect("toast should be set");
     assert!(
         toast.text.contains("Stale host"),
         "expected stale warning, got: {}",
@@ -4584,11 +4527,7 @@ fn test_t_key_warns_on_stale_host() {
         "expected TunnelList screen, got: {:?}",
         app.screen
     );
-    let toast = app
-        .status_center
-        .toast
-        .as_ref()
-        .expect("toast should be set");
+    let toast = app.status_center.toast().expect("toast should be set");
     assert!(
         toast.text.contains("Stale host"),
         "expected stale warning, got: {}",
@@ -6257,8 +6196,7 @@ fn esc_does_not_quit_first_press_shows_hint_toast() {
     );
     let toast = app
         .status_center
-        .toast
-        .as_ref()
+        .toast()
         .expect("first idle Esc must surface a toast");
     assert_eq!(toast.text, crate::messages::ESC_QUIT_HINT);
 }
@@ -6270,17 +6208,17 @@ fn esc_second_press_after_hint_is_silent_noop() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(
-        app.status_center.toast.is_some(),
+        app.status_center.toast().is_some(),
         "first press should have produced a toast"
     );
     // Simulate the toast having been read and dismissed.
-    app.status_center.toast = None;
+    app.status_center.set_toast_message(None);
 
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
 
     assert!(app.running, "second idle Esc must still not quit");
     assert!(
-        app.status_center.toast.is_none(),
+        app.status_center.toast().is_none(),
         "second idle Esc must stay silent (no repeated toast)"
     );
 }
@@ -6401,7 +6339,7 @@ fn test_bang_key_without_pings_shows_error() {
     let (tx, _rx) = std::sync::mpsc::channel();
     handle_key_event(&mut app, key(KeyCode::Char('!')), &tx).unwrap();
     assert!(!app.ping.filter_down_only);
-    assert!(app.status_center.toast.as_ref().unwrap().is_error());
+    assert!(app.status_center.toast().unwrap().is_error());
 }
 
 #[test]
@@ -7442,7 +7380,7 @@ fn jump_enter_on_snippet_hit_with_no_host_warns() {
     let (tx, _rx) = mpsc::channel();
     handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
     assert!(!matches!(app.screen, Screen::SnippetPicker { .. }));
-    let toast = app.status_center.toast.as_ref();
+    let toast = app.status_center.toast();
     assert!(
         toast.is_some(),
         "warning toast should surface when no host is selected"
@@ -8678,21 +8616,21 @@ fn whats_new_scroll_j_advances_state() {
 fn whats_new_close_dismisses_sticky_toast() {
     crate::preferences::tests_helpers::with_temp_prefs("whats_new_dismiss", |_| {
         let mut app = make_app("");
-        app.status_center.toast = Some(crate::app::StatusMessage {
-            text: crate::messages::whats_new_toast::upgraded("2.42.0"),
-            class: crate::app::MessageClass::Success,
-            tick_count: 0,
-            sticky: true,
-            created_at: std::time::Instant::now(),
-        });
+        app.status_center
+            .set_toast_message(Some(crate::app::StatusMessage {
+                text: crate::messages::whats_new_toast::upgraded("2.42.0"),
+                class: crate::app::MessageClass::Success,
+                tick_count: 0,
+                sticky: true,
+                created_at: std::time::Instant::now(),
+            }));
         app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
         let (tx, _rx) = mpsc::channel();
         let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
         let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
         let contains_invite = app
             .status_center
-            .toast
-            .as_ref()
+            .toast()
             .is_some_and(|t| t.text.contains(fragment));
         assert!(!contains_invite, "sticky toast should be dismissed");
     });
@@ -8741,7 +8679,7 @@ fn tunnels_overview_a_with_no_editable_hosts_shows_warning() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
     assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
-    let toast = app.status_center.toast.as_ref().expect("toast");
+    let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("No editable hosts"));
 }
 
@@ -9146,11 +9084,11 @@ fn tunnels_overview_s_cycles_sort_mode() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert_eq!(app.tunnels.sort_mode, TunnelSortMode::AlphaHostname);
-    let toast = app.status_center.toast.as_ref().expect("toast");
+    let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("A-Z hostname"));
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert_eq!(app.tunnels.sort_mode, TunnelSortMode::MostRecent);
-    let toast = app.status_center.toast.as_ref().expect("toast");
+    let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("most recent"));
 }
 
@@ -9310,8 +9248,7 @@ fn esc_on_tunnels_overview_does_not_quit_first_press_shows_hint() {
     assert!(app.ui.esc_quit_hint_shown);
     let toast = app
         .status_center
-        .toast
-        .as_ref()
+        .toast()
         .expect("first idle Esc must surface a toast");
     assert_eq!(toast.text, crate::messages::ESC_QUIT_HINT);
 }
@@ -9322,13 +9259,13 @@ fn esc_on_tunnels_overview_second_press_silent_noop() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    app.status_center.toast = None;
+    app.status_center.set_toast_message(None);
 
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
 
     assert!(app.running);
     assert!(
-        app.status_center.toast.is_none(),
+        app.status_center.toast().is_none(),
         "second idle Esc must stay silent"
     );
 }
@@ -9353,8 +9290,7 @@ fn esc_hint_does_not_displace_active_sticky_error_toast() {
     app.notify_error("provider sync failed");
     let sticky = app
         .status_center
-        .toast
-        .as_ref()
+        .toast()
         .expect("notify_error must land in the toast slot");
     assert!(sticky.sticky, "Error toasts are sticky by default");
     let sticky_text = sticky.text.clone();
@@ -9368,8 +9304,7 @@ fn esc_hint_does_not_displace_active_sticky_error_toast() {
     );
     assert_eq!(
         app.status_center
-            .toast
-            .as_ref()
+            .toast()
             .map(|t| t.text.as_str())
             .unwrap_or(""),
         sticky_text,
@@ -9378,11 +9313,11 @@ fn esc_hint_does_not_displace_active_sticky_error_toast() {
 
     // Once the sticky toast is cleared, a later idle Esc surfaces the hint as
     // designed and arms the one-shot flag.
-    app.status_center.toast = None;
+    app.status_center.set_toast_message(None);
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.ui.esc_quit_hint_shown);
     assert_eq!(
-        app.status_center.toast.as_ref().map(|t| t.text.as_str()),
+        app.status_center.toast().map(|t| t.text.as_str()),
         Some(crate::messages::ESC_QUIT_HINT)
     );
 }
@@ -9722,8 +9657,7 @@ fn containers_overview_enter_on_stopped_container_warns_and_does_nothing() {
     assert!(app.container_state.pending_exec.is_none());
     let toast = app
         .status_center
-        .toast
-        .as_ref()
+        .toast()
         .expect("warning toast for stopped container");
     assert!(toast.text.contains("redis"));
     assert!(toast.text.contains("not running"));
@@ -9766,7 +9700,7 @@ fn containers_overview_enter_rejects_unsafe_container_id() {
         "exec must not queue for an ID that fails validate_container_id"
     );
     assert!(
-        app.status_center.toast.is_some(),
+        app.status_center.toast().is_some(),
         "user-facing error toast expected"
     );
 }
@@ -9778,7 +9712,7 @@ fn containers_overview_enter_in_demo_mode_shows_disabled_toast() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(app.container_state.pending_exec.is_none());
-    let toast = app.status_center.toast.as_ref().expect("toast");
+    let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("Demo mode"));
     // Demo guards report a blocked action, so the toast must carry the
     // Warning severity, not Success. Mismatched severity here would tell
@@ -9793,7 +9727,7 @@ fn containers_overview_K_in_demo_mode_emits_warning_toast() {
     app.demo_mode = true;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('K')), &tx);
-    let toast = app.status_center.toast.as_ref().expect("toast");
+    let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("Demo mode"));
     assert_eq!(toast.class, crate::app::MessageClass::Warning);
 }
@@ -9817,7 +9751,7 @@ fn containers_overview_l_in_demo_mode_opens_logs_view() {
         app.container_state.pending_logs.is_some(),
         "logs fetch must be queued in demo mode (handler then short-circuits to demo_log_lines)"
     );
-    if let Some(toast) = app.status_center.toast.as_ref() {
+    if let Some(toast) = app.status_center.toast() {
         assert!(
             !toast.text.contains("Demo mode"),
             "logs must not surface a demo-disabled warning, got {:?}",
@@ -9834,7 +9768,7 @@ fn container_refresh_progress_uses_sticky_progress_class() {
     let mut app = make_containers_overview_app();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
-    let footer = app.status_center.status.as_ref().expect("progress footer");
+    let footer = app.status_center.status().expect("progress footer");
     assert!(footer.text.contains("Refreshing"));
     assert_eq!(footer.class, crate::app::MessageClass::Progress);
     assert!(footer.sticky, "refresh progress must be sticky");
@@ -10094,7 +10028,7 @@ fn containers_overview_first_esc_arms_quit_hint() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.running);
     assert!(app.ui.esc_quit_hint_shown);
-    let toast = app.status_center.toast.as_ref().expect("hint toast");
+    let toast = app.status_center.toast().expect("hint toast");
     assert!(toast.text.contains("q"));
 }
 
@@ -10165,10 +10099,10 @@ fn containers_overview_refresh_all_in_demo_mode_starts_synthetic_batch() {
         .expect("synthetic batch staged");
     assert_eq!(batch.in_flight, batch.total);
     assert!(batch.total > 0);
-    let footer = app.status_center.status.as_ref().expect("progress footer");
+    let footer = app.status_center.status().expect("progress footer");
     assert!(footer.text.contains("Refreshing"));
     assert!(!footer.text.contains("Demo mode"));
-    assert!(app.status_center.toast.is_none());
+    assert!(app.status_center.toast().is_none());
 }
 
 #[test]
@@ -10180,7 +10114,7 @@ fn containers_overview_refresh_all_on_empty_cache_warns() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
     assert!(app.containers_overview.refresh_batch.is_none());
-    let toast = app.status_center.toast.as_ref().expect("toast");
+    let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("No cached hosts"));
 }
 
@@ -10193,7 +10127,7 @@ fn containers_overview_refresh_all_rejects_concurrent_batch() {
 
     // Press R again while batch active.
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
-    let toast = app.status_center.toast.as_ref().expect("toast");
+    let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("already in progress"));
 }
 
@@ -10214,7 +10148,7 @@ fn containers_overview_a_in_demo_mode_shows_toast() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    let toast = app.status_center.toast.as_ref().expect("toast");
+    let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("Demo mode"));
 }
 
@@ -10267,7 +10201,7 @@ fn refresh_batch_completes_cleanly_on_last_listing() {
         app.containers_overview.refresh_batch.is_none(),
         "batch must clear after last listing"
     );
-    let toast = app.status_center.toast.as_ref().expect("completion toast");
+    let toast = app.status_center.toast().expect("completion toast");
     assert!(toast.text.contains("Refreshed"));
     assert!(toast.text.contains("2 hosts"));
 }
@@ -10290,11 +10224,7 @@ fn container_action_complete_emits_success_toast() {
         Ok(()),
         &tx,
     );
-    let toast = app
-        .status_center
-        .toast
-        .as_ref()
-        .expect("container action toast");
+    let toast = app.status_center.toast().expect("container action toast");
     assert_eq!(toast.class, crate::app::MessageClass::Success);
     assert!(toast.text.contains("restart"));
 }
@@ -10319,10 +10249,10 @@ fn refresh_batch_completion_clears_sticky_progress_and_uses_success_toast() {
     crate::handler::event_loop::drive_refresh_batch(&mut app, "web", &tx);
 
     assert!(
-        app.status_center.status.is_none(),
+        app.status_center.status().is_none(),
         "sticky progress footer must be cleared on batch completion"
     );
-    let toast = app.status_center.toast.as_ref().expect("completion toast");
+    let toast = app.status_center.toast().expect("completion toast");
     assert_eq!(toast.class, crate::app::MessageClass::Success);
 }
 
@@ -11310,7 +11240,7 @@ fn esc_hint_flag_is_shared_between_host_list_and_tunnels_overview() {
     // First idle Esc on host list arms the hint flag.
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.ui.esc_quit_hint_shown);
-    app.status_center.toast = None;
+    app.status_center.set_toast_message(None);
 
     // Switch to tunnels overview and press Esc again. The shared flag means
     // the hint stays silent — the user already learned about `q`.
@@ -11320,7 +11250,7 @@ fn esc_hint_flag_is_shared_between_host_list_and_tunnels_overview() {
 
     assert!(app.running);
     assert!(
-        app.status_center.toast.is_none(),
+        app.status_center.toast().is_none(),
         "second-tab idle Esc must not re-surface the hint"
     );
 
@@ -11329,7 +11259,7 @@ fn esc_hint_flag_is_shared_between_host_list_and_tunnels_overview() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.running);
     assert!(
-        app.status_center.toast.is_none(),
+        app.status_center.toast().is_none(),
         "third-tab idle Esc must not re-surface the hint"
     );
 }
@@ -11426,7 +11356,7 @@ fn containers_overview_l_on_header_warns_single_target() {
         "header rows must not open the logs overlay"
     );
     assert!(
-        app.status_center.toast.is_some(),
+        app.status_center.toast().is_some(),
         "user must see a hint about needing a single container"
     );
 }
@@ -11577,7 +11507,7 @@ fn containers_overview_ctrl_k_without_compose_label_warns_and_stays() {
     // No inspect entry seeded, so the helper warns and keeps the
     // user on the overview rather than guessing a project name.
     assert!(matches!(app.screen, Screen::HostList));
-    assert!(app.status_center.toast.is_some());
+    assert!(app.status_center.toast().is_some());
 }
 
 // --- Container restart confirm dialog --------------------------------
@@ -11775,7 +11705,7 @@ fn exec_prompt_enter_with_control_char_warns_and_does_not_queue() {
     // Embedded newline is a control char; the prompt rejects it.
     assert!(matches!(app.screen, Screen::ContainerExecPrompt { .. }));
     assert!(app.container_state.pending_exec.is_none());
-    assert!(app.status_center.toast.is_some());
+    assert!(app.status_center.toast().is_some());
 }
 
 #[test]

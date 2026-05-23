@@ -918,7 +918,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
         }
         KeyCode::Esc
             if !app.ui.esc_quit_hint_shown
-                && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky) =>
+                && !app.status_center.toast().is_some_and(|t| t.sticky) =>
         {
             log::debug!("[purple] esc on idle containers overview, showing quit hint toast");
             app.notify(crate::messages::ESC_QUIT_HINT);

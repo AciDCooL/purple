@@ -984,7 +984,7 @@ mod key_push_confirm_tests {
             app.keys.push.expected_count, 2,
             "guard must not reset in-flight state"
         );
-        let toast = app.status_center.toast.as_ref().expect("toast set");
+        let toast = app.status_center.toast().expect("toast set");
         assert!(
             toast.text.contains("already running"),
             "expected 'already running' warning, got: {}",
@@ -999,7 +999,7 @@ mod key_push_confirm_tests {
         start_key_push(&mut app, 0, Vec::new(), &tx);
         assert_eq!(app.keys.push.expected_count, 0);
         assert!(app.keys.push.worker.is_none());
-        let toast = app.status_center.toast.as_ref().expect("toast set");
+        let toast = app.status_center.toast().expect("toast set");
         assert!(toast.is_error());
     }
 
@@ -1011,7 +1011,7 @@ mod key_push_confirm_tests {
         start_key_push(&mut app, 0, vec!["h1".into()], &tx);
         assert_eq!(app.keys.push.expected_count, 0);
         assert!(app.keys.push.worker.is_none());
-        let toast = app.status_center.toast.as_ref().expect("toast set");
+        let toast = app.status_center.toast().expect("toast set");
         assert!(toast.is_error());
         assert!(toast.text.contains("Certificates"));
     }
@@ -1023,7 +1023,7 @@ mod key_push_confirm_tests {
         let (tx, _rx) = mpsc::channel();
         start_key_push(&mut app, 0, vec!["h1".into()], &tx);
         assert_eq!(app.keys.push.expected_count, 0);
-        let toast = app.status_center.toast.as_ref().expect("toast set");
+        let toast = app.status_center.toast().expect("toast set");
         assert!(toast.is_error());
     }
 
@@ -1044,7 +1044,7 @@ mod key_push_confirm_tests {
         start_key_push(&mut app, 0, vec!["h1".into()], &tx);
         assert_eq!(app.keys.push.expected_count, 0);
         assert!(app.keys.push.worker.is_none());
-        let toast = app.status_center.toast.as_ref().expect("toast set");
+        let toast = app.status_center.toast().expect("toast set");
         assert!(toast.is_error());
         assert!(toast.text.contains("validation"));
     }

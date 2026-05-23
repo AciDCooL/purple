@@ -98,7 +98,7 @@ mod tests {
             handle_key(&mut app, k(KeyCode::Char('I')));
             assert!(matches!(app.screen, Screen::HostList));
             assert!(
-                app.status_center.toast.is_some() || app.status_center.status.is_some(),
+                app.status_center.toast().is_some() || app.status_center.status().is_some(),
                 "I-key with known_hosts_count > 0 must attempt import and emit a status"
             );
         }));

@@ -90,7 +90,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             } else if !app.hosts_state.multi_select.is_empty() {
                 app.hosts_state.multi_select.clear();
             } else if !app.ui.esc_quit_hint_shown
-                && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky)
+                && !app.status_center.toast().is_some_and(|t| t.sticky)
             {
                 // Esc never quits the app. The first time a user presses Esc
                 // on an idle host list we surface a one-shot toast pointing to

@@ -219,7 +219,10 @@ mod tests {
         app.keys.push.list_state.select(Some(0));
         handle_key(&mut app, k(KeyCode::Char(' ')));
         assert!(!app.keys.push.selected.contains("h1"));
-        assert!(app.status_center.toast.is_some(), "vault skip should toast");
+        assert!(
+            app.status_center.toast().is_some(),
+            "vault skip should toast"
+        );
     }
 
     #[test]
@@ -236,7 +239,7 @@ mod tests {
             !app.keys.push.selected.contains("signed-prod"),
             "cert-file vault host must not be selectable"
         );
-        assert!(app.status_center.toast.is_some());
+        assert!(app.status_center.toast().is_some());
     }
 
     #[test]
@@ -279,7 +282,7 @@ mod tests {
         let mut app = make_app("Host h1\n  HostName 1.1.1.1\n");
         handle_key(&mut app, k(KeyCode::Enter));
         assert!(matches!(app.screen, Screen::KeyPushPicker { .. }));
-        assert!(app.status_center.toast.is_some());
+        assert!(app.status_center.toast().is_some());
     }
 
     #[test]

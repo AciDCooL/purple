@@ -110,7 +110,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         // is active so an informational nudge cannot displace a sticky error.
         KeyCode::Esc
             if !app.ui.esc_quit_hint_shown
-                && !app.status_center.toast.as_ref().is_some_and(|t| t.sticky) =>
+                && !app.status_center.toast().is_some_and(|t| t.sticky) =>
         {
             log::debug!("[purple] esc on idle keys overview, showing quit hint toast");
             app.notify(crate::messages::ESC_QUIT_HINT);
@@ -454,7 +454,7 @@ mod tests {
         assert!(app.keys.push.cancel.is_none());
         assert!(app.keys.push.selected.is_empty());
         // Cancel toast surfaced.
-        assert!(app.status_center.toast.is_some());
+        assert!(app.status_center.toast().is_some());
     }
 
     // --- Arrow-key navigation (j/k aliases via Left/Right) ---
