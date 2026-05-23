@@ -16,7 +16,7 @@ use crate::app::{App, Screen};
 /// `Include` directive and cannot be mutated through purple.
 pub(crate) fn editable_aliases(app: &App) -> Vec<String> {
     app.hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| h.source_file.is_none())
         .map(|h| h.alias.clone())
@@ -32,7 +32,7 @@ pub(crate) fn editable_aliases(app: &App) -> Vec<String> {
 pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
     let query = app.ui.tunnel_host_picker_query.to_lowercase();
     app.hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| h.source_file.is_none())
         .filter(|h| {

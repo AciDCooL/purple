@@ -21,7 +21,7 @@ fn test_provider_config() -> ProviderConfig {
 
 fn make_app(content: &str) -> App {
     // Unique tempdir per call — parallel `cargo test` threads must not
-    // share a config path when `app.hosts_state.ssh_config.write()` or preferences-write
+    // share a config path when `app.hosts_state.ssh_config().write()` or preferences-write
     // runs.
     let scratch = tempfile::tempdir().expect("tempdir").keep();
     // Set preferences override BEFORE App::new so PingState::from_preferences
@@ -1421,7 +1421,7 @@ fn test_space_on_vaultssh_with_no_candidates_inserts_literal_space() {
 #[test]
 fn test_space_on_vaultssh_with_candidates_opens_picker() {
     let mut app = make_form_app();
-    app.hosts_state.list[0].vault_ssh = Some("admin".to_string());
+    app.hosts_state.list_mut()[0].vault_ssh = Some("admin".to_string());
     app.forms.host.focused_field = FormField::VaultSsh;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
@@ -1827,7 +1827,7 @@ fn test_search_ctrl_e_opens_edit_form() {
 fn test_search_ctrl_e_blocks_included_host() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n");
     // Simulate an included host by setting source_file
-    if let Some(host) = app.hosts_state.list.first_mut() {
+    if let Some(host) = app.hosts_state.list_mut().first_mut() {
         host.source_file = Some(std::path::PathBuf::from("/etc/ssh/config.d/test"));
     }
     app.screen = Screen::HostList;
@@ -1850,7 +1850,7 @@ fn test_tunnel_handler_reads_askpass_from_hosts() {
     let app = make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass bw:my-item\n");
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == "myserver")
         .and_then(|h| h.askpass.clone());
@@ -1862,7 +1862,7 @@ fn test_tunnel_handler_askpass_none_when_absent() {
     let app = make_app("Host myserver\n  HostName 10.0.0.1\n");
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == "myserver")
         .and_then(|h| h.askpass.clone());
@@ -2089,7 +2089,7 @@ fn test_edit_form_populates_askpass() {
     let mut app =
         make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass vault:secret/ssh#pw\n");
     // Simulate what happens when user presses 'e' on a host
-    let entry = app.hosts_state.ssh_config.host_entries()[0].clone();
+    let entry = app.hosts_state.ssh_config().host_entries()[0].clone();
     app.forms.host = crate::app::HostForm::from_entry(&entry, Default::default());
     assert_eq!(app.forms.host.askpass, "vault:secret/ssh#pw");
 }
@@ -2097,7 +2097,7 @@ fn test_edit_form_populates_askpass() {
 #[test]
 fn test_edit_form_empty_askpass_when_none() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n");
-    let entry = app.hosts_state.ssh_config.host_entries()[0].clone();
+    let entry = app.hosts_state.ssh_config().host_entries()[0].clone();
     app.forms.host = crate::app::HostForm::from_entry(&entry, Default::default());
     assert_eq!(app.forms.host.askpass, "");
 }
@@ -2306,16 +2306,16 @@ Host gamma
   HostName c.com
 ";
     let app = make_app(config);
-    assert_eq!(app.hosts_state.list.len(), 3);
+    assert_eq!(app.hosts_state.list().len(), 3);
     assert_eq!(
-        app.hosts_state.list[0].askpass,
+        app.hosts_state.list()[0].askpass,
         Some("keychain".to_string())
     );
     assert_eq!(
-        app.hosts_state.list[1].askpass,
+        app.hosts_state.list()[1].askpass,
         Some("op://Vault/SSH/pw".to_string())
     );
-    assert_eq!(app.hosts_state.list[2].askpass, None);
+    assert_eq!(app.hosts_state.list()[2].askpass, None);
 }
 
 #[test]
@@ -2396,18 +2396,24 @@ fn test_delete_undo_preserves_askpass_in_config() {
     let mut app = make_app(config_str);
     // Verify askpass is present
     assert_eq!(
-        app.hosts_state.ssh_config.host_entries()[0].askpass,
+        app.hosts_state.ssh_config().host_entries()[0].askpass,
         Some("vault:secret/ssh#pw".to_string())
     );
 
     // Delete the host (undoable)
-    if let Some((element, position)) = app.hosts_state.ssh_config.delete_host_undoable("myserver") {
+    if let Some((element, position)) = app
+        .hosts_state
+        .ssh_config_mut()
+        .delete_host_undoable("myserver")
+    {
         // Host is gone
-        assert!(app.hosts_state.ssh_config.host_entries().is_empty());
+        assert!(app.hosts_state.ssh_config().host_entries().is_empty());
         // Undo: restore
-        app.hosts_state.ssh_config.insert_host_at(element, position);
+        app.hosts_state
+            .ssh_config_mut()
+            .insert_host_at(element, position);
         // Askpass should be restored
-        let entries = app.hosts_state.ssh_config.host_entries();
+        let entries = app.hosts_state.ssh_config().host_entries();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].askpass, Some("vault:secret/ssh#pw".to_string()));
     } else {
@@ -2491,7 +2497,7 @@ fn test_connect_mode_askpass_lookup() {
     let alias = "srv";
     let askpass = app
         .hosts_state
-        .ssh_config
+        .ssh_config()
         .host_entries()
         .iter()
         .find(|h| h.alias == alias)
@@ -2505,7 +2511,7 @@ fn test_connect_mode_askpass_none() {
     let alias = "srv";
     let askpass = app
         .hosts_state
-        .ssh_config
+        .ssh_config()
         .host_entries()
         .iter()
         .find(|h| h.alias == alias)
@@ -2519,7 +2525,7 @@ fn test_connect_mode_nonexistent_host() {
     let alias = "nonexistent";
     let askpass = app
         .hosts_state
-        .ssh_config
+        .ssh_config()
         .host_entries()
         .iter()
         .find(|h| h.alias == alias)
@@ -2637,7 +2643,7 @@ Host gamma
     let app = make_app(config);
     let lookup = |alias: &str| -> Option<String> {
         app.hosts_state
-            .list
+            .list()
             .iter()
             .find(|h| h.alias == alias)
             .and_then(|h| h.askpass.clone())
@@ -2736,7 +2742,7 @@ fn test_password_picker_prefix_vault_focuses_askpass() {
 fn test_included_host_edit_blocked() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
     app.screen = Screen::HostList;
-    if let Some(host) = app.hosts_state.list.first_mut() {
+    if let Some(host) = app.hosts_state.list_mut().first_mut() {
         host.source_file = Some(std::path::PathBuf::from("/etc/ssh/ssh_config.d/work.conf"));
     }
     app.ui.list_state.select(Some(0));
@@ -2749,7 +2755,7 @@ fn test_included_host_edit_blocked() {
 fn test_included_host_connect_still_carries_askpass() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass op://V/I/p\n");
     app.screen = Screen::HostList;
-    if let Some(host) = app.hosts_state.list.first_mut() {
+    if let Some(host) = app.hosts_state.list_mut().first_mut() {
         host.source_file = Some(std::path::PathBuf::from("/etc/ssh/ssh_config.d/work.conf"));
     }
     app.ui.list_state.select(Some(0));
@@ -2765,7 +2771,7 @@ fn test_included_host_connect_still_carries_askpass() {
 fn test_included_host_delete_blocked() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass bw:item\n");
     app.screen = Screen::HostList;
-    if let Some(host) = app.hosts_state.list.first_mut() {
+    if let Some(host) = app.hosts_state.list_mut().first_mut() {
         host.source_file = Some(std::path::PathBuf::from("/etc/ssh/ssh_config.d/work.conf"));
     }
     app.ui.list_state.select(Some(0));
@@ -2907,7 +2913,7 @@ fn test_submit_form_old_askpass_tracked_for_edit() {
     // When editing a host with keychain askpass, the old source is detected
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
     assert_eq!(
-        app.hosts_state.list[0].askpass,
+        app.hosts_state.list()[0].askpass,
         Some("keychain".to_string())
     );
     // Simulate opening edit form
@@ -2918,10 +2924,10 @@ fn test_submit_form_old_askpass_tracked_for_edit() {
     app.forms.host.hostname = "10.0.0.1".to_string();
     // Change askpass to something else
     app.forms.host.askpass = "op://Vault/Item/pw".to_string();
-    // The old_askpass detection in submit_form looks up app.hosts_state.list by alias
+    // The old_askpass detection in submit_form looks up app.hosts_state.list() by alias
     let old = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == "myserver")
         .and_then(|h| h.askpass.clone());
@@ -2940,7 +2946,7 @@ fn test_submit_form_no_keychain_removal_when_unchanged() {
     app.forms.host.askpass = "keychain".to_string();
     let old = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == "myserver")
         .and_then(|h| h.askpass.clone());
@@ -3073,14 +3079,14 @@ fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
         count: 1,
         timestamps: vec![1_700_000_100],
     });
-    app.hosts_state.sort_mode = sort_mode;
+    app.hosts_state.set_sort_mode(sort_mode);
     app.apply_sort();
 
     // Sanity: pre-rename, `top-old` sits at the top of the display list.
     let alias_at = |app: &App, idx: usize| -> Option<String> {
-        match app.hosts_state.display_list.get(idx)? {
+        match app.hosts_state.display_list().get(idx)? {
             crate::app::HostListItem::Host { index } => {
-                app.hosts_state.list.get(*index).map(|h| h.alias.clone())
+                app.hosts_state.list().get(*index).map(|h| h.alias.clone())
             }
             _ => None,
         }
@@ -3342,11 +3348,11 @@ fn test_snippet_picker_enter_starts_output() {
 #[test]
 fn test_snippet_picker_enter_clears_multi_select() {
     let mut app = make_snippet_app();
-    app.hosts_state.multi_select.insert(0);
+    app.hosts_state.multi_select_mut().insert(0);
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(app.hosts_state.multi_select.is_empty());
+    assert!(app.hosts_state.multi_select().is_empty());
 }
 
 #[test]
@@ -4004,7 +4010,7 @@ fn test_host_detail_r_opens_snippet_picker() {
 #[test]
 fn test_host_detail_e_on_included_host_stays() {
     let mut app = make_app("Host test\n  HostName test.com\n");
-    app.hosts_state.list[0].source_file = Some(PathBuf::from("/etc/ssh/config.d/test"));
+    app.hosts_state.list_mut()[0].source_file = Some(PathBuf::from("/etc/ssh/config.d/test"));
     app.screen = Screen::HostDetail { index: 0 };
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
@@ -4391,7 +4397,7 @@ fn test_confirm_purge_stale_y_deletes() {
     // The stale host should be gone, only "keep" remains
     let aliases: Vec<&str> = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .map(|h| h.alias.as_str())
         .collect();
@@ -4412,8 +4418,8 @@ fn test_confirm_purge_stale_esc_cancels() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::HostList));
     // Host should still exist
-    assert_eq!(app.hosts_state.list.len(), 1);
-    assert_eq!(app.hosts_state.list[0].alias, "do-web");
+    assert_eq!(app.hosts_state.list().len(), 1);
+    assert_eq!(app.hosts_state.list()[0].alias, "do-web");
 }
 
 #[test]
@@ -4610,8 +4616,8 @@ fn test_provider_purge_esc_returns_to_providers() {
         app.screen
     );
     // Host should still exist (purge was cancelled)
-    assert_eq!(app.hosts_state.list.len(), 1);
-    assert_eq!(app.hosts_state.list[0].alias, "do-web");
+    assert_eq!(app.hosts_state.list().len(), 1);
+    assert_eq!(app.hosts_state.list()[0].alias, "do-web");
 }
 
 // =========================================================================
@@ -5881,10 +5887,10 @@ fn test_providers_question_opens_help() {
 #[test]
 fn g_key_none_to_provider() {
     let mut app = make_app("Host web1\n  HostName 1.2.3.4\n  # purple:provider digitalocean:1\n");
-    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::None);
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::None);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
-    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::Provider);
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::Provider);
     assert!(matches!(app.screen, Screen::HostList));
 }
 
@@ -5896,13 +5902,14 @@ Host web1
   # purple:tags production
 ";
     let mut app = make_app(content);
-    app.hosts_state.group_by = crate::app::GroupBy::Provider;
+    app.hosts_state
+        .set_group_by_raw(crate::app::GroupBy::Provider);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
     assert!(
-        matches!(app.hosts_state.group_by, crate::app::GroupBy::Tag(_)),
+        matches!(app.hosts_state.group_by(), &crate::app::GroupBy::Tag(_)),
         "expected Tag mode, got {:?}",
-        app.hosts_state.group_by
+        app.hosts_state.group_by()
     );
     assert!(
         matches!(app.screen, Screen::HostList),
@@ -5917,10 +5924,11 @@ Host web1
   HostName 1.1.1.1
 ";
     let mut app = make_app(content);
-    app.hosts_state.group_by = crate::app::GroupBy::Provider;
+    app.hosts_state
+        .set_group_by_raw(crate::app::GroupBy::Provider);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
-    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::None);
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::None);
     assert!(matches!(app.screen, Screen::HostList));
 }
 
@@ -5932,15 +5940,16 @@ Host web1
   # purple:tags production
 ";
     let mut app = make_app(content);
-    app.hosts_state.group_by = crate::app::GroupBy::Tag("production".to_string());
+    app.hosts_state
+        .set_group_by_raw(crate::app::GroupBy::Tag("production".to_string()));
     app.apply_sort();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
-    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::None);
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::None);
     assert!(matches!(app.screen, Screen::HostList));
     assert!(
         app.hosts_state
-            .display_list
+            .display_list()
             .iter()
             .all(|item| matches!(item, crate::app::HostListItem::Host { .. }))
     );
@@ -5955,38 +5964,39 @@ Host web1
   # purple:tags production
 ";
     let mut app = make_app(content);
-    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::None);
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::None);
 
     let (tx, _rx) = mpsc::channel();
 
     // None → Provider
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
-    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::Provider);
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::Provider);
 
     // Provider → Tag (direct, no picker)
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
     assert!(
-        matches!(app.hosts_state.group_by, crate::app::GroupBy::Tag(_)),
+        matches!(app.hosts_state.group_by(), &crate::app::GroupBy::Tag(_)),
         "expected Tag mode, got {:?}",
-        app.hosts_state.group_by
+        app.hosts_state.group_by()
     );
     assert!(matches!(app.screen, Screen::HostList));
 
     // Tag → None
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
-    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::None);
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::None);
 }
 
 #[test]
 fn g_key_tag_to_none_empty_hosts() {
     let (tx, _rx) = std::sync::mpsc::channel();
     let mut app = make_app("");
-    app.hosts_state.group_by = crate::app::GroupBy::Tag("production".to_string());
+    app.hosts_state
+        .set_group_by_raw(crate::app::GroupBy::Tag("production".to_string()));
 
     let key = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
     let _ = handle_key_event(&mut app, key, &tx);
 
-    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::None);
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::None);
     assert!(matches!(app.screen, Screen::HostList));
 }
 
@@ -6001,14 +6011,16 @@ fn test_enter_on_group_header_does_not_connect() {
     let mut app = make_app(
         "Host web1\n  HostName 1.1.1.1\n  # purple:tags production\n\nHost web2\n  HostName 2.2.2.2\n  # purple:tags staging\n",
     );
-    app.hosts_state.group_by = crate::app::GroupBy::Tag("production".to_string());
-    app.hosts_state.sort_mode = crate::app::SortMode::AlphaAlias;
+    app.hosts_state
+        .set_group_by_raw(crate::app::GroupBy::Tag("production".to_string()));
+    app.hosts_state
+        .set_sort_mode(crate::app::SortMode::AlphaAlias);
     app.apply_sort();
 
     // Find the group header position
     let header_pos = app
         .hosts_state
-        .display_list
+        .display_list()
         .iter()
         .position(
             |item| matches!(item, crate::app::HostListItem::GroupHeader(t) if t == "production"),
@@ -6021,7 +6033,7 @@ fn test_enter_on_group_header_does_not_connect() {
     handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
 
     assert!(
-        app.hosts_state.group_filter.is_none(),
+        app.hosts_state.group_filter().is_none(),
         "group_filter should not be set by Enter on header"
     );
 }
@@ -6036,17 +6048,17 @@ fn test_ctrl_a_selects_all_visible_hosts() {
         "Host web1\n  HostName 1.1.1.1\n\nHost web2\n  HostName 2.2.2.2\n\nHost web3\n  HostName 3.3.3.3\n",
     );
     app.apply_sort();
-    assert!(app.hosts_state.multi_select.is_empty());
+    assert!(app.hosts_state.multi_select().is_empty());
 
     let (tx, _rx) = mpsc::channel();
     handle_key_event(&mut app, ctrl_key('a'), &tx).unwrap();
 
     // All 3 hosts should be selected
-    assert_eq!(app.hosts_state.multi_select.len(), 3);
+    assert_eq!(app.hosts_state.multi_select().len(), 3);
 
     // Press Ctrl+A again to deselect all
     handle_key_event(&mut app, ctrl_key('a'), &tx).unwrap();
-    assert!(app.hosts_state.multi_select.is_empty());
+    assert!(app.hosts_state.multi_select().is_empty());
 }
 
 #[test]
@@ -6060,16 +6072,16 @@ fn test_ctrl_a_in_search_mode_selects_filtered() {
     app.search.set_query(Some("prod".to_string()));
     app.apply_filter();
     assert_eq!(app.search.filtered_indices().len(), 2);
-    assert!(app.hosts_state.multi_select.is_empty());
+    assert!(app.hosts_state.multi_select().is_empty());
 
     // Ctrl+A should select only the 2 filtered hosts
     let (tx, _rx) = mpsc::channel();
     handle_key_event(&mut app, ctrl_key('a'), &tx).unwrap();
-    assert_eq!(app.hosts_state.multi_select.len(), 2);
+    assert_eq!(app.hosts_state.multi_select().len(), 2);
 
     // Press Ctrl+A again to deselect
     handle_key_event(&mut app, ctrl_key('a'), &tx).unwrap();
-    assert!(app.hosts_state.multi_select.is_empty());
+    assert!(app.hosts_state.multi_select().is_empty());
 }
 
 // =========================================================================
@@ -6143,7 +6155,7 @@ Host do-web2
 
     // Grouping toggled internally, top page unchanged.
     assert_eq!(app.top_page, starting_page);
-    assert_eq!(app.hosts_state.group_by, crate::app::GroupBy::Provider);
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::Provider);
 }
 
 #[test]
@@ -6158,10 +6170,11 @@ Host do-web2
   # purple:provider digitalocean:abc
 ";
     let mut app = make_app(content);
-    app.hosts_state.group_by = crate::app::GroupBy::Provider;
+    app.hosts_state
+        .set_group_by_raw(crate::app::GroupBy::Provider);
     app.apply_sort();
-    let first_group = app.hosts_state.group_tab_order[0].clone();
-    app.hosts_state.group_filter = Some(first_group);
+    let first_group = app.hosts_state.group_tab_order()[0].clone();
+    app.hosts_state.set_group_filter(Some(first_group));
     app.apply_sort();
     assert!(app.running);
 
@@ -6169,7 +6182,7 @@ Host do-web2
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
 
     assert!(
-        app.hosts_state.group_filter.is_none(),
+        app.hosts_state.group_filter().is_none(),
         "Esc with active group_filter should clear it"
     );
     assert!(app.running, "Esc with active filter should NOT quit");
@@ -6179,8 +6192,8 @@ Host do-web2
 #[test]
 fn esc_does_not_quit_first_press_shows_hint_toast() {
     let mut app = make_app("Host test\n  HostName test.com\n");
-    assert!(app.hosts_state.group_filter.is_none());
-    assert!(app.hosts_state.multi_select.is_empty());
+    assert!(app.hosts_state.group_filter().is_none());
+    assert!(app.hosts_state.multi_select().is_empty());
     assert!(app.running);
     assert!(!app.ui.esc_quit_hint_shown);
 
@@ -7644,13 +7657,13 @@ fn host_form_smart_paste_fires_on_enter() {
     assert_eq!(app.screen, Screen::HostList);
     assert!(
         app.hosts_state
-            .list
+            .list()
             .iter()
             .any(|h| h.alias == "web.example.com")
     );
     assert!(
         app.hosts_state
-            .list
+            .list()
             .iter()
             .any(|h| h.hostname == "web.example.com")
     );
@@ -7733,7 +7746,7 @@ fn bulk_make_app() -> App {
          Host b\n  HostName 2.2.2.2\n  # purple:tags prod,db\n\
          Host c\n  HostName 3.3.3.3\n  # purple:tags db\n",
     );
-    app.hosts_state.ssh_config.path = path;
+    app.hosts_state.ssh_config_mut().path = path;
     app
 }
 
@@ -7744,18 +7757,18 @@ fn plain_space_toggles_multi_select_in_host_list() {
     // First host is selected by default.
     let idx = app.selected_host_index().unwrap();
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
-    assert!(app.hosts_state.multi_select.contains(&idx));
+    assert!(app.hosts_state.multi_select().contains(&idx));
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
-    assert!(!app.hosts_state.multi_select.contains(&idx));
+    assert!(!app.hosts_state.multi_select().contains(&idx));
 }
 
 #[test]
 fn esc_with_selection_clears_it_without_quitting() {
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
+    app.hosts_state.multi_select_mut().insert(0);
     handle_key_event(&mut app, key(KeyCode::Esc), &tx).unwrap();
-    assert!(app.hosts_state.multi_select.is_empty());
+    assert!(app.hosts_state.multi_select().is_empty());
     assert!(app.running, "Esc must not quit while clearing selection");
 }
 
@@ -7763,8 +7776,8 @@ fn esc_with_selection_clears_it_without_quitting() {
 fn t_routes_to_bulk_editor_when_selection_active() {
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
-    app.hosts_state.multi_select.insert(1);
+    app.hosts_state.multi_select_mut().insert(0);
+    app.hosts_state.multi_select_mut().insert(1);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert_eq!(app.screen, Screen::BulkTagEditor);
     assert!(
@@ -7793,18 +7806,18 @@ fn bulk_editor_space_cycles_and_enter_applies() {
     // Select a + c. Apply "add prod" — a already has it, c does not.
     let idx_a = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .position(|h| h.alias == "a")
         .unwrap();
     let idx_c = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .position(|h| h.alias == "c")
         .unwrap();
-    app.hosts_state.multi_select.insert(idx_a);
-    app.hosts_state.multi_select.insert(idx_c);
+    app.hosts_state.multi_select_mut().insert(idx_a);
+    app.hosts_state.multi_select_mut().insert(idx_c);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert_eq!(app.screen, Screen::BulkTagEditor);
 
@@ -7828,7 +7841,7 @@ fn bulk_editor_space_cycles_and_enter_applies() {
     // c now has prod.
     let c = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == "c")
         .unwrap();
@@ -7842,7 +7855,7 @@ fn bulk_editor_esc_with_dirty_shows_discard_then_confirms() {
     // the discard prompt; pressing y then closes the editor and clears state.
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
+    app.hosts_state.multi_select_mut().insert(0);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert_eq!(app.screen, Screen::BulkTagEditor);
     // Stage a change.
@@ -7882,7 +7895,7 @@ fn bulk_editor_esc_when_clean_closes_immediately() {
     // Without dirty changes, Esc closes the editor without prompting.
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
+    app.hosts_state.multi_select_mut().insert(0);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert_eq!(app.screen, Screen::BulkTagEditor);
     handle_key_event(&mut app, key(KeyCode::Esc), &tx).unwrap();
@@ -7896,7 +7909,7 @@ fn bulk_editor_esc_dirty_then_no_keeps_editor_open() {
     // returns the user to the editor with their changes intact.
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
+    app.hosts_state.multi_select_mut().insert(0);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     let prod_row = app
         .forms
@@ -7919,7 +7932,7 @@ fn bulk_editor_esc_dirty_then_no_keeps_editor_open() {
 fn bulk_editor_plus_opens_new_tag_input() {
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
+    app.hosts_state.multi_select_mut().insert(0);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Char('+')), &tx).unwrap();
     assert!(app.forms.bulk_tag_editor.new_tag_input.is_some());
@@ -7945,18 +7958,18 @@ fn bulk_tag_undo_restores_previous_tags() {
     // Select a (has prod) + b (has prod, db). Remove `prod` from both.
     let idx_a = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .position(|h| h.alias == "a")
         .unwrap();
     let idx_b = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .position(|h| h.alias == "b")
         .unwrap();
-    app.hosts_state.multi_select.insert(idx_a);
-    app.hosts_state.multi_select.insert(idx_b);
+    app.hosts_state.multi_select_mut().insert(idx_a);
+    app.hosts_state.multi_select_mut().insert(idx_b);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     let prod_row = app
         .forms
@@ -7974,7 +7987,7 @@ fn bulk_tag_undo_restores_previous_tags() {
     // Verify prod was removed.
     let a = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == "a")
         .unwrap();
@@ -7986,13 +7999,13 @@ fn bulk_tag_undo_restores_previous_tags() {
     // Verify prod is back.
     let a = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == "a")
         .unwrap();
     let b = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == "b")
         .unwrap();
@@ -8006,7 +8019,7 @@ fn bulk_tag_undo_restores_previous_tags() {
 fn bulk_editor_q_cancels_like_esc() {
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
+    app.hosts_state.multi_select_mut().insert(0);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert_eq!(app.screen, Screen::BulkTagEditor);
     handle_key_event(&mut app, key(KeyCode::Char('q')), &tx).unwrap();
@@ -8018,8 +8031,8 @@ fn bulk_editor_q_cancels_like_esc() {
 fn bulk_editor_jk_navigates_rows() {
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
-    app.hosts_state.multi_select.insert(1);
+    app.hosts_state.multi_select_mut().insert(0);
+    app.hosts_state.multi_select_mut().insert(1);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert!(app.forms.bulk_tag_editor.rows.len() >= 2);
     let initial = app.ui.bulk_tag_editor_state.selected();
@@ -8035,7 +8048,7 @@ fn bulk_editor_jk_navigates_rows() {
 fn bulk_editor_help_roundtrip() {
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
+    app.hosts_state.multi_select_mut().insert(0);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert_eq!(app.screen, Screen::BulkTagEditor);
     // Stage a change so we can verify state survives the help roundtrip.
@@ -8055,7 +8068,7 @@ fn bulk_editor_help_roundtrip() {
 fn bulk_editor_new_tag_input_backspace_and_cursor() {
     let mut app = bulk_make_app();
     let tx = mpsc::channel().0;
-    app.hosts_state.multi_select.insert(0);
+    app.hosts_state.multi_select_mut().insert(0);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     // Open new-tag input.
     handle_key_event(&mut app, key(KeyCode::Char('+')), &tx).unwrap();
@@ -8902,7 +8915,7 @@ fn tunnels_overview_pending_delete_y_removes_tunnel_and_returns_to_overview() {
     assert!(matches!(app.screen, Screen::HostList));
     assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
     // Tunnel directive must be gone from the in-memory ssh_config.
-    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    let rules = app.hosts_state.ssh_config().find_tunnel_directives("test");
     assert!(rules.is_empty(), "tunnel should have been removed");
 }
 
@@ -8913,7 +8926,7 @@ fn tunnels_overview_pending_delete_n_cancels() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert_eq!(app.tunnels.pending_delete, None);
-    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    let rules = app.hosts_state.ssh_config().find_tunnel_directives("test");
     assert_eq!(rules.len(), 1, "tunnel must still be present after cancel");
 }
 
@@ -8993,7 +9006,7 @@ fn tunnels_overview_pending_delete_esc_cancels() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert_eq!(app.tunnels.pending_delete, None);
-    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    let rules = app.hosts_state.ssh_config().find_tunnel_directives("test");
     assert_eq!(rules.len(), 1);
 }
 
@@ -9006,7 +9019,7 @@ fn tunnels_overview_pending_delete_other_key_ignored() {
     // stays armed, the tunnel stays in the config, and no toast fires.
     let _ = handle_key_event(&mut app, key(KeyCode::Char('t')), &tx);
     assert_eq!(app.tunnels.pending_delete, Some(0));
-    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    let rules = app.hosts_state.ssh_config().find_tunnel_directives("test");
     assert_eq!(rules.len(), 1);
 }
 
@@ -9044,7 +9057,7 @@ fn tunnel_form_submit_from_tunnels_overview_returns_to_overview() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(matches!(app.screen, Screen::HostList));
     assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
-    let rules = app.hosts_state.ssh_config.find_tunnel_directives("test");
+    let rules = app.hosts_state.ssh_config().find_tunnel_directives("test");
     assert_eq!(rules.len(), 2, "new tunnel should be persisted");
 }
 
@@ -9222,8 +9235,8 @@ fn tunnels_overview_delete_after_sort_targets_visible_row() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     // After deletion of `aaa`'s tunnel, only `zzz`'s tunnel should remain.
-    let aaa_rules = app.hosts_state.ssh_config.find_tunnel_directives("aaa");
-    let zzz_rules = app.hosts_state.ssh_config.find_tunnel_directives("zzz");
+    let aaa_rules = app.hosts_state.ssh_config().find_tunnel_directives("aaa");
+    let zzz_rules = app.hosts_state.ssh_config().find_tunnel_directives("zzz");
     assert!(
         aaa_rules.is_empty(),
         "aaa's tunnel should have been removed"
@@ -10913,7 +10926,7 @@ fn queue_new_aliases_since_pushes_only_new() {
     let before = app.snapshot_alias_set();
     // Simulate a reload that added a new host.
     app.hosts_state
-        .list
+        .list_mut()
         .push(crate::ssh_config::model::HostEntry {
             alias: "fresh".to_string(),
             hostname: "2.2.2.2".to_string(),

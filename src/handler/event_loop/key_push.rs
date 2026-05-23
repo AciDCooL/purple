@@ -97,7 +97,7 @@ fn finalize_key_push(app: &mut App) {
     if appended > 0 {
         let ssh_dir = crate::ssh_keys::resolve_ssh_dir();
         if let Some(dir) = ssh_dir {
-            app.keys.list = crate::ssh_keys::discover_keys(&dir, &app.hosts_state.list);
+            app.keys.list = crate::ssh_keys::discover_keys(&dir, app.hosts_state.list());
             // Clamp the key-list cursor in case discover_keys returned a
             // shorter list (a key removed between push start and finalize
             // would otherwise leave the cursor pointing past the end).

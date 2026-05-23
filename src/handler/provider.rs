@@ -288,8 +288,8 @@ pub(super) fn handle_provider_list_key(
                 Some(r) => r.clone(),
                 None => return,
             };
-            let stale = app.hosts_state.ssh_config.stale_hosts();
-            let entries = app.hosts_state.ssh_config.host_entries();
+            let stale = app.hosts_state.ssh_config().stale_hosts();
+            let entries = app.hosts_state.ssh_config().host_entries();
             let (display, scope_provider, provider_stale): (String, Option<String>, Vec<_>) =
                 match &row {
                     crate::app::ProviderRow::Header { name, .. } => {
@@ -1009,7 +1009,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     if let Some(migration) = &pending_migration {
         let rewritten = app
             .hosts_state
-            .ssh_config
+            .ssh_config_mut()
             .rewrite_legacy_markers_to_label(&migration.provider, &migration.existing_label);
         if rewritten > 0 {
             log::debug!(
@@ -1018,7 +1018,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
                 migration.provider,
                 migration.existing_label
             );
-            if let Err(e) = app.hosts_state.ssh_config.write() {
+            if let Err(e) = app.hosts_state.ssh_config().write() {
                 app.notify_error(crate::messages::failed_to_save(&e));
             }
         }

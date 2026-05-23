@@ -37,17 +37,17 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                 if let Some(rule) = app.tunnels.list().get(sel) {
                     let key = rule.tunnel_type.directive_key().to_string();
                     let value = rule.to_directive_value();
-                    let config_backup = app.hosts_state.ssh_config.clone();
+                    let config_backup = app.hosts_state.ssh_config().clone();
                     if !app
                         .hosts_state
-                        .ssh_config
+                        .ssh_config_mut()
                         .remove_forward(&alias, &key, &value)
                     {
                         app.notify_warning(crate::messages::TUNNEL_NOT_FOUND);
                         return;
                     }
-                    if let Err(e) = app.hosts_state.ssh_config.write() {
-                        app.hosts_state.ssh_config = config_backup;
+                    if let Err(e) = app.hosts_state.ssh_config().write() {
+                        app.hosts_state.set_ssh_config(config_backup);
                         app.notify_error(crate::messages::failed_to_save(&e));
                     } else {
                         app.update_last_modified();
@@ -90,7 +90,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('a') => {
             // Check if host is from an included file (read-only)
-            if let Some(host) = app.hosts_state.list.iter().find(|h| h.alias == alias) {
+            if let Some(host) = app.hosts_state.list().iter().find(|h| h.alias == alias) {
                 if host.source_file.is_some() {
                     app.notify_warning(crate::messages::TUNNEL_INCLUDED_READ_ONLY);
                     return;
@@ -100,7 +100,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('e') => {
             // Check if host is from an included file (read-only)
-            if let Some(host) = app.hosts_state.list.iter().find(|h| h.alias == alias) {
+            if let Some(host) = app.hosts_state.list().iter().find(|h| h.alias == alias) {
                 if host.source_file.is_some() {
                     app.notify_warning(crate::messages::TUNNEL_INCLUDED_READ_ONLY);
                     return;
@@ -114,7 +114,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('d') => {
             // Check if host is from an included file (read-only)
-            if let Some(host) = app.hosts_state.list.iter().find(|h| h.alias == alias) {
+            if let Some(host) = app.hosts_state.list().iter().find(|h| h.alias == alias) {
                 if host.source_file.is_some() {
                     app.notify_warning(crate::messages::TUNNEL_INCLUDED_READ_ONLY);
                     return;
@@ -147,7 +147,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                 }
                 let askpass = app
                     .hosts_state
-                    .list
+                    .list()
                     .iter()
                     .find(|h| h.alias == alias)
                     .and_then(|h| h.askpass.clone());
@@ -287,7 +287,7 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
     }
 
     let (directive_key, directive_value) = app.tunnels.form.to_directive();
-    let config_backup = app.hosts_state.ssh_config.clone();
+    let config_backup = app.hosts_state.ssh_config().clone();
 
     // If editing, remove the old directive first
     if let Some(idx) = editing {
@@ -296,10 +296,10 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
             let old_value = old_rule.to_directive_value();
             if !app
                 .hosts_state
-                .ssh_config
+                .ssh_config_mut()
                 .remove_forward(alias, &old_key, &old_value)
             {
-                app.hosts_state.ssh_config = config_backup;
+                app.hosts_state.set_ssh_config(config_backup);
                 app.notify_warning(crate::messages::TUNNEL_ORIGINAL_NOT_FOUND);
                 return;
             }
@@ -313,24 +313,24 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
     // Duplicate detection (runs after old directive removal for edits)
     if app
         .hosts_state
-        .ssh_config
+        .ssh_config()
         .has_forward(alias, directive_key, &directive_value)
     {
-        app.hosts_state.ssh_config = config_backup;
+        app.hosts_state.set_ssh_config(config_backup);
         app.notify_warning(crate::messages::TUNNEL_DUPLICATE);
         return;
     }
 
     app.hosts_state
-        .ssh_config
+        .ssh_config_mut()
         .add_forward(alias, directive_key, &directive_value);
-    if let Err(e) = app.hosts_state.ssh_config.write() {
-        app.hosts_state.ssh_config = config_backup;
+    if let Err(e) = app.hosts_state.ssh_config().write() {
+        app.hosts_state.set_ssh_config(config_backup);
         app.notify_error(crate::messages::failed_to_save(&e));
         return;
     }
 
-    app.hosts_state.undo_stack.clear(); // Clear undo buffer — positions may have shifted
+    app.hosts_state.clear_undo(); // Clear undo buffer. Positions may have shifted.
     app.update_last_modified();
     app.refresh_tunnel_list(alias);
     app.reload_hosts();

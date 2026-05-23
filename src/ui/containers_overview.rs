@@ -1083,7 +1083,7 @@ fn build_host_detail_lines(
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     let entry = app.container_state.cache_entry(alias);
-    let host = app.hosts_state.list.iter().find(|h| h.alias == alias);
+    let host = app.hosts_state.list().iter().find(|h| h.alias == alias);
     let collapsed = app.containers_overview.collapsed_hosts.contains(alias);
     let now = current_unix_secs();
 
@@ -4241,7 +4241,7 @@ mod tests {
             tunnel_count: 3,
             ..Default::default()
         };
-        app.hosts_state.list.push(host);
+        app.hosts_state.list_mut().push(host);
         let text = host_detail_text(&app, "host-tc", 1, 1);
         assert!(text.contains("Tunnels"));
         assert!(text.contains("3"));

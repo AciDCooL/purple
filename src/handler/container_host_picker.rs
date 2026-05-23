@@ -18,7 +18,7 @@ use crate::event::AppEvent;
 /// hosts use `r`/`R` instead — so they are filtered out here.
 pub(crate) fn uncached_aliases(app: &App) -> Vec<String> {
     app.hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| !app.container_state.cache_contains(&h.alias))
         .map(|h| h.alias.clone())
@@ -31,7 +31,7 @@ pub(crate) fn uncached_aliases(app: &App) -> Vec<String> {
 pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
     let query = app.ui.container_host_picker_query.to_lowercase();
     app.hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| !app.container_state.cache_contains(&h.alias))
         .filter(|h| {
@@ -110,7 +110,7 @@ fn reset_cursor_after_query_change(app: &mut App) {
 fn spawn_initial_listing(app: &mut App, alias: String, events_tx: &mpsc::Sender<AppEvent>) {
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());

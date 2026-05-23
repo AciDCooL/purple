@@ -100,13 +100,13 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
             .map(|row| match row {
                 crate::app::ProviderRow::Header { name, .. } => app
                     .hosts_state
-                    .list
+                    .list()
                     .iter()
                     .filter(|h| h.stale.is_some() && h.provider.as_deref() == Some(name.as_str()))
                     .count(),
                 crate::app::ProviderRow::Leaf { id } => app
                     .hosts_state
-                    .list
+                    .list()
                     .iter()
                     .filter(|h| {
                         h.stale.is_some()
@@ -224,7 +224,7 @@ fn render_header_line(
 
     let stale_count = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| h.stale.is_some() && h.provider.as_deref() == Some(name))
         .count();
@@ -267,7 +267,7 @@ fn render_leaf_line(
 
     let stale_count = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| {
             h.stale.is_some()

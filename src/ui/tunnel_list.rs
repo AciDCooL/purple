@@ -10,7 +10,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
     let is_active = app.tunnels.active_contains(alias);
     let is_readonly = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .any(|h| h.alias == alias && h.source_file.is_some());
 

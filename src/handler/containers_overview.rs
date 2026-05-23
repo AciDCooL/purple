@@ -206,7 +206,7 @@ fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     let cached_runtime = app.container_state.cache_entry(&alias).map(|e| e.runtime);
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
@@ -253,7 +253,7 @@ pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEv
         if app.container_state.cache_contains(&alias) {
             continue;
         }
-        let Some(host) = app.hosts_state.list.iter().find(|h| h.alias == alias) else {
+        let Some(host) = app.hosts_state.list().iter().find(|h| h.alias == alias) else {
             continue;
         };
         if host.hostname.is_empty() {
@@ -376,7 +376,7 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     for (alias, entry) in app.container_state.cache() {
         let askpass = app
             .hosts_state
-            .list
+            .list()
             .iter()
             .find(|h| h.alias == *alias)
             .and_then(|h| h.askpass.clone());
@@ -485,7 +485,7 @@ fn selected_running_row_with_runtime(
     let runtime = entry.runtime;
     let (askpass, stale_hint) = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == row.alias)
         .map(|h| {
@@ -875,7 +875,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             // empty list, which reads as a bug. Mirror the tunnels-tab
             // guard pattern: notify the user and short-circuit so the
             // picker only opens when it has something to pick from.
-            if app.hosts_state.list.is_empty() {
+            if app.hosts_state.list().is_empty() {
                 app.notify_warning(crate::messages::PICKER_NO_HOSTS);
                 return;
             }
@@ -1005,7 +1005,7 @@ pub(super) fn ensure_inspect_for_selected(app: &mut App, events_tx: &mpsc::Sende
 
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
@@ -1061,7 +1061,7 @@ pub(crate) fn prefetch_inspect_for_listing(
         .as_secs();
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
@@ -1162,7 +1162,7 @@ pub(super) fn ensure_logs_for_selected(app: &mut App, events_tx: &mpsc::Sender<A
 
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
@@ -1242,7 +1242,7 @@ pub(super) fn ensure_inspect_for_host_header(app: &mut App, events_tx: &mpsc::Se
         .as_secs();
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
@@ -1347,7 +1347,7 @@ pub(super) fn ensure_list_for_selected_host(app: &mut App, events_tx: &mpsc::Sen
 
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());

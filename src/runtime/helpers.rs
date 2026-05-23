@@ -450,16 +450,18 @@ where
 pub fn apply_saved_sort(app: &mut App) {
     let saved = crate::preferences::load_sort_mode();
     let group = crate::preferences::load_group_by();
-    app.hosts_state.sort_mode = saved;
-    app.hosts_state.group_by = group;
-    app.hosts_state.view_mode = crate::preferences::load_view_mode();
+    app.hosts_state.set_sort_mode(saved);
+    app.hosts_state.set_group_by_raw(group);
+    app.hosts_state
+        .set_view_mode(crate::preferences::load_view_mode());
     app.containers_overview.hydrate_from_prefs();
     if app.clear_stale_group_tag() {
-        if let Err(e) = crate::preferences::save_group_by(&app.hosts_state.group_by) {
+        if let Err(e) = crate::preferences::save_group_by(app.hosts_state.group_by()) {
             app.notify_error(crate::messages::group_pref_reset_failed(&e));
         }
     }
-    if saved != app::SortMode::Original || !matches!(app.hosts_state.group_by, app::GroupBy::None) {
+    if saved != app::SortMode::Original || !matches!(app.hosts_state.group_by(), app::GroupBy::None)
+    {
         app.apply_sort();
         app.select_first_host();
     }

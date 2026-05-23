@@ -270,7 +270,7 @@ fn requeue_logs_fetch(app: &mut App, alias: String, container_id: String, contai
     let runtime = entry.runtime;
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());

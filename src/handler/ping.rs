@@ -23,7 +23,7 @@ pub(crate) fn refresh_selected_if_stale(app: &mut App, events_tx: &mpsc::Sender<
         let bastion_alias = host.proxy_jump.clone();
         match app
             .hosts_state
-            .list
+            .list()
             .iter()
             .find(|h| h.alias == bastion_alias)
         {
@@ -72,7 +72,7 @@ pub(super) fn ping_selected_host(
             let bastion_alias = host.proxy_jump.clone();
             if let Some(bastion) = app
                 .hosts_state
-                .list
+                .list()
                 .iter()
                 .find(|h| h.alias == bastion_alias)
             {

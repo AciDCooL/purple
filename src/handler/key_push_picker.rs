@@ -14,7 +14,7 @@ use crate::ssh_config::model::HostEntry;
 /// (`toggle_at_cursor` / `toggle_select_all_eligible`) refuses to select
 /// them. Picker policy lives in the handler layer, not the UI.
 pub(crate) fn pickable_hosts(app: &App) -> impl Iterator<Item = &HostEntry> {
-    app.hosts_state.list.iter()
+    app.hosts_state.list().iter()
 }
 
 /// True when a host is purple-Vault-managed: either a `# purple:vault-ssh`

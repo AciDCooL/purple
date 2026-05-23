@@ -55,7 +55,7 @@ pub fn render(frame: &mut Frame, app: &App, index: usize) {
         for alias in key.linked_hosts.iter().take(max_visible_hosts) {
             let hostname = app
                 .hosts_state
-                .list
+                .list()
                 .iter()
                 .find(|h| h.alias == *alias)
                 .map(|h| h.hostname.as_str())

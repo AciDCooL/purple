@@ -74,7 +74,7 @@ fn queue_exec_with_command(
     let runtime = entry.runtime;
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());

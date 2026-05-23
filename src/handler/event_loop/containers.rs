@@ -24,7 +24,7 @@ pub(crate) fn handle_container_listing(
     // re-populated with an orphan and the next save would write it
     // back to disk. Drop the result silently in that case but still
     // tick the batch driver so an `R`-batch can complete cleanly.
-    if !app.hosts_state.list.iter().any(|h| h.alias == alias) {
+    if !app.hosts_state.list().iter().any(|h| h.alias == alias) {
         log::debug!(
             "[purple] container_listing dropped: alias={} no longer in config",
             alias
@@ -203,7 +203,7 @@ pub(crate) fn handle_container_inspect_complete(
 ) {
     // Race guard mirrors handle_container_listing: drop the result
     // when the host (and therefore its containers) is gone.
-    if !app.hosts_state.list.iter().any(|h| h.alias == alias) {
+    if !app.hosts_state.list().iter().any(|h| h.alias == alias) {
         log::debug!(
             "[purple] container_inspect_complete dropped: alias={} no longer in config",
             alias
@@ -254,7 +254,7 @@ pub(crate) fn handle_container_logs_tail_complete(
     container_id: String,
     result: Result<Vec<String>, String>,
 ) {
-    if !app.hosts_state.list.iter().any(|h| h.alias == alias) {
+    if !app.hosts_state.list().iter().any(|h| h.alias == alias) {
         log::debug!(
             "[purple] container_logs_tail_complete dropped: alias={} no longer in config",
             alias

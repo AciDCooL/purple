@@ -160,10 +160,10 @@ fn run_or_prompt_params(
         });
     } else if terminal_mode {
         app.snippets.set_pending(Some((snippet, target_aliases)));
-        app.hosts_state.multi_select.clear();
+        app.hosts_state.clear_multi_select();
         app.set_screen(Screen::HostList);
     } else {
-        app.hosts_state.multi_select.clear();
+        app.hosts_state.clear_multi_select();
         start_snippet_output(app, &snippet, &target_aliases, events_tx);
     }
 }
@@ -185,7 +185,7 @@ fn start_snippet_output(
         .map(|alias| {
             let askpass = app
                 .hosts_state
-                .list
+                .list()
                 .iter()
                 .find(|h| h.alias == *alias)
                 .and_then(|h| h.askpass.clone())
@@ -527,10 +527,10 @@ pub(super) fn handle_param_form_key(
 
             if terminal_mode {
                 app.snippets.set_pending(Some((resolved, target_aliases)));
-                app.hosts_state.multi_select.clear();
+                app.hosts_state.clear_multi_select();
                 app.set_screen(Screen::HostList);
             } else {
-                app.hosts_state.multi_select.clear();
+                app.hosts_state.clear_multi_select();
                 start_snippet_output(app, &resolved, &target_aliases, events_tx);
             }
         }

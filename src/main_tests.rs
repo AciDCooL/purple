@@ -953,15 +953,15 @@ fn import_successful_sets_success_status() {
     std::fs::write(&hosts_file, "web.example.com\ndb.example.com\n").unwrap();
 
     let result =
-        import::import_from_file(&mut app.hosts_state.ssh_config, &hosts_file, Some("test"));
+        import::import_from_file(app.hosts_state.ssh_config_mut(), &hosts_file, Some("test"));
     let (imported, skipped, _, _) = result.unwrap();
     assert_eq!(imported, 2);
     assert_eq!(skipped, 0);
 
     // Write should succeed
-    assert!(app.hosts_state.ssh_config.write().is_ok());
+    assert!(app.hosts_state.ssh_config().write().is_ok());
     app.reload_hosts();
-    assert_eq!(app.hosts_state.list.len(), 2);
+    assert_eq!(app.hosts_state.list().len(), 2);
 
     // Verify the status message format
     let msg = format!(
@@ -999,13 +999,13 @@ fn import_all_duplicates_sets_status() {
     std::fs::write(&hosts_file, "web.example.com\n").unwrap();
 
     // First import
-    let _ = import::import_from_file(&mut app.hosts_state.ssh_config, &hosts_file, None);
-    let _ = app.hosts_state.ssh_config.write();
+    let _ = import::import_from_file(app.hosts_state.ssh_config_mut(), &hosts_file, None);
+    let _ = app.hosts_state.ssh_config().write();
     app.reload_hosts();
 
     // Second import - all duplicates
     let (imported, skipped, _, _) =
-        import::import_from_file(&mut app.hosts_state.ssh_config, &hosts_file, None).unwrap();
+        import::import_from_file(app.hosts_state.ssh_config_mut(), &hosts_file, None).unwrap();
     assert_eq!(imported, 0);
     assert_eq!(skipped, 1);
 
@@ -1038,22 +1038,22 @@ fn import_write_failure_rolls_back_config() {
         bom: false,
     };
     let mut app = App::new(config);
-    let config_backup = app.hosts_state.ssh_config.clone();
+    let config_backup = app.hosts_state.ssh_config().clone();
 
     let hosts_file = dir.join("hosts.txt");
     std::fs::write(&hosts_file, "web.example.com\n").unwrap();
 
     let (imported, _, _, _) =
-        import::import_from_file(&mut app.hosts_state.ssh_config, &hosts_file, None).unwrap();
+        import::import_from_file(app.hosts_state.ssh_config_mut(), &hosts_file, None).unwrap();
     assert_eq!(imported, 1);
 
     // Write should fail because parent dir doesn't exist
-    let write_result = app.hosts_state.ssh_config.write();
+    let write_result = app.hosts_state.ssh_config().write();
     assert!(write_result.is_err());
 
     // After failure, rollback should restore config
-    app.hosts_state.ssh_config = config_backup;
-    let hosts = app.hosts_state.ssh_config.host_entries();
+    app.hosts_state.set_ssh_config(config_backup);
+    let hosts = app.hosts_state.ssh_config().host_entries();
     assert_eq!(hosts.len(), 0, "config should be rolled back to empty");
 
     let _ = std::fs::remove_dir_all(&dir);

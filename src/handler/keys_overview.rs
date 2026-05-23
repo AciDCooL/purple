@@ -289,7 +289,7 @@ fn open_push_picker(app: &mut App) {
     // reads as a bug. Notify and short-circuit so the picker only
     // opens when it has something to pick from. Matches the
     // tunnels-tab / containers-tab guard pattern.
-    if app.hosts_state.list.is_empty() {
+    if app.hosts_state.list().is_empty() {
         app.notify_warning(crate::messages::PICKER_NO_HOSTS);
         return;
     }
@@ -376,7 +376,7 @@ mod tests {
     /// picker-state reset do not care about the host count itself.
     fn seed_one_host(app: &mut App) {
         app.hosts_state
-            .list
+            .list_mut()
             .push(crate::ssh_config::model::HostEntry {
                 alias: "h1".into(),
                 ..Default::default()

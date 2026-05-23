@@ -273,7 +273,7 @@ pub(super) fn submit_form(app: &mut App) {
     let old_askpass = match &app.screen {
         Screen::EditHost { alias } => app
             .hosts_state
-            .list
+            .list()
             .iter()
             .find(|h| h.alias == *alias)
             .and_then(|h| h.askpass.clone()),
@@ -291,7 +291,7 @@ pub(super) fn submit_form(app: &mut App) {
     match result {
         Ok(msg) => {
             // Clear undo buffer after successful write
-            app.hosts_state.undo_stack.clear();
+            app.hosts_state.clear_undo();
             // Handle keychain changes on edit
             let mut final_msg = msg;
             if old_askpass.as_deref() == Some("keychain") {
@@ -334,9 +334,12 @@ pub(super) fn submit_form(app: &mut App) {
     // every alias-keyed cache and persistent state in one step, so
     // submit_form no longer needs a separate migration call here.
     if let Screen::EditHost { ref alias } = app.screen {
-        let _ = app.hosts_state.ssh_config.clear_host_stale(alias);
+        let _ = app.hosts_state.ssh_config_mut().clear_host_stale(alias);
         if *alias != target_alias {
-            let _ = app.hosts_state.ssh_config.clear_host_stale(&target_alias);
+            let _ = app
+                .hosts_state
+                .ssh_config_mut()
+                .clear_host_stale(&target_alias);
         }
     }
     app.close_host_form_after_save(&target_alias);

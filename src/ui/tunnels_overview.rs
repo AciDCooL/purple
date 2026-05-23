@@ -80,10 +80,10 @@ pub(crate) fn visible_pairs(app: &App) -> Vec<(String, TunnelRule)> {
         .map(|q| q.to_lowercase())
         .filter(|q| !q.is_empty());
     let mut pairs: Vec<(String, TunnelRule)> = Vec::new();
-    for host in &app.hosts_state.list {
+    for host in app.hosts_state.list() {
         let rules = app
             .hosts_state
-            .ssh_config
+            .ssh_config()
             .find_tunnel_directives(&host.alias);
         for rule in rules {
             if let Some(ref q) = query {
@@ -564,11 +564,11 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
     let mut block = if search_active {
         let total: usize = app
             .hosts_state
-            .list
+            .list()
             .iter()
             .map(|h| {
                 app.hosts_state
-                    .ssh_config
+                    .ssh_config()
                     .find_tunnel_directives(&h.alias)
                     .len()
             })
@@ -755,11 +755,11 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: Rect, visible_count: us
     let query = app.search.query().unwrap_or("");
     let total: usize = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .map(|h| {
             app.hosts_state
-                .ssh_config
+                .ssh_config()
                 .find_tunnel_directives(&h.alias)
                 .len()
         })

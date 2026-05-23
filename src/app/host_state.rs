@@ -12,23 +12,23 @@ use crate::ui::theme;
 /// deletions, the multi-select set for bulk snippet runs and all sort /
 /// group / view UI-state. Pure state container.
 pub struct HostState {
-    pub ssh_config: SshConfigFile,
-    pub list: Vec<HostEntry>,
-    pub patterns: Vec<PatternEntry>,
-    pub display_list: Vec<HostListItem>,
-    pub render_cache: HostListRenderCache,
-    pub undo_stack: Vec<DeletedHost>,
+    pub(in crate::app) ssh_config: SshConfigFile,
+    pub(in crate::app) list: Vec<HostEntry>,
+    pub(in crate::app) patterns: Vec<PatternEntry>,
+    pub(in crate::app) display_list: Vec<HostListItem>,
+    pub(in crate::app) render_cache: HostListRenderCache,
+    pub(in crate::app) undo_stack: Vec<DeletedHost>,
     /// Host indices selected for multi-host snippet execution (space to toggle).
-    pub multi_select: HashSet<usize>,
-    pub sort_mode: SortMode,
-    pub group_by: GroupBy,
-    pub view_mode: ViewMode,
+    pub(in crate::app) multi_select: HashSet<usize>,
+    pub(in crate::app) sort_mode: SortMode,
+    pub(in crate::app) group_by: GroupBy,
+    pub(in crate::app) view_mode: ViewMode,
     /// Currently active group filter. None = show all groups.
-    pub group_filter: Option<String>,
+    pub(in crate::app) group_filter: Option<String>,
     /// Ordered list of group names from the current display list.
-    pub group_tab_order: Vec<String>,
+    pub(in crate::app) group_tab_order: Vec<String>,
     /// Host/pattern counts per group (computed before group filtering).
-    pub group_host_counts: HashMap<String, usize>,
+    pub(in crate::app) group_host_counts: HashMap<String, usize>,
 }
 
 impl HostState {
@@ -84,6 +84,133 @@ impl HostState {
             self.multi_select.remove(&idx);
         }
         inserted
+    }
+
+    pub fn ssh_config(&self) -> &SshConfigFile {
+        &self.ssh_config
+    }
+
+    pub fn ssh_config_mut(&mut self) -> &mut SshConfigFile {
+        &mut self.ssh_config
+    }
+
+    pub fn set_ssh_config(&mut self, config: SshConfigFile) {
+        self.ssh_config = config;
+    }
+
+    pub fn list(&self) -> &Vec<HostEntry> {
+        &self.list
+    }
+
+    pub fn list_mut(&mut self) -> &mut Vec<HostEntry> {
+        &mut self.list
+    }
+
+    pub fn patterns(&self) -> &Vec<PatternEntry> {
+        &self.patterns
+    }
+
+    pub fn patterns_mut(&mut self) -> &mut Vec<PatternEntry> {
+        &mut self.patterns
+    }
+
+    pub fn display_list(&self) -> &Vec<HostListItem> {
+        &self.display_list
+    }
+
+    pub fn display_list_mut(&mut self) -> &mut Vec<HostListItem> {
+        &mut self.display_list
+    }
+
+    pub fn render_cache(&self) -> &HostListRenderCache {
+        &self.render_cache
+    }
+
+    pub fn render_cache_mut(&mut self) -> &mut HostListRenderCache {
+        &mut self.render_cache
+    }
+
+    /// Invalidate the host-list render cache after a mutation.
+    pub fn invalidate_render_cache(&mut self) {
+        self.render_cache.invalidate();
+    }
+
+    pub fn undo_stack(&self) -> &Vec<DeletedHost> {
+        &self.undo_stack
+    }
+
+    pub fn undo_stack_mut(&mut self) -> &mut Vec<DeletedHost> {
+        &mut self.undo_stack
+    }
+
+    /// Drop the most recent deletion off the undo stack, if any.
+    pub fn pop_undo(&mut self) -> Option<DeletedHost> {
+        self.undo_stack.pop()
+    }
+
+    /// Clear the undo stack. Positions may have shifted after a reload.
+    pub fn clear_undo(&mut self) {
+        self.undo_stack.clear();
+    }
+
+    pub fn multi_select(&self) -> &HashSet<usize> {
+        &self.multi_select
+    }
+
+    pub fn multi_select_mut(&mut self) -> &mut HashSet<usize> {
+        &mut self.multi_select
+    }
+
+    /// Clear the multi-select set. Idempotent.
+    pub fn clear_multi_select(&mut self) {
+        self.multi_select.clear();
+    }
+
+    pub fn sort_mode(&self) -> SortMode {
+        self.sort_mode
+    }
+
+    pub fn set_sort_mode(&mut self, mode: SortMode) {
+        self.sort_mode = mode;
+    }
+
+    /// Advance the sort mode to the next variant in the cycle.
+    pub fn advance_sort_mode(&mut self) {
+        self.sort_mode = self.sort_mode.next();
+    }
+
+    pub fn group_by(&self) -> &GroupBy {
+        &self.group_by
+    }
+
+    /// Set the group-by mode without touching the active group filter.
+    /// Use when restoring saved state. `set_group_by` resets the filter.
+    pub fn set_group_by_raw(&mut self, by: GroupBy) {
+        self.group_by = by;
+    }
+
+    pub fn view_mode(&self) -> ViewMode {
+        self.view_mode
+    }
+
+    pub fn set_view_mode(&mut self, mode: ViewMode) {
+        self.view_mode = mode;
+    }
+
+    pub fn group_filter(&self) -> Option<&String> {
+        self.group_filter.as_ref()
+    }
+
+    pub fn set_group_filter(&mut self, filter: Option<String>) {
+        self.group_filter = filter;
+    }
+
+    pub fn group_tab_order(&self) -> &Vec<String> {
+        &self.group_tab_order
+    }
+
+    pub fn group_host_counts(&self) -> &HashMap<String, usize> {
+        &self.group_host_counts
     }
 }
 
@@ -441,5 +568,86 @@ mod tests {
         assert!(s.multi_select.contains(&1));
         assert!(s.multi_select.contains(&2));
         assert!(s.multi_select.contains(&3));
+    }
+
+    #[test]
+    fn advance_sort_mode_steps_to_next_variant() {
+        let mut s = HostState::default();
+        assert_eq!(s.sort_mode, SortMode::Original);
+        s.advance_sort_mode();
+        assert_eq!(s.sort_mode, SortMode::AlphaAlias);
+    }
+
+    #[test]
+    fn advance_sort_mode_wraps_from_last_to_first() {
+        let mut s = HostState {
+            sort_mode: SortMode::Status,
+            ..Default::default()
+        };
+        s.advance_sort_mode();
+        assert_eq!(s.sort_mode, SortMode::Original);
+    }
+
+    #[test]
+    fn set_group_by_raw_keeps_active_filter() {
+        let mut s = HostState {
+            group_filter: Some("acme".to_string()),
+            ..Default::default()
+        };
+        s.set_group_by_raw(GroupBy::Provider);
+        assert!(matches!(s.group_by, GroupBy::Provider));
+        assert_eq!(s.group_filter.as_deref(), Some("acme"));
+    }
+
+    #[test]
+    fn clear_multi_select_empties_the_set() {
+        let mut s = HostState::default();
+        s.multi_select.insert(1);
+        s.multi_select.insert(2);
+        s.clear_multi_select();
+        assert!(s.multi_select.is_empty());
+    }
+
+    #[test]
+    fn pop_undo_returns_most_recent_deletion() {
+        let mut s = HostState::default();
+        s.undo_stack.push(DeletedHost {
+            element: ConfigElement::GlobalLine(String::new()),
+            position: 0,
+        });
+        s.undo_stack.push(DeletedHost {
+            element: ConfigElement::GlobalLine(String::new()),
+            position: 7,
+        });
+        let popped = s.pop_undo().expect("undo entry present");
+        assert_eq!(popped.position, 7);
+        assert_eq!(s.undo_stack.len(), 1);
+    }
+
+    #[test]
+    fn pop_undo_returns_none_when_empty() {
+        let mut s = HostState::default();
+        assert!(s.pop_undo().is_none());
+    }
+
+    #[test]
+    fn clear_undo_empties_the_stack() {
+        let mut s = HostState::default();
+        s.undo_stack.push(DeletedHost {
+            element: ConfigElement::GlobalLine(String::new()),
+            position: 0,
+        });
+        s.clear_undo();
+        assert!(s.undo_stack.is_empty());
+    }
+
+    #[test]
+    fn invalidate_render_cache_clears_cached_fields() {
+        let mut s = HostState::default();
+        s.render_cache.history_width = Some(12);
+        s.render_cache.group_alias_map = Some(HashMap::new());
+        s.invalidate_render_cache();
+        assert!(s.render_cache.history_width.is_none());
+        assert!(s.render_cache.group_alias_map.is_none());
     }
 }

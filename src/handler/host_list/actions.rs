@@ -77,7 +77,7 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
         return;
     }
     let provider_config = crate::providers::config::ProviderConfig::load();
-    let entries = app.hosts_state.ssh_config.host_entries();
+    let entries = app.hosts_state.ssh_config().host_entries();
     let mut signable: Vec<crate::vault_ssh::VaultSignTarget> = Vec::new();
     let mut pubkey_error: Option<String> = None;
     for e in &entries {

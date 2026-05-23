@@ -258,7 +258,8 @@ fn visual_host_list_detail_panel() {
     let mut app = demo::build_demo_app();
     // Detail panel renders alongside the host list when view_mode is Detailed
     // and the terminal is wide enough (DETAIL_MIN_WIDTH).
-    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    app.hosts_state
+        .set_view_mode(crate::app::ViewMode::Detailed);
     let actual = render_screen(&mut app);
     assert_golden("host_list_detail_panel", &actual);
 }
@@ -437,7 +438,7 @@ fn visual_keys_overview_no_vault() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
     app.keys.list_state.select(Some(0));
-    for host in &mut app.hosts_state.list {
+    for host in app.hosts_state.list_mut() {
         host.vault_ssh = None;
     }
     app.vault.clear_cert_cache();
@@ -481,7 +482,7 @@ fn visual_keys_overview_many_linked_hosts() {
     app.keys.list[0].linked_hosts = synthetic.clone();
     for alias in &synthetic {
         app.hosts_state
-            .list
+            .list_mut()
             .push(crate::ssh_config::model::HostEntry {
                 alias: alias.clone(),
                 hostname: format!("10.0.{}.{}", alias.len(), alias.len() * 3 % 250),
@@ -574,7 +575,7 @@ fn visual_keys_push_picker_selected() {
     // added or removed from the demo this assertion fails with a clear
     // message instead of an opaque golden diff.
     assert_eq!(
-        app.hosts_state.list.len(),
+        app.hosts_state.list().len(),
         31,
         "demo host count drifted; update this assertion and regenerate the golden"
     );
@@ -585,7 +586,7 @@ fn visual_keys_push_picker_selected() {
     // Pick two non-vault hosts so the selected glyph renders.
     let to_select: Vec<String> = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| h.vault_ssh.is_none())
         .take(2)
@@ -608,7 +609,7 @@ fn visual_keys_push_confirm() {
     app.top_page = crate::app::TopPage::Keys;
     let aliases: Vec<String> = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| h.vault_ssh.is_none())
         .take(3)
@@ -642,10 +643,10 @@ fn visual_host_list_empty() {
     // placeholder (no "Select a host to see details." floating top-right).
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.hosts_state.list.clear();
-    app.hosts_state.patterns.clear();
-    app.hosts_state.display_list.clear();
-    app.hosts_state.ssh_config.elements = Vec::new();
+    app.hosts_state.list_mut().clear();
+    app.hosts_state.patterns_mut().clear();
+    app.hosts_state.display_list_mut().clear();
+    app.hosts_state.ssh_config_mut().elements = Vec::new();
     app.tunnels.clear_active();
     app.tunnels.demo_live_snapshots_mut().clear();
     let actual = render_screen(&mut app);
@@ -674,8 +675,8 @@ fn visual_tunnels_overview_empty() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Tunnels;
-    app.hosts_state.ssh_config.elements = Vec::new();
-    app.hosts_state.list.clear();
+    app.hosts_state.ssh_config_mut().elements = Vec::new();
+    app.hosts_state.list_mut().clear();
     app.tunnels.clear_active();
     app.tunnels.demo_live_snapshots_mut().clear();
     let actual = render_screen(&mut app);
@@ -1400,8 +1401,8 @@ fn visual_bulk_tag_editor() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     // Bulk tag editor operates on multi_select. Populate it with a couple of demo hosts.
-    app.hosts_state.multi_select.insert(0);
-    app.hosts_state.multi_select.insert(1);
+    app.hosts_state.multi_select_mut().insert(0);
+    app.hosts_state.multi_select_mut().insert(1);
     app.screen = Screen::BulkTagEditor;
     let actual = render_screen(&mut app);
     assert_golden("bulk_tag_editor", &actual);
@@ -1570,10 +1571,10 @@ fn visual_whats_new() {
 /// Select a host by alias in the main list so detail_panel renders it.
 fn select_host_by_alias(app: &mut App, alias: &str) {
     use crate::app::HostListItem;
-    let pos = app.hosts_state.display_list.iter().position(|item| {
+    let pos = app.hosts_state.display_list().iter().position(|item| {
         if let HostListItem::Host { index } = item {
             app.hosts_state
-                .list
+                .list()
                 .get(*index)
                 .map(|h| h.alias == alias)
                 .unwrap_or(false)
@@ -1601,7 +1602,8 @@ fn visual_host_detail_vault_expired() {
         ),
     );
     select_host_by_alias(&mut app, "gateway-vpn");
-    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    app.hosts_state
+        .set_view_mode(crate::app::ViewMode::Detailed);
     let actual = render_screen(&mut app);
     assert_golden("host_detail_vault_expired", &actual);
 }
@@ -1618,14 +1620,15 @@ fn visual_host_detail_long_proxy_chain() {
     // All three are in the demo host list, so they render as known hops.
     if let Some(h) = app
         .hosts_state
-        .list
+        .list_mut()
         .iter_mut()
         .find(|h| h.alias == "customer-db-1")
     {
         h.proxy_jump = "customer-jump,bastion-ams,gateway-vpn".to_string();
     }
     select_host_by_alias(&mut app, "customer-db-1");
-    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    app.hosts_state
+        .set_view_mode(crate::app::ViewMode::Detailed);
     let actual = render_screen(&mut app);
     assert_golden("host_detail_long_proxy_chain", &actual);
 }
@@ -1641,7 +1644,8 @@ fn visual_host_detail_no_provider_tag() {
     let mut app = demo::build_demo_app();
     app.vault.remove_cert("prod-eu2");
     select_host_by_alias(&mut app, "prod-eu2");
-    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    app.hosts_state
+        .set_view_mode(crate::app::ViewMode::Detailed);
     let actual = render_screen(&mut app);
     assert_golden("host_detail_no_provider_tag", &actual);
 }
@@ -1658,7 +1662,8 @@ fn visual_host_detail_no_containers() {
     // Ensure there is definitely no container cache entry.
     app.container_state.remove_cache_entry("prod-eu1");
     select_host_by_alias(&mut app, "prod-eu1");
-    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    app.hosts_state
+        .set_view_mode(crate::app::ViewMode::Detailed);
     let actual = render_screen(&mut app);
     assert_golden("host_detail_no_containers", &actual);
 }
@@ -1673,7 +1678,8 @@ fn visual_host_detail_with_tags() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     select_host_by_alias(&mut app, "aws-api-prod");
-    app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
+    app.hosts_state
+        .set_view_mode(crate::app::ViewMode::Detailed);
     let actual = render_screen(&mut app);
     assert_golden("host_detail_with_tags", &actual);
 }

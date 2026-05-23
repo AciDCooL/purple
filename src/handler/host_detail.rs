@@ -14,10 +14,16 @@ pub(super) fn handle_tag_input(app: &mut App, key: KeyEvent) {
                 if let Some(host) = app.selected_host() {
                     let alias = host.alias.clone();
                     let old_tags = host.tags.clone();
-                    let _ = app.hosts_state.ssh_config.set_host_tags(&alias, &tags);
-                    if let Err(e) = app.hosts_state.ssh_config.write() {
+                    let _ = app
+                        .hosts_state
+                        .ssh_config_mut()
+                        .set_host_tags(&alias, &tags);
+                    if let Err(e) = app.hosts_state.ssh_config().write() {
                         // Restore old tags on write failure
-                        let _ = app.hosts_state.ssh_config.set_host_tags(&alias, &old_tags);
+                        let _ = app
+                            .hosts_state
+                            .ssh_config_mut()
+                            .set_host_tags(&alias, &old_tags);
                         app.notify_error(crate::messages::failed_to_save(&e));
                     } else {
                         app.update_last_modified();
@@ -71,13 +77,13 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             });
         }
         KeyCode::Char('e') => {
-            if let Some(host) = app.hosts_state.list.get(index).cloned() {
+            if let Some(host) = app.hosts_state.list().get(index).cloned() {
                 let hint = super::host_form::stale_hint_for(&host);
                 app.open_host_edit_form(host, hint);
             }
         }
         KeyCode::Char('T') => {
-            if let Some(host) = app.hosts_state.list.get(index) {
+            if let Some(host) = app.hosts_state.list().get(index) {
                 let stale_hint = super::host_form::stale_hint_for(host);
                 let alias = host.alias.clone();
                 if let Some(hint) = stale_hint {
@@ -92,7 +98,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('r') => {
-            if let Some(host) = app.hosts_state.list.get(index) {
+            if let Some(host) = app.hosts_state.list().get(index) {
                 let stale_hint = super::host_form::stale_hint_for(host);
                 let alias = host.alias.clone();
                 if let Some(hint) = stale_hint {

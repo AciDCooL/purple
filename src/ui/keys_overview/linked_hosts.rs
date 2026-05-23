@@ -50,7 +50,7 @@ pub(super) fn render_linked_hosts(frame: &mut Frame, app: &App, key: &SshKeyInfo
         .map(|alias| {
             let hostname = app
                 .hosts_state
-                .list
+                .list()
                 .iter()
                 .find(|h| h.alias == *alias)
                 .map(|h| h.hostname.clone())

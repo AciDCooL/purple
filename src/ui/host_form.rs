@@ -122,7 +122,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let vault_provider_hint: Option<(String, String)> =
         if let Screen::EditHost { alias } = &app.screen {
             app.hosts_state
-                .list
+                .list()
                 .iter()
                 .find(|h| h.alias == *alias)
                 .and_then(|h| h.provider.as_ref())
@@ -146,7 +146,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let vault_addr_provider_hint: Option<(String, String)> =
         if let Screen::EditHost { alias } = &app.screen {
             app.hosts_state
-                .list
+                .list()
                 .iter()
                 .find(|h| h.alias == *alias)
                 .and_then(|h| h.provider.as_ref())

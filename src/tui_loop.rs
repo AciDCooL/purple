@@ -23,7 +23,7 @@ pub fn run_tui(mut app: App) -> Result<()> {
         if let Some(home) = dirs::home_dir() {
             let purple_dir = home.join(".purple");
             if let Some(has_backup) = first_launch_init(&purple_dir, app.reload.config_path()) {
-                let host_count = app.hosts_state.list.len();
+                let host_count = app.hosts_state.list().len();
                 let known_hosts_count = if host_count == 0 {
                     import::count_known_hosts_candidates()
                 } else {
@@ -135,12 +135,12 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
     if app.ping.auto_ping() {
         let hosts_to_ping: Vec<(String, String, u16)> = app
             .hosts_state
-            .list
+            .list()
             .iter()
             .filter(|h| !h.hostname.is_empty() && h.proxy_jump.is_empty())
             .map(|h| (h.alias.clone(), h.hostname.clone(), h.port))
             .collect();
-        for h in &app.hosts_state.list {
+        for h in app.hosts_state.list() {
             if !h.proxy_jump.is_empty() {
                 app.ping
                     .insert_status(h.alias.clone(), app::PingStatus::Skipped);
@@ -164,7 +164,7 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
     // `CertCheckResult` event path as the lazy selection-driven check.
     let vault_aliases: Vec<(String, String)> = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| vault_ssh::has_purple_vault_context(h))
         .filter(|h| !app.vault.is_cert_check_in_flight(&h.alias))
@@ -469,7 +469,7 @@ fn handle_pending_connect(
     };
     let vault_host = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .cloned();
@@ -488,7 +488,7 @@ fn handle_pending_connect(
                 &alias,
                 app.reload.config_path(),
                 &app.providers.config,
-                &mut app.hosts_state.ssh_config,
+                app.hosts_state.ssh_config_mut(),
             );
             if msg.is_some() {
                 app.reload_hosts();
@@ -533,7 +533,7 @@ fn handle_pending_connect(
             &alias,
             app.reload.config_path(),
             &app.providers.config,
-            &mut app.hosts_state.ssh_config,
+            app.hosts_state.ssh_config_mut(),
         );
         if msg.is_some() {
             app.reload_hosts();
@@ -565,7 +565,7 @@ fn handle_pending_connect(
             if code != 255 {
                 app.history.record(&alias);
                 app.record_key_use(&alias, key_activity::now_secs());
-                app.hosts_state.render_cache.invalidate();
+                app.hosts_state.invalidate_render_cache();
             }
             if code != 0 {
                 if let Some((hostname, known_hosts_path)) =
@@ -612,7 +612,8 @@ fn handle_pending_connect(
     terminal.enter()?;
     events.resume();
     *last_config_check = std::time::Instant::now();
-    app.hosts_state.ssh_config = SshConfigFile::parse(app.reload.config_path())?;
+    app.hosts_state
+        .set_ssh_config(SshConfigFile::parse(app.reload.config_path())?);
     app.reload_hosts();
     app.update_last_modified();
     Ok(())
@@ -717,7 +718,7 @@ fn handle_pending_container_exec(
             if code != 255 {
                 app.history.record(&req.alias);
                 app.record_key_use(&req.alias, key_activity::now_secs());
-                app.hosts_state.render_cache.invalidate();
+                app.hosts_state.invalidate_render_cache();
             }
             if code == 0 {
                 app.notify(crate::messages::container_exec_ended(&req.container_name));
@@ -865,7 +866,7 @@ fn handle_pending_snippet(
     for alias in &aliases {
         let askpass = app
             .hosts_state
-            .list
+            .list()
             .iter()
             .find(|h| h.alias == *alias)
             .and_then(|h| h.askpass.clone())
@@ -898,7 +899,7 @@ fn handle_pending_snippet(
                 if r.status.success() {
                     app.history.record(alias);
                     app.record_key_use(alias, key_activity::now_secs());
-                    app.hosts_state.render_cache.invalidate();
+                    app.hosts_state.invalidate_render_cache();
                 } else if multi {
                     eprintln!(
                         "{}",
@@ -932,7 +933,8 @@ fn handle_pending_snippet(
     events.resume();
     *last_config_check = std::time::Instant::now();
     // Reload so sort order (e.g. most recent) reflects the new history.
-    app.hosts_state.ssh_config = SshConfigFile::parse(app.reload.config_path())?;
+    app.hosts_state
+        .set_ssh_config(SshConfigFile::parse(app.reload.config_path())?);
     app.reload_hosts();
     app.update_last_modified();
     Ok(())
@@ -957,7 +959,7 @@ fn tui_teardown(app: &mut App, terminal: &mut tui::Tui) -> Result<()> {
 }
 
 pub(crate) fn current_cert_mtime(alias: &str, app: &app::App) -> Option<std::time::SystemTime> {
-    let host = app.hosts_state.list.iter().find(|h| h.alias == alias)?;
+    let host = app.hosts_state.list().iter().find(|h| h.alias == alias)?;
     let cert_path = vault_ssh::resolve_cert_path(alias, &host.certificate_file).ok()?;
     std::fs::metadata(&cert_path)
         .ok()

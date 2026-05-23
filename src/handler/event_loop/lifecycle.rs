@@ -101,13 +101,13 @@ pub(crate) fn handle_ping_result(
         app.ping.record_check(alias.clone(), now);
         // Propagate bastion status to all ProxyJump dependents.
         app::propagate_ping_to_dependents(
-            &app.hosts_state.list,
+            app.hosts_state.list(),
             app.ping.status_map_mut(),
             &alias,
             &status,
         );
         let mut propagated = 0usize;
-        for h in &app.hosts_state.list {
+        for h in app.hosts_state.list() {
             if h.proxy_jump == alias {
                 app.ping.record_check(h.alias.clone(), now);
                 propagated += 1;
@@ -124,7 +124,7 @@ pub(crate) fn handle_ping_result(
         if app.ping.filter_down_only() {
             app.apply_filter();
         }
-        if app.hosts_state.sort_mode == app::SortMode::Status {
+        if app.hosts_state.sort_mode() == app::SortMode::Status {
             app.apply_sort();
         }
         // Update "last checked" timestamp when all pings are done

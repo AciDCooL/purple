@@ -85,10 +85,10 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             app.running = false;
         }
         KeyCode::Esc => {
-            if app.hosts_state.group_filter.is_some() {
+            if app.hosts_state.group_filter().is_some() {
                 app.clear_group_filter();
-            } else if !app.hosts_state.multi_select.is_empty() {
-                app.hosts_state.multi_select.clear();
+            } else if !app.hosts_state.multi_select().is_empty() {
+                app.hosts_state.clear_multi_select();
             } else if !app.ui.esc_quit_hint_shown
                 && !app.status_center.toast().is_some_and(|t| t.sticky)
             {
@@ -151,7 +151,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             let visible_indices: Vec<usize> = app
                 .hosts_state
-                .display_list
+                .display_list()
                 .iter()
                 .filter_map(|item| match item {
                     crate::app::HostListItem::Host { index } => Some(*index),
@@ -161,12 +161,12 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             let all_selected = !visible_indices.is_empty()
                 && visible_indices
                     .iter()
-                    .all(|idx| app.hosts_state.multi_select.contains(idx));
+                    .all(|idx| app.hosts_state.multi_select().contains(idx));
             if all_selected {
-                app.hosts_state.multi_select.clear();
+                app.hosts_state.clear_multi_select();
             } else {
                 for idx in visible_indices {
-                    app.hosts_state.multi_select.insert(idx);
+                    app.hosts_state.multi_select_mut().insert(idx);
                 }
             }
         }
@@ -236,9 +236,9 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             if let Some(host) = app.selected_host() {
                 let alias = host.alias.clone();
                 if let Some(block) = serialize_host_block(
-                    &app.hosts_state.ssh_config.elements,
+                    &app.hosts_state.ssh_config().elements,
                     &alias,
-                    app.hosts_state.ssh_config.crlf,
+                    app.hosts_state.ssh_config().crlf,
                 ) {
                     match clipboard::copy_to_clipboard(&block) {
                         Ok(()) => {
@@ -277,14 +277,14 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             } else {
                 let hosts_to_ping: Vec<(String, String, u16)> = app
                     .hosts_state
-                    .list
+                    .list()
                     .iter()
                     .filter(|h| !h.hostname.is_empty() && h.proxy_jump.is_empty())
                     .map(|h| (h.alias.clone(), h.hostname.clone(), h.port))
                     .collect();
                 // Mark ProxyJump hosts as Checking (their status will be
                 // inherited from the bastion once it responds).
-                for h in &app.hosts_state.list {
+                for h in app.hosts_state.list() {
                     if !h.proxy_jump.is_empty() {
                         app.ping
                             .insert_status(h.alias.clone(), crate::app::PingStatus::Checking);
@@ -338,7 +338,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             // the bulk tag editor. Otherwise fall back to the single-host
             // tag input bar. `t` consistently means "edit tags" — only the
             // scope changes.
-            if !app.hosts_state.multi_select.is_empty() {
+            if !app.hosts_state.multi_select().is_empty() {
                 if !app.open_bulk_tag_editor() {
                     app.notify_warning(crate::messages::NO_HOSTS_TO_TAG);
                 }
@@ -359,33 +359,33 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             }
         }
         KeyCode::Char('s') => {
-            app.hosts_state.sort_mode = app.hosts_state.sort_mode.next();
+            app.hosts_state.advance_sort_mode();
             app.apply_sort();
-            if let Err(e) = preferences::save_sort_mode(app.hosts_state.sort_mode) {
+            if let Err(e) = preferences::save_sort_mode(app.hosts_state.sort_mode()) {
                 app.notify_error(crate::messages::sorted_by_save_failed(
-                    app.hosts_state.sort_mode.label(),
+                    app.hosts_state.sort_mode().label(),
                     &e,
                 ));
             } else {
                 app.notify(crate::messages::sorted_by(
-                    app.hosts_state.sort_mode.label(),
+                    app.hosts_state.sort_mode().label(),
                 ));
             }
         }
         KeyCode::Char('g') => {
             use crate::app::GroupBy;
-            match &app.hosts_state.group_by {
+            match app.hosts_state.group_by() {
                 GroupBy::None => {
                     app.hosts_state.set_group_by(GroupBy::Provider);
                     app.apply_sort();
-                    if let Err(e) = preferences::save_group_by(&app.hosts_state.group_by) {
+                    if let Err(e) = preferences::save_group_by(app.hosts_state.group_by()) {
                         app.notify_error(crate::messages::grouped_by_save_failed(
-                            &app.hosts_state.group_by.label(),
+                            &app.hosts_state.group_by().label(),
                             &e,
                         ));
                     } else {
                         app.notify(crate::messages::grouped_by(
-                            &app.hosts_state.group_by.label(),
+                            &app.hosts_state.group_by().label(),
                         ));
                     }
                 }
@@ -393,7 +393,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     let user_tags: Vec<String> = {
                         let mut seen = std::collections::HashSet::new();
                         let mut tags = Vec::new();
-                        for host in &app.hosts_state.list {
+                        for host in app.hosts_state.list() {
                             for tag in &host.tags {
                                 if seen.insert(tag.clone()) {
                                     tags.push(tag.clone());
@@ -406,7 +406,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     if user_tags.is_empty() {
                         app.hosts_state.set_group_by(GroupBy::None);
                         app.apply_sort();
-                        if let Err(e) = preferences::save_group_by(&app.hosts_state.group_by) {
+                        if let Err(e) = preferences::save_group_by(app.hosts_state.group_by()) {
                             app.notify_error(crate::messages::ungrouped_save_failed(&e));
                         } else {
                             app.notify(crate::messages::UNGROUPED);
@@ -416,7 +416,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                         // tags as tabs, no picker needed.
                         app.hosts_state.set_group_by(GroupBy::Tag(String::new()));
                         app.apply_sort();
-                        if let Err(e) = preferences::save_group_by(&app.hosts_state.group_by) {
+                        if let Err(e) = preferences::save_group_by(app.hosts_state.group_by()) {
                             app.notify_error(crate::messages::grouped_by_tag_save_failed(&e));
                         } else {
                             app.notify(crate::messages::GROUPED_BY_TAG);
@@ -426,7 +426,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 GroupBy::Tag(_) => {
                     app.hosts_state.set_group_by(GroupBy::None);
                     app.apply_sort();
-                    if let Err(e) = preferences::save_group_by(&app.hosts_state.group_by) {
+                    if let Err(e) = preferences::save_group_by(app.hosts_state.group_by()) {
                         app.notify_error(crate::messages::ungrouped_save_failed(&e));
                     } else {
                         app.notify(crate::messages::UNGROUPED);
@@ -446,14 +446,14 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             app.hosts_state.toggle_view_mode();
             app.ui.detail_toggle_pending = true;
             app.ui.detail_scroll = 0;
-            if let Err(e) = preferences::save_view_mode(app.hosts_state.view_mode) {
+            if let Err(e) = preferences::save_view_mode(app.hosts_state.view_mode()) {
                 log::warn!("[config] Failed to persist view mode: {e}");
             }
         }
-        KeyCode::Char(']') if app.hosts_state.view_mode == ViewMode::Detailed => {
+        KeyCode::Char(']') if app.hosts_state.view_mode() == ViewMode::Detailed => {
             app.ui.detail_scroll = app.ui.detail_scroll.saturating_add(1);
         }
-        KeyCode::Char('[') if app.hosts_state.view_mode == ViewMode::Detailed => {
+        KeyCode::Char('[') if app.hosts_state.view_mode() == ViewMode::Detailed => {
             app.ui.detail_scroll = app.ui.detail_scroll.saturating_sub(1);
         }
         KeyCode::Char('u') => {
@@ -463,12 +463,12 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             // cleared so the next `u` falls through to the deleted-host
             // stack as usual.
             if let Some(snapshot) = app.forms.bulk_tag_undo.take() {
-                let config_backup = app.hosts_state.ssh_config.clone();
+                let config_backup = app.hosts_state.ssh_config().clone();
                 for (alias, tags) in &snapshot {
-                    let _ = app.hosts_state.ssh_config.set_host_tags(alias, tags);
+                    let _ = app.hosts_state.ssh_config_mut().set_host_tags(alias, tags);
                 }
-                if let Err(e) = app.hosts_state.ssh_config.write() {
-                    app.hosts_state.ssh_config = config_backup;
+                if let Err(e) = app.hosts_state.ssh_config().write() {
+                    app.hosts_state.set_ssh_config(config_backup);
                     app.forms.bulk_tag_undo = Some(snapshot);
                     app.notify_error(crate::messages::failed_to_save(&e));
                 } else {
@@ -477,21 +477,23 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     app.reload_hosts();
                     app.notify(crate::messages::restored_tags(count));
                 }
-            } else if let Some(deleted) = app.hosts_state.undo_stack.pop() {
+            } else if let Some(deleted) = app.hosts_state.pop_undo() {
                 let alias = match &deleted.element {
                     ConfigElement::HostBlock(block) => block.host_pattern.clone(),
                     _ => "host".to_string(),
                 };
                 app.hosts_state
-                    .ssh_config
+                    .ssh_config_mut()
                     .insert_host_at(deleted.element, deleted.position);
-                if let Err(e) = app.hosts_state.ssh_config.write() {
+                if let Err(e) = app.hosts_state.ssh_config().write() {
                     // Rollback: remove re-inserted host and restore undo buffer
-                    if let Some((element, position)) =
-                        app.hosts_state.ssh_config.delete_host_undoable(&alias)
+                    if let Some((element, position)) = app
+                        .hosts_state
+                        .ssh_config_mut()
+                        .delete_host_undoable(&alias)
                     {
                         app.hosts_state
-                            .undo_stack
+                            .undo_stack_mut()
                             .push(crate::app::DeletedHost { element, position });
                     }
                     app.notify_error(crate::messages::failed_to_save(&e));
@@ -571,7 +573,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             }
         }
         KeyCode::Char('X') => {
-            let stale = app.hosts_state.ssh_config.stale_hosts();
+            let stale = app.hosts_state.ssh_config().stale_hosts();
             if stale.is_empty() {
                 app.notify_warning(crate::messages::NO_STALE_HOSTS);
             } else {
@@ -610,7 +612,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 return;
             }
             let (aliases, stale_hint): (Vec<String>, Option<String>) =
-                if app.hosts_state.multi_select.is_empty() {
+                if app.hosts_state.multi_select().is_empty() {
                     if let Some(host) = app.selected_host() {
                         let hint = super::host_form::stale_hint_for(host);
                         (vec![host.alias.clone()], hint)
@@ -618,18 +620,18 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                         (Vec::new(), None)
                     }
                 } else {
-                    let has_stale = app.hosts_state.multi_select.iter().any(|&idx| {
+                    let has_stale = app.hosts_state.multi_select().iter().any(|&idx| {
                         app.hosts_state
-                            .list
+                            .list()
                             .get(idx)
                             .is_some_and(|h| h.stale.is_some())
                     });
                     (
                         app.hosts_state
-                            .multi_select
+                            .multi_select()
                             .iter()
                             .filter_map(|&idx| {
-                                app.hosts_state.list.get(idx).map(|h| h.alias.clone())
+                                app.hosts_state.list().get(idx).map(|h| h.alias.clone())
                             })
                             .collect(),
                         if has_stale {
@@ -654,11 +656,11 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             }
             let aliases: Vec<String> = app
                 .hosts_state
-                .display_list
+                .display_list()
                 .iter()
                 .filter_map(|item| match item {
                     crate::app::HostListItem::Host { index } => {
-                        Some(app.hosts_state.list[*index].alias.clone())
+                        Some(app.hosts_state.list()[*index].alias.clone())
                     }
                     _ => None,
                 })
@@ -753,12 +755,12 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
             let all_selected = !visible_indices.is_empty()
                 && visible_indices
                     .iter()
-                    .all(|idx| app.hosts_state.multi_select.contains(idx));
+                    .all(|idx| app.hosts_state.multi_select().contains(idx));
             if all_selected {
-                app.hosts_state.multi_select.clear();
+                app.hosts_state.clear_multi_select();
             } else {
                 for idx in visible_indices {
-                    app.hosts_state.multi_select.insert(idx);
+                    app.hosts_state.multi_select_mut().insert(idx);
                 }
             }
         }

@@ -1382,10 +1382,10 @@ pub fn build_demo_app() -> App {
     // Preferences. Demo boots into Detailed view on both the Host List and
     // the Containers tab so screenshots and the demo recording land on a
     // fully-populated detail panel without an extra `v` keystroke.
-    app.hosts_state.view_mode = ViewMode::Detailed;
+    app.hosts_state.set_view_mode(ViewMode::Detailed);
     app.containers_overview.view_mode = ViewMode::Detailed;
-    app.hosts_state.sort_mode = SortMode::MostRecent;
-    app.hosts_state.group_by = GroupBy::None;
+    app.hosts_state.set_sort_mode(SortMode::MostRecent);
+    app.hosts_state.set_group_by_raw(GroupBy::None);
     app.ping.set_auto_ping(true);
 
     // Rebuild display list with sort/group applied
@@ -2346,7 +2346,7 @@ mod tests {
         let (app, _guard) = demo_app();
         // 22 original + 2 do-personal + 1 podman-edge + 1 db-proton
         // + 5 (prod-eu1, prod-eu2, customer-jump, customer-db-1, legacy-prod) = 31
-        assert_eq!(app.hosts_state.list.len(), 31);
+        assert_eq!(app.hosts_state.list().len(), 31);
     }
 
     #[test]
@@ -2480,7 +2480,7 @@ mod tests {
         // At least one host has a per-host vault_ssh override.
         let override_host = app
             .hosts_state
-            .list
+            .list()
             .iter()
             .find(|h| h.vault_ssh.as_deref().is_some_and(|s| !s.is_empty()));
         assert!(
@@ -2494,14 +2494,14 @@ mod tests {
         let (app, _guard) = demo_app();
         let cache = app
             .hosts_state
-            .list
+            .list()
             .iter()
             .find(|h| h.alias == "aws-cache-eu");
         assert!(cache.is_some());
         assert!(cache.unwrap().stale.is_some());
         let backup = app
             .hosts_state
-            .list
+            .list()
             .iter()
             .find(|h| h.alias == "pve-backup");
         assert!(backup.is_some());
@@ -2542,11 +2542,11 @@ mod tests {
     #[test]
     fn demo_app_has_correct_preferences() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.hosts_state.view_mode, ViewMode::Detailed);
+        assert_eq!(app.hosts_state.view_mode(), ViewMode::Detailed);
         assert_eq!(app.containers_overview.view_mode, ViewMode::Detailed);
-        assert_eq!(app.hosts_state.sort_mode, SortMode::MostRecent);
-        assert_eq!(app.hosts_state.group_by, GroupBy::None);
+        assert_eq!(app.hosts_state.sort_mode(), SortMode::MostRecent);
+        assert_eq!(app.hosts_state.group_by(), &GroupBy::None);
         assert!(app.ping.auto_ping());
-        assert!(!app.hosts_state.display_list.is_empty());
+        assert!(!app.hosts_state.display_list().is_empty());
     }
 }

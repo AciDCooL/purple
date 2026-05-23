@@ -70,11 +70,11 @@ fn toggle_tunnel(app: &mut App) {
     }
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
-    let rules = app.hosts_state.ssh_config.find_tunnel_directives(&alias);
+    let rules = app.hosts_state.ssh_config().find_tunnel_directives(&alias);
     if rules.is_empty() {
         return;
     }
@@ -139,7 +139,7 @@ fn selected_row_is_included(app: &App) -> bool {
         return false;
     };
     app.hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .map(|h| h.source_file.is_some())
@@ -162,17 +162,17 @@ fn confirm_delete_selected(app: &mut App) {
     };
     let directive_key = rule.tunnel_type.directive_key().to_string();
     let directive_value = rule.to_directive_value();
-    let config_backup = app.hosts_state.ssh_config.clone();
+    let config_backup = app.hosts_state.ssh_config().clone();
     if !app
         .hosts_state
-        .ssh_config
+        .ssh_config_mut()
         .remove_forward(&alias, &directive_key, &directive_value)
     {
         app.notify_warning(crate::messages::TUNNEL_NOT_FOUND);
         return;
     }
-    if let Err(e) = app.hosts_state.ssh_config.write() {
-        app.hosts_state.ssh_config = config_backup;
+    if let Err(e) = app.hosts_state.ssh_config().write() {
+        app.hosts_state.set_ssh_config(config_backup);
         app.notify_error(crate::messages::failed_to_save(&e));
         return;
     }

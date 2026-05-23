@@ -36,15 +36,15 @@ pub fn route_confirm_key(key: KeyEvent) -> ConfirmAction {
 
 /// Run known_hosts import and set status. Used by both ConfirmImport and Welcome handlers.
 pub(super) fn execute_known_hosts_import(app: &mut App) {
-    let config_backup = app.hosts_state.ssh_config.clone();
+    let config_backup = app.hosts_state.ssh_config().clone();
     match crate::import::import_from_known_hosts(
-        &mut app.hosts_state.ssh_config,
+        app.hosts_state.ssh_config_mut(),
         Some("known_hosts"),
     ) {
         Ok((imported, skipped, _, _)) => {
             if imported > 0 {
-                if let Err(e) = app.hosts_state.ssh_config.write() {
-                    app.hosts_state.ssh_config = config_backup;
+                if let Err(e) = app.hosts_state.ssh_config().write() {
+                    app.hosts_state.set_ssh_config(config_backup);
                     app.notify_error(crate::messages::failed_to_save(&e));
                     return;
                 }
@@ -97,7 +97,7 @@ pub(super) fn handle_purge_stale_key(app: &mut App, key: KeyEvent) {
 }
 
 fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
-    let stale = app.hosts_state.ssh_config.stale_hosts();
+    let stale = app.hosts_state.ssh_config().stale_hosts();
     if stale.is_empty() {
         return;
     }
@@ -107,7 +107,7 @@ fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
             .into_iter()
             .filter(|(alias, _)| {
                 app.hosts_state
-                    .ssh_config
+                    .ssh_config()
                     .host_entries()
                     .iter()
                     .any(|e| e.alias == *alias && e.provider.as_deref() == Some(prov))
@@ -119,13 +119,13 @@ fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
     if targets.is_empty() {
         return;
     }
-    let config_backup = app.hosts_state.ssh_config.clone();
+    let config_backup = app.hosts_state.ssh_config().clone();
     let count = targets.len();
     for (alias, _) in &targets {
-        app.hosts_state.ssh_config.delete_host(alias);
+        app.hosts_state.ssh_config_mut().delete_host(alias);
     }
-    if let Err(e) = app.hosts_state.ssh_config.write() {
-        app.hosts_state.ssh_config = config_backup;
+    if let Err(e) = app.hosts_state.ssh_config().write() {
+        app.hosts_state.set_ssh_config(config_backup);
         app.notify_error(crate::messages::failed_to_save(&e));
         return;
     }
@@ -136,7 +136,7 @@ fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
             let _ = tunnel.child.wait();
         }
     }
-    app.hosts_state.undo_stack.clear();
+    app.hosts_state.clear_undo();
     app.update_last_modified();
     app.reload_hosts();
     let msg = if let Some(prov) = provider {
@@ -166,7 +166,7 @@ pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
     // across all confirm dialogs.
     match route_confirm_key(key) {
         ConfirmAction::Yes => {
-            let siblings = app.hosts_state.ssh_config.siblings_of(&alias);
+            let siblings = app.hosts_state.ssh_config().siblings_of(&alias);
 
             if !siblings.is_empty() {
                 // Multi-alias block: strip only the selected token.
@@ -177,8 +177,8 @@ pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
                 // via a dedicated toast that names the surviving
                 // siblings, so the user knows what did and did not
                 // change on disk.
-                app.hosts_state.ssh_config.delete_host(&alias);
-                if let Err(e) = app.hosts_state.ssh_config.write() {
+                app.hosts_state.ssh_config_mut().delete_host(&alias);
+                if let Err(e) = app.hosts_state.ssh_config().write() {
                     // Disk write failed: reload from disk to discard
                     // the in-memory strip so view and storage match.
                     app.notify_error(crate::messages::failed_to_save(&e));
@@ -192,12 +192,16 @@ pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
                     app.reload_hosts();
                     app.notify(crate::messages::siblings_stripped(&alias, siblings.len()));
                 }
-            } else if let Some((element, position)) =
-                app.hosts_state.ssh_config.delete_host_undoable(&alias)
+            } else if let Some((element, position)) = app
+                .hosts_state
+                .ssh_config_mut()
+                .delete_host_undoable(&alias)
             {
-                if let Err(e) = app.hosts_state.ssh_config.write() {
+                if let Err(e) = app.hosts_state.ssh_config().write() {
                     // Restore the element on write failure
-                    app.hosts_state.ssh_config.insert_host_at(element, position);
+                    app.hosts_state
+                        .ssh_config_mut()
+                        .insert_host_at(element, position);
                     app.notify_error(crate::messages::failed_to_save(&e));
                 } else {
                     // Stop active tunnel for the deleted host
@@ -226,10 +230,10 @@ pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
                         }
                     }
                     app.hosts_state
-                        .undo_stack
+                        .undo_stack_mut()
                         .push(crate::app::DeletedHost { element, position });
-                    if app.hosts_state.undo_stack.len() > 50 {
-                        app.hosts_state.undo_stack.remove(0);
+                    if app.hosts_state.undo_stack().len() > 50 {
+                        app.hosts_state.undo_stack_mut().remove(0);
                     }
                     app.update_last_modified();
                     app.reload_hosts();
@@ -690,7 +694,7 @@ fn queue_container_action(
     let runtime = entry.runtime;
     let askpass = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
@@ -856,7 +860,7 @@ fn start_key_push(
         aliases.len(),
     ));
 
-    let config_path = app.hosts_state.ssh_config.path.clone();
+    let config_path = app.hosts_state.ssh_config().path.clone();
     let tx = events_tx.clone();
     let pubkey_payload = pubkey;
     let handle = std::thread::Builder::new()

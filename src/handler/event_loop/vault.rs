@@ -24,7 +24,7 @@ pub(crate) fn handle_vault_sign_result(
             if let Ok(cert_path) = vault_ssh::cert_path_for(&alias) {
                 let updated = app
                     .hosts_state
-                    .ssh_config
+                    .ssh_config_mut()
                     .set_host_certificate_file(&alias, &cert_path.to_string_lossy());
                 if !updated {
                     host_missing = true;
@@ -131,7 +131,7 @@ pub(crate) fn handle_vault_sign_all_done(
             // running. Writing now would overwrite those edits.
             let reapply: Vec<(String, String)> = app
                 .hosts_state
-                .ssh_config
+                .ssh_config()
                 .host_entries()
                 .into_iter()
                 .filter_map(|h| {
@@ -148,12 +148,12 @@ pub(crate) fn handle_vault_sign_all_done(
                 .collect();
             match ssh_config::model::SshConfigFile::parse(app.reload.config_path()) {
                 Ok(fresh) => {
-                    app.hosts_state.ssh_config = fresh;
+                    app.hosts_state.set_ssh_config(fresh);
                     let mut reapplied = 0usize;
                     for (alias, cert_path) in &reapply {
                         let entry = app
                             .hosts_state
-                            .ssh_config
+                            .ssh_config()
                             .host_entries()
                             .into_iter()
                             .find(|h| &h.alias == alias);
@@ -161,7 +161,7 @@ pub(crate) fn handle_vault_sign_all_done(
                             if crate::should_write_certificate_file(&entry.certificate_file)
                                 && app
                                     .hosts_state
-                                    .ssh_config
+                                    .ssh_config_mut()
                                     .set_host_certificate_file(alias, cert_path)
                             {
                                 reapplied += 1;
@@ -169,7 +169,7 @@ pub(crate) fn handle_vault_sign_all_done(
                         }
                     }
                     if reapplied > 0 {
-                        if let Err(e) = app.hosts_state.ssh_config.write() {
+                        if let Err(e) = app.hosts_state.ssh_config().write() {
                             app.notify_sticky_error(crate::messages::vault_config_reapply_failed(
                                 signed as usize,
                                 &e,
@@ -205,7 +205,7 @@ pub(crate) fn handle_vault_sign_all_done(
                     ));
                 }
             }
-        } else if let Err(e) = app.hosts_state.ssh_config.write() {
+        } else if let Err(e) = app.hosts_state.ssh_config().write() {
             app.notify_sticky_error(crate::messages::vault_config_update_failed(
                 signed as usize,
                 &e,

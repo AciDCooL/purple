@@ -17,7 +17,7 @@ pub fn render(frame: &mut Frame, app: &App, alias: &str) {
     // sibling tokens, spell them out so the user understands what will
     // happen (only the selected alias is stripped; siblings keep the
     // shared config).
-    let siblings = app.hosts_state.ssh_config.siblings_of(alias);
+    let siblings = app.hosts_state.ssh_config().siblings_of(alias);
     let has_siblings = !siblings.is_empty();
 
     let popup_w: u16 = if has_siblings { 60 } else { 52 };

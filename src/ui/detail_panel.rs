@@ -202,7 +202,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
             // "Select a host to see details." in the right panel on top
             // of that re-introduces the double-message bug the design
             // system is meant to prevent — keep the detail panel quiet.
-            if app.hosts_state.list.is_empty() {
+            if app.hosts_state.list().is_empty() {
                 design::render_tab_empty_detail(frame, area);
             } else {
                 design::render_empty(frame, area, "Select a host to see details.");
@@ -495,7 +495,7 @@ fn render_route(
             );
             section_close(lines, box_width);
         } else {
-            let chain = resolve_proxy_chain(host, &app.hosts_state.list);
+            let chain = resolve_proxy_chain(host, app.hosts_state.list());
             if !chain.is_empty() {
                 section_open(lines, "ROUTE", box_width);
                 // hop_width: content width minus "  ● " prefix (4 chars)
@@ -763,7 +763,7 @@ fn render_tunnels(
         };
         section_open(lines, tunnel_label, box_width);
 
-        let rules = find_tunnel_rules(&app.hosts_state.ssh_config.elements, &host.alias);
+        let rules = find_tunnel_rules(&app.hosts_state.ssh_config().elements, &host.alias);
         let style = if tunnel_active {
             theme::success()
         } else {
@@ -866,7 +866,7 @@ fn render_pattern_matches(
 ) {
     // Inherited directives section — alias-only matching (SSH-faithful).
     // OpenSSH Host keyword matches only the alias typed on the command line.
-    let inherited = app.hosts_state.ssh_config.matching_patterns(&host.alias);
+    let inherited = app.hosts_state.ssh_config().matching_patterns(&host.alias);
     for pattern_entry in &inherited {
         section_open(lines, "PATTERN MATCH", box_width);
         let inner = box_width.saturating_sub(4);
@@ -1017,7 +1017,7 @@ fn render_pat_tags(lines: &mut Vec<Line<'static>>, tags: &[String], box_width: u
 fn render_pat_matches(lines: &mut Vec<Line<'static>>, pattern: &str, app: &App, box_width: usize) {
     let matching_aliases: Vec<String> = app
         .hosts_state
-        .list
+        .list()
         .iter()
         .filter(|h| crate::ssh_config::model::host_pattern_matches(pattern, &h.alias))
         .map(|h| h.alias.clone())
