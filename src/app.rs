@@ -876,7 +876,28 @@ impl App {
             }
         }
         state.hits = filtered;
-        state.selected = restore_selection(&state.visible_hits(), prior_identity.as_ref(), 0);
+        // `state.hits` is score-sorted but `visible_hits()` reorders into
+        // fixed render-section order. Default the cursor to the top-scored
+        // hit's position in that display order so the boosted best match
+        // stays pre-selected and the highlight lands on the row that Enter
+        // will dispatch, even when a lower-scored host renders above it. The
+        // top-scored hit is the first of its kind in display order, so its
+        // position is the first row of that section. Resolving by kind
+        // sidesteps the non-unique action/tunnel/container identities.
+        let display = state.visible_hits();
+        let top_display = state
+            .hits
+            .first()
+            .map(|h| h.kind())
+            .and_then(|k| display.iter().position(|h| h.kind() == k))
+            .unwrap_or(0);
+        state.selected = restore_selection(&display, prior_identity.as_ref(), top_display);
+        log::debug!(
+            "jump: recompute selected={} of {} hits (top_display={})",
+            state.selected,
+            state.hits.len(),
+            top_display
+        );
         self.jump = Some(state);
     }
 

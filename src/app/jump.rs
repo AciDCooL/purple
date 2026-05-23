@@ -31,7 +31,7 @@ impl SourceKind {
     }
 
     /// Fixed render order. Empty sections are skipped at render time but the
-    /// order itself never changes — keeps muscle memory stable.
+    /// order itself never changes. Keeps muscle memory stable.
     pub fn render_order() -> [Self; 5] {
         [
             Self::Host,
@@ -660,7 +660,16 @@ impl JumpState {
             out.extend(self.empty_state_actions());
             out
         } else {
-            self.hits.clone()
+            // Return hits in the same fixed-section render order the overlay
+            // lays them out, preserving the score order within each section.
+            // Navigation and dispatch index this list while the renderer
+            // groups by `SourceKind`; the two must agree or the highlighted
+            // row and the executed hit drift apart.
+            let mut out: Vec<JumpHit> = Vec::with_capacity(self.hits.len());
+            for kind in SourceKind::render_order() {
+                out.extend(self.hits.iter().filter(|h| h.kind() == kind).cloned());
+            }
+            out
         }
     }
 
@@ -834,6 +843,52 @@ pub mod tests {
         test_path::set(path.clone());
         f(&path);
         test_path::clear();
+    }
+
+    #[test]
+    fn visible_hits_matches_grouped_render_order_with_active_query() {
+        // Regression for the jump-bar mis-dispatch: navigation (`move_down`)
+        // and dispatch index `visible_hits()`, while the renderer lays rows
+        // out in `grouped_hits()` order. When a query matches across sections
+        // the score-sorted flat list interleaves kinds differently from the
+        // fixed render order, so the highlighted row and the executed hit
+        // point at different items. Pin that the two orders agree.
+        let action = JumpAction::all()[0];
+        let host = HostHit {
+            alias: "proxy-vm".into(),
+            hostname: "proxy-vm.example.com".into(),
+            tags: Vec::new(),
+            provider: None,
+            user: String::new(),
+            identity_file: String::new(),
+            proxy_jump: String::new(),
+            vault_ssh: None,
+        };
+        // Score order puts the action first (a strong action match outranks a
+        // fuzzy host match). The renderer regroups HOSTS before ACTIONS.
+        let state = JumpState {
+            query: "prov".into(),
+            hits: vec![JumpHit::Action(action), JumpHit::Host(host)],
+            ..Default::default()
+        };
+
+        let visible = state.visible_hits();
+        let flattened: Vec<JumpHit> = state
+            .grouped_hits()
+            .into_iter()
+            .flat_map(|(_, hits)| hits)
+            .collect();
+        assert_eq!(
+            visible, flattened,
+            "visible_hits() must equal the flattened grouped order so the \
+             highlighted row and the dispatched hit reference the same item"
+        );
+        // Row 0 is what the selection cue lands on first; with HOSTS rendered
+        // before ACTIONS it must be the host, matching what the user sees.
+        assert!(
+            matches!(visible[0], JumpHit::Host(_)),
+            "first visible row must follow render order (HOSTS first)"
+        );
     }
 
     #[test]

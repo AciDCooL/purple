@@ -7366,19 +7366,22 @@ fn collect_jump_candidates_emits_hosts_tunnels_and_actions() {
 
 #[test]
 fn hotkey_boost_outranks_fuzzy_host_match() {
-    // Add a host whose alias matches the boost letter `K`, then type `K`
-    // and verify the action lands on top thanks to the +10000 score boost.
+    // Add a host whose alias matches the boost letter `K`, then type `K`.
+    // The +10000 hotkey boost must make the action the pre-selected hit
+    // (the one Enter dispatches), even though the host renders first in the
+    // fixed section order. The cursor follows the top score, not row 0, and
+    // dispatch reads the selected index, so highlight and dispatch agree.
     let mut app = make_jump_app("Host Kbrk\n  HostName k.example\n");
     app.jump = Some(crate::app::JumpState::for_mode(JumpMode::Hosts));
     app.jump.as_mut().unwrap().push_query('K');
     app.recompute_jump_hits();
     let jump = app.jump.as_ref().expect("jump");
     let visible = jump.visible_hits();
-    let first = visible.first().expect("at least one hit");
+    let selected = visible.get(jump.selected()).expect("a selected hit");
     assert!(
-        matches!(first, JumpHit::Action(a) if a.key == 'K'),
-        "expected K action at index 0, got {:?}",
-        first
+        matches!(selected, JumpHit::Action(a) if a.key == 'K'),
+        "hotkey boost must pre-select the K action, got {:?}",
+        selected
     );
 }
 

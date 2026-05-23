@@ -1,3 +1,9 @@
+## 3.15.17 - 2026-05-23
+
+- feat: The command palette runs exactly the row you highlight.
+- fix: Searches that mix hosts and actions now highlight and run the same row.
+- Thanks to @AndreyOkh for reporting this (#76).
+
 ## 3.15.16 - 2026-05-23
 
 - change: Sturdier internals behind the Containers tab.
