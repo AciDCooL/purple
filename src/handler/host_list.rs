@@ -217,7 +217,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 return;
             }
             if let Some(host) = app.selected_host() {
-                let cmd = host.ssh_command(&app.reload.config_path);
+                let cmd = host.ssh_command(app.reload.config_path());
                 let alias = host.alias.clone();
                 match clipboard::copy_to_clipboard(&cmd) {
                     Ok(()) => {

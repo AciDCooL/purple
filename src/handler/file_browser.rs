@@ -76,7 +76,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                     local_path.display(),
                     remote_path
                 );
-                let config_path = app.reload.config_path.clone();
+                let config_path = app.reload.config_path().to_path_buf();
                 let bw = app.bw_session.clone();
                 let tx = events_tx.clone();
                 let direction_str = direction.to_string();
@@ -281,7 +281,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                             let alias = fb.alias.clone();
                             let ctx = crate::ssh_context::OwnedSshContext {
                                 alias,
-                                config_path: app.reload.config_path.clone(),
+                                config_path: app.reload.config_path().to_path_buf(),
                                 askpass: fb.askpass.clone(),
                                 bw_session: app.bw_session.clone(),
                                 has_tunnel: app.tunnels.active.contains_key(&fb.alias),
@@ -324,7 +324,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                             let alias = fb.alias.clone();
                             let ctx = crate::ssh_context::OwnedSshContext {
                                 alias,
-                                config_path: app.reload.config_path.clone(),
+                                config_path: app.reload.config_path().to_path_buf(),
                                 askpass: fb.askpass.clone(),
                                 bw_session: app.bw_session.clone(),
                                 has_tunnel: app.tunnels.active.contains_key(&fb.alias),
@@ -396,7 +396,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                         let alias = fb.alias.clone();
                         let ctx = crate::ssh_context::OwnedSshContext {
                             alias,
-                            config_path: app.reload.config_path.clone(),
+                            config_path: app.reload.config_path().to_path_buf(),
                             askpass: fb.askpass.clone(),
                             bw_session: app.bw_session.clone(),
                             has_tunnel: app.tunnels.active.contains_key(&fb.alias),
@@ -495,7 +495,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 let alias = fb.alias.clone();
                 let ctx = crate::ssh_context::OwnedSshContext {
                     alias,
-                    config_path: app.reload.config_path.clone(),
+                    config_path: app.reload.config_path().to_path_buf(),
                     askpass: fb.askpass.clone(),
                     bw_session: app.bw_session.clone(),
                     has_tunnel: app.tunnels.active.contains_key(&fb.alias),
@@ -535,7 +535,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 let alias = fb.alias.clone();
                 let ctx = crate::ssh_context::OwnedSshContext {
                     alias,
-                    config_path: app.reload.config_path.clone(),
+                    config_path: app.reload.config_path().to_path_buf(),
                     askpass: fb.askpass.clone(),
                     bw_session: app.bw_session.clone(),
                     has_tunnel: app.tunnels.active.contains_key(&fb.alias),

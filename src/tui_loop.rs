@@ -22,7 +22,7 @@ pub fn run_tui(mut app: App) -> Result<()> {
     if app.status_center.status.is_none() && !app.demo_mode {
         if let Some(home) = dirs::home_dir() {
             let purple_dir = home.join(".purple");
-            if let Some(has_backup) = first_launch_init(&purple_dir, &app.reload.config_path) {
+            if let Some(has_backup) = first_launch_init(&purple_dir, app.reload.config_path()) {
                 let host_count = app.hosts_state.list.len();
                 let known_hosts_count = if host_count == 0 {
                     import::count_known_hosts_candidates()
@@ -488,13 +488,13 @@ fn handle_pending_connect(
         let vault_msg = if vault_host.is_some() {
             let msg = ensure_vault_ssh_chain_if_needed(
                 &alias,
-                &app.reload.config_path,
+                app.reload.config_path(),
                 &app.providers.config,
                 &mut app.hosts_state.ssh_config,
             );
             if msg.is_some() {
                 app.reload_hosts();
-                for hop in vault_ssh::resolve_proxy_chain(&app.reload.config_path, &alias) {
+                for hop in vault_ssh::resolve_proxy_chain(app.reload.config_path(), &alias) {
                     app.refresh_cert_cache(&hop);
                 }
             }
@@ -503,7 +503,7 @@ fn handle_pending_connect(
             None
         };
 
-        match connection::connect_tmux_window(&alias, &app.reload.config_path, has_active_tunnel) {
+        match connection::connect_tmux_window(&alias, app.reload.config_path(), has_active_tunnel) {
             Ok(()) => {
                 app.record_key_use(&alias, key_activity::now_secs());
                 if let Some((ref msg, is_error)) = vault_msg {
@@ -533,13 +533,13 @@ fn handle_pending_connect(
     let vault_msg = if vault_host.is_some() {
         let msg = ensure_vault_ssh_chain_if_needed(
             &alias,
-            &app.reload.config_path,
+            app.reload.config_path(),
             &app.providers.config,
             &mut app.hosts_state.ssh_config,
         );
         if msg.is_some() {
             app.reload_hosts();
-            for hop in vault_ssh::resolve_proxy_chain(&app.reload.config_path, &alias) {
+            for hop in vault_ssh::resolve_proxy_chain(app.reload.config_path(), &alias) {
                 app.refresh_cert_cache(&hop);
             }
         }
@@ -555,7 +555,7 @@ fn handle_pending_connect(
     print!("{}", crate::messages::cli::beaming_up(&alias));
     let result = connection::connect(
         &alias,
-        &app.reload.config_path,
+        app.reload.config_path(),
         askpass.as_deref(),
         app.bw_session.as_deref(),
         has_active_tunnel,
@@ -614,7 +614,7 @@ fn handle_pending_connect(
     terminal.enter()?;
     events.resume();
     *last_config_check = std::time::Instant::now();
-    app.hosts_state.ssh_config = SshConfigFile::parse(&app.reload.config_path)?;
+    app.hosts_state.ssh_config = SshConfigFile::parse(app.reload.config_path())?;
     app.reload_hosts();
     app.update_last_modified();
     Ok(())
@@ -677,7 +677,7 @@ fn handle_pending_container_exec(
         let label = format!("{}/{}", req.alias, req.container_name);
         match connection::connect_tmux_window_with_remote_command(
             &req.alias,
-            &app.reload.config_path,
+            app.reload.config_path(),
             has_active_tunnel,
             &remote_cmd,
             &label,
@@ -701,7 +701,7 @@ fn handle_pending_container_exec(
 
     let result = connection::connect_with_remote_command(
         &req.alias,
-        &app.reload.config_path,
+        app.reload.config_path(),
         askpass.as_deref(),
         app.bw_session.as_deref(),
         has_active_tunnel,
@@ -775,7 +775,7 @@ fn handle_pending_container_logs(app: &mut App, events_tx: &std::sync::mpsc::Sen
     let has_tunnel = app.tunnels.active.contains_key(&req.alias);
     let ctx = crate::ssh_context::OwnedSshContext {
         alias: req.alias,
-        config_path: app.reload.config_path.clone(),
+        config_path: app.reload.config_path().to_path_buf(),
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
@@ -820,7 +820,7 @@ fn handle_pending_container_action(app: &mut App, events_tx: &std::sync::mpsc::S
     let has_tunnel = app.tunnels.active.contains_key(&req.alias);
     let ctx = crate::ssh_context::OwnedSshContext {
         alias: req.alias.clone(),
-        config_path: app.reload.config_path.clone(),
+        config_path: app.reload.config_path().to_path_buf(),
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
@@ -889,7 +889,7 @@ fn handle_pending_snippet(
         let has_tunnel = app.tunnels.active.contains_key(alias);
         match snippet::run_snippet(
             alias,
-            &app.reload.config_path,
+            app.reload.config_path(),
             &snip.command,
             askpass.as_deref(),
             app.bw_session.as_deref(),
@@ -934,7 +934,7 @@ fn handle_pending_snippet(
     events.resume();
     *last_config_check = std::time::Instant::now();
     // Reload so sort order (e.g. most recent) reflects the new history.
-    app.hosts_state.ssh_config = SshConfigFile::parse(&app.reload.config_path)?;
+    app.hosts_state.ssh_config = SshConfigFile::parse(app.reload.config_path())?;
     app.reload_hosts();
     app.update_last_modified();
     Ok(())

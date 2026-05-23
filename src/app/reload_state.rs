@@ -8,18 +8,18 @@ use crate::ssh_config::model::SshConfigFile;
 /// Auto-reload mtime tracking.
 #[derive(Default)]
 pub struct ReloadState {
-    pub config_path: PathBuf,
-    pub last_modified: Option<SystemTime>,
-    pub include_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
-    pub include_dir_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+    pub(in crate::app) config_path: PathBuf,
+    pub(in crate::app) last_modified: Option<SystemTime>,
+    pub(in crate::app) include_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+    pub(in crate::app) include_dir_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
     /// mtime of `~/.ssh/` itself. Changes when a key file is created,
     /// renamed or removed; combined with `key_file_mtimes` this gives a
     /// full add/remove/modify signal without needing a real watcher.
-    pub keys_dir_mtime: Option<SystemTime>,
+    pub(in crate::app) keys_dir_mtime: Option<SystemTime>,
     /// mtime per known `*.pub` (or private) key path. Touch-only edits
     /// (re-encrypt, passphrase change) move the file mtime without
     /// touching the parent directory, so we track both.
-    pub key_file_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
+    pub(in crate::app) key_file_mtimes: Vec<(PathBuf, Option<SystemTime>)>,
 }
 
 /// Form conflict detection mtimes.
@@ -32,6 +32,10 @@ pub struct ConflictState {
 }
 
 impl ReloadState {
+    pub fn config_path(&self) -> &Path {
+        &self.config_path
+    }
+
     /// Build from a loaded config: captures initial mtimes for the main file
     /// and every Include'd file and directory.
     pub fn from_config(config: &SshConfigFile) -> Self {

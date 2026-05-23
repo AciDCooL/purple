@@ -132,7 +132,7 @@ pub(crate) fn handle_scp_complete(
         let has_tunnel = app.tunnels.active.contains_key(&fb_alias);
         let ctx = crate::ssh_context::OwnedSshContext {
             alias: fb_alias,
-            config_path: app.reload.config_path.clone(),
+            config_path: app.reload.config_path().to_path_buf(),
             askpass: askpass_fb,
             bw_session: app.bw_session.clone(),
             has_tunnel,

@@ -140,7 +140,7 @@ pub(crate) fn drive_refresh_batch(app: &mut App, alias: &str, events_tx: &mpsc::
     if let Some(item) = next {
         batch.in_flight += 1;
         batch.in_flight_aliases.insert(item.alias.clone());
-        let config_path = app.reload.config_path.clone();
+        let config_path = app.reload.config_path().to_path_buf();
         let bw_session = app.bw_session.clone();
         let ctx = crate::ssh_context::OwnedSshContext {
             alias: item.alias,
@@ -426,7 +426,7 @@ pub(crate) fn handle_container_action_complete(
             .insert(refresh_alias.clone());
         let ctx = crate::ssh_context::OwnedSshContext {
             alias: refresh_alias,
-            config_path: app.reload.config_path.clone(),
+            config_path: app.reload.config_path().to_path_buf(),
             askpass,
             bw_session: app.bw_session.clone(),
             has_tunnel,

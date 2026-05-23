@@ -124,7 +124,7 @@ fn spawn_initial_listing(app: &mut App, alias: String, events_tx: &mpsc::Sender<
         .insert(alias.clone());
     let ctx = crate::ssh_context::OwnedSshContext {
         alias,
-        config_path: app.reload.config_path.clone(),
+        config_path: app.reload.config_path().to_path_buf(),
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,

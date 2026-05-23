@@ -229,7 +229,7 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
     let remote = remote_path;
     let ctx = crate::ssh_context::OwnedSshContext {
         alias: alias.clone(),
-        config_path: app.reload.config_path.clone(),
+        config_path: app.reload.config_path().to_path_buf(),
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,

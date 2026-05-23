@@ -223,7 +223,7 @@ fn start_snippet_output(
     crate::snippet::spawn_snippet_execution(
         run_id,
         askpass_map,
-        app.reload.config_path.clone(),
+        app.reload.config_path().to_path_buf(),
         snippet.command.clone(),
         app.bw_session.clone(),
         tunnel_aliases,

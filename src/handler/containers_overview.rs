@@ -221,7 +221,7 @@ fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         .auto_list_in_flight
         .insert(alias.clone());
     spawn_refresh(
-        app.reload.config_path.clone(),
+        app.reload.config_path().to_path_buf(),
         app.bw_session.clone(),
         crate::app::RefreshQueueItem {
             alias,
@@ -306,7 +306,7 @@ pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEv
             in_flight_aliases,
         });
 
-    let config_path = app.reload.config_path.clone();
+    let config_path = app.reload.config_path().to_path_buf();
     let bw_session = app.bw_session.clone();
     for item in initial {
         spawn_refresh(config_path.clone(), bw_session.clone(), item, events_tx);
@@ -417,7 +417,7 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         });
     app.notify_progress(crate::messages::container_refresh_progress(0, total));
 
-    let config_path = app.reload.config_path.clone();
+    let config_path = app.reload.config_path().to_path_buf();
     let bw_session = app.bw_session.clone();
     for item in initial_batch {
         spawn_refresh(config_path.clone(), bw_session.clone(), item, events_tx);
@@ -1014,7 +1014,7 @@ pub(super) fn ensure_inspect_for_selected(app: &mut App, events_tx: &mpsc::Sende
     let has_tunnel = app.tunnels.active.contains_key(&alias);
     let ctx = crate::ssh_context::OwnedSshContext {
         alias,
-        config_path: app.reload.config_path.clone(),
+        config_path: app.reload.config_path().to_path_buf(),
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
@@ -1068,7 +1068,7 @@ pub(crate) fn prefetch_inspect_for_listing(
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
     let has_tunnel = app.tunnels.active.contains_key(alias);
-    let config_path = app.reload.config_path.clone();
+    let config_path = app.reload.config_path().to_path_buf();
     let bw_session = app.bw_session.clone();
     for c in containers {
         // Skip containers that already have a fresh inspect or a
@@ -1172,7 +1172,7 @@ pub(super) fn ensure_logs_for_selected(app: &mut App, events_tx: &mpsc::Sender<A
     let has_tunnel = app.tunnels.active.contains_key(&alias);
     let ctx = crate::ssh_context::OwnedSshContext {
         alias,
-        config_path: app.reload.config_path.clone(),
+        config_path: app.reload.config_path().to_path_buf(),
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
@@ -1250,7 +1250,7 @@ pub(super) fn ensure_inspect_for_host_header(app: &mut App, events_tx: &mpsc::Se
         .find(|h| h.alias == alias)
         .and_then(|h| h.askpass.clone());
     let has_tunnel = app.tunnels.active.contains_key(&alias);
-    let config_path = app.reload.config_path.clone();
+    let config_path = app.reload.config_path().to_path_buf();
     let bw_session = app.bw_session.clone();
 
     let mut fired: usize = 0;
@@ -1357,7 +1357,7 @@ pub(super) fn ensure_list_for_selected_host(app: &mut App, events_tx: &mpsc::Sen
     let has_tunnel = app.tunnels.active.contains_key(&alias);
     log::debug!("[purple] auto-list refresh: alias={}", alias);
     spawn_refresh(
-        app.reload.config_path.clone(),
+        app.reload.config_path().to_path_buf(),
         app.bw_session.clone(),
         crate::app::RefreshQueueItem {
             alias,

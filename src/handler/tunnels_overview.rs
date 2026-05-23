@@ -80,7 +80,7 @@ fn toggle_tunnel(app: &mut App) {
     }
     match crate::tunnel::start_tunnel(
         &alias,
-        &app.reload.config_path,
+        app.reload.config_path(),
         askpass.as_deref(),
         app.bw_session.as_deref(),
     ) {

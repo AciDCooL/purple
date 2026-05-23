@@ -153,7 +153,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                     .and_then(|h| h.askpass.clone());
                 match crate::tunnel::start_tunnel(
                     &alias,
-                    &app.reload.config_path,
+                    app.reload.config_path(),
                     askpass.as_deref(),
                     app.bw_session.as_deref(),
                 ) {

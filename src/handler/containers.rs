@@ -53,7 +53,7 @@ pub(super) fn open_overlay_for_host(
             .insert(alias.clone());
         let ctx = crate::ssh_context::OwnedSshContext {
             alias,
-            config_path: app.reload.config_path.clone(),
+            config_path: app.reload.config_path().to_path_buf(),
             askpass,
             bw_session: app.bw_session.clone(),
             has_tunnel,
@@ -201,7 +201,7 @@ pub(super) fn handle_key(
                 let cached_runtime = state.runtime;
                 let ctx = crate::ssh_context::OwnedSshContext {
                     alias: alias.clone(),
-                    config_path: app.reload.config_path.clone(),
+                    config_path: app.reload.config_path().to_path_buf(),
                     askpass: state.askpass.clone(),
                     bw_session: app.bw_session.clone(),
                     has_tunnel: app.tunnels.active.contains_key(&alias),
@@ -260,7 +260,7 @@ fn container_action(
     let alias = state.alias.clone();
     let ctx = crate::ssh_context::OwnedSshContext {
         alias: alias.clone(),
-        config_path: app.reload.config_path.clone(),
+        config_path: app.reload.config_path().to_path_buf(),
         askpass: state.askpass.clone(),
         bw_session: app.bw_session.clone(),
         has_tunnel: app.tunnels.active.contains_key(&alias),
