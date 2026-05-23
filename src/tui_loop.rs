@@ -29,7 +29,7 @@ pub fn run_tui(mut app: App) -> Result<()> {
                 } else {
                     0
                 };
-                app.ui.known_hosts_count = known_hosts_count;
+                app.ui.set_known_hosts_count(known_hosts_count);
                 app.screen = app::Screen::Welcome {
                     has_backup,
                     host_count,
@@ -461,7 +461,7 @@ fn handle_pending_connect(
     events: &EventHandler,
     last_config_check: &mut std::time::Instant,
 ) -> Result<()> {
-    let Some((alias, host_askpass)) = app.ui.pending_connect.take() else {
+    let Some((alias, host_askpass)) = app.ui.take_pending_connect() else {
         return Ok(());
     };
     let vault_host = app

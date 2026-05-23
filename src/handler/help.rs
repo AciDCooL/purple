@@ -5,7 +5,7 @@ use crate::app::{App, Screen};
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
-            app.ui.help_scroll = 0;
+            app.ui.set_help_scroll(0);
             let return_screen = match std::mem::replace(&mut app.screen, Screen::HostList) {
                 Screen::Help { return_screen } => *return_screen,
                 _ => Screen::HostList,
@@ -13,16 +13,20 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             app.set_screen(return_screen);
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.ui.help_scroll = app.ui.help_scroll.saturating_add(1);
+            app.ui
+                .set_help_scroll(app.ui.help_scroll().saturating_add(1));
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.ui.help_scroll = app.ui.help_scroll.saturating_sub(1);
+            app.ui
+                .set_help_scroll(app.ui.help_scroll().saturating_sub(1));
         }
         KeyCode::PageDown => {
-            app.ui.help_scroll = app.ui.help_scroll.saturating_add(10);
+            app.ui
+                .set_help_scroll(app.ui.help_scroll().saturating_add(10));
         }
         KeyCode::PageUp => {
-            app.ui.help_scroll = app.ui.help_scroll.saturating_sub(10);
+            app.ui
+                .set_help_scroll(app.ui.help_scroll().saturating_sub(10));
         }
         _ => {}
     }

@@ -47,46 +47,46 @@ pub struct RegionPickerState {
 
 #[derive(Debug, Default)]
 pub struct UiSelection {
-    pub list_state: ListState,
-    pub key_picker: PickerState,
-    pub password_picker: PickerState,
-    pub proxyjump_picker: PickerState,
-    pub vault_role_picker: PickerState,
-    pub tag_picker_state: ListState,
-    pub bulk_tag_editor_state: ListState,
-    pub theme_picker: ThemePickerState,
-    pub provider_list_state: ListState,
-    pub tunnel_list_state: ListState,
-    pub tunnels_overview_state: ListState,
-    pub containers_overview_state: ListState,
+    pub(in crate::app) list_state: ListState,
+    pub(in crate::app) key_picker: PickerState,
+    pub(in crate::app) password_picker: PickerState,
+    pub(in crate::app) proxyjump_picker: PickerState,
+    pub(in crate::app) vault_role_picker: PickerState,
+    pub(in crate::app) tag_picker_state: ListState,
+    pub(in crate::app) bulk_tag_editor_state: ListState,
+    pub(in crate::app) theme_picker: ThemePickerState,
+    pub(in crate::app) provider_list_state: ListState,
+    pub(in crate::app) tunnel_list_state: ListState,
+    pub(in crate::app) tunnels_overview_state: ListState,
+    pub(in crate::app) containers_overview_state: ListState,
     /// Cursor for the host picker reached from the tunnels overview when
     /// adding a new tunnel. Indexes into the editable-hosts slice built at
     /// render time (hosts from included files are excluded).
-    pub tunnel_host_picker_state: ListState,
+    pub(in crate::app) tunnel_host_picker_state: ListState,
     /// Live fuzzy-search query for the tunnel host picker. Always-on input
     /// mode: every printable keystroke appends to the query and shrinks the
     /// candidate set. Empty string means "show all".
-    pub tunnel_host_picker_query: String,
+    pub(in crate::app) tunnel_host_picker_query: String,
     /// Cursor + live query for the containers-tab `a` host picker.
     /// Mirrors the tunnel host picker pair; kept separate so the two
     /// pickers can be open back-to-back without state bleed.
-    pub container_host_picker_state: ListState,
-    pub container_host_picker_query: String,
-    pub snippet_picker_state: ListState,
-    pub snippet_search: Option<String>,
-    pub region_picker: RegionPickerState,
-    pub help_scroll: u16,
-    pub detail_scroll: u16,
+    pub(in crate::app) container_host_picker_state: ListState,
+    pub(in crate::app) container_host_picker_query: String,
+    pub(in crate::app) snippet_picker_state: ListState,
+    pub(in crate::app) snippet_search: Option<String>,
+    pub(in crate::app) region_picker: RegionPickerState,
+    pub(in crate::app) help_scroll: u16,
+    pub(in crate::app) detail_scroll: u16,
     /// Set by handler, consumed by AnimationState to trigger detail panel transition.
-    pub detail_toggle_pending: bool,
+    pub(in crate::app) detail_toggle_pending: bool,
     /// Tracks when the welcome screen was opened to auto-dismiss it.
-    pub welcome_opened: Option<std::time::Instant>,
+    pub(in crate::app) welcome_opened: Option<std::time::Instant>,
     /// Set once the first time Esc-on-empty-list hint is shown per process.
-    pub esc_quit_hint_shown: bool,
+    pub(in crate::app) esc_quit_hint_shown: bool,
     /// Welcome-screen heuristic: number of known hosts at last render.
-    pub known_hosts_count: usize,
+    pub(in crate::app) known_hosts_count: usize,
     /// Pending SSH dispatch queued by connect actions; consumed by the event loop.
-    pub pending_connect: Option<(String, Option<String>)>,
+    pub(in crate::app) pending_connect: Option<(String, Option<String>)>,
 }
 
 impl UiSelection {
@@ -117,6 +117,223 @@ impl UiSelection {
     /// Exit snippet picker search mode. Idempotent.
     pub fn close_snippet_search(&mut self) {
         self.snippet_search = None;
+    }
+
+    pub fn list_state(&self) -> &ListState {
+        &self.list_state
+    }
+
+    pub fn list_state_mut(&mut self) -> &mut ListState {
+        &mut self.list_state
+    }
+
+    pub fn key_picker(&self) -> &PickerState {
+        &self.key_picker
+    }
+
+    pub fn key_picker_mut(&mut self) -> &mut PickerState {
+        &mut self.key_picker
+    }
+
+    pub fn password_picker(&self) -> &PickerState {
+        &self.password_picker
+    }
+
+    pub fn password_picker_mut(&mut self) -> &mut PickerState {
+        &mut self.password_picker
+    }
+
+    pub fn proxyjump_picker(&self) -> &PickerState {
+        &self.proxyjump_picker
+    }
+
+    pub fn proxyjump_picker_mut(&mut self) -> &mut PickerState {
+        &mut self.proxyjump_picker
+    }
+
+    pub fn vault_role_picker(&self) -> &PickerState {
+        &self.vault_role_picker
+    }
+
+    pub fn vault_role_picker_mut(&mut self) -> &mut PickerState {
+        &mut self.vault_role_picker
+    }
+
+    pub fn tag_picker_state(&self) -> &ListState {
+        &self.tag_picker_state
+    }
+
+    pub fn tag_picker_state_mut(&mut self) -> &mut ListState {
+        &mut self.tag_picker_state
+    }
+
+    pub fn bulk_tag_editor_state(&self) -> &ListState {
+        &self.bulk_tag_editor_state
+    }
+
+    pub fn bulk_tag_editor_state_mut(&mut self) -> &mut ListState {
+        &mut self.bulk_tag_editor_state
+    }
+
+    pub fn theme_picker(&self) -> &ThemePickerState {
+        &self.theme_picker
+    }
+
+    pub fn theme_picker_mut(&mut self) -> &mut ThemePickerState {
+        &mut self.theme_picker
+    }
+
+    pub fn provider_list_state(&self) -> &ListState {
+        &self.provider_list_state
+    }
+
+    pub fn provider_list_state_mut(&mut self) -> &mut ListState {
+        &mut self.provider_list_state
+    }
+
+    pub fn tunnel_list_state(&self) -> &ListState {
+        &self.tunnel_list_state
+    }
+
+    pub fn tunnel_list_state_mut(&mut self) -> &mut ListState {
+        &mut self.tunnel_list_state
+    }
+
+    pub fn tunnels_overview_state(&self) -> &ListState {
+        &self.tunnels_overview_state
+    }
+
+    pub fn tunnels_overview_state_mut(&mut self) -> &mut ListState {
+        &mut self.tunnels_overview_state
+    }
+
+    pub fn containers_overview_state(&self) -> &ListState {
+        &self.containers_overview_state
+    }
+
+    pub fn containers_overview_state_mut(&mut self) -> &mut ListState {
+        &mut self.containers_overview_state
+    }
+
+    pub fn tunnel_host_picker_state(&self) -> &ListState {
+        &self.tunnel_host_picker_state
+    }
+
+    pub fn tunnel_host_picker_state_mut(&mut self) -> &mut ListState {
+        &mut self.tunnel_host_picker_state
+    }
+
+    pub fn tunnel_host_picker_query(&self) -> &String {
+        &self.tunnel_host_picker_query
+    }
+
+    pub fn tunnel_host_picker_query_mut(&mut self) -> &mut String {
+        &mut self.tunnel_host_picker_query
+    }
+
+    pub fn set_tunnel_host_picker_query(&mut self, query: String) {
+        self.tunnel_host_picker_query = query;
+    }
+
+    pub fn container_host_picker_state(&self) -> &ListState {
+        &self.container_host_picker_state
+    }
+
+    pub fn container_host_picker_state_mut(&mut self) -> &mut ListState {
+        &mut self.container_host_picker_state
+    }
+
+    pub fn container_host_picker_query(&self) -> &String {
+        &self.container_host_picker_query
+    }
+
+    pub fn container_host_picker_query_mut(&mut self) -> &mut String {
+        &mut self.container_host_picker_query
+    }
+
+    pub fn set_container_host_picker_query(&mut self, query: String) {
+        self.container_host_picker_query = query;
+    }
+
+    pub fn snippet_picker_state(&self) -> &ListState {
+        &self.snippet_picker_state
+    }
+
+    pub fn snippet_picker_state_mut(&mut self) -> &mut ListState {
+        &mut self.snippet_picker_state
+    }
+
+    pub fn snippet_search(&self) -> Option<&String> {
+        self.snippet_search.as_ref()
+    }
+
+    pub fn snippet_search_mut(&mut self) -> Option<&mut String> {
+        self.snippet_search.as_mut()
+    }
+
+    pub fn region_picker(&self) -> &RegionPickerState {
+        &self.region_picker
+    }
+
+    pub fn region_picker_mut(&mut self) -> &mut RegionPickerState {
+        &mut self.region_picker
+    }
+
+    pub fn help_scroll(&self) -> u16 {
+        self.help_scroll
+    }
+
+    pub fn set_help_scroll(&mut self, scroll: u16) {
+        self.help_scroll = scroll;
+    }
+
+    pub fn detail_scroll(&self) -> u16 {
+        self.detail_scroll
+    }
+
+    pub fn set_detail_scroll(&mut self, scroll: u16) {
+        self.detail_scroll = scroll;
+    }
+
+    pub fn detail_toggle_pending(&self) -> bool {
+        self.detail_toggle_pending
+    }
+
+    pub fn set_detail_toggle_pending(&mut self, pending: bool) {
+        self.detail_toggle_pending = pending;
+    }
+
+    pub fn welcome_opened(&self) -> Option<std::time::Instant> {
+        self.welcome_opened
+    }
+
+    pub fn set_welcome_opened(&mut self, when: Option<std::time::Instant>) {
+        self.welcome_opened = when;
+    }
+
+    pub fn esc_quit_hint_shown(&self) -> bool {
+        self.esc_quit_hint_shown
+    }
+
+    pub fn set_esc_quit_hint_shown(&mut self, shown: bool) {
+        self.esc_quit_hint_shown = shown;
+    }
+
+    pub fn known_hosts_count(&self) -> usize {
+        self.known_hosts_count
+    }
+
+    pub fn set_known_hosts_count(&mut self, count: usize) {
+        self.known_hosts_count = count;
+    }
+
+    pub fn pending_connect(&self) -> Option<&(String, Option<String>)> {
+        self.pending_connect.as_ref()
+    }
+
+    /// Take the queued connect, leaving `None`. Consumed by the event loop.
+    pub fn take_pending_connect(&mut self) -> Option<(String, Option<String>)> {
+        self.pending_connect.take()
     }
 }
 

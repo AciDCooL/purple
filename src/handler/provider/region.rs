@@ -117,7 +117,7 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
             // exclusively and closes. For multi-select: Enter confirms current
             // selection (same as Esc).
             if kind == Some(ProviderKind::Ovh) {
-                let cursor = app.ui.region_picker.cursor;
+                let cursor = app.ui.region_picker().cursor;
                 if let Some(Some(code)) = rows.get(cursor) {
                     selected.clear();
                     selected.insert(code.to_string());
@@ -131,14 +131,14 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
                 app.notify(crate::messages::regions_selected_count(count, zone_label));
             }
         }
-        KeyCode::Down | KeyCode::Char('j') if app.ui.region_picker.cursor + 1 < total => {
-            app.ui.region_picker.cursor += 1;
+        KeyCode::Down | KeyCode::Char('j') if app.ui.region_picker().cursor + 1 < total => {
+            app.ui.region_picker_mut().cursor += 1;
         }
-        KeyCode::Up | KeyCode::Char('k') if app.ui.region_picker.cursor > 0 => {
-            app.ui.region_picker.cursor -= 1;
+        KeyCode::Up | KeyCode::Char('k') if app.ui.region_picker().cursor > 0 => {
+            app.ui.region_picker_mut().cursor -= 1;
         }
         KeyCode::Char(' ') => {
-            let cursor = app.ui.region_picker.cursor;
+            let cursor = app.ui.region_picker().cursor;
             if let Some(Some(code)) = rows.get(cursor) {
                 // Toggle single region
                 if selected.contains(*code) {

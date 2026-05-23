@@ -6,25 +6,25 @@ use crate::ssh_config::model::HostEntry;
 
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     // Dispatch to password picker if it's open
-    if app.ui.password_picker.open {
+    if app.ui.password_picker().open {
         super::picker::handle_password_picker(app, key);
         return;
     }
 
     // Dispatch to key picker if it's open
-    if app.ui.key_picker.open {
+    if app.ui.key_picker().open {
         super::picker::handle_key_picker_shared(app, key, false);
         return;
     }
 
     // Dispatch to proxyjump picker if it's open
-    if app.ui.proxyjump_picker.open {
+    if app.ui.proxyjump_picker().open {
         super::picker::handle_proxyjump_picker(app, key);
         return;
     }
 
     // Dispatch to vault role picker if it's open
-    if app.ui.vault_role_picker.open {
+    if app.ui.vault_role_picker().open {
         super::picker::handle_vault_role_picker(app, key);
         return;
     }

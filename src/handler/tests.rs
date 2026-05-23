@@ -98,7 +98,7 @@ fn make_providers_app_with_proxmox() -> App {
 fn open_provider_form(app: &mut App, provider_name: &str) {
     let sorted = app.sorted_provider_names();
     let idx = sorted.iter().position(|n| n == provider_name).unwrap();
-    app.ui.provider_list_state.select(Some(idx));
+    app.ui.provider_list_state_mut().select(Some(idx));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(app, key(KeyCode::Enter), &tx);
 }
@@ -819,25 +819,25 @@ fn test_ovh_space_on_regions_opens_picker() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
-        app.ui.region_picker.open,
+        app.ui.region_picker().open,
         "Space on OVH Regions should open picker"
     );
-    assert_eq!(app.ui.region_picker.cursor, 0);
+    assert_eq!(app.ui.region_picker().cursor, 0);
 }
 
 #[test]
 fn test_ovh_picker_select_eu() {
     let mut app = make_ovh_form_app();
     app.providers.form_mut().focused_field = ProviderFormField::Regions;
-    app.ui.region_picker.open = true;
-    app.ui.region_picker.cursor = 0;
+    app.ui.region_picker_mut().open = true;
+    app.ui.region_picker_mut().cursor = 0;
 
     // Cursor starts on group header "API Endpoint" (row 0).
     // Row 1 = "eu", Row 2 = "ca", Row 3 = "us"
     // Move down to "eu" (row 1)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    assert_eq!(app.ui.region_picker.cursor, 1);
+    assert_eq!(app.ui.region_picker().cursor, 1);
 
     // Press Space to select "eu"
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
@@ -845,15 +845,15 @@ fn test_ovh_picker_select_eu() {
 
     // Press Enter to confirm
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.region_picker.open);
+    assert!(!app.ui.region_picker().open);
     assert_eq!(app.providers.form_mut().regions, "eu");
 }
 
 #[test]
 fn test_ovh_picker_select_us() {
     let mut app = make_ovh_form_app();
-    app.ui.region_picker.open = true;
-    app.ui.region_picker.cursor = 0;
+    app.ui.region_picker_mut().open = true;
+    app.ui.region_picker_mut().cursor = 0;
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
@@ -863,21 +863,21 @@ fn test_ovh_picker_select_us() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    assert_eq!(app.ui.region_picker.cursor, 3);
+    assert_eq!(app.ui.region_picker().cursor, 3);
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert_eq!(app.providers.form_mut().regions, "us");
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.region_picker.open);
+    assert!(!app.ui.region_picker().open);
     assert_eq!(app.providers.form_mut().regions, "us");
 }
 
 #[test]
 fn test_ovh_picker_space_on_header_toggles_all() {
     let mut app = make_ovh_form_app();
-    app.ui.region_picker.open = true;
-    app.ui.region_picker.cursor = 0; // Group header
+    app.ui.region_picker_mut().open = true;
+    app.ui.region_picker_mut().cursor = 0; // Group header
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
@@ -907,8 +907,8 @@ fn test_ovh_endpoint_picker_rows() {
 fn test_ovh_picker_enter_selects_and_closes() {
     // OVH is single-select: Enter on an item should select it and close
     let mut app = make_ovh_form_app();
-    app.ui.region_picker.open = true;
-    app.ui.region_picker.cursor = 0;
+    app.ui.region_picker_mut().open = true;
+    app.ui.region_picker_mut().cursor = 0;
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
@@ -917,19 +917,19 @@ fn test_ovh_picker_enter_selects_and_closes() {
     // Move to "ca" (row 2)
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    assert_eq!(app.ui.region_picker.cursor, 2);
+    assert_eq!(app.ui.region_picker().cursor, 2);
 
     // Enter directly (no Space needed) selects "ca" and closes
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.region_picker.open);
+    assert!(!app.ui.region_picker().open);
     assert_eq!(app.providers.form_mut().regions, "ca");
 }
 
 #[test]
 fn test_ovh_picker_enter_on_header_closes_without_select() {
     let mut app = make_ovh_form_app();
-    app.ui.region_picker.open = true;
-    app.ui.region_picker.cursor = 0; // group header
+    app.ui.region_picker_mut().open = true;
+    app.ui.region_picker_mut().cursor = 0; // group header
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
@@ -937,7 +937,7 @@ fn test_ovh_picker_enter_on_header_closes_without_select() {
     let (tx, _rx) = mpsc::channel();
     // Enter on header: no item to select, just closes
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.region_picker.open);
+    assert!(!app.ui.region_picker().open);
     assert_eq!(app.providers.form_mut().regions, "");
 }
 
@@ -945,8 +945,8 @@ fn test_ovh_picker_enter_on_header_closes_without_select() {
 fn test_ovh_picker_enter_replaces_previous_selection() {
     let mut app = make_ovh_form_app();
     app.providers.form_mut().regions = "eu".to_string(); // previously selected EU
-    app.ui.region_picker.open = true;
-    app.ui.region_picker.cursor = 3; // "us"
+    app.ui.region_picker_mut().open = true;
+    app.ui.region_picker_mut().cursor = 3; // "us"
     app.screen = Screen::ProviderForm {
         id: crate::providers::config::ProviderConfigId::bare("ovh"),
     };
@@ -964,7 +964,7 @@ fn test_azure_enter_on_regions_does_not_open_picker() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Must NOT open region picker (Azure uses text input, not picker)
-    assert!(!app.ui.region_picker.open);
+    assert!(!app.ui.region_picker().open);
     // Screen should no longer be ProviderForm (submit transitions away)
     // or validation error sets status (screen stays on form)
     // Either way: not a picker.
@@ -1117,7 +1117,7 @@ fn test_provider_form_space_opens_key_picker() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::IdentityFile);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.key_picker.open);
+    assert!(app.ui.key_picker().open);
 }
 
 #[test]
@@ -1163,20 +1163,20 @@ fn test_provider_list_q_returns_to_host_list() {
 #[test]
 fn test_provider_list_j_selects_next() {
     let mut app = make_providers_app_with_do();
-    app.ui.provider_list_state.select(Some(0));
+    app.ui.provider_list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     // Should advance (wrapping depends on count)
-    assert!(app.ui.provider_list_state.selected().is_some());
+    assert!(app.ui.provider_list_state().selected().is_some());
 }
 
 #[test]
 fn test_provider_list_k_selects_prev() {
     let mut app = make_providers_app_with_do();
-    app.ui.provider_list_state.select(Some(1));
+    app.ui.provider_list_state_mut().select(Some(1));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('k')), &tx);
-    assert!(app.ui.provider_list_state.selected().is_some());
+    assert!(app.ui.provider_list_state().selected().is_some());
 }
 
 #[test]
@@ -1187,7 +1187,7 @@ fn test_provider_list_sync_unconfigured_shows_status() {
     // No config for digitalocean - select it and press s
     let sorted = app.sorted_provider_names();
     let idx = sorted.iter().position(|n| n == "digitalocean").unwrap();
-    app.ui.provider_list_state.select(Some(idx));
+    app.ui.provider_list_state_mut().select(Some(idx));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert!(
@@ -1204,7 +1204,7 @@ fn test_provider_list_delete_removes_config() {
     let mut app = make_providers_app_with_do();
     let sorted = app.sorted_provider_names();
     let idx = sorted.iter().position(|n| n == "digitalocean").unwrap();
-    app.ui.provider_list_state.select(Some(idx));
+    app.ui.provider_list_state_mut().select(Some(idx));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     // d now triggers confirmation
@@ -1223,7 +1223,7 @@ fn test_provider_list_delete_unconfigured_is_noop() {
     *app.providers.config_mut() = test_provider_config();
     let sorted = app.sorted_provider_names();
     let idx = sorted.iter().position(|n| n == "digitalocean").unwrap();
-    app.ui.provider_list_state.select(Some(idx));
+    app.ui.provider_list_state_mut().select(Some(idx));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     // No status/toast message because no section existed to delete
@@ -1400,8 +1400,8 @@ fn test_space_on_askpass_opens_password_picker() {
     app.forms.host_mut().focused_field = FormField::AskPass;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.password_picker.open);
-    assert_eq!(app.ui.password_picker.list.selected(), Some(0));
+    assert!(app.ui.password_picker().open);
+    assert_eq!(app.ui.password_picker().list.selected(), Some(0));
 }
 
 #[test]
@@ -1410,7 +1410,7 @@ fn test_space_on_identityfile_opens_key_picker() {
     app.forms.host_mut().focused_field = FormField::IdentityFile;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.key_picker.open);
+    assert!(app.ui.key_picker().open);
 }
 
 #[test]
@@ -1419,7 +1419,7 @@ fn test_space_on_proxyjump_opens_proxyjump_picker() {
     app.forms.host_mut().focused_field = FormField::ProxyJump;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.proxyjump_picker.open);
+    assert!(app.ui.proxyjump_picker().open);
 }
 
 // VaultSsh has two Space branches. With no role candidates Space inserts a
@@ -1432,7 +1432,7 @@ fn test_space_on_vaultssh_with_no_candidates_inserts_literal_space() {
     app.forms.host_mut().focused_field = FormField::VaultSsh;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(!app.ui.vault_role_picker.open);
+    assert!(!app.ui.vault_role_picker().open);
     assert_eq!(app.forms.host_mut().vault_ssh, " ");
 }
 
@@ -1443,8 +1443,8 @@ fn test_space_on_vaultssh_with_candidates_opens_picker() {
     app.forms.host_mut().focused_field = FormField::VaultSsh;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.vault_role_picker.open);
-    assert_eq!(app.ui.vault_role_picker.list.selected(), Some(0));
+    assert!(app.ui.vault_role_picker().open);
+    assert_eq!(app.ui.vault_role_picker().list.selected(), Some(0));
 }
 
 // --- Esc closes picker ---
@@ -1452,10 +1452,10 @@ fn test_space_on_vaultssh_with_candidates_opens_picker() {
 #[test]
 fn test_password_picker_esc_closes() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(2);
+    app.ui.password_picker_mut().open_at(2);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     // Form field should be unchanged
     assert_eq!(app.forms.host_mut().askpass, "");
 }
@@ -1463,39 +1463,39 @@ fn test_password_picker_esc_closes() {
 #[test]
 fn test_key_picker_esc_closes() {
     let mut app = make_form_app();
-    app.ui.key_picker.open_at(0);
+    app.ui.key_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(!app.ui.key_picker.open);
+    assert!(!app.ui.key_picker().open);
 }
 
 #[test]
 fn test_proxyjump_picker_esc_closes() {
     let mut app = make_form_app();
-    app.ui.proxyjump_picker.open_at(0);
+    app.ui.proxyjump_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(!app.ui.proxyjump_picker.open);
+    assert!(!app.ui.proxyjump_picker().open);
 }
 
 #[test]
 fn test_vault_role_picker_esc_closes() {
     let mut app = make_form_app();
-    app.ui.vault_role_picker.open_at(0);
+    app.ui.vault_role_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(!app.ui.vault_role_picker.open);
+    assert!(!app.ui.vault_role_picker().open);
 }
 
 #[test]
 fn test_region_picker_esc_closes() {
     let mut app = make_ovh_form_app();
     app.providers.form_mut().focused_field = ProviderFormField::Regions;
-    app.ui.region_picker.open = true;
-    app.ui.region_picker.cursor = 0;
+    app.ui.region_picker_mut().open = true;
+    app.ui.region_picker_mut().cursor = 0;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(!app.ui.region_picker.open);
+    assert!(!app.ui.region_picker().open);
 }
 
 // --- Navigation j/k ---
@@ -1503,57 +1503,57 @@ fn test_region_picker_esc_closes() {
 #[test]
 fn test_password_picker_j_moves_down() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(0);
+    app.ui.password_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    assert_eq!(app.ui.password_picker.list.selected(), Some(1));
+    assert_eq!(app.ui.password_picker().list.selected(), Some(1));
 }
 
 #[test]
 fn test_password_picker_k_moves_up() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(2);
+    app.ui.password_picker_mut().open_at(2);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('k')), &tx);
-    assert_eq!(app.ui.password_picker.list.selected(), Some(1));
+    assert_eq!(app.ui.password_picker().list.selected(), Some(1));
 }
 
 #[test]
 fn test_password_picker_down_arrow() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(0);
+    app.ui.password_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Down), &tx);
-    assert_eq!(app.ui.password_picker.list.selected(), Some(1));
+    assert_eq!(app.ui.password_picker().list.selected(), Some(1));
 }
 
 #[test]
 fn test_password_picker_up_arrow() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(3);
+    app.ui.password_picker_mut().open_at(3);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Up), &tx);
-    assert_eq!(app.ui.password_picker.list.selected(), Some(2));
+    assert_eq!(app.ui.password_picker().list.selected(), Some(2));
 }
 
 #[test]
 fn test_password_picker_wraps_around_bottom() {
     let mut app = make_form_app();
     let last = crate::askpass::PASSWORD_SOURCES.len() - 1;
-    app.ui.password_picker.open_at(last);
+    app.ui.password_picker_mut().open_at(last);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    assert_eq!(app.ui.password_picker.list.selected(), Some(0));
+    assert_eq!(app.ui.password_picker().list.selected(), Some(0));
 }
 
 #[test]
 fn test_password_picker_wraps_around_top() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(0);
+    app.ui.password_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('k')), &tx);
     let last = crate::askpass::PASSWORD_SOURCES.len() - 1;
-    assert_eq!(app.ui.password_picker.list.selected(), Some(last));
+    assert_eq!(app.ui.password_picker().list.selected(), Some(last));
 }
 
 // --- Enter selects source: OS Keychain ---
@@ -1561,10 +1561,10 @@ fn test_password_picker_wraps_around_top() {
 #[test]
 fn test_password_picker_select_keychain() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(0); // OS Keychain
+    app.ui.password_picker_mut().open_at(0); // OS Keychain
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     assert_eq!(app.forms.host_mut().askpass, "keychain");
 }
 
@@ -1573,10 +1573,10 @@ fn test_password_picker_select_keychain() {
 #[test]
 fn test_password_picker_select_1password() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(1); // 1Password
+    app.ui.password_picker_mut().open_at(1); // 1Password
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     assert_eq!(app.forms.host_mut().askpass, "op://");
     assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
@@ -1586,10 +1586,10 @@ fn test_password_picker_select_1password() {
 #[test]
 fn test_password_picker_select_bitwarden() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(2); // Bitwarden
+    app.ui.password_picker_mut().open_at(2); // Bitwarden
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     assert_eq!(app.forms.host_mut().askpass, "bw:");
     assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
@@ -1599,10 +1599,10 @@ fn test_password_picker_select_bitwarden() {
 #[test]
 fn test_password_picker_select_pass() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(3); // pass
+    app.ui.password_picker_mut().open_at(3); // pass
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     assert_eq!(app.forms.host_mut().askpass, "pass:");
     assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
@@ -1612,10 +1612,10 @@ fn test_password_picker_select_pass() {
 #[test]
 fn test_password_picker_select_vault() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(4); // HashiCorp Vault
+    app.ui.password_picker_mut().open_at(4); // HashiCorp Vault
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     assert_eq!(app.forms.host_mut().askpass, "vault:");
     assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
@@ -1625,10 +1625,10 @@ fn test_password_picker_select_vault() {
 #[test]
 fn test_password_picker_select_proton_pass() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(5); // Proton Pass
+    app.ui.password_picker_mut().open_at(5); // Proton Pass
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     assert_eq!(app.forms.host_mut().askpass, "proton:");
     assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
 }
@@ -1668,10 +1668,10 @@ fn test_host_form_proton_askpass_writes_comment() {
 fn test_password_picker_select_custom() {
     let mut app = make_form_app();
     app.forms.host_mut().askpass = "old-value".to_string();
-    app.ui.password_picker.open_at(6); // Custom command
+    app.ui.password_picker_mut().open_at(6); // Custom command
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     assert_eq!(app.forms.host_mut().askpass, "");
     // Custom-command branch must refocus AskPass so the next keystroke
     // lands in the askpass input, not whichever field had focus before
@@ -1685,10 +1685,10 @@ fn test_password_picker_select_custom() {
 fn test_password_picker_select_none() {
     let mut app = make_form_app();
     app.forms.host_mut().askpass = "keychain".to_string();
-    app.ui.password_picker.open_at(7); // None
+    app.ui.password_picker_mut().open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     assert_eq!(app.forms.host_mut().askpass, "");
 }
 
@@ -1698,7 +1698,7 @@ fn test_password_picker_select_none() {
 fn test_password_picker_blocks_char_input() {
     let mut app = make_form_app();
     app.forms.host_mut().askpass = "".to_string();
-    app.ui.password_picker.open_at(0);
+    app.ui.password_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
     // 'x' should not be appended to any form field
@@ -1710,7 +1710,7 @@ fn test_password_picker_blocks_char_input() {
 fn test_password_picker_blocks_tab() {
     let mut app = make_form_app();
     let original_field = app.forms.host_mut().focused_field;
-    app.ui.password_picker.open_at(0);
+    app.ui.password_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Tab), &tx);
     // Tab should not change focused field
@@ -1730,7 +1730,7 @@ fn test_password_picker_works_on_edit_host() {
     let (tx, _rx) = mpsc::channel();
     // Space on empty picker field opens the picker.
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.password_picker.open);
+    assert!(app.ui.password_picker().open);
     // Inside the picker, Enter selects the highlighted entry (keychain).
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert_eq!(app.forms.host_mut().askpass, "keychain");
@@ -1741,13 +1741,13 @@ fn test_password_picker_works_on_edit_host() {
 #[test]
 fn test_password_picker_takes_priority_over_key_picker() {
     let mut app = make_form_app();
-    app.ui.key_picker.open = true;
-    app.ui.password_picker.open_at(0);
+    app.ui.key_picker_mut().open = true;
+    app.ui.password_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     // Esc should close password picker, not key picker
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(!app.ui.password_picker.open);
-    assert!(app.ui.key_picker.open); // still open
+    assert!(!app.ui.password_picker().open);
+    assert!(app.ui.key_picker().open); // still open
 }
 
 // =========================================================================
@@ -1759,10 +1759,10 @@ fn test_host_list_enter_carries_askpass() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
     app.screen = Screen::HostList;
     // Select the host
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.ui.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect().unwrap();
     assert_eq!(pending.0, "myserver");
     assert_eq!(pending.1, Some("keychain".to_string()));
 }
@@ -1772,10 +1772,10 @@ fn test_host_list_enter_carries_vault_askpass() {
     let mut app =
         make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass vault:secret/ssh#pass\n");
     app.screen = Screen::HostList;
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.ui.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect().unwrap();
     assert_eq!(pending.1, Some("vault:secret/ssh#pass".to_string()));
 }
 
@@ -1783,10 +1783,10 @@ fn test_host_list_enter_carries_vault_askpass() {
 fn test_host_list_enter_no_askpass() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n");
     app.screen = Screen::HostList;
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.ui.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect().unwrap();
     assert_eq!(pending.0, "myserver");
     assert_eq!(pending.1, None);
 }
@@ -1802,10 +1802,10 @@ fn test_search_enter_carries_askpass() {
     app.start_search();
     // In search mode, filtered_indices should contain our host
     assert!(!app.search.filtered_indices().is_empty());
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.ui.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect().unwrap();
     assert_eq!(pending.0, "myserver");
     assert_eq!(pending.1, Some("op://V/I/p".to_string()));
     // Search should be cancelled after Enter
@@ -1817,10 +1817,10 @@ fn test_search_enter_no_askpass() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n");
     app.screen = Screen::HostList;
     app.start_search();
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let pending = app.ui.pending_connect.as_ref().unwrap();
+    let pending = app.ui.pending_connect().unwrap();
     assert_eq!(pending.1, None);
 }
 
@@ -1833,7 +1833,7 @@ fn test_search_ctrl_e_opens_edit_form() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n");
     app.screen = Screen::HostList;
     app.start_search();
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('e'), &tx);
     assert!(matches!(app.screen, Screen::EditHost { ref alias } if alias == "myserver"));
@@ -1850,7 +1850,7 @@ fn test_search_ctrl_e_blocks_included_host() {
     }
     app.screen = Screen::HostList;
     app.start_search();
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('e'), &tx);
     // Should remain in search mode (not open edit form)
@@ -1896,7 +1896,7 @@ fn test_edit_host_populates_askpass_in_form() {
     let mut app =
         make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass pass:ssh/prod\n");
     app.screen = Screen::HostList;
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     // Press 'e' to edit
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
@@ -1909,7 +1909,7 @@ fn test_edit_host_populates_askpass_in_form() {
 fn test_edit_host_populates_empty_askpass() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n");
     app.screen = Screen::HostList;
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     if matches!(app.screen, Screen::EditHost { .. }) {
@@ -2005,7 +2005,7 @@ fn test_picker_select_vault_then_type_rest() {
     for _ in 0..4 {
         let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     }
-    assert_eq!(app.ui.password_picker.list.selected(), Some(4));
+    assert_eq!(app.ui.password_picker().list.selected(), Some(4));
     // Inside the picker, Enter selects.
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert_eq!(app.forms.host_mut().askpass, "vault:");
@@ -2038,7 +2038,7 @@ fn test_picker_select_keychain_no_further_typing_needed() {
 #[test]
 fn test_picker_keychain_sets_status_message() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(0);
+    app.ui.password_picker_mut().open_at(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(
@@ -2054,7 +2054,7 @@ fn test_picker_keychain_sets_status_message() {
 fn test_picker_none_sets_cleared_status() {
     let mut app = make_form_app();
     app.forms.host_mut().askpass = "keychain".to_string();
-    app.ui.password_picker.open_at(7); // None
+    app.ui.password_picker_mut().open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(app.status_center.toast().unwrap().text.contains("cleared"));
@@ -2065,7 +2065,7 @@ fn test_picker_prefix_source_shows_guidance() {
     // Prefix sources (op://, bw:, etc.) show a guidance message
     let mut app = make_form_app();
     app.status_center.set_toast_message(None);
-    app.ui.password_picker.open_at(1); // 1Password (op://)
+    app.ui.password_picker_mut().open_at(1); // 1Password (op://)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(app.status_center.toast().unwrap().text.contains("Complete"));
@@ -2083,7 +2083,7 @@ fn test_backspace_after_prefix_selection() {
     let (tx, _rx) = mpsc::channel();
     // Space opens the picker; Enter selects 1Password (after pre-positioning).
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    app.ui.password_picker.list.select(Some(1));
+    app.ui.password_picker_mut().list.select(Some(1));
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert_eq!(app.forms.host_mut().askpass, "op://");
     assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
@@ -2127,12 +2127,12 @@ fn test_edit_form_empty_askpass_when_none() {
 #[test]
 fn test_password_picker_ignores_unknown_keys() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(2);
+    app.ui.password_picker_mut().open_at(2);
     let (tx, _rx) = mpsc::channel();
     // F1 key should be a no-op
     let _ = handle_key_event(&mut app, key(KeyCode::F(1)), &tx);
-    assert!(app.ui.password_picker.open);
-    assert_eq!(app.ui.password_picker.list.selected(), Some(2));
+    assert!(app.ui.password_picker().open);
+    assert_eq!(app.ui.password_picker().list.selected(), Some(2));
 }
 
 // =========================================================================
@@ -2146,7 +2146,7 @@ fn test_search_enter_carries_askpass_op_uri() {
     app.apply_filter();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    if let Some((alias, askpass)) = &app.ui.pending_connect {
+    if let Some((alias, askpass)) = app.ui.pending_connect() {
         assert_eq!(alias, "myserver");
         assert_eq!(askpass.as_deref(), Some("op://V/I/p"));
     } else {
@@ -2208,7 +2208,7 @@ fn test_full_flow_picker_to_typed_value() {
 
     // Space opens picker; pre-position to Bitwarden (index 2); Enter selects.
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    app.ui.password_picker.list.select(Some(2));
+    app.ui.password_picker_mut().list.select(Some(2));
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     // Verify field has prefix
@@ -2258,9 +2258,9 @@ fn test_full_flow_clear_askpass_via_picker_none() {
     // pre-set the show_password_picker state directly (mirrors the user
     // backspacing the field clean and pressing Space, but skips the steps
     // since we are testing the post-picker behavior).
-    app.ui.password_picker.open = true;
-    app.ui.password_picker.list = ratatui::widgets::ListState::default();
-    app.ui.password_picker.list.select(Some(0));
+    app.ui.password_picker_mut().open = true;
+    app.ui.password_picker_mut().list = ratatui::widgets::ListState::default();
+    app.ui.password_picker_mut().list.select(Some(0));
     for _ in 0..6 {
         let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     }
@@ -2280,7 +2280,7 @@ fn test_host_list_enter_no_askpass_is_none() {
     let mut app = make_app("Host plain\n  HostName 10.0.0.1\n");
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    if let Some((alias, askpass)) = &app.ui.pending_connect {
+    if let Some((alias, askpass)) = app.ui.pending_connect() {
         assert_eq!(alias, "plain");
         assert!(askpass.is_none());
     } else {
@@ -2302,7 +2302,7 @@ fn test_ctrl_p_on_provider_form_does_not_open_password_picker() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('p'), &tx);
     // Provider form does not have a password picker
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
 }
 
 // =========================================================================
@@ -2351,16 +2351,16 @@ Host beta
     let (tx, _rx) = mpsc::channel();
 
     // Select alpha (first host) and press Enter
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let (alias, askpass) = app.ui.pending_connect.take().unwrap();
+    let (alias, askpass) = app.ui.take_pending_connect().unwrap();
     assert_eq!(alias, "alpha");
     assert_eq!(askpass, Some("keychain".to_string()));
 
     // Select beta (second host) and press Enter
-    app.ui.list_state.select(Some(1));
+    app.ui.list_state_mut().select(Some(1));
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    let (alias, askpass) = app.ui.pending_connect.take().unwrap();
+    let (alias, askpass) = app.ui.take_pending_connect().unwrap();
     assert_eq!(alias, "beta");
     assert_eq!(askpass, Some("bw:my-item".to_string()));
 }
@@ -2469,7 +2469,7 @@ fn test_space_on_empty_askpass_field_opens_picker() {
     assert!(app.forms.host_mut().askpass.is_empty());
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.password_picker.open);
+    assert!(app.ui.password_picker().open);
 }
 
 #[test]
@@ -2483,7 +2483,7 @@ fn test_space_on_populated_askpass_field_inserts_literal() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
-        !app.ui.password_picker.open,
+        !app.ui.password_picker().open,
         "Space on a populated picker field must NOT open the picker"
     );
     assert_eq!(app.forms.host_mut().askpass, "my-script ");
@@ -2498,10 +2498,10 @@ fn test_picker_open_on_empty_then_enter_selects_keychain() {
     assert!(app.forms.host_mut().askpass.is_empty());
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.password_picker.open);
+    assert!(app.ui.password_picker().open);
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert_eq!(app.forms.host_mut().askpass, "keychain");
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
 }
 
 // =========================================================================
@@ -2589,10 +2589,10 @@ fn test_picker_esc_preserves_existing_askpass() {
     // Field has content → user must clear it to reach the picker. Simulate
     // by setting the picker open directly (the unit under test is the Esc
     // behavior, not the open path).
-    app.ui.password_picker.open = true;
-    app.ui.password_picker.list = ratatui::widgets::ListState::default();
-    app.ui.password_picker.list.select(Some(0));
-    assert!(app.ui.password_picker.open);
+    app.ui.password_picker_mut().open = true;
+    app.ui.password_picker_mut().list = ratatui::widgets::ListState::default();
+    app.ui.password_picker_mut().list.select(Some(0));
+    assert!(app.ui.password_picker().open);
     // Navigate but then Esc
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
@@ -2678,7 +2678,7 @@ Host gamma
 #[test]
 fn test_password_picker_keychain_sets_status_message() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(0); // Keychain
+    app.ui.password_picker_mut().open_at(0); // Keychain
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     let toast = app.status_center.toast().unwrap();
@@ -2693,7 +2693,7 @@ fn test_password_picker_keychain_sets_status_message() {
 fn test_password_picker_none_sets_cleared_status() {
     let mut app = make_form_app();
     app.forms.host_mut().askpass = "keychain".to_string();
-    app.ui.password_picker.open_at(7); // None
+    app.ui.password_picker_mut().open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     let toast = app.status_center.toast().unwrap();
@@ -2707,7 +2707,7 @@ fn test_password_picker_none_sets_cleared_status() {
 #[test]
 fn test_password_picker_prefix_source_focuses_askpass_field() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(1); // 1Password (op://)
+    app.ui.password_picker_mut().open_at(1); // 1Password (op://)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert_eq!(
@@ -2725,7 +2725,7 @@ fn test_password_picker_prefix_source_focuses_askpass_field() {
 #[test]
 fn test_password_picker_prefix_bw_focuses_askpass() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(2); // Bitwarden (bw:)
+    app.ui.password_picker_mut().open_at(2); // Bitwarden (bw:)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
@@ -2735,7 +2735,7 @@ fn test_password_picker_prefix_bw_focuses_askpass() {
 #[test]
 fn test_password_picker_prefix_pass_focuses_askpass() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(3); // pass (pass:)
+    app.ui.password_picker_mut().open_at(3); // pass (pass:)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
@@ -2745,7 +2745,7 @@ fn test_password_picker_prefix_pass_focuses_askpass() {
 #[test]
 fn test_password_picker_prefix_vault_focuses_askpass() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(4); // Vault (vault:)
+    app.ui.password_picker_mut().open_at(4); // Vault (vault:)
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert_eq!(app.forms.host_mut().focused_field, FormField::AskPass);
@@ -2763,7 +2763,7 @@ fn test_included_host_edit_blocked() {
     if let Some(host) = app.hosts_state.list_mut().first_mut() {
         host.source_file = Some(std::path::PathBuf::from("/etc/ssh/ssh_config.d/work.conf"));
     }
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
@@ -2776,10 +2776,10 @@ fn test_included_host_connect_still_carries_askpass() {
     if let Some(host) = app.hosts_state.list_mut().first_mut() {
         host.source_file = Some(std::path::PathBuf::from("/etc/ssh/ssh_config.d/work.conf"));
     }
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    if let Some((alias, askpass)) = &app.ui.pending_connect {
+    if let Some((alias, askpass)) = app.ui.pending_connect() {
         assert_eq!(alias, "myserver");
         assert_eq!(askpass.as_deref(), Some("op://V/I/p"));
     }
@@ -2792,7 +2792,7 @@ fn test_included_host_delete_blocked() {
     if let Some(host) = app.hosts_state.list_mut().first_mut() {
         host.source_file = Some(std::path::PathBuf::from("/etc/ssh/ssh_config.d/work.conf"));
     }
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
@@ -2846,12 +2846,12 @@ fn test_form_submit_empty_askpass_is_none() {
 #[test]
 fn test_password_picker_enter_with_no_selection() {
     let mut app = make_form_app();
-    app.ui.password_picker.open = true;
-    app.ui.password_picker.list = ratatui::widgets::ListState::default(); // no selection
+    app.ui.password_picker_mut().open = true;
+    app.ui.password_picker_mut().list = ratatui::widgets::ListState::default(); // no selection
     app.forms.host_mut().askpass = "old".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
     assert_eq!(app.forms.host_mut().askpass, "old");
 }
 
@@ -2881,17 +2881,17 @@ fn test_bw_session_none_for_non_bw_source() {
 fn test_password_picker_ctrl_d_closes_picker() {
     // Use "None" to avoid writing a value to the real preferences file
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(7); // None
+    app.ui.password_picker_mut().open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('d'), &tx);
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
 }
 
 #[test]
 fn test_password_picker_ctrl_d_does_not_change_form_askpass() {
     let mut app = make_form_app();
     app.forms.host_mut().askpass = "old".to_string();
-    app.ui.password_picker.open_at(7); // None
+    app.ui.password_picker_mut().open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('d'), &tx);
     // Ctrl+D only sets the global default, not the form field
@@ -2901,12 +2901,12 @@ fn test_password_picker_ctrl_d_does_not_change_form_askpass() {
 #[test]
 fn test_password_picker_ctrl_d_none_sets_status() {
     let mut app = make_form_app();
-    app.ui.password_picker.open_at(7); // None
+    app.ui.password_picker_mut().open_at(7); // None
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('d'), &tx);
     // Shows "cleared" on success or "Failed to save" if ~/.purple doesn't exist
     assert!(app.status_center.status().is_some() || app.status_center.toast().is_some());
-    assert!(!app.ui.password_picker.open);
+    assert!(!app.ui.password_picker().open);
 }
 
 #[test]
@@ -3137,7 +3137,7 @@ fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
     // The cursor follows the rename: `submit_form` calls
     // `select_host_by_alias(&target_alias)` after the rename.
     assert_eq!(
-        app.ui.list_state.selected(),
+        app.ui.list_state().selected(),
         Some(0),
         "cursor must follow the renamed host to its new display position on {:?}",
         sort_mode
@@ -3307,7 +3307,7 @@ fn make_snippet_app() -> App {
         },
     ];
     let _ = app.snippets.store_mut().save();
-    app.ui.snippet_picker_state.select(Some(0));
+    app.ui.snippet_picker_state_mut().select(Some(0));
     app.screen = Screen::SnippetPicker {
         target_aliases: vec!["myserver".to_string()],
     };
@@ -3320,10 +3320,10 @@ fn test_snippet_picker_nav_down_up() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    assert_eq!(app.ui.snippet_picker_state.selected(), Some(1));
+    assert_eq!(app.ui.snippet_picker_state().selected(), Some(1));
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('k')), &tx);
-    assert_eq!(app.ui.snippet_picker_state.selected(), Some(0));
+    assert_eq!(app.ui.snippet_picker_state().selected(), Some(0));
 }
 
 #[test]
@@ -3419,7 +3419,7 @@ fn test_snippet_picker_d_deletes_and_saves() {
     assert_eq!(app.snippets.pending_delete(), None);
     assert_eq!(app.snippets.store().snippets.len(), 1);
     assert_eq!(app.snippets.store().snippets[0].name, "uptime");
-    assert_eq!(app.ui.snippet_picker_state.selected(), Some(0));
+    assert_eq!(app.ui.snippet_picker_state().selected(), Some(0));
 }
 
 #[test]
@@ -3430,7 +3430,7 @@ fn test_snippet_picker_d_last_item_selects_none() {
         command: "ls".to_string(),
         description: String::new(),
     }];
-    app.ui.snippet_picker_state.select(Some(0));
+    app.ui.snippet_picker_state_mut().select(Some(0));
     let _ = app.snippets.store_mut().save();
     let (tx, _rx) = mpsc::channel();
 
@@ -3439,7 +3439,7 @@ fn test_snippet_picker_d_last_item_selects_none() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(app.snippets.store().snippets.is_empty());
-    assert_eq!(app.ui.snippet_picker_state.selected(), None);
+    assert_eq!(app.ui.snippet_picker_state().selected(), None);
 }
 
 #[test]
@@ -3686,7 +3686,7 @@ fn test_snippet_form_edit_rename_rollback_on_save_failure() {
 fn test_snippet_picker_enter_with_no_selection() {
     let mut app = make_snippet_app();
     app.snippets.store_mut().snippets.clear();
-    app.ui.snippet_picker_state.select(None);
+    app.ui.snippet_picker_state_mut().select(None);
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
@@ -3698,7 +3698,7 @@ fn test_snippet_picker_enter_with_no_selection() {
 #[test]
 fn test_host_list_r_opens_snippet_picker() {
     let mut app = make_app("Host myserver\n  HostName 1.2.3.4\n");
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let dir = std::env::temp_dir().join(format!("purple_handler_snip_r_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     app.snippets.store_mut().path_override = Some(dir.join("snippets"));
@@ -3716,7 +3716,7 @@ fn test_host_list_r_opens_snippet_picker() {
 #[test]
 fn test_host_list_r_shift_opens_snippet_picker_all() {
     let mut app = make_app("Host a\n  HostName 1.1.1.1\nHost b\n  HostName 2.2.2.2\n");
-    app.ui.list_state.select(Some(0));
+    app.ui.list_state_mut().select(Some(0));
     let dir = std::env::temp_dir().join(format!("purple_handler_snip_R_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     app.snippets.store_mut().path_override = Some(dir.join("snippets"));
@@ -4180,7 +4180,7 @@ fn test_tunnel_list_d_y_deletes_tunnel() {
         alias: "test".to_string(),
     };
     app.refresh_tunnel_list("test");
-    app.ui.tunnel_list_state.select(Some(0));
+    app.ui.tunnel_list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     assert_eq!(app.tunnels.pending_delete(), Some(0));
@@ -4195,7 +4195,7 @@ fn test_tunnel_list_d_esc_cancels_delete() {
         alias: "test".to_string(),
     };
     app.refresh_tunnel_list("test");
-    app.ui.tunnel_list_state.select(Some(0));
+    app.ui.tunnel_list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     assert_eq!(app.tunnels.pending_delete(), Some(0));
@@ -4211,7 +4211,7 @@ fn test_tunnel_list_d_n_cancels_delete() {
         alias: "test".to_string(),
     };
     app.refresh_tunnel_list("test");
-    app.ui.tunnel_list_state.select(Some(0));
+    app.ui.tunnel_list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
@@ -4346,7 +4346,7 @@ fn test_tunnel_delete_other_key_ignored() {
         alias: "test".to_string(),
     };
     app.refresh_tunnel_list("test");
-    app.ui.tunnel_list_state.select(Some(0));
+    app.ui.tunnel_list_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     assert_eq!(app.tunnels.pending_delete(), Some(0));
@@ -4477,7 +4477,7 @@ fn test_enter_on_stale_host_shows_warning() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Connection should still be pending
-    assert!(app.ui.pending_connect.is_some());
+    assert!(app.ui.pending_connect().is_some());
     // But toast should show stale warning
     let toast = app.status_center.toast().expect("toast should be set");
     assert!(
@@ -4493,7 +4493,7 @@ fn test_enter_on_normal_host_no_stale_warning() {
     let mut app = make_app("Host normal\n  HostName 1.2.3.4\n");
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(app.ui.pending_connect.is_some());
+    assert!(app.ui.pending_connect().is_some());
     // No stale warning
     assert!(
         app.status_center.toast().is_none()
@@ -4511,7 +4511,7 @@ fn test_search_enter_on_stale_host_shows_warning() {
     app.apply_filter();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(app.ui.pending_connect.is_some());
+    assert!(app.ui.pending_connect().is_some());
     let toast = app.status_center.toast().expect("toast should be set");
     assert!(
         toast.text.contains("Stale host"),
@@ -4587,7 +4587,7 @@ fn test_provider_x_key_opens_scoped_purge() {
         .iter()
         .position(|n| n == "digitalocean")
         .expect("digitalocean should be in sorted list");
-    app.ui.provider_list_state.select(Some(idx));
+    app.ui.provider_list_state_mut().select(Some(idx));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('X')), &tx);
     match &app.screen {
@@ -5667,10 +5667,10 @@ fn test_help_j_increments_scroll() {
     app.screen = Screen::Help {
         return_screen: Box::new(Screen::HostList),
     };
-    app.ui.help_scroll = 0;
+    app.ui.set_help_scroll(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    assert_eq!(app.ui.help_scroll, 1);
+    assert_eq!(app.ui.help_scroll(), 1);
 }
 
 #[test]
@@ -5679,10 +5679,10 @@ fn test_help_k_does_not_underflow() {
     app.screen = Screen::Help {
         return_screen: Box::new(Screen::HostList),
     };
-    app.ui.help_scroll = 0;
+    app.ui.set_help_scroll(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('k')), &tx);
-    assert_eq!(app.ui.help_scroll, 0);
+    assert_eq!(app.ui.help_scroll(), 0);
 }
 
 #[test]
@@ -5691,10 +5691,10 @@ fn test_help_page_down_increments_by_ten() {
     app.screen = Screen::Help {
         return_screen: Box::new(Screen::HostList),
     };
-    app.ui.help_scroll = 0;
+    app.ui.set_help_scroll(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::PageDown), &tx);
-    assert_eq!(app.ui.help_scroll, 10);
+    assert_eq!(app.ui.help_scroll(), 10);
 }
 
 #[test]
@@ -5703,10 +5703,10 @@ fn test_help_page_up_does_not_underflow() {
     app.screen = Screen::Help {
         return_screen: Box::new(Screen::HostList),
     };
-    app.ui.help_scroll = 0;
+    app.ui.set_help_scroll(0);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::PageUp), &tx);
-    assert_eq!(app.ui.help_scroll, 0);
+    assert_eq!(app.ui.help_scroll(), 0);
 }
 
 #[test]
@@ -5715,10 +5715,10 @@ fn test_help_scroll_reset_on_close() {
     app.screen = Screen::Help {
         return_screen: Box::new(Screen::HostList),
     };
-    app.ui.help_scroll = 7;
+    app.ui.set_help_scroll(7);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert_eq!(app.ui.help_scroll, 0);
+    assert_eq!(app.ui.help_scroll(), 0);
     assert!(matches!(app.screen, Screen::HostList));
 }
 
@@ -5735,7 +5735,7 @@ fn test_help_q_closes_and_returns() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
     assert!(matches!(app.screen, Screen::TunnelList { .. }));
-    assert_eq!(app.ui.help_scroll, 0);
+    assert_eq!(app.ui.help_scroll(), 0);
 }
 
 #[test]
@@ -5749,7 +5749,7 @@ fn test_help_question_again_closes_and_returns() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('?')), &tx);
     assert!(matches!(app.screen, Screen::Containers { .. }));
-    assert_eq!(app.ui.help_scroll, 0);
+    assert_eq!(app.ui.help_scroll(), 0);
 }
 
 // --- Return screen field preservation ---
@@ -6044,7 +6044,7 @@ fn test_enter_on_group_header_does_not_connect() {
             |item| matches!(item, crate::app::HostListItem::GroupHeader(t) if t == "production"),
         )
         .expect("should have a production group header");
-    app.ui.list_state.select(Some(header_pos));
+    app.ui.list_state_mut().select(Some(header_pos));
 
     // Press Enter — should not panic and group_filter should remain None
     let (tx, _rx) = mpsc::channel();
@@ -6213,14 +6213,14 @@ fn esc_does_not_quit_first_press_shows_hint_toast() {
     assert!(app.hosts_state.group_filter().is_none());
     assert!(app.hosts_state.multi_select().is_empty());
     assert!(app.running);
-    assert!(!app.ui.esc_quit_hint_shown);
+    assert!(!app.ui.esc_quit_hint_shown());
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
 
     assert!(app.running, "Esc on idle host list must not quit");
     assert!(
-        app.ui.esc_quit_hint_shown,
+        app.ui.esc_quit_hint_shown(),
         "first idle Esc must arm the one-shot hint flag"
     );
     let toast = app
@@ -6259,7 +6259,7 @@ fn q_still_quits_after_esc_hint() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.running);
-    assert!(app.ui.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown());
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
     assert!(
@@ -7305,7 +7305,7 @@ fn jump_enter_on_tunnel_hit_switches_to_tunnels_page_and_selects_row() {
     let expected_idx = pairs
         .iter()
         .position(|(alias, rule)| alias == "alpha" && rule.bind_port == 5432);
-    assert_eq!(app.ui.tunnels_overview_state.selected(), expected_idx);
+    assert_eq!(app.ui.tunnels_overview_state().selected(), expected_idx);
 }
 
 #[test]
@@ -7357,7 +7357,7 @@ fn jump_enter_on_container_hit_lands_on_global_containers_tab() {
     let visible = crate::ui::containers_overview::visible_items(&app);
     let selected_idx = app
         .ui
-        .containers_overview_state
+        .containers_overview_state()
         .selected()
         .expect("cursor must be placed on a row");
     let row = visible
@@ -7475,7 +7475,7 @@ fn proxyjump_picker_app() -> App {
     app.screen = Screen::EditHost {
         alias: "victim".to_string(),
     };
-    app.ui.proxyjump_picker.open = true;
+    app.ui.proxyjump_picker_mut().open = true;
     app
 }
 
@@ -7487,13 +7487,13 @@ fn proxyjump_picker_enter_on_section_label_is_noop() {
         .iter()
         .position(|c| matches!(c, ProxyJumpCandidate::SectionLabel(_)))
         .expect("test setup must produce a SectionLabel");
-    app.ui.proxyjump_picker.list.select(Some(label_idx));
+    app.ui.proxyjump_picker_mut().list.select(Some(label_idx));
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     assert!(
-        app.ui.proxyjump_picker.open,
+        app.ui.proxyjump_picker().open,
         "Enter on a SectionLabel must not close the picker"
     );
     assert!(
@@ -7510,13 +7510,13 @@ fn proxyjump_picker_enter_on_separator_is_noop() {
         .iter()
         .position(|c| matches!(c, ProxyJumpCandidate::Separator))
         .expect("test setup must produce a separator");
-    app.ui.proxyjump_picker.list.select(Some(sep));
+    app.ui.proxyjump_picker_mut().list.select(Some(sep));
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     assert!(
-        app.ui.proxyjump_picker.open,
+        app.ui.proxyjump_picker().open,
         "Enter on a Separator must not close the picker"
     );
     assert!(
@@ -7531,13 +7531,13 @@ fn proxyjump_picker_enter_on_host_applies_alias_and_closes() {
     // Select the first host (the suggested one). `proxyjump_first_host_index`
     // resolves to the right index regardless of any leading SectionLabel.
     let first_host = app.proxyjump_first_host_index().expect("host expected");
-    app.ui.proxyjump_picker.list.select(Some(first_host));
+    app.ui.proxyjump_picker_mut().list.select(Some(first_host));
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     assert!(
-        !app.ui.proxyjump_picker.open,
+        !app.ui.proxyjump_picker().open,
         "Enter on a Host must close the picker"
     );
     assert_eq!(
@@ -7848,7 +7848,7 @@ fn bulk_editor_space_cycles_and_enter_applies() {
         .iter()
         .position(|r| r.tag == "prod")
         .unwrap();
-    app.ui.bulk_tag_editor_state.select(Some(prod_row));
+    app.ui.bulk_tag_editor_state_mut().select(Some(prod_row));
     // One Space: Leave → AddToAll.
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
     assert_eq!(
@@ -7885,7 +7885,7 @@ fn bulk_editor_esc_with_dirty_shows_discard_then_confirms() {
         .iter()
         .position(|r| r.tag == "prod")
         .unwrap();
-    app.ui.bulk_tag_editor_state.select(Some(prod_row));
+    app.ui.bulk_tag_editor_state_mut().select(Some(prod_row));
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
     assert!(
         app.forms.bulk_tag_editor_mut().is_dirty(),
@@ -7937,7 +7937,7 @@ fn bulk_editor_esc_dirty_then_no_keeps_editor_open() {
         .iter()
         .position(|r| r.tag == "prod")
         .unwrap();
-    app.ui.bulk_tag_editor_state.select(Some(prod_row));
+    app.ui.bulk_tag_editor_state_mut().select(Some(prod_row));
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Esc), &tx).unwrap();
     assert!(app.forms.is_discard_pending());
@@ -8000,7 +8000,7 @@ fn bulk_tag_undo_restores_previous_tags() {
         .iter()
         .position(|r| r.tag == "prod")
         .unwrap();
-    app.ui.bulk_tag_editor_state.select(Some(prod_row));
+    app.ui.bulk_tag_editor_state_mut().select(Some(prod_row));
     // Cycle to RemoveFromAll (Leave → AddToAll → RemoveFromAll).
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
@@ -8057,12 +8057,12 @@ fn bulk_editor_jk_navigates_rows() {
     app.hosts_state.multi_select_mut().insert(1);
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert!(app.forms.bulk_tag_editor_mut().rows.len() >= 2);
-    let initial = app.ui.bulk_tag_editor_state.selected();
+    let initial = app.ui.bulk_tag_editor_state().selected();
     handle_key_event(&mut app, key(KeyCode::Char('j')), &tx).unwrap();
-    let after_j = app.ui.bulk_tag_editor_state.selected();
+    let after_j = app.ui.bulk_tag_editor_state().selected();
     assert_ne!(initial, after_j, "j should move selection");
     handle_key_event(&mut app, key(KeyCode::Char('k')), &tx).unwrap();
-    let after_k = app.ui.bulk_tag_editor_state.selected();
+    let after_k = app.ui.bulk_tag_editor_state().selected();
     assert_eq!(initial, after_k, "k should move back");
 }
 
@@ -8074,7 +8074,7 @@ fn bulk_editor_help_roundtrip() {
     handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
     assert_eq!(app.screen, Screen::BulkTagEditor);
     // Stage a change so we can verify state survives the help roundtrip.
-    app.ui.bulk_tag_editor_state.select(Some(0));
+    app.ui.bulk_tag_editor_state_mut().select(Some(0));
     handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx).unwrap();
     let action_before = app.forms.bulk_tag_editor_mut().rows[0].action;
     // Open help.
@@ -8321,7 +8321,7 @@ fn enter_on_identity_file_field_does_not_open_key_picker() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(
-        !app.ui.key_picker.open,
+        !app.ui.key_picker().open,
         "Enter on IdentityFile must NOT open the key picker (use Space)"
     );
 }
@@ -8333,7 +8333,7 @@ fn space_on_empty_identity_file_opens_key_picker() {
     assert!(app.forms.host_mut().identity_file.is_empty());
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.key_picker.open);
+    assert!(app.ui.key_picker().open);
 }
 
 #[test]
@@ -8345,7 +8345,7 @@ fn space_on_populated_identity_file_inserts_literal() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
-        !app.ui.key_picker.open,
+        !app.ui.key_picker().open,
         "Space on populated IdentityFile must NOT open picker"
     );
     assert_eq!(app.forms.host_mut().identity_file, "/home/me/keys/id ");
@@ -8357,7 +8357,7 @@ fn enter_on_proxy_jump_field_does_not_open_picker() {
     app.forms.host_mut().focused_field = FormField::ProxyJump;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.proxyjump_picker.open);
+    assert!(!app.ui.proxyjump_picker().open);
 }
 
 #[test]
@@ -8366,7 +8366,7 @@ fn space_on_empty_proxy_jump_opens_picker() {
     app.forms.host_mut().focused_field = FormField::ProxyJump;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(app.ui.proxyjump_picker.open);
+    assert!(app.ui.proxyjump_picker().open);
 }
 
 #[test]
@@ -8377,7 +8377,7 @@ fn space_on_populated_proxy_jump_inserts_literal() {
     app.forms.host_mut().cursor_pos = 7;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(!app.ui.proxyjump_picker.open);
+    assert!(!app.ui.proxyjump_picker().open);
     assert_eq!(app.forms.host_mut().proxy_jump, "bastion ");
 }
 
@@ -8392,7 +8392,7 @@ fn space_on_empty_vault_ssh_with_no_candidates_inserts_literal() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
-        !app.ui.vault_role_picker.open,
+        !app.ui.vault_role_picker().open,
         "no candidates → no picker, even on empty field"
     );
     assert_eq!(
@@ -8409,7 +8409,7 @@ fn enter_on_provider_identity_file_does_not_open_picker() {
     let mut app = make_form_app_focused_on("digitalocean", ProviderFormField::IdentityFile);
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(!app.ui.key_picker.open);
+    assert!(!app.ui.key_picker().open);
 }
 
 #[test]
@@ -8419,7 +8419,7 @@ fn space_on_populated_provider_identity_file_inserts_literal() {
     app.providers.form_mut().cursor_pos = 5;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
-    assert!(!app.ui.key_picker.open);
+    assert!(!app.ui.key_picker().open);
     assert_eq!(app.providers.form_mut().identity_file, "/path ");
 }
 
@@ -8432,7 +8432,7 @@ fn space_on_populated_ovh_regions_inserts_literal() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
     assert!(
-        !app.ui.region_picker.open,
+        !app.ui.region_picker().open,
         "Space on populated Regions must NOT open picker"
     );
     assert_eq!(app.providers.form_mut().regions, "eu ");
@@ -8698,7 +8698,7 @@ fn make_tunnels_overview_app() -> App {
     let mut app = make_app("Host test\n  HostName test.com\n  LocalForward 8080 localhost:80\n");
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::HostList;
-    app.ui.tunnels_overview_state.select(Some(0));
+    app.ui.tunnels_overview_state_mut().select(Some(0));
     app
 }
 
@@ -8721,7 +8721,7 @@ fn tunnels_overview_a_opens_host_picker() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
     assert!(matches!(app.screen, Screen::TunnelHostPicker));
-    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(0));
+    assert_eq!(app.ui.tunnel_host_picker_state().selected(), Some(0));
 }
 
 #[test]
@@ -8729,7 +8729,7 @@ fn tunnel_host_picker_enter_opens_form_for_chosen_host() {
     let mut app = make_app("Host alpha\n  HostName a.example\n\nHost beta\n  HostName b.example\n");
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_state.select(Some(1)); // beta
+    app.ui.tunnel_host_picker_state_mut().select(Some(1)); // beta
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     match &app.screen {
@@ -8740,19 +8740,19 @@ fn tunnel_host_picker_enter_opens_form_for_chosen_host() {
         other => panic!("expected TunnelForm, got {:?}", other.variant_name()),
     }
     // Picker cursor was reset so re-opening starts from the top.
-    assert_eq!(app.ui.tunnel_host_picker_state.selected(), None);
+    assert_eq!(app.ui.tunnel_host_picker_state().selected(), None);
 }
 
 #[test]
 fn tunnel_host_picker_esc_returns_to_overview() {
     let mut app = make_tunnels_overview_app();
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_state.select(Some(0));
+    app.ui.tunnel_host_picker_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::HostList));
     assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
-    assert_eq!(app.ui.tunnel_host_picker_state.selected(), None);
+    assert_eq!(app.ui.tunnel_host_picker_state().selected(), None);
 }
 
 #[test]
@@ -8763,16 +8763,16 @@ fn tunnel_host_picker_arrow_keys_clamp() {
     let mut app = make_app("Host alpha\n  HostName a\n\nHost beta\n  HostName b\n");
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_state.select(Some(0));
+    app.ui.tunnel_host_picker_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Down), &tx);
-    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(1));
+    assert_eq!(app.ui.tunnel_host_picker_state().selected(), Some(1));
     let _ = handle_key_event(&mut app, key(KeyCode::Down), &tx);
-    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(1));
+    assert_eq!(app.ui.tunnel_host_picker_state().selected(), Some(1));
     let _ = handle_key_event(&mut app, key(KeyCode::Up), &tx);
-    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(0));
+    assert_eq!(app.ui.tunnel_host_picker_state().selected(), Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Up), &tx);
-    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(0));
+    assert_eq!(app.ui.tunnel_host_picker_state().selected(), Some(0));
 }
 
 #[test]
@@ -8786,15 +8786,15 @@ fn tunnel_host_picker_typing_filters_live() {
     );
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_state.select(Some(0));
+    app.ui.tunnel_host_picker_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
-    assert_eq!(app.ui.tunnel_host_picker_query, "db");
+    assert_eq!(app.ui.tunnel_host_picker_query(), "db");
     let visible = crate::handler::tunnel_host_picker::filtered_hosts(&app);
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].0, "db-primary");
-    assert_eq!(app.ui.tunnel_host_picker_state.selected(), Some(0));
+    assert_eq!(app.ui.tunnel_host_picker_state().selected(), Some(0));
 }
 
 #[test]
@@ -8802,13 +8802,13 @@ fn tunnel_host_picker_backspace_pops_query_char() {
     let mut app = make_app("Host alpha\n  HostName a\n\nHost beta\n  HostName b\n");
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_state.select(Some(0));
-    app.ui.tunnel_host_picker_query = "be".to_string();
+    app.ui.tunnel_host_picker_state_mut().select(Some(0));
+    app.ui.set_tunnel_host_picker_query("be".to_string());
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.ui.tunnel_host_picker_query, "b");
+    assert_eq!(app.ui.tunnel_host_picker_query(), "b");
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
-    assert_eq!(app.ui.tunnel_host_picker_query, "");
+    assert_eq!(app.ui.tunnel_host_picker_query(), "");
     // Still on the picker; full list is restored.
     assert!(matches!(app.screen, Screen::TunnelHostPicker));
     let visible = crate::handler::tunnel_host_picker::filtered_hosts(&app);
@@ -8822,7 +8822,7 @@ fn tunnel_host_picker_backspace_on_empty_query_closes() {
     let mut app = make_app("Host alpha\n  HostName a\n");
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_state.select(Some(0));
+    app.ui.tunnel_host_picker_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
     assert!(matches!(app.screen, Screen::HostList));
@@ -8841,7 +8841,7 @@ fn tunnel_host_picker_substring_match() {
     );
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_query = "db".to_string();
+    app.ui.set_tunnel_host_picker_query("db".to_string());
     let visible = crate::handler::tunnel_host_picker::filtered_hosts(&app);
     let aliases: Vec<&str> = visible.iter().map(|(a, _)| a.as_str()).collect();
     assert_eq!(aliases, vec!["db-primary", "other"]);
@@ -8858,8 +8858,8 @@ fn tunnel_host_picker_enter_uses_filtered_index() {
     );
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_query = "db".to_string();
-    app.ui.tunnel_host_picker_state.select(Some(0));
+    app.ui.set_tunnel_host_picker_query("db".to_string());
+    app.ui.tunnel_host_picker_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     match &app.screen {
@@ -8869,7 +8869,7 @@ fn tunnel_host_picker_enter_uses_filtered_index() {
         }
         other => panic!("expected TunnelForm, got {:?}", other.variant_name()),
     }
-    assert!(app.ui.tunnel_host_picker_query.is_empty());
+    assert!(app.ui.tunnel_host_picker_query().is_empty());
 }
 
 #[test]
@@ -8879,11 +8879,11 @@ fn tunnel_host_picker_no_match_blocks_enter() {
     let mut app = make_app("Host alpha\n  HostName a\n");
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_state.select(Some(0));
+    app.ui.tunnel_host_picker_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('z')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('z')), &tx);
-    assert_eq!(app.ui.tunnel_host_picker_state.selected(), None);
+    assert_eq!(app.ui.tunnel_host_picker_state().selected(), None);
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(matches!(app.screen, Screen::TunnelHostPicker));
 }
@@ -8898,7 +8898,7 @@ fn tunnel_host_picker_query_matches_hostname_too() {
     );
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_query = "10.30".to_string();
+    app.ui.set_tunnel_host_picker_query("10.30".to_string());
     let visible = crate::handler::tunnel_host_picker::filtered_hosts(&app);
     assert_eq!(visible.len(), 1);
     assert_eq!(visible[0].0, "db");
@@ -8964,7 +8964,7 @@ fn make_multi_tunnel_overview_app() -> App {
     );
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::HostList;
-    app.ui.tunnels_overview_state.select(Some(0));
+    app.ui.tunnels_overview_state_mut().select(Some(0));
     app
 }
 
@@ -8983,7 +8983,7 @@ fn tunnels_overview_search_down_navigates_filtered_list_without_leaving_input_mo
         app.search.query().is_some(),
         "Down must NOT exit search input mode"
     );
-    assert_eq!(app.ui.tunnels_overview_state.selected(), Some(1));
+    assert_eq!(app.ui.tunnels_overview_state().selected(), Some(1));
 }
 
 #[test]
@@ -9011,7 +9011,7 @@ fn tunnels_overview_search_esc_clears_query_and_resets_cursor() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.search.query().is_none());
-    assert_eq!(app.ui.tunnels_overview_state.selected(), Some(0));
+    assert_eq!(app.ui.tunnels_overview_state().selected(), Some(0));
 }
 
 #[test]
@@ -9194,7 +9194,7 @@ fn tunnels_overview_edit_after_sort_targets_visible_row() {
     app.screen = Screen::HostList;
     app.tunnels
         .set_sort_mode(crate::app::TunnelSortMode::AlphaHostname);
-    app.ui.tunnels_overview_state.select(Some(0));
+    app.ui.tunnels_overview_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
     match &app.screen {
@@ -9223,7 +9223,7 @@ fn tunnels_overview_reposition_cursor_follows_row_to_new_index() {
     app.screen = Screen::HostList;
     app.tunnels
         .set_sort_mode(crate::app::TunnelSortMode::MostRecent);
-    app.ui.tunnels_overview_state.select(Some(1));
+    app.ui.tunnels_overview_state_mut().select(Some(1));
     let zzz_rule = TunnelRule {
         tunnel_type: TunnelType::Local,
         bind_address: String::new(),
@@ -9238,7 +9238,7 @@ fn tunnels_overview_reposition_cursor_follows_row_to_new_index() {
     let pairs = crate::ui::tunnels_overview::visible_pairs(&app);
     let zzz_idx = pairs.iter().position(|(a, _)| a == "zzz").expect("zzz row");
     assert_eq!(
-        app.ui.tunnels_overview_state.selected(),
+        app.ui.tunnels_overview_state().selected(),
         Some(zzz_idx),
         "cursor must follow zzz to its new sorted position"
     );
@@ -9256,7 +9256,7 @@ fn tunnels_overview_delete_after_sort_targets_visible_row() {
     app.screen = Screen::HostList;
     app.tunnels
         .set_sort_mode(crate::app::TunnelSortMode::AlphaHostname);
-    app.ui.tunnels_overview_state.select(Some(0));
+    app.ui.tunnels_overview_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
@@ -9274,13 +9274,13 @@ fn tunnels_overview_delete_after_sort_targets_visible_row() {
 fn esc_on_tunnels_overview_does_not_quit_first_press_shows_hint() {
     let mut app = make_tunnels_overview_app();
     assert!(app.running);
-    assert!(!app.ui.esc_quit_hint_shown);
+    assert!(!app.ui.esc_quit_hint_shown());
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
 
     assert!(app.running, "Esc on idle tunnels overview must not quit");
-    assert!(app.ui.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown());
     let toast = app
         .status_center
         .toast()
@@ -9334,7 +9334,7 @@ fn esc_hint_does_not_displace_active_sticky_error_toast() {
 
     assert!(app.running, "Esc must not quit");
     assert!(
-        !app.ui.esc_quit_hint_shown,
+        !app.ui.esc_quit_hint_shown(),
         "flag must stay unset when the hint was suppressed by a sticky toast"
     );
     assert_eq!(
@@ -9350,7 +9350,7 @@ fn esc_hint_does_not_displace_active_sticky_error_toast() {
     // designed and arms the one-shot flag.
     app.status_center.set_toast_message(None);
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(app.ui.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown());
     assert_eq!(
         app.status_center.toast().map(|t| t.text.as_str()),
         Some(crate::messages::ESC_QUIT_HINT)
@@ -9398,7 +9398,7 @@ fn make_containers_overview_app() -> App {
     //   [4] Container(web/redis)
     // Park cursor on the first container so tests start from a
     // selectable row (headers are skipped by handler navigation).
-    app.ui.containers_overview_state.select(Some(1));
+    app.ui.containers_overview_state_mut().select(Some(1));
     app
 }
 
@@ -9410,18 +9410,18 @@ fn containers_overview_j_advances_cursor() {
     let mut app = make_containers_overview_app();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('j')), &tx);
-    assert_eq!(app.ui.containers_overview_state.selected(), Some(2));
+    assert_eq!(app.ui.containers_overview_state().selected(), Some(2));
 }
 
 #[test]
 fn containers_overview_g_jumps_to_top() {
     let mut app = make_containers_overview_app();
-    app.ui.containers_overview_state.select(Some(4));
+    app.ui.containers_overview_state_mut().select(Some(4));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
     // Headers are valid selection targets; `g` snaps to the very
     // first row, which is the db host divider at idx 0.
-    assert_eq!(app.ui.containers_overview_state.selected(), Some(0));
+    assert_eq!(app.ui.containers_overview_state().selected(), Some(0));
 }
 
 #[test]
@@ -9430,7 +9430,7 @@ fn containers_overview_capital_g_jumps_to_bottom() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('G')), &tx);
     // Last non-header item: idx 4 (web/redis) in our fixture.
-    assert_eq!(app.ui.containers_overview_state.selected(), Some(4));
+    assert_eq!(app.ui.containers_overview_state().selected(), Some(4));
 }
 
 #[test]
@@ -9496,7 +9496,7 @@ fn containers_overview_s_keeps_cursor_on_same_alias_after_flip() {
     //   [0] Header(db)  [1] postgres  [2] Header(web)  [3] nginx  [4] redis
     // Park the cursor on web/nginx (idx 3).
     let mut app = make_containers_overview_app();
-    app.ui.containers_overview_state.select(Some(3));
+    app.ui.containers_overview_state_mut().select(Some(3));
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
@@ -9508,7 +9508,7 @@ fn containers_overview_s_keeps_cursor_on_same_alias_after_flip() {
     let items = crate::ui::containers_overview::visible_items(&app);
     let idx = app
         .ui
-        .containers_overview_state
+        .containers_overview_state()
         .selected()
         .expect("cursor selected");
     let row = items[idx]
@@ -9548,7 +9548,7 @@ fn containers_overview_slash_opens_search() {
     // Cursor snaps to the first row, which can be a header now that
     // dividers are selectable. AlphaHost mode places the db header at
     // idx 0.
-    assert_eq!(app.ui.containers_overview_state.selected(), Some(0));
+    assert_eq!(app.ui.containers_overview_state().selected(), Some(0));
 }
 
 #[test]
@@ -9583,7 +9583,9 @@ fn containers_overview_search_enter_on_header_is_noop() {
         }
         _ => unreachable!(),
     };
-    app.ui.containers_overview_state.select(Some(header_idx));
+    app.ui
+        .containers_overview_state_mut()
+        .select(Some(header_idx));
     let was_collapsed = app
         .containers_overview
         .collapsed_hosts
@@ -9627,7 +9629,9 @@ fn containers_overview_enter_on_host_header_is_noop() {
         }
         _ => unreachable!(),
     };
-    app.ui.containers_overview_state.select(Some(header_idx));
+    app.ui
+        .containers_overview_state_mut()
+        .select(Some(header_idx));
     let was_collapsed = app
         .containers_overview
         .collapsed_hosts
@@ -9672,7 +9676,7 @@ fn containers_overview_enter_on_stopped_container_warns_and_does_nothing() {
     let mut app = make_containers_overview_app();
     // Items: [0]Header(db) [1]postgres [2]Header(web) [3]nginx [4]redis.
     // redis is the exited container (idx 4 in items).
-    app.ui.containers_overview_state.select(Some(4));
+    app.ui.containers_overview_state_mut().select(Some(4));
     let items = crate::ui::containers_overview::visible_items(&app);
     let row = items
         .into_iter()
@@ -9724,7 +9728,7 @@ fn containers_overview_enter_rejects_unsafe_container_id() {
     app.screen = Screen::HostList;
     // Items: [0]Header(web) [1]Container(web/evil). Park cursor on
     // the container, not the header.
-    app.ui.containers_overview_state.select(Some(1));
+    app.ui.containers_overview_state_mut().select(Some(1));
 
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
@@ -10061,7 +10065,7 @@ fn containers_overview_first_esc_arms_quit_hint() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(app.running);
-    assert!(app.ui.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown());
     let toast = app.status_center.toast().expect("hint toast");
     assert!(toast.text.contains("q"));
 }
@@ -10171,8 +10175,8 @@ fn containers_overview_a_opens_picker_in_real_mode() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
     assert!(matches!(app.screen, Screen::ContainerHostPicker));
-    assert_eq!(app.ui.container_host_picker_state.selected(), Some(0));
-    assert!(app.ui.container_host_picker_query.is_empty());
+    assert_eq!(app.ui.container_host_picker_state().selected(), Some(0));
+    assert!(app.ui.container_host_picker_query().is_empty());
 }
 
 #[test]
@@ -11172,7 +11176,7 @@ fn ensure_list_for_selected_host_refreshes_when_cursor_on_header() {
     // the past).
     let _ = app.container_state.cache_entry("db");
     // Items[0] is HostHeader(db) in the fixture's AlphaHost layout.
-    app.ui.containers_overview_state.select(Some(0));
+    app.ui.containers_overview_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_list_for_selected_host(&mut app, &tx);
     assert!(
@@ -11190,7 +11194,7 @@ fn ensure_inspect_for_host_header_marks_running_first_then_others() {
     let mut app = make_containers_overview_app();
     app.demo_mode = false;
     // Items[2] is HostHeader(web) in the fixture's AlphaHost layout.
-    app.ui.containers_overview_state.select(Some(2));
+    app.ui.containers_overview_state_mut().select(Some(2));
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
     let in_flight = &app.containers_overview.inspect_cache.in_flight;
@@ -11212,7 +11216,7 @@ fn ensure_inspect_for_host_header_skips_when_cursor_not_on_header() {
     // owns that responsibility.
     let mut app = make_containers_overview_app();
     app.demo_mode = false;
-    app.ui.containers_overview_state.select(Some(1));
+    app.ui.containers_overview_state_mut().select(Some(1));
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
     assert!(
@@ -11225,7 +11229,7 @@ fn ensure_inspect_for_host_header_skips_when_cursor_not_on_header() {
 fn ensure_inspect_for_host_header_no_op_in_demo_mode() {
     let mut app = make_containers_overview_app();
     app.demo_mode = true;
-    app.ui.containers_overview_state.select(Some(2));
+    app.ui.containers_overview_state_mut().select(Some(2));
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
     assert!(app.containers_overview.inspect_cache.in_flight.is_empty());
@@ -11239,7 +11243,7 @@ fn ensure_inspect_for_host_header_dedups_on_repeated_call() {
     // sessions for the same id.
     let mut app = make_containers_overview_app();
     app.demo_mode = false;
-    app.ui.containers_overview_state.select(Some(2));
+    app.ui.containers_overview_state_mut().select(Some(2));
     let (tx, _rx) = mpsc::channel();
     super::containers_overview::ensure_inspect_for_host_header(&mut app, &tx);
     let first = app.containers_overview.inspect_cache.in_flight.len();
@@ -11259,13 +11263,13 @@ fn esc_hint_flag_is_shared_between_host_list_and_tunnels_overview() {
 
     // First idle Esc on host list arms the hint flag.
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(app.ui.esc_quit_hint_shown);
+    assert!(app.ui.esc_quit_hint_shown());
     app.status_center.set_toast_message(None);
 
     // Switch to tunnels overview and press Esc again. The shared flag means
     // the hint stays silent — the user already learned about `q`.
     app.top_page = crate::app::TopPage::Tunnels;
-    app.ui.tunnels_overview_state.select(Some(0));
+    app.ui.tunnels_overview_state_mut().select(Some(0));
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
 
     assert!(app.running);
@@ -11324,7 +11328,7 @@ fn containers_overview_K_on_header_opens_host_restart_all() {
     // confirm dialog instead of the per-container restart.
     let mut app = make_containers_overview_app();
     // Items[0] is HostHeader(db); only one running container (postgres).
-    app.ui.containers_overview_state.select(Some(0));
+    app.ui.containers_overview_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('K')), &tx);
     let Screen::ConfirmHostRestartAll {
@@ -11344,7 +11348,7 @@ fn containers_overview_K_on_header_opens_host_restart_all() {
 fn containers_overview_S_on_header_opens_host_stop_all() {
     let mut app = make_containers_overview_app();
     // Items[2] is HostHeader(web); web has nginx running, redis exited.
-    app.ui.containers_overview_state.select(Some(2));
+    app.ui.containers_overview_state_mut().select(Some(2));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('S')), &tx);
     let Screen::ConfirmHostStopAll {
@@ -11368,7 +11372,7 @@ fn containers_overview_l_on_header_warns_single_target() {
     // l (logs) on a host-divider row is a no-op with a guidance toast,
     // because logs apply to a single container.
     let mut app = make_containers_overview_app();
-    app.ui.containers_overview_state.select(Some(0));
+    app.ui.containers_overview_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('l')), &tx);
     assert!(
@@ -11388,7 +11392,7 @@ fn containers_overview_space_on_header_toggles_collapse() {
     // module tests, since the demo flag set by `build_demo_app` blocks
     // the persistence path here.
     let mut app = make_containers_overview_app();
-    app.ui.containers_overview_state.select(Some(0)); // db header
+    app.ui.containers_overview_state_mut().select(Some(0)); // db header
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
@@ -11424,7 +11428,7 @@ fn containers_overview_v_toggles_view_mode_and_arms_animation() {
         crate::app::ViewMode::Compact
     );
     assert!(
-        app.ui.detail_toggle_pending,
+        app.ui.detail_toggle_pending(),
         "v must arm the detail-panel animation so the next render eases the panel out"
     );
 
@@ -11453,7 +11457,7 @@ fn containers_overview_l_queues_logs_fetch_and_opens_overlay() {
 fn containers_overview_K_on_exited_does_not_open_confirm() {
     let mut app = make_containers_overview_app();
     // Move cursor to web/redis (state="exited", index 4 in fixture).
-    app.ui.containers_overview_state.select(Some(4));
+    app.ui.containers_overview_state_mut().select(Some(4));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('K')), &tx);
     assert!(

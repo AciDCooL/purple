@@ -58,7 +58,7 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         .highlight_style(theme::selected_row())
         .highlight_symbol(design::LIST_HIGHLIGHT);
 
-    frame.render_stateful_widget(list, inner, &mut app.ui.provider_list_state);
+    frame.render_stateful_widget(list, inner, app.ui.provider_list_state_mut());
 
     // Footer below the block
     let footer_area = design::render_overlay_footer(frame, area);
@@ -92,7 +92,7 @@ pub fn render_provider_list(frame: &mut Frame, app: &mut App) {
         // Count stale hosts for the currently selected row.
         let selected_row = app
             .ui
-            .provider_list_state
+            .provider_list_state()
             .selected()
             .and_then(|idx| rows.get(idx));
         let selected_stale_count: usize = selected_row
@@ -532,12 +532,12 @@ pub fn render_provider_form(frame: &mut Frame, app: &mut App, provider_name: &st
     }
 
     // Key picker popup overlay
-    if app.ui.key_picker.open {
+    if app.ui.key_picker().open {
         super::host_form::render_key_picker_overlay(frame, app);
     }
 
     // Region picker popup overlay
-    if app.ui.region_picker.open {
+    if app.ui.region_picker().open {
         render_region_picker_overlay(frame, app);
     }
 }
@@ -842,7 +842,7 @@ fn render_region_picker_overlay(frame: &mut Frame, app: &mut App) {
     frame.render_widget(block, block_area);
 
     // Scroll so cursor is always visible
-    let cursor = app.ui.region_picker.cursor;
+    let cursor = app.ui.region_picker().cursor;
     let scroll_offset = if cursor >= visible_rows as usize {
         cursor - visible_rows as usize + 1
     } else {

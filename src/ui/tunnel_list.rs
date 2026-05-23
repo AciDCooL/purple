@@ -76,7 +76,7 @@ pub fn render(frame: &mut Frame, app: &mut App, alias: &str) {
             .highlight_style(theme::selected_row())
             .highlight_symbol(design::LIST_HIGHLIGHT);
 
-        frame.render_stateful_widget(list, inner, &mut app.ui.tunnel_list_state);
+        frame.render_stateful_widget(list, inner, app.ui.tunnel_list_state_mut());
     }
 
     // Footer below the block — but only when there is no pending

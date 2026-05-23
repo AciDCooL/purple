@@ -108,7 +108,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .highlight_style(theme::selected_row())
         .highlight_symbol(design::LIST_HIGHLIGHT);
 
-    frame.render_stateful_widget(list, inner, &mut app.ui.tag_picker_state);
+    frame.render_stateful_widget(list, inner, app.ui.tag_picker_state_mut());
 
     let footer_area = design::render_overlay_footer(frame, area);
     use crate::messages::footer as fl;

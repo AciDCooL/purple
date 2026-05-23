@@ -514,14 +514,14 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
     }
 
     // Clamp the cursor before the panel-height calculation needs it.
-    let sel = app.ui.tunnels_overview_state.selected();
+    let sel = app.ui.tunnels_overview_state().selected();
     let new_sel = match sel {
         Some(i) if i < row_count => Some(i),
         _ if row_count > 0 => Some(0),
         _ => None,
     };
     if new_sel != sel {
-        app.ui.tunnels_overview_state.select(new_sel);
+        app.ui.tunnels_overview_state_mut().select(new_sel);
     }
 
     let target_panel_height = panel_stretch_height(body_area, &rows);
@@ -643,7 +643,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
     let list = List::new(items)
         .highlight_style(theme::selected_row())
         .highlight_symbol(design::HOST_HIGHLIGHT);
-    frame.render_stateful_widget(list, list_area, &mut app.ui.tunnels_overview_state);
+    frame.render_stateful_widget(list, list_area, app.ui.tunnels_overview_state_mut());
 
     if let Some(dash) = dashboard_area {
         if panel_visible_target {
@@ -723,7 +723,7 @@ fn partition_body(area: Rect, panel_visible: bool, panel_height: u16) -> (Rect, 
 /// snapshots count as active so the detail panel still renders for
 /// the marketing demo.
 fn is_selected_tunnel_active(app: &App, rows: &[TunnelRow]) -> bool {
-    let sel = app.ui.tunnels_overview_state.selected();
+    let sel = app.ui.tunnels_overview_state().selected();
     let alias = match sel.and_then(|i| rows.get(i)).map(|r| r.alias.clone()) {
         Some(a) => a,
         None => return false,
@@ -801,7 +801,7 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &mut App, rows: &[TunnelRow
 
     let row_active = app
         .ui
-        .tunnels_overview_state
+        .tunnels_overview_state()
         .selected()
         .and_then(|i| rows.get(i))
         .map(|r| r.is_active)

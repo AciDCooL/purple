@@ -323,7 +323,7 @@ fn visual_tunnels_overview_active() {
     // bastion-ams). The detail panel reads from `demo_live_snapshots`
     // so the LIVE/CLIENTS/EVENTS cards render byte-stably.
     demo::seed_tunnel_live_snapshots(&mut app);
-    app.ui.tunnels_overview_state.select(Some(0));
+    app.ui.tunnels_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("tunnels_overview_active", &actual);
 }
@@ -338,7 +338,7 @@ fn visual_tunnels_overview_active_tall() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Tunnels;
     demo::seed_tunnel_live_snapshots(&mut app);
-    app.ui.tunnels_overview_state.select(Some(0));
+    app.ui.tunnels_overview_state_mut().select(Some(0));
     let backend = TestBackend::new(120, 50);
     let mut terminal = Terminal::new(backend).expect("create terminal");
     let mut anim = AnimationState::default();
@@ -368,7 +368,7 @@ fn visual_tunnel_host_picker() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_state.select(Some(0));
+    app.ui.tunnel_host_picker_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("tunnel_host_picker", &actual);
 }
@@ -381,8 +381,8 @@ fn visual_tunnel_host_picker_filtered() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Tunnels;
     app.screen = Screen::TunnelHostPicker;
-    app.ui.tunnel_host_picker_query = "db".to_string();
-    app.ui.tunnel_host_picker_state.select(Some(0));
+    app.ui.set_tunnel_host_picker_query("db".to_string());
+    app.ui.tunnel_host_picker_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("tunnel_host_picker_filtered", &actual);
 }
@@ -396,7 +396,7 @@ fn visual_container_host_picker() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
     app.screen = Screen::ContainerHostPicker;
-    app.ui.container_host_picker_state.select(Some(0));
+    app.ui.container_host_picker_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("container_host_picker", &actual);
 }
@@ -689,7 +689,7 @@ fn visual_containers_overview() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    app.ui.containers_overview_state.select(Some(0));
+    app.ui.containers_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("containers_overview", &actual);
 }
@@ -704,7 +704,7 @@ fn visual_containers_overview_alpha_container_mode() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
     app.containers_overview.sort_mode = crate::app::ContainersSortMode::AlphaContainer;
-    app.ui.containers_overview_state.select(Some(0));
+    app.ui.containers_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_alpha_container", &actual);
 }
@@ -727,7 +727,7 @@ fn visual_containers_overview_with_detail() {
         .position(|i| i.as_container().is_some())
         .expect("demo cache has at least one container");
     app.ui
-        .containers_overview_state
+        .containers_overview_state_mut()
         .select(Some(first_container));
     let backend = TestBackend::new(200, 60);
     let mut terminal = Terminal::new(backend).expect("create terminal");
@@ -760,7 +760,9 @@ fn visual_containers_overview_podman_host_detail() {
             _ => false,
         })
         .expect("podman-edge header in demo");
-    app.ui.containers_overview_state.select(Some(podman_header));
+    app.ui
+        .containers_overview_state_mut()
+        .select(Some(podman_header));
     let backend = TestBackend::new(200, 60);
     let mut terminal = Terminal::new(backend).expect("create terminal");
     let mut anim = AnimationState::default();
@@ -789,7 +791,9 @@ fn visual_containers_overview_podman_container_detail() {
             None => false,
         })
         .expect("podman-edge/caddy in demo");
-    app.ui.containers_overview_state.select(Some(caddy_row));
+    app.ui
+        .containers_overview_state_mut()
+        .select(Some(caddy_row));
     let backend = TestBackend::new(200, 60);
     let mut terminal = Terminal::new(backend).expect("create terminal");
     let mut anim = AnimationState::default();
@@ -816,7 +820,9 @@ fn visual_containers_overview_host_detail() {
         .iter()
         .position(|i| i.is_header())
         .expect("AlphaHost mode emits a header before the first container");
-    app.ui.containers_overview_state.select(Some(first_header));
+    app.ui
+        .containers_overview_state_mut()
+        .select(Some(first_header));
     let backend = TestBackend::new(200, 60);
     let mut terminal = Terminal::new(backend).expect("create terminal");
     let mut anim = AnimationState::default();
@@ -1021,7 +1027,7 @@ fn visual_containers_overview_compact() {
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
     app.containers_overview.view_mode = crate::app::ViewMode::Compact;
-    app.ui.containers_overview_state.select(Some(0));
+    app.ui.containers_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_compact", &actual);
 }
@@ -1037,7 +1043,7 @@ fn visual_containers_overview_collapsed_group() {
     app.containers_overview
         .collapsed_hosts
         .insert("aws-api-staging".to_string());
-    app.ui.containers_overview_state.select(Some(0));
+    app.ui.containers_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_collapsed_group", &actual);
 }
@@ -1057,7 +1063,7 @@ fn visual_containers_overview_paused() {
             first.status = "Paused".to_string();
         }
     }
-    app.ui.containers_overview_state.select(Some(0));
+    app.ui.containers_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_paused", &actual);
 }
@@ -1075,7 +1081,7 @@ fn visual_containers_overview_restarting() {
             first.status = "Restarting (1) 2 seconds ago".to_string();
         }
     }
-    app.ui.containers_overview_state.select(Some(0));
+    app.ui.containers_overview_state_mut().select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_restarting", &actual);
 }
@@ -1101,7 +1107,7 @@ fn visual_tunnels_overview_delete_confirm() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Tunnels;
-    app.ui.tunnels_overview_state.select(Some(0));
+    app.ui.tunnels_overview_state_mut().select(Some(0));
     app.tunnels.request_delete(0);
     let actual = render_screen(&mut app);
     assert_golden("tunnels_overview_delete_confirm", &actual);
@@ -1232,10 +1238,10 @@ fn visual_tag_picker() {
 fn visual_theme_picker() {
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.ui.theme_picker.builtins = ui::theme::ThemeDef::builtins();
-    app.ui.theme_picker.custom = Vec::new();
-    app.ui.theme_picker.saved_name = "Purple".to_string();
-    app.ui.theme_picker.list.select(Some(0));
+    app.ui.theme_picker_mut().builtins = ui::theme::ThemeDef::builtins();
+    app.ui.theme_picker_mut().custom = Vec::new();
+    app.ui.theme_picker_mut().saved_name = "Purple".to_string();
+    app.ui.theme_picker_mut().list.select(Some(0));
     app.screen = Screen::ThemePicker;
     let actual = render_screen(&mut app);
     assert_golden("theme_picker", &actual);
@@ -1586,7 +1592,7 @@ fn select_host_by_alias(app: &mut App, alias: &str) {
             false
         }
     });
-    app.ui.list_state.select(pos);
+    app.ui.list_state_mut().select(pos);
 }
 
 #[test]

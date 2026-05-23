@@ -357,7 +357,7 @@ pub fn render_welcome(
     // gracefully instead of showing a partially animated state.
     let elapsed = app
         .ui
-        .welcome_opened
+        .welcome_opened()
         .map(|t| t.elapsed().as_millis())
         .unwrap_or(u128::MAX);
 

@@ -94,23 +94,23 @@ pub(super) fn handle_provider_list_key(
             app.set_screen(Screen::HostList);
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            crate::app::cycle_selection(&mut app.ui.provider_list_state, row_count, true);
+            crate::app::cycle_selection(app.ui.provider_list_state_mut(), row_count, true);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            crate::app::cycle_selection(&mut app.ui.provider_list_state, row_count, false);
+            crate::app::cycle_selection(app.ui.provider_list_state_mut(), row_count, false);
         }
         KeyCode::PageDown => {
-            crate::app::page_down(&mut app.ui.provider_list_state, row_count, 10);
+            crate::app::page_down(app.ui.provider_list_state_mut(), row_count, 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(&mut app.ui.provider_list_state, row_count, 10);
+            crate::app::page_up(app.ui.provider_list_state_mut(), row_count, 10);
         }
         // SPACE GUARD MUST PRECEDE any generic Char(c) arm in this handler
         // so Space toggles expand/collapse on a multi-config header instead
         // of being consumed as a literal space.
         KeyCode::Char(' ') => {
             // Space toggles expand/collapse on a multi-config provider header.
-            if let Some(idx) = app.ui.provider_list_state.selected() {
+            if let Some(idx) = app.ui.provider_list_state().selected() {
                 if let Some(crate::app::ProviderRow::Header { name, config_count }) = rows.get(idx)
                 {
                     if *config_count >= 2 {
@@ -134,7 +134,7 @@ pub(super) fn handle_provider_list_key(
             // lazy-migration prompt when the provider already has one bare
             // config; for an already-labeled provider, opens the form
             // directly with an empty label.
-            if let Some(idx) = app.ui.provider_list_state.selected() {
+            if let Some(idx) = app.ui.provider_list_state().selected() {
                 let provider_name = rows.get(idx).map(|r| r.provider_name().to_string());
                 if let Some(name) = provider_name {
                     open_add_config_flow(app, &name);
@@ -142,7 +142,7 @@ pub(super) fn handle_provider_list_key(
             }
         }
         KeyCode::Enter => {
-            if let Some(index) = app.ui.provider_list_state.selected() {
+            if let Some(index) = app.ui.provider_list_state().selected() {
                 let row = match rows.get(index) {
                     Some(r) => r.clone(),
                     None => return,
@@ -191,7 +191,7 @@ pub(super) fn handle_provider_list_key(
             }
             let row = match app
                 .ui
-                .provider_list_state
+                .provider_list_state()
                 .selected()
                 .and_then(|i| rows.get(i))
             {
@@ -236,7 +236,7 @@ pub(super) fn handle_provider_list_key(
         KeyCode::Char('d') => {
             let row = match app
                 .ui
-                .provider_list_state
+                .provider_list_state()
                 .selected()
                 .and_then(|i| rows.get(i))
             {
@@ -279,7 +279,7 @@ pub(super) fn handle_provider_list_key(
             // - Leaf   → only hosts of that labeled config
             let row = match app
                 .ui
-                .provider_list_state
+                .provider_list_state()
                 .selected()
                 .and_then(|i| rows.get(i))
             {
@@ -542,13 +542,13 @@ pub(super) fn handle_provider_form_key(
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
     // Dispatch to key picker if open
-    if app.ui.key_picker.open {
+    if app.ui.key_picker().open {
         super::picker::handle_key_picker_shared(app, key, true);
         return;
     }
 
     // Dispatch to region picker if open
-    if app.ui.region_picker.open {
+    if app.ui.region_picker().open {
         region::handle_region_picker(app, key);
         return;
     }

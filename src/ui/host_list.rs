@@ -767,7 +767,7 @@ fn render_display_list(
         .highlight_style(theme::selected_row())
         .highlight_symbol(design::HOST_HIGHLIGHT);
 
-    frame.render_stateful_widget(list, list_area, &mut app.ui.list_state);
+    frame.render_stateful_widget(list, list_area, app.ui.list_state_mut());
 }
 
 fn render_search_list(
@@ -898,7 +898,7 @@ fn render_search_list(
         .highlight_style(theme::selected_row())
         .highlight_symbol(design::HOST_HIGHLIGHT);
 
-    frame.render_stateful_widget(list, list_area, &mut app.ui.list_state);
+    frame.render_stateful_widget(list, list_area, app.ui.list_state_mut());
 }
 
 fn render_header(

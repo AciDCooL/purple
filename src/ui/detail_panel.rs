@@ -249,7 +249,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect, spinner_tick: u64) {
         }
     }
 
-    let paragraph = Paragraph::new(lines).scroll((app.ui.detail_scroll, 0));
+    let paragraph = Paragraph::new(lines).scroll((app.ui.detail_scroll(), 0));
     frame.render_widget(paragraph, area);
 }
 
@@ -952,7 +952,7 @@ fn render_pattern_detail(
         }
     }
 
-    let paragraph = Paragraph::new(lines).scroll((app.ui.detail_scroll, 0));
+    let paragraph = Paragraph::new(lines).scroll((app.ui.detail_scroll(), 0));
     frame.render_widget(paragraph, area);
 }
 

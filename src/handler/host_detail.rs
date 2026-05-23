@@ -90,9 +90,9 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                     app.notify_warning(crate::messages::stale_host(&hint));
                 }
                 app.refresh_tunnel_list(&alias);
-                app.ui.tunnel_list_state = ratatui::widgets::ListState::default();
+                *app.ui.tunnel_list_state_mut() = ratatui::widgets::ListState::default();
                 if !app.tunnels.list().is_empty() {
-                    app.ui.tunnel_list_state.select(Some(0));
+                    app.ui.tunnel_list_state_mut().select(Some(0));
                 }
                 app.set_screen(Screen::TunnelList { alias });
             }
@@ -107,10 +107,10 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                 app.set_screen(Screen::SnippetPicker {
                     target_aliases: vec![alias],
                 });
-                app.ui.snippet_picker_state = ratatui::widgets::ListState::default();
+                *app.ui.snippet_picker_state_mut() = ratatui::widgets::ListState::default();
                 let indices = app.filtered_snippet_indices();
                 if !indices.is_empty() {
-                    app.ui.snippet_picker_state.select(Some(0));
+                    app.ui.snippet_picker_state_mut().select(Some(0));
                 }
             }
         }

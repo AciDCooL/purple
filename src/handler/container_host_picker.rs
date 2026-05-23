@@ -29,7 +29,7 @@ pub(crate) fn uncached_aliases(app: &App) -> Vec<String> {
 /// for display. Same case-insensitive substring match the tunnel host
 /// picker uses.
 pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
-    let query = app.ui.container_host_picker_query.to_lowercase();
+    let query = app.ui.container_host_picker_query().to_lowercase();
     app.hosts_state
         .list()
         .iter()
@@ -49,18 +49,18 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
     match key.code {
         KeyCode::Esc => close(app),
         KeyCode::Down if total > 0 => {
-            let cur = app.ui.container_host_picker_state.selected().unwrap_or(0);
+            let cur = app.ui.container_host_picker_state().selected().unwrap_or(0);
             let next = (cur + 1).min(total - 1);
-            app.ui.container_host_picker_state.select(Some(next));
+            app.ui.container_host_picker_state_mut().select(Some(next));
         }
         KeyCode::Up => {
-            let cur = app.ui.container_host_picker_state.selected().unwrap_or(0);
+            let cur = app.ui.container_host_picker_state().selected().unwrap_or(0);
             app.ui
-                .container_host_picker_state
+                .container_host_picker_state_mut()
                 .select(Some(cur.saturating_sub(1)));
         }
         KeyCode::Enter => {
-            let Some(idx) = app.ui.container_host_picker_state.selected() else {
+            let Some(idx) = app.ui.container_host_picker_state().selected() else {
                 return;
             };
             let Some((alias, _)) = filtered_hosts(app).into_iter().nth(idx) else {
@@ -70,18 +70,18 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             spawn_initial_listing(app, alias, events_tx);
         }
         KeyCode::Backspace => {
-            if app.ui.container_host_picker_query.is_empty() {
+            if app.ui.container_host_picker_query().is_empty() {
                 close(app);
             } else {
-                app.ui.container_host_picker_query.pop();
+                app.ui.container_host_picker_query_mut().pop();
                 reset_cursor_after_query_change(app);
             }
         }
         KeyCode::Char(c)
             if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && app.ui.container_host_picker_query.len() < 64 =>
+                && app.ui.container_host_picker_query().len() < 64 =>
         {
-            app.ui.container_host_picker_query.push(c);
+            app.ui.container_host_picker_query_mut().push(c);
             reset_cursor_after_query_change(app);
         }
         _ => {}
@@ -89,17 +89,17 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
 }
 
 fn close(app: &mut App) {
-    app.ui.container_host_picker_state.select(None);
-    app.ui.container_host_picker_query.clear();
+    app.ui.container_host_picker_state_mut().select(None);
+    app.ui.container_host_picker_query_mut().clear();
     app.set_screen(Screen::HostList);
 }
 
 fn reset_cursor_after_query_change(app: &mut App) {
     let total = filtered_hosts(app).len();
     if total == 0 {
-        app.ui.container_host_picker_state.select(None);
+        app.ui.container_host_picker_state_mut().select(None);
     } else {
-        app.ui.container_host_picker_state.select(Some(0));
+        app.ui.container_host_picker_state_mut().select(Some(0));
     }
 }
 

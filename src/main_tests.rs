@@ -764,7 +764,7 @@ fn confirm_import_arrow_key_stays() {
 #[test]
 fn app_known_hosts_count_default_zero() {
     let app = empty_app();
-    assert_eq!(app.ui.known_hosts_count, 0);
+    assert_eq!(app.ui.known_hosts_count(), 0);
 }
 
 // =========================================================================
@@ -1075,29 +1075,29 @@ fn known_hosts_count_not_reset_on_write_failure() {
     // without resetting known_hosts_count. This is correct behavior:
     // if the import didn't save, the user might want to try again.
     let mut app = empty_app();
-    app.ui.known_hosts_count = 10;
-    // Simulate: write failure would do `return` before `app.ui.known_hosts_count = 0`
+    app.ui.set_known_hosts_count(10);
+    // Simulate: write failure would do `return` before `app.ui.known_hosts_count() = 0`
     // So known_hosts_count should remain 10
-    assert_eq!(app.ui.known_hosts_count, 10);
+    assert_eq!(app.ui.known_hosts_count(), 10);
 }
 
 #[test]
 fn known_hosts_count_not_reset_on_import_error() {
     // When import_from_known_hosts returns Err, known_hosts_count is not reset
     let mut app = empty_app();
-    app.ui.known_hosts_count = 5;
+    app.ui.set_known_hosts_count(5);
     // The Err branch only sets status, doesn't touch known_hosts_count
     app.notify_error("some error");
-    assert_eq!(app.ui.known_hosts_count, 5);
+    assert_eq!(app.ui.known_hosts_count(), 5);
 }
 
 #[test]
 fn known_hosts_count_reset_on_success() {
     // When import succeeds (even with 0 imported), known_hosts_count is reset
     let mut app = empty_app();
-    app.ui.known_hosts_count = 15;
-    app.ui.known_hosts_count = 0; // simulates the Ok branch
-    assert_eq!(app.ui.known_hosts_count, 0);
+    app.ui.set_known_hosts_count(15);
+    app.ui.set_known_hosts_count(0); // simulates the Ok branch
+    assert_eq!(app.ui.known_hosts_count(), 0);
 }
 
 // =========================================================================

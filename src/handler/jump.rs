@@ -115,7 +115,7 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
                 .iter()
                 .position(|(alias, rule)| alias == &t.alias && rule.bind_port == t.bind_port)
             {
-                app.ui.tunnels_overview_state.select(Some(idx));
+                app.ui.tunnels_overview_state_mut().select(Some(idx));
             }
         }
         JumpHit::Container(c) => {
@@ -147,7 +147,7 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
                     &crate::ui::containers_overview::visible_items(app),
                 )
             });
-            app.ui.containers_overview_state.select(target_idx);
+            app.ui.containers_overview_state_mut().select(target_idx);
         }
         JumpHit::Snippet(_s) => {
             // The snippet picker requires at least one target host. If the

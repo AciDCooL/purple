@@ -53,7 +53,7 @@ pub(super) fn execute_known_hosts_import(app: &mut App) {
             } else {
                 app.notify(crate::messages::all_hosts_exist(skipped));
             }
-            app.ui.known_hosts_count = 0;
+            app.ui.set_known_hosts_count(0);
         }
         Err(e) => {
             app.notify_error(e);

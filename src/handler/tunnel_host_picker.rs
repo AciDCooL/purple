@@ -30,7 +30,7 @@ pub(crate) fn editable_aliases(app: &App) -> Vec<String> {
 /// case-insensitive substring search. Same predictable semantics across
 /// every "type to filter" overlay in the app.
 pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
-    let query = app.ui.tunnel_host_picker_query.to_lowercase();
+    let query = app.ui.tunnel_host_picker_query().to_lowercase();
     app.hosts_state
         .list()
         .iter()
@@ -50,44 +50,44 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => close(app),
         KeyCode::Down if total > 0 => {
-            let cur = app.ui.tunnel_host_picker_state.selected().unwrap_or(0);
+            let cur = app.ui.tunnel_host_picker_state().selected().unwrap_or(0);
             let next = (cur + 1).min(total - 1);
-            app.ui.tunnel_host_picker_state.select(Some(next));
+            app.ui.tunnel_host_picker_state_mut().select(Some(next));
         }
         KeyCode::Up => {
-            let cur = app.ui.tunnel_host_picker_state.selected().unwrap_or(0);
+            let cur = app.ui.tunnel_host_picker_state().selected().unwrap_or(0);
             app.ui
-                .tunnel_host_picker_state
+                .tunnel_host_picker_state_mut()
                 .select(Some(cur.saturating_sub(1)));
         }
         KeyCode::Enter => {
-            let Some(idx) = app.ui.tunnel_host_picker_state.selected() else {
+            let Some(idx) = app.ui.tunnel_host_picker_state().selected() else {
                 return;
             };
             let Some((alias, _)) = filtered_hosts(app).into_iter().nth(idx) else {
                 return;
             };
-            app.ui.tunnel_host_picker_state.select(None);
-            app.ui.tunnel_host_picker_query.clear();
+            app.ui.tunnel_host_picker_state_mut().select(None);
+            app.ui.tunnel_host_picker_query_mut().clear();
             app.open_tunnel_add_form(alias);
         }
         KeyCode::Backspace => {
             // Mirror the jump: Backspace on an empty query
             // closes the overlay; otherwise it shortens the query.
-            if app.ui.tunnel_host_picker_query.is_empty() {
+            if app.ui.tunnel_host_picker_query().is_empty() {
                 close(app);
             } else {
-                app.ui.tunnel_host_picker_query.pop();
+                app.ui.tunnel_host_picker_query_mut().pop();
                 reset_cursor_after_query_change(app);
             }
         }
         KeyCode::Char(c)
             if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && app.ui.tunnel_host_picker_query.len() < 64 =>
+                && app.ui.tunnel_host_picker_query().len() < 64 =>
         {
             // Cap the query length so a stuck key cannot grow the buffer
             // unbounded. Same 64-char cap the jump uses.
-            app.ui.tunnel_host_picker_query.push(c);
+            app.ui.tunnel_host_picker_query_mut().push(c);
             reset_cursor_after_query_change(app);
         }
         _ => {}
@@ -95,8 +95,8 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 }
 
 fn close(app: &mut App) {
-    app.ui.tunnel_host_picker_state.select(None);
-    app.ui.tunnel_host_picker_query.clear();
+    app.ui.tunnel_host_picker_state_mut().select(None);
+    app.ui.tunnel_host_picker_query_mut().clear();
     app.set_screen(Screen::HostList);
 }
 
@@ -105,8 +105,8 @@ fn close(app: &mut App) {
 fn reset_cursor_after_query_change(app: &mut App) {
     let total = filtered_hosts(app).len();
     if total == 0 {
-        app.ui.tunnel_host_picker_state.select(None);
+        app.ui.tunnel_host_picker_state_mut().select(None);
     } else {
-        app.ui.tunnel_host_picker_state.select(Some(0));
+        app.ui.tunnel_host_picker_state_mut().select(Some(0));
     }
 }

@@ -37,12 +37,12 @@ fn select_next(app: &mut App) {
     let items = crate::ui::containers_overview::visible_items(app);
     let total = items.len();
     if total == 0 {
-        app.ui.containers_overview_state.select(None);
+        app.ui.containers_overview_state_mut().select(None);
         return;
     }
-    let cur = app.ui.containers_overview_state.selected().unwrap_or(0);
+    let cur = app.ui.containers_overview_state().selected().unwrap_or(0);
     let next = if cur + 1 >= total { 0 } else { cur + 1 };
-    app.ui.containers_overview_state.select(Some(next));
+    app.ui.containers_overview_state_mut().select(Some(next));
 }
 
 /// Move cursor to the previous visible item, header or container,
@@ -51,12 +51,12 @@ fn select_prev(app: &mut App) {
     let items = crate::ui::containers_overview::visible_items(app);
     let total = items.len();
     if total == 0 {
-        app.ui.containers_overview_state.select(None);
+        app.ui.containers_overview_state_mut().select(None);
         return;
     }
-    let cur = app.ui.containers_overview_state.selected().unwrap_or(0);
+    let cur = app.ui.containers_overview_state().selected().unwrap_or(0);
     let prev = if cur == 0 { total - 1 } else { cur - 1 };
-    app.ui.containers_overview_state.select(Some(prev));
+    app.ui.containers_overview_state_mut().select(Some(prev));
 }
 
 /// Index of the first/last visible item in the current list,
@@ -79,7 +79,7 @@ fn last_visible_idx(app: &App) -> Option<usize> {
 /// Alias under the cursor when the cursor is parked on a host-divider
 /// row. Returns `None` for container rows or when the list is empty.
 fn selected_header_alias(app: &App) -> Option<String> {
-    let sel = app.ui.containers_overview_state.selected()?;
+    let sel = app.ui.containers_overview_state().selected()?;
     let items = crate::ui::containers_overview::visible_items(app);
     items.into_iter().nth(sel).and_then(|i| match i {
         crate::ui::containers_overview::ContainerListItem::HostHeader { alias, .. } => Some(alias),
@@ -137,7 +137,7 @@ fn host_running_members(app: &App, alias: &str) -> Vec<crate::app::StackMember> 
 /// host-aware actions (`r`, fold, bulk K/S) consult the helpers in
 /// pairs (`selected_container_alias` + `selected_header_alias`).
 fn selected_container_row(app: &App) -> Option<crate::ui::containers_overview::ContainerRow> {
-    let sel = app.ui.containers_overview_state.selected()?;
+    let sel = app.ui.containers_overview_state().selected()?;
     let items = crate::ui::containers_overview::visible_items(app);
     items.into_iter().nth(sel).and_then(|i| match i {
         crate::ui::containers_overview::ContainerListItem::Container(row) => Some(row),
@@ -770,21 +770,20 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
         }
         KeyCode::Char('g') => {
             if let Some(idx) = first_visible_idx(app) {
-                app.ui.containers_overview_state.select(Some(idx));
+                app.ui.containers_overview_state_mut().select(Some(idx));
             }
         }
         KeyCode::Char('G') => {
             if let Some(idx) = last_visible_idx(app) {
-                app.ui.containers_overview_state.select(Some(idx));
+                app.ui.containers_overview_state_mut().select(Some(idx));
             }
         }
         KeyCode::Char('/') => {
             app.search.set_query(Some(String::new()));
             // Snap to the first non-header item; pre-search list may
             // start with a host divider in AlphaHost mode.
-            app.ui
-                .containers_overview_state
-                .select(first_visible_idx(app));
+            let idx = first_visible_idx(app);
+            app.ui.containers_overview_state_mut().select(idx);
         }
         KeyCode::Char('s') => {
             // Capture the alias under the cursor BEFORE flipping the
@@ -801,10 +800,10 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             let save_result = app.containers_overview.set_sort_mode(new_mode);
             match pinned {
                 Some(alias) => reposition_cursor_on(app, &alias, was_header),
-                None => app
-                    .ui
-                    .containers_overview_state
-                    .select(first_visible_idx(app)),
+                None => {
+                    let idx = first_visible_idx(app);
+                    app.ui.containers_overview_state_mut().select(idx);
+                }
             }
             match save_result {
                 Ok(()) => app.notify(crate::messages::sorted_by(new_mode.label())),
@@ -879,8 +878,8 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 app.notify_warning(crate::messages::PICKER_NO_HOSTS);
                 return;
             }
-            app.ui.container_host_picker_state.select(Some(0));
-            app.ui.container_host_picker_query.clear();
+            app.ui.container_host_picker_state_mut().select(Some(0));
+            app.ui.container_host_picker_query_mut().clear();
             app.set_screen(Screen::ContainerHostPicker);
         }
         KeyCode::Char('n') => {
@@ -894,8 +893,8 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 ViewMode::Compact
             };
             let _ = app.containers_overview.set_view_mode(new_mode);
-            app.ui.detail_toggle_pending = true;
-            app.ui.detail_scroll = 0;
+            app.ui.set_detail_toggle_pending(true);
+            app.ui.set_detail_scroll(0);
         }
         // SPACE GUARD MUST PRECEDE the generic Char(c) arm below. Without
         // it, fuzz-style char input would shadow the host-row collapse
@@ -915,12 +914,12 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             app.running = false;
         }
         KeyCode::Esc
-            if !app.ui.esc_quit_hint_shown
+            if !app.ui.esc_quit_hint_shown()
                 && !app.status_center.toast().is_some_and(|t| t.sticky) =>
         {
             log::debug!("[purple] esc on idle containers overview, showing quit hint toast");
             app.notify(crate::messages::ESC_QUIT_HINT);
-            app.ui.esc_quit_hint_shown = true;
+            app.ui.set_esc_quit_hint_shown(true);
         }
         _ => {}
     }
@@ -934,7 +933,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
 fn reposition_cursor_on(app: &mut App, alias: &str, prefer_header: bool) {
     let items = crate::ui::containers_overview::visible_items(app);
     if items.is_empty() {
-        app.ui.containers_overview_state.select(None);
+        app.ui.containers_overview_state_mut().select(None);
         return;
     }
     let header_pos = items.iter().position(|i| match i {
@@ -953,7 +952,7 @@ fn reposition_cursor_on(app: &mut App, alias: &str, prefer_header: bool) {
         container_pos.or(header_pos)
     }
     .unwrap_or(0);
-    app.ui.containers_overview_state.select(Some(new_idx));
+    app.ui.containers_overview_state_mut().select(Some(new_idx));
 }
 
 /// If the cursor points at a container whose `docker inspect` data is
@@ -1370,9 +1369,8 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             app.search.set_query(None);
-            app.ui
-                .containers_overview_state
-                .select(first_visible_idx(app));
+            let idx = first_visible_idx(app);
+            app.ui.containers_overview_state_mut().select(idx);
         }
         KeyCode::Enter => {
             // Mirror the main handler: silent no-op on host headers,
@@ -1397,15 +1395,13 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Backspace => {
             app.search.pop_query_char();
-            app.ui
-                .containers_overview_state
-                .select(first_visible_idx(app));
+            let idx = first_visible_idx(app);
+            app.ui.containers_overview_state_mut().select(idx);
         }
         KeyCode::Char(c) => {
             app.search.push_query_char(c);
-            app.ui
-                .containers_overview_state
-                .select(first_visible_idx(app));
+            let idx = first_visible_idx(app);
+            app.ui.containers_overview_state_mut().select(idx);
         }
         _ => {}
     }

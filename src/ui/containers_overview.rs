@@ -650,7 +650,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
         render_search_bar(frame, app, search_bar_area, row_count, total_cached);
     }
 
-    let sel = app.ui.containers_overview_state.selected();
+    let sel = app.ui.containers_overview_state().selected();
     let new_sel = match sel {
         // Headers are now valid selection targets (the user can park on a
         // group divider to drive bulk actions or fold the group). Empty
@@ -660,7 +660,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
         _ => first_visible_index(&items),
     };
     if new_sel != sel {
-        app.ui.containers_overview_state.select(new_sel);
+        app.ui.containers_overview_state_mut().select(new_sel);
     }
 
     // Detail panel is gated by both the user's `v` toggle and the
@@ -819,11 +819,15 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progre
 
     let selected_item = app
         .ui
-        .containers_overview_state
+        .containers_overview_state()
         .selected()
         .and_then(|i| items.get(i).cloned());
 
-    frame.render_stateful_widget(list, list_inner_area, &mut app.ui.containers_overview_state);
+    frame.render_stateful_widget(
+        list,
+        list_inner_area,
+        app.ui.containers_overview_state_mut(),
+    );
 
     if let Some(detail) = detail_area {
         if detail.width >= DETAIL_RENDER_MIN {

@@ -112,12 +112,12 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         // session. The sticky-toast guard skips the hint when a sticky toast
         // is active so an informational nudge cannot displace a sticky error.
         KeyCode::Esc
-            if !app.ui.esc_quit_hint_shown
+            if !app.ui.esc_quit_hint_shown()
                 && !app.status_center.toast().is_some_and(|t| t.sticky) =>
         {
             log::debug!("[purple] esc on idle keys overview, showing quit hint toast");
             app.notify(crate::messages::ESC_QUIT_HINT);
-            app.ui.esc_quit_hint_shown = true;
+            app.ui.set_esc_quit_hint_shown(true);
         }
         _ => {}
     }

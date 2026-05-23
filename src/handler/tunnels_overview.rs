@@ -14,7 +14,7 @@ use crate::tunnel::TunnelRule;
 /// filtered + sorted sequence the UI renders so the cursor always points
 /// at the row visually under it.
 fn selected_row(app: &App) -> Option<(String, TunnelRule)> {
-    let sel = app.ui.tunnels_overview_state.selected()?;
+    let sel = app.ui.tunnels_overview_state().selected()?;
     crate::ui::tunnels_overview::visible_pairs(app)
         .into_iter()
         .nth(sel)
@@ -28,23 +28,23 @@ fn row_count(app: &App) -> usize {
 fn select_next(app: &mut App) {
     let total = row_count(app);
     if total == 0 {
-        app.ui.tunnels_overview_state.select(None);
+        app.ui.tunnels_overview_state_mut().select(None);
         return;
     }
-    let cur = app.ui.tunnels_overview_state.selected().unwrap_or(0);
+    let cur = app.ui.tunnels_overview_state().selected().unwrap_or(0);
     let next = if cur + 1 >= total { 0 } else { cur + 1 };
-    app.ui.tunnels_overview_state.select(Some(next));
+    app.ui.tunnels_overview_state_mut().select(Some(next));
 }
 
 fn select_prev(app: &mut App) {
     let total = row_count(app);
     if total == 0 {
-        app.ui.tunnels_overview_state.select(None);
+        app.ui.tunnels_overview_state_mut().select(None);
         return;
     }
-    let cur = app.ui.tunnels_overview_state.selected().unwrap_or(0);
+    let cur = app.ui.tunnels_overview_state().selected().unwrap_or(0);
     let prev = if cur == 0 { total - 1 } else { cur - 1 };
-    app.ui.tunnels_overview_state.select(Some(prev));
+    app.ui.tunnels_overview_state_mut().select(Some(prev));
 }
 
 fn toggle_tunnel(app: &mut App) {
@@ -121,7 +121,7 @@ fn toggle_tunnel(app: &mut App) {
 pub(super) fn reposition_cursor_on(app: &mut App, alias: &str, rule: &TunnelRule) {
     let pairs = crate::ui::tunnels_overview::visible_pairs(app);
     if pairs.is_empty() {
-        app.ui.tunnels_overview_state.select(None);
+        app.ui.tunnels_overview_state_mut().select(None);
         return;
     }
     let new_idx = pairs
@@ -129,7 +129,7 @@ pub(super) fn reposition_cursor_on(app: &mut App, alias: &str, rule: &TunnelRule
         .position(|(a, r)| a == alias && r == rule)
         .unwrap_or(0)
         .min(pairs.len() - 1);
-    app.ui.tunnels_overview_state.select(Some(new_idx));
+    app.ui.tunnels_overview_state_mut().select(Some(new_idx));
 }
 
 /// True when the host under the cursor lives in an included config file
@@ -182,9 +182,9 @@ fn confirm_delete_selected(app: &mut App) {
     // sit past the new end.
     let total = row_count(app);
     if total == 0 {
-        app.ui.tunnels_overview_state.select(None);
+        app.ui.tunnels_overview_state_mut().select(None);
     } else if sel >= total {
-        app.ui.tunnels_overview_state.select(Some(total - 1));
+        app.ui.tunnels_overview_state_mut().select(Some(total - 1));
     }
     app.notify(crate::messages::TUNNEL_REMOVED);
 }
@@ -235,19 +235,19 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char('g') if row_count(app) > 0 => {
-            app.ui.tunnels_overview_state.select(Some(0));
+            app.ui.tunnels_overview_state_mut().select(Some(0));
         }
         KeyCode::Char('G') => {
             let total = row_count(app);
             if total > 0 {
-                app.ui.tunnels_overview_state.select(Some(total - 1));
+                app.ui.tunnels_overview_state_mut().select(Some(total - 1));
             }
         }
         KeyCode::Char('/') => {
             // Enter search mode. Stays on the Tunnels tab; filtering
             // happens at row-build time in ui::tunnels_overview.
             app.search.set_query(Some(String::new()));
-            app.ui.tunnels_overview_state.select(Some(0));
+            app.ui.tunnels_overview_state_mut().select(Some(0));
         }
         KeyCode::Char('s') => {
             // Capture the row under the cursor BEFORE cycling so we can
@@ -259,7 +259,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             app.tunnels.set_sort_mode(app.tunnels.sort_mode().next());
             match pinned {
                 Some((alias, rule)) => reposition_cursor_on(app, &alias, &rule),
-                None => app.ui.tunnels_overview_state.select(Some(0)),
+                None => app.ui.tunnels_overview_state_mut().select(Some(0)),
             }
             app.notify(crate::messages::sorted_by(app.tunnels.sort_mode().label()));
         }
@@ -283,8 +283,8 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                 app.notify_warning(crate::messages::TUNNEL_NO_EDITABLE_HOSTS);
                 return;
             }
-            app.ui.tunnel_host_picker_state.select(Some(0));
-            app.ui.tunnel_host_picker_query.clear();
+            app.ui.tunnel_host_picker_state_mut().select(Some(0));
+            app.ui.tunnel_host_picker_query_mut().clear();
             app.set_screen(Screen::TunnelHostPicker);
         }
         KeyCode::Char('e') => {
@@ -308,7 +308,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             app.open_tunnel_edit_form(alias, &rule, idx);
         }
         KeyCode::Char('d') => {
-            let Some(sel) = app.ui.tunnels_overview_state.selected() else {
+            let Some(sel) = app.ui.tunnels_overview_state().selected() else {
                 return;
             };
             if selected_row_is_included(app) {
@@ -344,12 +344,12 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         // Esc presses (or Esc while a sticky is up) fall through to the no-op
         // arm below.
         KeyCode::Esc
-            if !app.ui.esc_quit_hint_shown
+            if !app.ui.esc_quit_hint_shown()
                 && !app.status_center.toast().is_some_and(|t| t.sticky) =>
         {
             log::debug!("[purple] esc on idle tunnels overview, showing quit hint toast");
             app.notify(crate::messages::ESC_QUIT_HINT);
-            app.ui.esc_quit_hint_shown = true;
+            app.ui.set_esc_quit_hint_shown(true);
         }
         _ => {}
     }
@@ -366,7 +366,7 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             app.search.set_query(None);
-            app.ui.tunnels_overview_state.select(Some(0));
+            app.ui.tunnels_overview_state_mut().select(Some(0));
         }
         KeyCode::Enter => {
             // Act on the highlighted row and dismiss the input. Re-
@@ -388,11 +388,11 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Backspace => {
             app.search.pop_query_char();
-            app.ui.tunnels_overview_state.select(Some(0));
+            app.ui.tunnels_overview_state_mut().select(Some(0));
         }
         KeyCode::Char(c) => {
             app.search.push_query_char(c);
-            app.ui.tunnels_overview_state.select(Some(0));
+            app.ui.tunnels_overview_state_mut().select(Some(0));
         }
         _ => {}
     }

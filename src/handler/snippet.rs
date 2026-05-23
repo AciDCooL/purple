@@ -12,9 +12,9 @@ use crate::preferences;
 
 pub(super) fn open_snippet_picker(app: &mut App, aliases: Vec<String>) {
     *app.snippets.store_mut() = crate::snippet::SnippetStore::load();
-    app.ui.snippet_picker_state = ratatui::widgets::ListState::default();
+    *app.ui.snippet_picker_state_mut() = ratatui::widgets::ListState::default();
     if !app.snippets.store().snippets.is_empty() {
-        app.ui.snippet_picker_state.select(Some(0));
+        app.ui.snippet_picker_state_mut().select(Some(0));
     }
     app.set_screen(Screen::SnippetPicker {
         target_aliases: aliases,
@@ -37,7 +37,7 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
     }
 
     // Search mode dispatch
-    if app.ui.snippet_search.is_some() {
+    if app.ui.snippet_search().is_some() {
         handle_snippet_picker_search(app, key, &target_aliases, events_tx);
         return;
     }
@@ -56,10 +56,10 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
                         app.notify_error(crate::messages::failed_to_save(&e));
                     } else {
                         if app.snippets.store().snippets.is_empty() {
-                            app.ui.snippet_picker_state.select(None);
+                            app.ui.snippet_picker_state_mut().select(None);
                         } else if sel >= app.snippets.store().snippets.len() {
                             app.ui
-                                .snippet_picker_state
+                                .snippet_picker_state_mut()
                                 .select(Some(app.snippets.store().snippets.len() - 1));
                         }
                         app.notify(crate::messages::snippet_removed(&removed.name));
@@ -91,14 +91,14 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
         }
         KeyCode::PageDown => {
             crate::app::page_down(
-                &mut app.ui.snippet_picker_state,
+                app.ui.snippet_picker_state_mut(),
                 app.snippets.store().snippets.len(),
                 10,
             );
         }
         KeyCode::PageUp => {
             crate::app::page_up(
-                &mut app.ui.snippet_picker_state,
+                app.ui.snippet_picker_state_mut(),
                 app.snippets.store().snippets.len(),
                 10,
             );
@@ -107,28 +107,28 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
             app.open_snippet_add_form(target_aliases.clone());
         }
         KeyCode::Char('e') => {
-            if let Some(sel) = app.ui.snippet_picker_state.selected() {
+            if let Some(sel) = app.ui.snippet_picker_state().selected() {
                 if let Some(snippet) = app.snippets.store().snippets.get(sel).cloned() {
                     app.open_snippet_edit_form(&snippet, target_aliases.clone(), sel);
                 }
             }
         }
         KeyCode::Char('d') => {
-            if let Some(sel) = app.ui.snippet_picker_state.selected() {
+            if let Some(sel) = app.ui.snippet_picker_state().selected() {
                 if sel < app.snippets.store().snippets.len() {
                     app.snippets.request_delete(sel);
                 }
             }
         }
         KeyCode::Enter => {
-            if let Some(sel) = app.ui.snippet_picker_state.selected() {
+            if let Some(sel) = app.ui.snippet_picker_state().selected() {
                 if let Some(snippet) = app.snippets.store().snippets.get(sel).cloned() {
                     run_or_prompt_params(app, snippet, target_aliases, false, events_tx);
                 }
             }
         }
         KeyCode::Char('!') => {
-            if let Some(sel) = app.ui.snippet_picker_state.selected() {
+            if let Some(sel) = app.ui.snippet_picker_state().selected() {
                 if let Some(snippet) = app.snippets.store().snippets.get(sel).cloned() {
                     run_or_prompt_params(app, snippet, target_aliases, true, events_tx);
                 }
@@ -373,9 +373,9 @@ pub(super) fn handle_output_key(app: &mut App, key: KeyEvent) {
 fn reset_snippet_search_selection(app: &mut App) {
     let filtered = app.filtered_snippet_indices();
     if filtered.is_empty() {
-        app.ui.snippet_picker_state.select(None);
+        app.ui.snippet_picker_state_mut().select(None);
     } else {
-        app.ui.snippet_picker_state.select(Some(0));
+        app.ui.snippet_picker_state_mut().select(Some(0));
     }
 }
 
@@ -390,14 +390,14 @@ pub(super) fn handle_snippet_picker_search(
             app.ui.close_snippet_search();
             // Restore selection to full list
             if !app.snippets.store().snippets.is_empty()
-                && app.ui.snippet_picker_state.selected().is_none()
+                && app.ui.snippet_picker_state().selected().is_none()
             {
-                app.ui.snippet_picker_state.select(Some(0));
+                app.ui.snippet_picker_state_mut().select(Some(0));
             }
         }
         KeyCode::Enter => {
             let filtered = app.filtered_snippet_indices();
-            if let Some(sel) = app.ui.snippet_picker_state.selected() {
+            if let Some(sel) = app.ui.snippet_picker_state().selected() {
                 if sel < filtered.len() {
                     let real_idx = filtered[sel];
                     if let Some(snippet) = app.snippets.store().snippets.get(real_idx).cloned() {
@@ -414,18 +414,18 @@ pub(super) fn handle_snippet_picker_search(
             }
         }
         KeyCode::Char(c) => {
-            if let Some(ref mut query) = app.ui.snippet_search {
+            if let Some(query) = app.ui.snippet_search_mut() {
                 query.push(c);
             }
             reset_snippet_search_selection(app);
         }
         KeyCode::Backspace => {
-            if let Some(ref mut query) = app.ui.snippet_search {
+            if let Some(query) = app.ui.snippet_search_mut() {
                 query.pop();
                 if query.is_empty() {
                     app.ui.close_snippet_search();
                     if !app.snippets.store().snippets.is_empty() {
-                        app.ui.snippet_picker_state.select(Some(0));
+                        app.ui.snippet_picker_state_mut().select(Some(0));
                     }
                     return;
                 }
@@ -434,16 +434,16 @@ pub(super) fn handle_snippet_picker_search(
         }
         KeyCode::Down => {
             let count = app.filtered_snippet_indices().len();
-            if let Some(sel) = app.ui.snippet_picker_state.selected() {
+            if let Some(sel) = app.ui.snippet_picker_state().selected() {
                 if sel + 1 < count {
-                    app.ui.snippet_picker_state.select(Some(sel + 1));
+                    app.ui.snippet_picker_state_mut().select(Some(sel + 1));
                 }
             }
         }
         KeyCode::Up => {
-            if let Some(sel) = app.ui.snippet_picker_state.selected() {
+            if let Some(sel) = app.ui.snippet_picker_state().selected() {
                 if sel > 0 {
-                    app.ui.snippet_picker_state.select(Some(sel - 1));
+                    app.ui.snippet_picker_state_mut().select(Some(sel - 1));
                 }
             }
         }
@@ -677,7 +677,7 @@ fn submit_snippet_form(app: &mut App, target_aliases: &[String], editing: Option
         .snippets
         .iter()
         .position(|s| s.name == name);
-    app.ui.snippet_picker_state.select(new_idx);
+    app.ui.snippet_picker_state_mut().select(new_idx);
 
     if is_new {
         app.notify(crate::messages::snippet_added(&name));

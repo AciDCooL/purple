@@ -68,7 +68,7 @@ struct SelectedRow {
 }
 
 fn selected_row(app: &App) -> Option<SelectedRow> {
-    let sel = app.ui.tunnels_overview_state.selected()?;
+    let sel = app.ui.tunnels_overview_state().selected()?;
     let pairs = super::tunnels_overview::visible_pairs(app);
     let (alias, rule) = pairs.into_iter().nth(sel)?;
     let started_at = app.tunnels.active_get(&alias).map(|a| a.started_at);

@@ -89,7 +89,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 app.clear_group_filter();
             } else if !app.hosts_state.multi_select().is_empty() {
                 app.hosts_state.clear_multi_select();
-            } else if !app.ui.esc_quit_hint_shown
+            } else if !app.ui.esc_quit_hint_shown()
                 && !app.status_center.toast().is_some_and(|t| t.sticky)
             {
                 // Esc never quits the app. The first time a user presses Esc
@@ -101,7 +101,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 // surface on a later Esc once the sticky toast is dismissed.
                 log::debug!("[purple] esc on idle host list, showing quit hint toast");
                 app.notify(crate::messages::ESC_QUIT_HINT);
-                app.ui.esc_quit_hint_shown = true;
+                app.ui.set_esc_quit_hint_shown(true);
             }
         }
         KeyCode::Char('j') | KeyCode::Down => {
@@ -444,17 +444,19 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
         }
         KeyCode::Char('v') => {
             app.hosts_state.toggle_view_mode();
-            app.ui.detail_toggle_pending = true;
-            app.ui.detail_scroll = 0;
+            app.ui.set_detail_toggle_pending(true);
+            app.ui.set_detail_scroll(0);
             if let Err(e) = preferences::save_view_mode(app.hosts_state.view_mode()) {
                 log::warn!("[config] Failed to persist view mode: {e}");
             }
         }
         KeyCode::Char(']') if app.hosts_state.view_mode() == ViewMode::Detailed => {
-            app.ui.detail_scroll = app.ui.detail_scroll.saturating_add(1);
+            app.ui
+                .set_detail_scroll(app.ui.detail_scroll().saturating_add(1));
         }
         KeyCode::Char('[') if app.hosts_state.view_mode() == ViewMode::Detailed => {
-            app.ui.detail_scroll = app.ui.detail_scroll.saturating_sub(1);
+            app.ui
+                .set_detail_scroll(app.ui.detail_scroll().saturating_sub(1));
         }
         KeyCode::Char('u') => {
             // Bulk-tag undo takes priority: the most recent bulk-tag apply
@@ -530,12 +532,12 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     }
                 })
                 .unwrap_or(0);
-            app.ui.theme_picker.list.select(Some(idx));
-            app.ui.theme_picker.builtins = builtins;
-            app.ui.theme_picker.custom = custom;
-            app.ui.theme_picker.saved_name =
+            app.ui.theme_picker_mut().list.select(Some(idx));
+            app.ui.theme_picker_mut().builtins = builtins;
+            app.ui.theme_picker_mut().custom = custom;
+            app.ui.theme_picker_mut().saved_name =
                 crate::preferences::load_theme().unwrap_or_else(|| "Purple".to_string());
-            app.ui.theme_picker.original = Some(crate::ui::theme::current_theme());
+            app.ui.theme_picker_mut().original = Some(crate::ui::theme::current_theme());
             app.set_screen(Screen::ThemePicker);
         }
         KeyCode::Char('T') => {
@@ -549,9 +551,9 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                     app.notify_warning(crate::messages::stale_host(&hint));
                 }
                 app.refresh_tunnel_list(&alias);
-                app.ui.tunnel_list_state = ratatui::widgets::ListState::default();
+                *app.ui.tunnel_list_state_mut() = ratatui::widgets::ListState::default();
                 if !app.tunnels.list().is_empty() {
-                    app.ui.tunnel_list_state.select(Some(0));
+                    app.ui.tunnel_list_state_mut().select(Some(0));
                 }
                 app.set_screen(Screen::TunnelList { alias });
             }
@@ -560,8 +562,8 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             if !app.demo_mode {
                 *app.providers.config_mut() = crate::providers::config::ProviderConfig::load();
             }
-            app.ui.provider_list_state = ratatui::widgets::ListState::default();
-            app.ui.provider_list_state.select(Some(0));
+            *app.ui.provider_list_state_mut() = ratatui::widgets::ListState::default();
+            app.ui.provider_list_state_mut().select(Some(0));
             app.set_screen(Screen::Providers);
         }
         KeyCode::Char('I') => {

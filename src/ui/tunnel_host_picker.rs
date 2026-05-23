@@ -20,7 +20,7 @@ use crate::handler::tunnel_host_picker::{editable_aliases, filtered_hosts};
 pub fn render(frame: &mut Frame, app: &mut App) {
     let total_editable = editable_aliases(app).len();
     let visible = filtered_hosts(app);
-    let query = app.ui.tunnel_host_picker_query.clone();
+    let query = app.ui.tunnel_host_picker_query().clone();
 
     let area = picker_helpers::host_picker_overlay_area(frame, visible.len());
     frame.render_widget(Clear, area);
@@ -64,10 +64,13 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             })
             .collect();
 
-        picker_helpers::clamp_picker_selection(&mut app.ui.tunnel_host_picker_state, visible.len());
+        picker_helpers::clamp_picker_selection(
+            app.ui.tunnel_host_picker_state_mut(),
+            visible.len(),
+        );
 
         let list = List::new(items).highlight_style(theme::selected_row());
-        frame.render_stateful_widget(list, rows[2], &mut app.ui.tunnel_host_picker_state);
+        frame.render_stateful_widget(list, rows[2], app.ui.tunnel_host_picker_state_mut());
     }
 
     let footer_area = design::render_overlay_footer(frame, area);

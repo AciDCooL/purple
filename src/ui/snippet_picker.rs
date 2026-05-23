@@ -16,7 +16,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         _ => 1,
     };
 
-    let searching = app.ui.snippet_search.is_some();
+    let searching = app.ui.snippet_search().is_some();
 
     let title = if host_count > 1 {
         format!("Snippets ({} hosts)", host_count)
@@ -75,7 +75,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Search bar
     if let Some(si) = search_ci {
-        let query = app.ui.snippet_search.as_deref().unwrap_or("");
+        let query = app.ui.snippet_search().map(|s| s.as_str()).unwrap_or("");
         let search_line = Line::from(vec![
             Span::styled(" / ", theme::brand_badge()),
             Span::styled(query, theme::bold()),
@@ -174,7 +174,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             .highlight_style(theme::selected_row())
             .highlight_symbol(design::LIST_HIGHLIGHT);
 
-        frame.render_stateful_widget(list, list_area, &mut app.ui.snippet_picker_state);
+        frame.render_stateful_widget(list, list_area, app.ui.snippet_picker_state_mut());
     }
 
     // Footer

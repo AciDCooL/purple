@@ -143,8 +143,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     };
 
     let max_scroll = total_lines.saturating_sub(max_body);
-    if app.ui.help_scroll > max_scroll {
-        app.ui.help_scroll = max_scroll;
+    if app.ui.help_scroll() > max_scroll {
+        app.ui.set_help_scroll(max_scroll);
     }
 
     // Fixed content widths: col1 fits its longest line
@@ -182,8 +182,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         // stay in vertical lock-step. Labels are pre-sized to fit each
         // column's budget (see help_line_short callers); CI check 23
         // enforces no overflow.
-        let para1 = Paragraph::new(col1).scroll((app.ui.help_scroll, 0));
-        let para2 = Paragraph::new(col2).scroll((app.ui.help_scroll, 0));
+        let para1 = Paragraph::new(col1).scroll((app.ui.help_scroll(), 0));
+        let para2 = Paragraph::new(col2).scroll((app.ui.help_scroll(), 0));
         frame.render_widget(para1, cols[1]);
         frame.render_widget(para2, cols[3]);
     } else if col2.is_empty() {
@@ -191,14 +191,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         // description folds to a continuation row instead of clipping.
         // Reserve the standard right margin via body-area math.
         let para = Paragraph::new(col1)
-            .scroll((app.ui.help_scroll, 0))
+            .scroll((app.ui.help_scroll(), 0))
             .wrap(Wrap { trim: false });
         frame.render_widget(para, content_row);
     } else {
         let mut all = col1;
         all.extend(col2);
         let para = Paragraph::new(all)
-            .scroll((app.ui.help_scroll, 0))
+            .scroll((app.ui.help_scroll(), 0))
             .wrap(Wrap { trim: false });
         frame.render_widget(para, content_row);
     }
@@ -240,7 +240,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let mut spans = design::Footer::new()
             .action(fl::KEYS_SCROLL, fl::LABEL_SCROLL)
             .into_spans();
-        let position = app.ui.help_scroll.saturating_add(1);
+        let position = app.ui.help_scroll().saturating_add(1);
         let max = max_scroll.saturating_add(1);
         spans.push(Span::styled(
             format!(" [{}/{}]", position, max),
@@ -1030,7 +1030,8 @@ mod tests {
         let mut app = help_test_app(Screen::HostList);
         let text = render_to_text(&mut app, 100, 50);
         assert_eq!(
-            app.ui.help_scroll, 0,
+            app.ui.help_scroll(),
+            0,
             "host-list help should fit without scrolling at 100x50"
         );
         for header in ["NAVIGATE", "VIEW", "MANAGE HOSTS", "TOOLS"] {
@@ -1047,10 +1048,11 @@ mod tests {
         // viewport (max_scroll == 0), a previously elevated help_scroll
         // must be clamped back to 0 so the overlay does not render blank.
         let mut app = help_test_app(Screen::HostList);
-        app.ui.help_scroll = 999;
+        app.ui.set_help_scroll(999);
         render_to_text(&mut app, 100, 50);
         assert_eq!(
-            app.ui.help_scroll, 0,
+            app.ui.help_scroll(),
+            0,
             "stale scroll must clamp to 0 when content fits"
         );
     }

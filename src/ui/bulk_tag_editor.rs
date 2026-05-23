@@ -102,7 +102,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         let list = List::new(items)
             .highlight_style(theme::selected_row())
             .highlight_symbol(design::LIST_HIGHLIGHT);
-        frame.render_stateful_widget(list, chunks[list_idx], &mut app.ui.bulk_tag_editor_state);
+        frame.render_stateful_widget(list, chunks[list_idx], app.ui.bulk_tag_editor_state_mut());
     }
 
     // Optional input bar rendered in-place of the spacer when typing a new

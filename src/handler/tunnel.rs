@@ -54,10 +54,10 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                         app.refresh_tunnel_list(&alias);
                         app.reload_hosts();
                         if app.tunnels.list().is_empty() {
-                            app.ui.tunnel_list_state.select(None);
+                            app.ui.tunnel_list_state_mut().select(None);
                         } else if sel >= app.tunnels.list().len() {
                             app.ui
-                                .tunnel_list_state
+                                .tunnel_list_state_mut()
                                 .select(Some(app.tunnels.list().len() - 1));
                         }
                         app.notify(crate::messages::TUNNEL_REMOVED);
@@ -83,10 +83,10 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
             app.select_prev_tunnel();
         }
         KeyCode::PageDown => {
-            crate::app::page_down(&mut app.ui.tunnel_list_state, app.tunnels.list().len(), 10);
+            crate::app::page_down(app.ui.tunnel_list_state_mut(), app.tunnels.list().len(), 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(&mut app.ui.tunnel_list_state, app.tunnels.list().len(), 10);
+            crate::app::page_up(app.ui.tunnel_list_state_mut(), app.tunnels.list().len(), 10);
         }
         KeyCode::Char('a') => {
             // Check if host is from an included file (read-only)
@@ -106,7 +106,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                     return;
                 }
             }
-            if let Some(sel) = app.ui.tunnel_list_state.selected() {
+            if let Some(sel) = app.ui.tunnel_list_state().selected() {
                 if let Some(rule) = app.tunnels.list().get(sel).cloned() {
                     app.open_tunnel_edit_form(alias.clone(), &rule, sel);
                 }
@@ -120,7 +120,7 @@ pub(super) fn handle_tunnel_list_key(app: &mut App, key: KeyEvent) {
                     return;
                 }
             }
-            if let Some(sel) = app.ui.tunnel_list_state.selected() {
+            if let Some(sel) = app.ui.tunnel_list_state().selected() {
                 if sel < app.tunnels.list().len() {
                     app.tunnels.request_delete(sel);
                 }
@@ -336,16 +336,16 @@ fn submit_tunnel_form(app: &mut App, alias: &str, editing: Option<usize>) {
     app.reload_hosts();
     // Fix selection after list change
     if app.tunnels.list().is_empty() {
-        app.ui.tunnel_list_state.select(None);
-    } else if let Some(sel) = app.ui.tunnel_list_state.selected() {
+        app.ui.tunnel_list_state_mut().select(None);
+    } else if let Some(sel) = app.ui.tunnel_list_state().selected() {
         if sel >= app.tunnels.list().len() {
             app.ui
-                .tunnel_list_state
+                .tunnel_list_state_mut()
                 .select(Some(app.tunnels.list().len() - 1));
         }
     } else {
         // First tunnel added to empty list — initialize selection
-        app.ui.tunnel_list_state.select(Some(0));
+        app.ui.tunnel_list_state_mut().select(Some(0));
     }
     app.notify(crate::messages::TUNNEL_SAVED);
     let return_to = tunnel_form_return_screen(app, alias);
