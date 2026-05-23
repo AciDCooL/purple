@@ -1789,7 +1789,7 @@ fn test_search_enter_carries_askpass() {
     app.screen = Screen::HostList;
     app.start_search();
     // In search mode, filtered_indices should contain our host
-    assert!(!app.search.filtered_indices.is_empty());
+    assert!(!app.search.filtered_indices().is_empty());
     app.ui.list_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
@@ -1797,7 +1797,7 @@ fn test_search_enter_carries_askpass() {
     assert_eq!(pending.0, "myserver");
     assert_eq!(pending.1, Some("op://V/I/p".to_string()));
     // Search should be cancelled after Enter
-    assert!(app.search.query.is_none());
+    assert!(app.search.query().is_none());
 }
 
 #[test]
@@ -1826,7 +1826,7 @@ fn test_search_ctrl_e_opens_edit_form() {
     let _ = handle_key_event(&mut app, ctrl_key('e'), &tx);
     assert!(matches!(app.screen, Screen::EditHost { ref alias } if alias == "myserver"));
     // Search query should be preserved so user returns to filtered list
-    assert!(app.search.query.is_some());
+    assert!(app.search.query().is_some());
 }
 
 #[test]
@@ -2145,7 +2145,7 @@ fn test_password_picker_ignores_unknown_keys() {
 #[test]
 fn test_search_enter_carries_askpass_op_uri() {
     let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass op://V/I/p\n");
-    app.search.query = Some("myserver".to_string());
+    app.search.set_query(Some("myserver".to_string()));
     app.apply_filter();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
@@ -4534,7 +4534,7 @@ fn test_search_enter_on_stale_host_shows_warning() {
         "Host do-web\n  HostName 1.2.3.4\n  # purple:provider digitalocean:123\n  # purple:stale 1711900000\n",
     );
     // Enter search mode
-    app.search.query = Some("do-web".to_string());
+    app.search.set_query(Some("do-web".to_string()));
     app.apply_filter();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
@@ -6120,9 +6120,9 @@ fn test_ctrl_a_in_search_mode_selects_filtered() {
     app.apply_sort();
 
     // Enter search mode and filter to "prod"
-    app.search.query = Some("prod".to_string());
+    app.search.set_query(Some("prod".to_string()));
     app.apply_filter();
-    assert_eq!(app.search.filtered_indices.len(), 2);
+    assert_eq!(app.search.filtered_indices().len(), 2);
     assert!(app.hosts_state.multi_select.is_empty());
 
     // Ctrl+A should select only the 2 filtered hosts
@@ -6361,7 +6361,7 @@ fn test_ctrl_p_with_active_filter_clears_pings_and_cancels_search() {
         .last_checked
         .insert("web1".to_string(), std::time::Instant::now());
     app.ping.filter_down_only = true;
-    app.search.query = Some("we".to_string());
+    app.search.set_query(Some("we".to_string()));
 
     let (tx, _rx) = std::sync::mpsc::channel();
     handle_key_event(&mut app, ctrl_key('p'), &tx).unwrap();
@@ -6371,7 +6371,7 @@ fn test_ctrl_p_with_active_filter_clears_pings_and_cancels_search() {
     assert!(app.ping.last_checked.is_empty());
     assert!(!app.ping.filter_down_only);
     // Active filter triggered cancel_search: query is gone
-    assert!(app.search.query.is_none());
+    assert!(app.search.query().is_none());
 }
 
 #[test]
@@ -6382,7 +6382,7 @@ fn test_ctrl_p_without_active_filter_clears_pings_and_preserves_search() {
         crate::app::PingStatus::Reachable { rtt_ms: 10 },
     );
     app.ping.filter_down_only = false;
-    app.search.query = Some("we".to_string());
+    app.search.set_query(Some("we".to_string()));
 
     let (tx, _rx) = std::sync::mpsc::channel();
     handle_key_event(&mut app, ctrl_key('p'), &tx).unwrap();
@@ -6391,7 +6391,7 @@ fn test_ctrl_p_without_active_filter_clears_pings_and_preserves_search() {
     assert!(app.ping.status.is_empty());
     assert!(!app.ping.filter_down_only);
     // No active filter: search query is preserved (cancel_search not called)
-    assert_eq!(app.search.query.as_deref(), Some("we"));
+    assert_eq!(app.search.query(), Some("we"));
 }
 
 #[test]
@@ -6417,9 +6417,9 @@ fn test_bang_key_toggles_down_only_on() {
     let (tx, _rx) = std::sync::mpsc::channel();
     handle_key_event(&mut app, key(KeyCode::Char('!')), &tx).unwrap();
     assert!(app.ping.filter_down_only);
-    assert!(app.search.query.is_some());
+    assert!(app.search.query().is_some());
     // Only web1 (Unreachable) should be in filtered results
-    assert_eq!(app.search.filtered_indices.len(), 1);
+    assert_eq!(app.search.filtered_indices().len(), 1);
 }
 
 #[test]
@@ -6439,7 +6439,7 @@ fn test_bang_key_toggles_down_only_off() {
     // Toggle off
     handle_key_event(&mut app, key(KeyCode::Char('!')), &tx).unwrap();
     assert!(!app.ping.filter_down_only);
-    assert!(app.search.query.is_none());
+    assert!(app.search.query().is_none());
 }
 
 #[test]
@@ -8711,11 +8711,11 @@ fn host_list_n_opens_whats_new_when_search_inactive() {
 fn host_list_n_types_into_search_when_active() {
     let mut app = make_app("");
     app.screen = Screen::HostList;
-    app.search.query = Some(String::new());
+    app.search.set_query(Some(String::new()));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert_eq!(app.search.query.as_deref(), Some("n"));
+    assert_eq!(app.search.query(), Some("n"));
 }
 
 // =========================================================================
@@ -9007,10 +9007,10 @@ fn tunnels_overview_search_down_navigates_filtered_list_without_leaving_input_mo
     let mut app = make_multi_tunnel_overview_app();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
-    assert!(app.search.query.is_some(), "/ enters search mode");
+    assert!(app.search.query().is_some(), "/ enters search mode");
     let _ = handle_key_event(&mut app, key(KeyCode::Down), &tx);
     assert!(
-        app.search.query.is_some(),
+        app.search.query().is_some(),
         "Down must NOT exit search input mode"
     );
     assert_eq!(app.ui.tunnels_overview_state.selected(), Some(1));
@@ -9028,7 +9028,7 @@ fn tunnels_overview_search_enter_acts_on_highlighted_row_and_dismisses_input() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(
-        app.search.query.is_none(),
+        app.search.query().is_none(),
         "Enter must dismiss the search input"
     );
 }
@@ -9040,7 +9040,7 @@ fn tunnels_overview_search_esc_clears_query_and_resets_cursor() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('b')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(app.search.query.is_none());
+    assert!(app.search.query().is_none());
     assert_eq!(app.ui.tunnels_overview_state.selected(), Some(0));
 }
 
@@ -9574,7 +9574,7 @@ fn containers_overview_slash_opens_search() {
     let mut app = make_containers_overview_app();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
-    assert_eq!(app.search.query.as_deref(), Some(""));
+    assert_eq!(app.search.query(), Some(""));
     // Cursor snaps to the first row, which can be a header now that
     // dividers are selectable. AlphaHost mode places the db header at
     // idx 0.
@@ -9584,7 +9584,7 @@ fn containers_overview_slash_opens_search() {
 #[test]
 fn containers_overview_search_filters_rows() {
     let mut app = make_containers_overview_app();
-    app.search.query = Some(String::new());
+    app.search.set_query(Some(String::new()));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('p')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('o')), &tx);
@@ -9601,7 +9601,7 @@ fn containers_overview_search_enter_on_header_is_noop() {
     // the search query, but never toggle fold or queue an exec when
     // the cursor sits on a host-header row.
     let mut app = make_containers_overview_app();
-    app.search.query = Some(String::new());
+    app.search.set_query(Some(String::new()));
     let items = crate::ui::containers_overview::visible_items(&app);
     let header_idx = items
         .iter()
@@ -9623,7 +9623,7 @@ fn containers_overview_search_enter_on_header_is_noop() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     assert!(
-        app.search.query.is_none(),
+        app.search.query().is_none(),
         "Enter in search mode clears the query"
     );
     let now_collapsed = app

@@ -372,7 +372,7 @@ fn run_positional_alias(
         app.notify(messages::config_repaired(repaired_groups, orphaned_headers));
     }
     app.start_search_with(alias);
-    if app.search.filtered_indices.is_empty() {
+    if app.search.filtered_indices().is_empty() {
         app.notify(messages::no_exact_match(alias));
     }
     run_tui(app)

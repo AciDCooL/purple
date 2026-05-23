@@ -60,7 +60,7 @@ pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64) {
     // Show the vertical key-list card only when there are 2+ keys or
     // search is active. With a single key, the card adds no value and
     // we give the freed width to the info card.
-    let search_active = app.search.query.is_some();
+    let search_active = app.search.query().is_some();
     let show_key_list = app.keys.list.len() > 1 || search_active;
 
     // Order: top nav, optional Vault SSH strip, hero (with key list,
@@ -154,7 +154,7 @@ fn split_hero_for_key_list(hero: Rect, show_list: bool) -> (Rect, Rect) {
 /// selected so the hero renders the first key by default.
 fn current_key_index(app: &App) -> Option<usize> {
     let sel = app.keys.list_state.selected().unwrap_or(0);
-    crate::ssh_keys::resolve_selection(&app.keys.list, app.search.query.as_deref(), sel)
+    crate::ssh_keys::resolve_selection(&app.keys.list, app.search.query(), sel)
 }
 
 /// Render the shared top navigation bar via `host_list::top_bar_spans`.
@@ -179,15 +179,14 @@ fn render_top_bar(frame: &mut Frame, app: &App, area: Rect) {
 /// rows; selection state is reused for both modes.
 fn render_key_list_card(frame: &mut Frame, app: &mut App, area: Rect) {
     let total = app.keys.list.len();
-    let filtered =
-        crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query.as_deref());
-    let search_active = app.search.query.is_some();
+    let filtered = crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query());
+    let search_active = app.search.query().is_some();
 
     let block = if search_active {
         // Mirror host_list / tunnels / containers: an active search
         // recolours the card border via `search_block_line` so the
         // focus indicator is consistent across tabs.
-        let q = app.search.query.as_deref().unwrap_or("");
+        let q = app.search.query().unwrap_or("");
         design::search_block_line(card_title(
             "SEARCH",
             Some(&format!("{} ({}/{})", q, filtered.len(), total)),

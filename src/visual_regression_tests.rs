@@ -527,7 +527,7 @@ fn visual_keys_overview_search() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
-    app.search.query = Some("rsa".to_string());
+    app.search.set_query(Some("rsa".to_string()));
     app.keys.list_state.select(Some(0));
     let actual = render_screen(&mut app);
     assert_golden("keys_overview_search", &actual);
@@ -541,7 +541,7 @@ fn visual_keys_overview_search_no_match() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Keys;
-    app.search.query = Some("xyzzy".to_string());
+    app.search.set_query(Some("xyzzy".to_string()));
     app.keys.list_state.select(None);
     let actual = render_screen(&mut app);
     assert_golden("keys_overview_search_no_match", &actual);

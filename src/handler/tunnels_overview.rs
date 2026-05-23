@@ -216,7 +216,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 
     // Search-mode intercept: while a query is being typed, navigation keys
     // are forwarded into the query buffer rather than moving the cursor.
-    if app.search.query.is_some() {
+    if app.search.query().is_some() {
         handle_search_keys(app, key);
         return;
     }
@@ -246,7 +246,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('/') => {
             // Enter search mode. Stays on the Tunnels tab; filtering
             // happens at row-build time in ui::tunnels_overview.
-            app.search.query = Some(String::new());
+            app.search.set_query(Some(String::new()));
             app.ui.tunnels_overview_state.select(Some(0));
         }
         KeyCode::Char('s') => {
@@ -269,11 +269,11 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Tab => {
             app.cycle_top_page_next();
-            app.search.query = None;
+            app.search.set_query(None);
         }
         KeyCode::BackTab => {
             app.cycle_top_page_prev();
-            app.search.query = None;
+            app.search.set_query(None);
         }
         KeyCode::Char('a') => {
             // Add: route through host picker — the user has not yet picked
@@ -365,13 +365,13 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 fn handle_search_keys(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
-            app.search.query = None;
+            app.search.set_query(None);
             app.ui.tunnels_overview_state.select(Some(0));
         }
         KeyCode::Enter => {
             // Act on the highlighted row and dismiss the input. Re-
             // pressing `/` re-opens with an empty query.
-            app.search.query = None;
+            app.search.set_query(None);
             toggle_tunnel(app);
         }
         KeyCode::Down | KeyCode::Tab => select_next(app),
@@ -387,15 +387,11 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Backspace => {
-            if let Some(q) = app.search.query.as_mut() {
-                q.pop();
-            }
+            app.search.pop_query_char();
             app.ui.tunnels_overview_state.select(Some(0));
         }
         KeyCode::Char(c) => {
-            if let Some(q) = app.search.query.as_mut() {
-                q.push(c);
-            }
+            app.search.push_query_char(c);
             app.ui.tunnels_overview_state.select(Some(0));
         }
         _ => {}

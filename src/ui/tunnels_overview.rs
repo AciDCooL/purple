@@ -76,8 +76,7 @@ struct TunnelRow {
 pub(crate) fn visible_pairs(app: &App) -> Vec<(String, TunnelRule)> {
     let query = app
         .search
-        .query
-        .as_deref()
+        .query()
         .map(|q| q.to_lowercase())
         .filter(|q| !q.is_empty());
     let mut pairs: Vec<(String, TunnelRule)> = Vec::new();
@@ -493,7 +492,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
     let spinner_tick = anim.spinner_tick;
     let area = frame.area();
 
-    let search_active = app.search.query.is_some();
+    let search_active = app.search.query().is_some();
     let search_bar_h = if search_active { 1 } else { 0 };
     // Search bar sits between the body and the footer, mirroring the
     // host-list layout. TUI convention (vim/less/fzf/lazygit/htop) puts
@@ -754,7 +753,7 @@ fn render_top_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_search_bar(frame: &mut Frame, app: &App, area: Rect, visible_count: usize) {
-    let query = app.search.query.as_deref().unwrap_or("");
+    let query = app.search.query().unwrap_or("");
     let total: usize = app
         .hosts_state
         .list

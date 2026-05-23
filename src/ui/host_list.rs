@@ -287,7 +287,7 @@ fn composite_host_label(host: &crate::ssh_config::model::HostEntry) -> String {
 pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progress: Option<f32>) {
     let area = frame.area();
 
-    let is_searching = app.search.query.is_some();
+    let is_searching = app.search.query().is_some();
     let is_tagging = app.tags.input().is_some();
     // Top navigation bar: always visible. Bordered block with three slots:
     // [purple brand] [hosts (N)] [tunnels (M)]. Top + content + bottom = 3 rows.
@@ -777,7 +777,7 @@ fn render_search_list(
     spinner_tick: u64,
 ) {
     let total_results =
-        app.search.filtered_indices.len() + app.search.filtered_pattern_indices.len();
+        app.search.filtered_indices().len() + app.search.filtered_pattern_indices().len();
     let total = app.hosts_state.list.len() + app.hosts_state.patterns.len();
     let title = Line::from(vec![Span::styled(
         format!(" search: {}/{} ", total_results, total),
@@ -791,7 +791,8 @@ fn render_search_list(
 
     let url_label = Line::from(Span::styled(" getpurple.sh ", theme::muted()));
 
-    if app.search.filtered_indices.is_empty() && app.search.filtered_pattern_indices.is_empty() {
+    if app.search.filtered_indices().is_empty() && app.search.filtered_pattern_indices().is_empty()
+    {
         // Compound multi-span title: use `search_block_line`.
         let mut block =
             design::search_block_line(title).title_bottom(url_label.clone().right_aligned());
@@ -815,7 +816,7 @@ fn render_search_list(
     let content_width = (inner.width as usize).saturating_sub(2); // -1 right margin, -1 left margin
     let filtered_hosts = || {
         app.search
-            .filtered_indices
+            .filtered_indices()
             .iter()
             .filter_map(|&i| app.hosts_state.list.get(i))
     };
@@ -865,11 +866,11 @@ fn render_search_list(
         underline_area,
     );
 
-    let query = app.search.query.as_deref();
+    let query = app.search.query();
     let mut items: Vec<ListItem> = Vec::with_capacity(
-        app.search.filtered_indices.len() + app.search.filtered_pattern_indices.len(),
+        app.search.filtered_indices().len() + app.search.filtered_pattern_indices().len(),
     );
-    for &idx in app.search.filtered_indices.iter() {
+    for &idx in app.search.filtered_indices().iter() {
         if let Some(host) = app.hosts_state.list.get(idx) {
             let tunnel_active = app.tunnels.active.contains_key(&host.alias);
             let item_ctx = HostItemContext {
@@ -887,7 +888,7 @@ fn render_search_list(
             items.push(list_item);
         }
     }
-    for &idx in app.search.filtered_pattern_indices.iter() {
+    for &idx in app.search.filtered_pattern_indices().iter() {
         if let Some(pattern) = app.hosts_state.patterns.get(idx) {
             items.push(build_pattern_item(pattern, &cols));
         }
@@ -1351,8 +1352,8 @@ fn build_tag_column(
 }
 
 fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let query = app.search.query.as_deref().unwrap_or("");
-    let total = if let Some(ref scope) = app.search.scope_indices {
+    let query = app.search.query().unwrap_or("");
+    let total = if let Some(scope) = app.search.scope_indices() {
         scope.len()
     } else {
         app.hosts_state.list.len() + app.hosts_state.patterns.len()
@@ -1360,7 +1361,8 @@ fn render_search_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     let match_info = if query.is_empty() {
         String::new()
     } else {
-        let count = app.search.filtered_indices.len() + app.search.filtered_pattern_indices.len();
+        let count =
+            app.search.filtered_indices().len() + app.search.filtered_pattern_indices().len();
         format!(" ({} of {})", count, total)
     };
     let scope_span = match &app.hosts_state.group_filter {

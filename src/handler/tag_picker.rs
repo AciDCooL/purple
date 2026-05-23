@@ -31,7 +31,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                     let tag: String = tag.clone();
                     app.set_screen(Screen::HostList);
                     app.start_search();
-                    app.search.query = Some(format!("tag={}", tag));
+                    app.search.set_query(Some(format!("tag={}", tag)));
                     app.apply_filter();
                 }
             }

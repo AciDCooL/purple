@@ -187,7 +187,7 @@ fn view_fingerprint(app: &App) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
 
     (app.containers_overview.sort_mode as u8).hash(&mut hasher);
-    app.search.query.as_deref().hash(&mut hasher);
+    app.search.query().hash(&mut hasher);
 
     let mut collapsed: Vec<&String> = app.containers_overview.collapsed_hosts.iter().collect();
     collapsed.sort();
@@ -227,8 +227,7 @@ pub(crate) fn visible_rows(app: &App) -> Vec<ContainerRow> {
 fn collect_rows(app: &App) -> Vec<ContainerRow> {
     let query = app
         .search
-        .query
-        .as_deref()
+        .query()
         .map(|q| q.to_lowercase())
         .filter(|q| !q.is_empty());
 
@@ -626,7 +625,7 @@ const DETAIL_MIN_TOTAL_WIDTH: u16 = 158;
 pub fn render(frame: &mut Frame, app: &mut App, spinner_tick: u64, detail_progress: Option<f32>) {
     let area = frame.area();
 
-    let search_active = app.search.query.is_some();
+    let search_active = app.search.query().is_some();
     let search_bar_h = if search_active { 1 } else { 0 };
     let [top_bar_area, body_area, search_bar_area, footer_area] = Layout::vertical([
         Constraint::Length(TOP_BAR_HEIGHT),
@@ -866,7 +865,7 @@ fn render_top_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_search_bar(frame: &mut Frame, app: &App, area: Rect, visible_count: usize, total: usize) {
-    let query = app.search.query.as_deref().unwrap_or("");
+    let query = app.search.query().unwrap_or("");
     let match_info = if query.is_empty() {
         String::new()
     } else {
@@ -2631,12 +2630,12 @@ mod tests {
             ("apollo", &[("2", "zebra", "postgres:16", "exited")]),
         ]);
         let mut app = app_with_cache(cache);
-        app.search.query = Some("postgres".to_string());
+        app.search.set_query(Some("postgres".to_string()));
         let rows = visible_rows(&app);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "zebra");
 
-        app.search.query = Some("ZEUS".to_string());
+        app.search.set_query(Some("ZEUS".to_string()));
         let rows = visible_rows(&app);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].alias, "zeus");
@@ -2646,7 +2645,7 @@ mod tests {
     fn empty_search_query_returns_everything() {
         let cache = cache_with(&[("zeus", &[("1", "alpha", "img", "running")])]);
         let mut app = app_with_cache(cache);
-        app.search.query = Some(String::new());
+        app.search.set_query(Some(String::new()));
         let rows = visible_rows(&app);
         assert_eq!(rows.len(), 1);
     }
@@ -2988,7 +2987,7 @@ mod tests {
         *app.containers_overview.view_cache.borrow_mut() = None;
         let _ = visible_rows(&app);
         let fp_before = cached_fp(&app).unwrap();
-        app.search.query = Some("web".to_string());
+        app.search.set_query(Some("web".to_string()));
         let _ = visible_rows(&app);
         assert_ne!(fp_before, cached_fp(&app).unwrap());
     }

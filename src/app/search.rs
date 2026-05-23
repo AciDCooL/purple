@@ -10,13 +10,57 @@ use crate::app::App;
 /// Search mode state.
 #[derive(Default)]
 pub struct SearchState {
-    pub query: Option<String>,
-    pub filtered_indices: Vec<usize>,
-    pub filtered_pattern_indices: Vec<usize>,
-    pub pre_search_selection: Option<usize>,
+    pub(in crate::app) query: Option<String>,
+    pub(in crate::app) filtered_indices: Vec<usize>,
+    pub(in crate::app) filtered_pattern_indices: Vec<usize>,
+    pub(in crate::app) pre_search_selection: Option<usize>,
     /// When a group tab is active, holds the host indices visible in that group.
     /// Search results are intersected with this set to scope the search.
-    pub scope_indices: Option<HashSet<usize>>,
+    pub(in crate::app) scope_indices: Option<HashSet<usize>>,
+}
+
+impl SearchState {
+    pub fn query(&self) -> Option<&str> {
+        self.query.as_deref()
+    }
+
+    pub fn filtered_indices(&self) -> &[usize] {
+        &self.filtered_indices
+    }
+
+    pub fn filtered_pattern_indices(&self) -> &[usize] {
+        &self.filtered_pattern_indices
+    }
+
+    pub fn scope_indices(&self) -> Option<&HashSet<usize>> {
+        self.scope_indices.as_ref()
+    }
+
+    pub fn set_query(&mut self, value: Option<String>) {
+        self.query = value;
+    }
+
+    pub fn clear_filtered_indices(&mut self) {
+        self.filtered_indices.clear();
+    }
+
+    pub fn clear_filtered_pattern_indices(&mut self) {
+        self.filtered_pattern_indices.clear();
+    }
+
+    /// Append a char to the query string. No-op when the query is inactive.
+    pub fn push_query_char(&mut self, c: char) {
+        if let Some(q) = self.query.as_mut() {
+            q.push(c);
+        }
+    }
+
+    /// Pop the trailing char from the query string. No-op when the query is inactive.
+    pub fn pop_query_char(&mut self) {
+        if let Some(q) = self.query.as_mut() {
+            q.pop();
+        }
+    }
 }
 
 impl App {

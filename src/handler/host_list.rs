@@ -51,7 +51,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
         }
         crate::app::TopPage::Keys => super::keys_overview::handle_key(app, key),
         crate::app::TopPage::Hosts => {
-            if app.search.query.is_some() {
+            if app.search.query().is_some() {
                 handle_search_key(app, key, events_tx);
             } else {
                 handle_main_key(app, key, events_tx);
@@ -114,12 +114,12 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
         }
         KeyCode::Tab => {
             app.cycle_top_page_next();
-            app.search.query = None;
+            app.search.set_query(None);
             super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::BackTab => {
             app.cycle_top_page_prev();
-            app.search.query = None;
+            app.search.set_query(None);
             super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::PageDown => {
@@ -309,18 +309,18 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 app.ping.filter_down_only = !app.ping.filter_down_only;
                 if app.ping.filter_down_only {
                     // Activate search mode to trigger filtering
-                    if app.search.query.is_none() {
-                        app.search.query = Some(String::new());
+                    if app.search.query().is_none() {
+                        app.search.set_query(Some(String::new()));
                     }
                     app.apply_filter();
-                    let count = app.search.filtered_indices.len();
+                    let count = app.search.filtered_indices().len();
                     app.notify(crate::messages::showing_unreachable(count));
                 } else {
                     // If search was only active for down-only, clear it
-                    if app.search.query.as_ref().is_some_and(|q| q.is_empty()) {
-                        app.search.query = None;
-                        app.search.filtered_indices.clear();
-                        app.search.filtered_pattern_indices.clear();
+                    if app.search.query().is_some_and(|q| q.is_empty()) {
+                        app.search.set_query(None);
+                        app.search.clear_filtered_indices();
+                        app.search.clear_filtered_pattern_indices();
                     } else {
                         app.apply_filter();
                     }
@@ -677,7 +677,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
         }
         KeyCode::Char('F') => actions::open_file_browser(app, events_tx),
         KeyCode::Char('C') => actions::open_container_overlay(app, events_tx),
-        KeyCode::Char('n') if app.search.query.is_none() => {
+        KeyCode::Char('n') if app.search.query().is_none() => {
             log::debug!("[purple] opening whats-new overlay via n");
             super::whats_new::dismiss_whats_new_toast(app);
             app.set_screen(Screen::WhatsNew(crate::app::WhatsNewState::default()));
@@ -751,7 +751,7 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
             }
         }
         KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            let visible_indices: Vec<usize> = app.search.filtered_indices.clone();
+            let visible_indices: Vec<usize> = app.search.filtered_indices().to_vec();
             let all_selected = !visible_indices.is_empty()
                 && visible_indices
                     .iter()
@@ -772,7 +772,7 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
         }
         KeyCode::Char('!') if app.ping.filter_down_only => {
             app.ping.filter_down_only = false;
-            if app.search.query.as_ref().is_some_and(|q| q.is_empty()) {
+            if app.search.query().is_some_and(|q| q.is_empty()) {
                 app.cancel_search();
             } else {
                 app.apply_filter();
@@ -780,15 +780,11 @@ pub(super) fn handle_search_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
             app.clear_status();
         }
         KeyCode::Char(c) => {
-            if let Some(ref mut query) = app.search.query {
-                query.push(c);
-            }
+            app.search.push_query_char(c);
             app.apply_filter();
         }
         KeyCode::Backspace => {
-            if let Some(ref mut query) = app.search.query {
-                query.pop();
-            }
+            app.search.pop_query_char();
             app.apply_filter();
         }
         _ => {}

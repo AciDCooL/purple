@@ -19,18 +19,18 @@ use crate::app::{App, Screen};
 /// search sub-handler while a query is active so typing characters edits
 /// the query instead of triggering the normal-mode shortcuts.
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
-    if app.search.query.is_some() {
+    if app.search.query().is_some() {
         handle_search_keys(app, key);
         return;
     }
     match key.code {
         KeyCode::Tab => {
             app.cycle_top_page_next();
-            app.search.query = None;
+            app.search.set_query(None);
         }
         KeyCode::BackTab => {
             app.cycle_top_page_prev();
-            app.search.query = None;
+            app.search.set_query(None);
         }
         KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => {
             app.select_next_key();
@@ -71,7 +71,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             // `App::start_search()` because that helper drives the
             // hosts-specific `filtered_indices` state machine; the Keys
             // tab filters at render time and only needs the query string.
-            app.search.query = Some(String::new());
+            app.search.set_query(Some(String::new()));
             // Reset selection so we always land on the first match.
             if !app.keys.list.is_empty() {
                 app.keys.list_state.select(Some(0));
@@ -162,12 +162,11 @@ fn cancel_push_if_running(app: &mut App) {
 /// (copies the highlighted match and clears the query). Tab/BackTab also
 /// exit search-mode before cycling tabs.
 fn handle_search_keys(app: &mut App, key: KeyEvent) {
-    let filtered =
-        crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query.as_deref());
+    let filtered = crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query());
     let count = filtered.len();
     match key.code {
         KeyCode::Esc => {
-            app.search.query = None;
+            app.search.set_query(None);
             // Restore selection to first key so navigation feels stable
             // when the user re-opens the same view.
             if !app.keys.list.is_empty() {
@@ -179,14 +178,14 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             // Copy the currently highlighted match, then exit search.
             copy_selected_pubkey(app);
-            app.search.query = None;
+            app.search.set_query(None);
         }
         KeyCode::Tab => {
-            app.search.query = None;
+            app.search.set_query(None);
             app.cycle_top_page_next();
         }
         KeyCode::BackTab => {
-            app.search.query = None;
+            app.search.set_query(None);
             app.cycle_top_page_prev();
         }
         KeyCode::Down | KeyCode::Right if count > 0 => {
@@ -204,13 +203,10 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
             crate::app::page_up(&mut app.keys.list_state, count, 10);
         }
         KeyCode::Backspace => {
-            if let Some(q) = app.search.query.as_mut() {
-                q.pop();
-            }
+            app.search.pop_query_char();
             // Re-anchor selection to the first match after the query shrinks.
             let new_count =
-                crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query.as_deref())
-                    .len();
+                crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query()).len();
             if new_count == 0 {
                 app.keys.list_state.select(None);
             } else {
@@ -218,12 +214,9 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char(c) => {
-            if let Some(q) = app.search.query.as_mut() {
-                q.push(c);
-            }
+            app.search.push_query_char(c);
             let new_count =
-                crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query.as_deref())
-                    .len();
+                crate::ssh_keys::filtered_key_indices(&app.keys.list, app.search.query()).len();
             if new_count == 0 {
                 app.keys.list_state.select(None);
             } else {
@@ -244,8 +237,7 @@ fn copy_selected_pubkey(app: &mut App) {
     let Some(sel) = app.keys.list_state.selected() else {
         return;
     };
-    let Some(idx) =
-        crate::ssh_keys::resolve_selection(&app.keys.list, app.search.query.as_deref(), sel)
+    let Some(idx) = crate::ssh_keys::resolve_selection(&app.keys.list, app.search.query(), sel)
     else {
         return;
     };
@@ -286,7 +278,7 @@ fn open_push_picker(app: &mut App) {
         return;
     };
     let Some(key_index) =
-        crate::ssh_keys::resolve_selection(&app.keys.list, app.search.query.as_deref(), sel)
+        crate::ssh_keys::resolve_selection(&app.keys.list, app.search.query(), sel)
     else {
         return;
     };
@@ -396,7 +388,7 @@ mod tests {
         let mut app = make_app();
         seed_one_host(&mut app);
         app.keys.list = vec![key("id_ed25519"), key("yubikey_work"), key("customer-x")];
-        app.search.query = Some("yubi".to_string());
+        app.search.set_query(Some("yubi".to_string()));
         // After applying the filter, position 0 in the visible list is
         // "yubikey_work" which is index 1 in app.keys.list.
         app.keys.list_state.select(Some(0));
@@ -513,7 +505,7 @@ mod tests {
         app.keys.list = vec![key("a"), key("b"), key("c")];
         app.keys.list_state.select(Some(2));
         handle_key(&mut app, k(KeyCode::Char('/')));
-        assert_eq!(app.search.query.as_deref(), Some(""));
+        assert_eq!(app.search.query(), Some(""));
         assert_eq!(
             app.keys.list_state.selected(),
             Some(0),
@@ -528,7 +520,7 @@ mod tests {
         handle_key(&mut app, k(KeyCode::Char('/')));
         handle_key(&mut app, k(KeyCode::Char('a')));
         handle_key(&mut app, k(KeyCode::Char('l')));
-        assert_eq!(app.search.query.as_deref(), Some("al"));
+        assert_eq!(app.search.query(), Some("al"));
     }
 
     #[test]
@@ -538,7 +530,7 @@ mod tests {
         handle_key(&mut app, k(KeyCode::Char('/')));
         handle_key(&mut app, k(KeyCode::Char('a')));
         handle_key(&mut app, k(KeyCode::Esc));
-        assert!(app.search.query.is_none(), "Esc must close search");
+        assert!(app.search.query().is_none(), "Esc must close search");
     }
 
     #[test]
@@ -550,7 +542,7 @@ mod tests {
         app.keys.list = vec![key("alpha")];
         handle_key(&mut app, k(KeyCode::Char('/')));
         handle_key(&mut app, k(KeyCode::Backspace));
-        assert_eq!(app.search.query.as_deref(), Some(""));
+        assert_eq!(app.search.query(), Some(""));
         // Cursor must remain on a valid match index when filtered list is non-empty.
         assert_eq!(app.keys.list_state.selected(), Some(0));
     }
@@ -559,7 +551,7 @@ mod tests {
     fn tab_cycles_to_next_top_page_and_closes_search() {
         let mut app = make_app();
         app.top_page = crate::app::TopPage::Keys;
-        app.search.query = None;
+        app.search.set_query(None);
         handle_key(&mut app, k(KeyCode::Tab));
         assert!(!matches!(app.top_page, crate::app::TopPage::Keys));
     }
@@ -571,7 +563,7 @@ mod tests {
         app.keys.list = vec![key("alpha")];
         handle_key(&mut app, k(KeyCode::Char('/')));
         handle_key(&mut app, k(KeyCode::Tab));
-        assert!(app.search.query.is_none());
+        assert!(app.search.query().is_none());
         assert!(!matches!(app.top_page, crate::app::TopPage::Keys));
     }
 

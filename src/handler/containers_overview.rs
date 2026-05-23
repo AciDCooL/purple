@@ -738,7 +738,7 @@ fn open_exec_prompt(app: &mut App) {
 /// because it needs the sender after this returns; refresh and add
 /// (`r`/`R`/`a`) need the sender directly to spawn listings.
 pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
-    if app.search.query.is_some() {
+    if app.search.query().is_some() {
         handle_search_keys(app, key);
         return;
     }
@@ -781,7 +781,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             }
         }
         KeyCode::Char('/') => {
-            app.search.query = Some(String::new());
+            app.search.set_query(Some(String::new()));
             // Snap to the first non-header item; pre-search list may
             // start with a host divider in AlphaHost mode.
             app.ui
@@ -821,11 +821,11 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
         }
         KeyCode::Tab => {
             app.cycle_top_page_next();
-            app.search.query = None;
+            app.search.set_query(None);
         }
         KeyCode::BackTab => {
             app.cycle_top_page_prev();
-            app.search.query = None;
+            app.search.set_query(None);
         }
         // Enter on a container row queues an exec. On a host-header
         // row Enter falls through silently; Space is the single binding
@@ -1372,7 +1372,7 @@ pub(super) fn ensure_list_for_selected_host(app: &mut App, events_tx: &mpsc::Sen
 fn handle_search_keys(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
-            app.search.query = None;
+            app.search.set_query(None);
             app.ui
                 .containers_overview_state
                 .select(first_visible_idx(app));
@@ -1381,7 +1381,7 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
             // Mirror the main handler: silent no-op on host headers,
             // exec on container rows. Clear search either way so the
             // user always returns to the full listing.
-            app.search.query = None;
+            app.search.set_query(None);
             if selected_header_alias(app).is_none() {
                 exec_into_selected_container(app);
             }
@@ -1399,17 +1399,13 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Backspace => {
-            if let Some(q) = app.search.query.as_mut() {
-                q.pop();
-            }
+            app.search.pop_query_char();
             app.ui
                 .containers_overview_state
                 .select(first_visible_idx(app));
         }
         KeyCode::Char(c) => {
-            if let Some(q) = app.search.query.as_mut() {
-                q.push(c);
-            }
+            app.search.push_query_char(c);
             app.ui
                 .containers_overview_state
                 .select(first_visible_idx(app));
