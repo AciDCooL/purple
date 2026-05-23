@@ -1,3 +1,11 @@
+## 3.15.15 - 2026-05-23
+
+- change: Sturdier internals across hosts, keys, forms and UI.
+- change: Host list sorting, grouping, multi-select and undo route through single operations, so your filters and selections stay consistent mid-action.
+- change: Provider sync progress and diff totals update through one path, so the counter never jumps out of step.
+- change: Form edit, discard and delete prompts share guarded operations, so unsaved-change warnings and rollbacks behave the same on every screen.
+- change: Keys tab, pickers and overlays manage their cursors and scroll state through named operations, keeping navigation predictable.
+
 ## 3.15.14 - 2026-05-23
 
 - change: Steadier internals across host, tunnel and snippet state.
