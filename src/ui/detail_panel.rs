@@ -799,7 +799,7 @@ fn render_containers(
     box_width: usize,
     max_value_width: usize,
 ) {
-    if let Some(cache_entry) = app.container_state.cache.get(&host.alias) {
+    if let Some(cache_entry) = app.container_state.cache_entry(&host.alias) {
         section_open(lines, "CONTAINERS", box_width);
         let running = cache_entry
             .containers

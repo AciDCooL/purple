@@ -41,7 +41,7 @@ pub(crate) fn handle_container_listing(
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            app.container_state.cache.insert(
+            app.container_state.insert_cache_entry(
                 alias.clone(),
                 containers::ContainerCacheEntry {
                     timestamp: now,
@@ -50,7 +50,7 @@ pub(crate) fn handle_container_listing(
                     containers: listing.containers.clone(),
                 },
             );
-            containers::save_container_cache(&app.container_state.cache);
+            containers::save_container_cache(app.container_state.cache());
             // Prefetch `docker inspect` for every container in this
             // listing so HEALTH and the inspect-sourced detail cards
             // populate without waiting for the user to scroll over
@@ -66,7 +66,7 @@ pub(crate) fn handle_container_listing(
         Err(e) => {
             // Preserve runtime even on error
             if let Some(rt) = e.runtime {
-                if let Some(entry) = app.container_state.cache.get_mut(&alias) {
+                if let Some(entry) = app.container_state.cache_entry_mut(&alias) {
                     entry.runtime = rt;
                 }
             }

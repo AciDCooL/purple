@@ -23,14 +23,107 @@ pub struct ContainerSession {
 /// Separate from `ContainerSession`, which is the per-host overlay session state.
 #[derive(Debug, Default)]
 pub struct ContainerState {
-    pub pending_exec: Option<ContainerExecRequest>,
-    pub pending_logs: Option<ContainerLogsRequest>,
-    pub pending_actions: std::collections::VecDeque<ContainerActionRequest>,
-    pub pending_fetch_aliases: Vec<String>,
-    pub cache: std::collections::HashMap<String, crate::containers::ContainerCacheEntry>,
+    pub(in crate::app) pending_exec: Option<ContainerExecRequest>,
+    pub(in crate::app) pending_logs: Option<ContainerLogsRequest>,
+    pub(in crate::app) pending_actions: std::collections::VecDeque<ContainerActionRequest>,
+    pub(in crate::app) pending_fetch_aliases: Vec<String>,
+    pub(in crate::app) cache:
+        std::collections::HashMap<String, crate::containers::ContainerCacheEntry>,
 }
 
 impl ContainerState {
+    pub fn cache(
+        &self,
+    ) -> &std::collections::HashMap<String, crate::containers::ContainerCacheEntry> {
+        &self.cache
+    }
+
+    pub fn set_cache(
+        &mut self,
+        cache: std::collections::HashMap<String, crate::containers::ContainerCacheEntry>,
+    ) {
+        self.cache = cache;
+    }
+
+    pub fn cache_entry(&self, alias: &str) -> Option<&crate::containers::ContainerCacheEntry> {
+        self.cache.get(alias)
+    }
+
+    pub fn cache_entry_mut(
+        &mut self,
+        alias: &str,
+    ) -> Option<&mut crate::containers::ContainerCacheEntry> {
+        self.cache.get_mut(alias)
+    }
+
+    pub fn cache_contains(&self, alias: &str) -> bool {
+        self.cache.contains_key(alias)
+    }
+
+    pub fn cache_len(&self) -> usize {
+        self.cache.len()
+    }
+
+    pub fn insert_cache_entry(
+        &mut self,
+        alias: String,
+        entry: crate::containers::ContainerCacheEntry,
+    ) {
+        self.cache.insert(alias, entry);
+    }
+
+    pub fn remove_cache_entry(&mut self, alias: &str) {
+        self.cache.remove(alias);
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
+    }
+
+    pub fn pending_exec_request(&self) -> Option<&ContainerExecRequest> {
+        self.pending_exec.as_ref()
+    }
+
+    pub fn pending_logs_request(&self) -> Option<&ContainerLogsRequest> {
+        self.pending_logs.as_ref()
+    }
+
+    pub fn has_pending_fetches(&self) -> bool {
+        !self.pending_fetch_aliases.is_empty()
+    }
+
+    pub fn pending_actions_len(&self) -> usize {
+        self.pending_actions.len()
+    }
+
+    pub fn take_pending_exec(&mut self) -> Option<ContainerExecRequest> {
+        self.pending_exec.take()
+    }
+
+    pub fn take_pending_logs(&mut self) -> Option<ContainerLogsRequest> {
+        self.pending_logs.take()
+    }
+
+    pub fn pop_next_action(&mut self) -> Option<ContainerActionRequest> {
+        self.pending_actions.pop_front()
+    }
+
+    pub fn pending_actions_iter(&self) -> impl Iterator<Item = &ContainerActionRequest> {
+        self.pending_actions.iter()
+    }
+
+    pub fn pending_actions_at(&self, idx: usize) -> Option<&ContainerActionRequest> {
+        self.pending_actions.get(idx)
+    }
+
+    pub fn pending_fetch_aliases(&self) -> &[String] {
+        &self.pending_fetch_aliases
+    }
+
+    pub fn extend_pending_fetches<I: IntoIterator<Item = String>>(&mut self, iter: I) {
+        self.pending_fetch_aliases.extend(iter);
+    }
+
     /// Queue a logs request for the main loop to drain. Replaces any
     /// previous pending logs request and logs the displaced alias so a
     /// dropped request is traceable.

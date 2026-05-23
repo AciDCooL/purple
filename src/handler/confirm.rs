@@ -680,7 +680,7 @@ fn queue_container_action(
     container_name: String,
     action: crate::containers::ContainerAction,
 ) {
-    let Some(entry) = app.container_state.cache.get(&alias) else {
+    let Some(entry) = app.container_state.cache_entry(&alias) else {
         log::debug!(
             "[purple] container_action: queue aborted, no cache for alias={}",
             alias

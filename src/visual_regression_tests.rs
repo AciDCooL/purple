@@ -660,7 +660,7 @@ fn visual_containers_overview_empty() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    app.container_state.cache.clear();
+    app.container_state.clear_cache();
     let actual = render_screen(&mut app);
     assert_golden("containers_overview_empty", &actual);
 }
@@ -1049,7 +1049,7 @@ fn visual_containers_overview_paused() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    if let Some(entry) = app.container_state.cache.get_mut("bastion-ams") {
+    if let Some(entry) = app.container_state.cache_entry_mut("bastion-ams") {
         if let Some(first) = entry.containers.first_mut() {
             first.state = "paused".to_string();
             first.status = "Paused".to_string();
@@ -1067,7 +1067,7 @@ fn visual_containers_overview_restarting() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    if let Some(entry) = app.container_state.cache.get_mut("db-primary") {
+    if let Some(entry) = app.container_state.cache_entry_mut("db-primary") {
         if let Some(first) = entry.containers.first_mut() {
             first.state = "restarting".to_string();
             first.status = "Restarting (1) 2 seconds ago".to_string();
@@ -1245,8 +1245,7 @@ fn visual_containers() {
     let alias = "bastion-ams".to_string();
     let cached = app
         .container_state
-        .cache
-        .get(&alias)
+        .cache_entry(&alias)
         .map(|c| c.containers.clone())
         .unwrap_or_default();
     app.container_session = Some(crate::app::ContainerSession {
@@ -1657,7 +1656,7 @@ fn visual_host_detail_no_containers() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     // Ensure there is definitely no container cache entry.
-    app.container_state.cache.remove("prod-eu1");
+    app.container_state.remove_cache_entry("prod-eu1");
     select_host_by_alias(&mut app, "prod-eu1");
     app.hosts_state.view_mode = crate::app::ViewMode::Detailed;
     let actual = render_screen(&mut app);

@@ -103,7 +103,7 @@ pub fn run_tui(mut app: App) -> Result<()> {
         // fetch (form save, sync, external edit, restore). The
         // helper drains the queue itself and routes the items into
         // the existing `RefreshBatch` driver.
-        if !app.container_state.pending_fetch_aliases.is_empty() {
+        if !!app.container_state.has_pending_fetches() {
             handler::containers_overview::auto_fetch_new_hosts(&mut app, &events_tx);
         }
         handle_pending_snippet(&mut app, &mut terminal, &events, &mut last_config_check)?;
@@ -630,7 +630,7 @@ fn handle_pending_container_exec(
     events: &EventHandler,
     last_config_check: &mut std::time::Instant,
 ) -> Result<()> {
-    let Some(req) = app.container_state.pending_exec.take() else {
+    let Some(req) = app.container_state.take_pending_exec() else {
         return Ok(());
     };
 
@@ -768,7 +768,7 @@ fn handle_pending_container_exec(
 /// receiving handler in `event_loop.rs` fills the open
 /// `Screen::ContainerLogs` overlay's body.
 fn handle_pending_container_logs(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>) {
-    let Some(req) = app.container_state.pending_logs.take() else {
+    let Some(req) = app.container_state.take_pending_logs() else {
         return;
     };
     let askpass = req.askpass.or_else(preferences::load_askpass_default);
@@ -813,7 +813,7 @@ fn handle_pending_container_action(app: &mut App, events_tx: &std::sync::mpsc::S
     // Drain at most one action per tick. Stack-restart pushes N
     // requests but the SSH workers should not all sprint off the
     // same tick. staggering keeps load on the remote sshd lower.
-    let Some(req) = app.container_state.pending_actions.pop_front() else {
+    let Some(req) = app.container_state.pop_next_action() else {
         return;
     };
     let askpass = req.askpass.or_else(preferences::load_askpass_default);

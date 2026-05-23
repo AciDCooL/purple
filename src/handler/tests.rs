@@ -3152,7 +3152,7 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
     app.ping
         .last_checked
         .insert("web-old".to_string(), std::time::Instant::now());
-    app.container_state.cache.insert(
+    app.container_state.insert_cache_entry(
         "web-old".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 1_700_000_000,
@@ -3196,13 +3196,12 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
 
     // Container cache carried over with payload intact.
     assert!(
-        !app.container_state.cache.contains_key("web-old"),
+        !app.container_state.cache_contains("web-old"),
         "container_cache under old alias must be cleared"
     );
     let entry = app
         .container_state
-        .cache
-        .get("web-new")
+        .cache_entry("web-new")
         .expect("container_cache must move to the new alias");
     assert_eq!(entry.timestamp, 1_700_000_000);
     assert_eq!(entry.engine_version.as_deref(), Some("24.0.0"));
@@ -4684,7 +4683,7 @@ fn test_shift_c_no_host_noop() {
 #[test]
 fn test_shift_c_loads_cache() {
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
-    app.container_state.cache.insert(
+    app.container_state.insert_cache_entry(
         "web".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -7292,7 +7291,7 @@ fn jump_enter_on_container_hit_lands_on_global_containers_tab() {
     let mut app = make_app("Host beta\n  HostName beta.example\n");
     // Seed a cached container for `beta` so collect_jump_candidates
     // surfaces it; Enter then dispatches the matching hit.
-    app.container_state.cache.insert(
+    app.container_state.insert_cache_entry(
         "beta".into(),
         crate::containers::ContainerCacheEntry {
             timestamp: 0,
@@ -9330,8 +9329,8 @@ fn make_containers_overview_app() -> App {
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n\nHost db\n  HostName 2.2.2.2\n");
     // App::new loads ~/.purple/container_cache.jsonl from disk. Clear so
     // host-environment cache state cannot leak into the test set.
-    app.container_state.cache.clear();
-    app.container_state.cache.insert(
+    app.container_state.clear_cache();
+    app.container_state.insert_cache_entry(
         "web".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -9343,7 +9342,7 @@ fn make_containers_overview_app() -> App {
             ],
         },
     );
-    app.container_state.cache.insert(
+    app.container_state.insert_cache_entry(
         "db".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -9570,7 +9569,7 @@ fn containers_overview_search_enter_on_header_is_noop() {
         "Enter on header during search must not toggle fold"
     );
     assert!(
-        app.container_state.pending_exec.is_none(),
+        app.container_state.pending_exec_request().is_none(),
         "Enter on header during search must not queue an exec"
     );
 }
@@ -9610,7 +9609,7 @@ fn containers_overview_enter_on_host_header_is_noop() {
         "Enter on host header must not toggle fold"
     );
     assert!(
-        app.container_state.pending_exec.is_none(),
+        app.container_state.pending_exec_request().is_none(),
         "Enter on host header must not queue an exec"
     );
 }
@@ -9623,8 +9622,7 @@ fn containers_overview_enter_queues_exec_for_running_container() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     let req = app
         .container_state
-        .pending_exec
-        .as_ref()
+        .pending_exec_request()
         .expect("Enter must queue a container-exec request");
     assert_eq!(req.alias, "db");
     assert_eq!(req.container_name, "postgres");
@@ -9654,7 +9652,7 @@ fn containers_overview_enter_on_stopped_container_warns_and_does_nothing() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
-    assert!(app.container_state.pending_exec.is_none());
+    assert!(app.container_state.pending_exec_request().is_none());
     let toast = app
         .status_center
         .toast()
@@ -9669,8 +9667,8 @@ fn containers_overview_enter_rejects_unsafe_container_id() {
     // theory inject shell metacharacters into row.id. The handler
     // must validate before queueing the exec request.
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
-    app.container_state.cache.clear();
-    app.container_state.cache.insert(
+    app.container_state.clear_cache();
+    app.container_state.insert_cache_entry(
         "web".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -9696,7 +9694,7 @@ fn containers_overview_enter_rejects_unsafe_container_id() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
 
     assert!(
-        app.container_state.pending_exec.is_none(),
+        app.container_state.pending_exec_request().is_none(),
         "exec must not queue for an ID that fails validate_container_id"
     );
     assert!(
@@ -9711,7 +9709,7 @@ fn containers_overview_enter_in_demo_mode_shows_disabled_toast() {
     app.demo_mode = true;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(app.container_state.pending_exec.is_none());
+    assert!(app.container_state.pending_exec_request().is_none());
     let toast = app.status_center.toast().expect("toast");
     assert!(toast.text.contains("Demo mode"));
     // Demo guards report a blocked action, so the toast must carry the
@@ -9748,7 +9746,7 @@ fn containers_overview_l_in_demo_mode_opens_logs_view() {
         app.screen
     );
     assert!(
-        app.container_state.pending_logs.is_some(),
+        app.container_state.pending_logs_request().is_some(),
         "logs fetch must be queued in demo mode (handler then short-circuits to demo_log_lines)"
     );
     if let Some(toast) = app.status_center.toast() {
@@ -10057,9 +10055,9 @@ fn containers_overview_refresh_all_starts_capped_batch() {
 fn containers_overview_refresh_all_caps_in_flight_at_max_parallel() {
     // Build 10-host cache; R should leave 4 in flight and 6 queued.
     let mut app = make_containers_overview_app();
-    app.container_state.cache.clear();
+    app.container_state.clear_cache();
     for i in 0..10 {
-        app.container_state.cache.insert(
+        app.container_state.insert_cache_entry(
             format!("h{}", i),
             crate::containers::ContainerCacheEntry {
                 timestamp: 100,
@@ -10108,7 +10106,7 @@ fn containers_overview_refresh_all_in_demo_mode_starts_synthetic_batch() {
 #[test]
 fn containers_overview_refresh_all_on_empty_cache_warns() {
     let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
-    app.container_state.cache.clear();
+    app.container_state.clear_cache();
     app.top_page = crate::app::TopPage::Containers;
     app.screen = Screen::HostList;
     let (tx, _rx) = mpsc::channel();
@@ -10164,8 +10162,8 @@ fn container_host_picker_filters_to_uncached_only() {
     let mut app = make_app(
         "Host web\n  HostName 1.2.3.4\n\nHost db\n  HostName 2.2.2.2\n\nHost api\n  HostName 3.3.3.3\n",
     );
-    app.container_state.cache.clear();
-    app.container_state.cache.insert(
+    app.container_state.clear_cache();
+    app.container_state.insert_cache_entry(
         "web".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -10327,7 +10325,7 @@ fn container_listing_dropped_for_alias_no_longer_in_config() {
     // listing handler must drop the result instead of resurrecting
     // the orphan in the cache.
     let mut app = make_app(""); // empty config — alias "ghost" is NOT in hosts_state.list
-    app.container_state.cache.clear();
+    app.container_state.clear_cache();
     let result: Result<crate::containers::ContainerListing, crate::containers::ContainerError> =
         Ok(crate::containers::ContainerListing {
             runtime: crate::containers::ContainerRuntime::Docker,
@@ -10342,7 +10340,7 @@ fn container_listing_dropped_for_alias_no_longer_in_config() {
         &tx,
     );
     assert!(
-        !app.container_state.cache.contains_key("ghost"),
+        !app.container_state.cache_contains("ghost"),
         "late listing for a removed host must not repopulate the cache"
     );
 }
@@ -10350,7 +10348,7 @@ fn container_listing_dropped_for_alias_no_longer_in_config() {
 #[test]
 fn container_inspect_complete_dropped_for_alias_no_longer_in_config() {
     let mut app = make_app("");
-    app.container_state.cache.clear();
+    app.container_state.clear_cache();
     let inspect = crate::containers::ContainerInspect {
         exit_code: 0,
         oom_killed: false,
@@ -10399,8 +10397,8 @@ fn reload_hosts_drops_orphan_container_cache_entries() {
     // hosts_state.list must lose its container_cache entry so
     // ~/.purple/container_cache.jsonl does not accumulate orphans.
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
-    app.container_state.cache.clear();
-    app.container_state.cache.insert(
+    app.container_state.clear_cache();
+    app.container_state.insert_cache_entry(
         "alive".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -10409,7 +10407,7 @@ fn reload_hosts_drops_orphan_container_cache_entries() {
             containers: vec![],
         },
     );
-    app.container_state.cache.insert(
+    app.container_state.insert_cache_entry(
         "ghost".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -10421,9 +10419,9 @@ fn reload_hosts_drops_orphan_container_cache_entries() {
 
     app.reload_hosts();
 
-    assert!(app.container_state.cache.contains_key("alive"));
+    assert!(app.container_state.cache_contains("alive"));
     assert!(
-        !app.container_state.cache.contains_key("ghost"),
+        !app.container_state.cache_contains("ghost"),
         "orphan host must be pruned"
     );
 }
@@ -10431,8 +10429,8 @@ fn reload_hosts_drops_orphan_container_cache_entries() {
 #[test]
 fn reload_hosts_drops_orphan_inspect_cache_entries() {
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
-    app.container_state.cache.clear();
-    app.container_state.cache.insert(
+    app.container_state.clear_cache();
+    app.container_state.insert_cache_entry(
         "alive".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -10659,7 +10657,7 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
         let mut sign = app.vault.sign_in_flight().lock().expect("lock");
         sign.insert(ghost.clone());
     }
-    app.container_state.cache.insert(
+    app.container_state.insert_cache_entry(
         ghost.clone(),
         crate::containers::ContainerCacheEntry {
             timestamp: 0,
@@ -10713,7 +10711,7 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
         assert!(!sign.contains(&ghost), "vault.sign_in_flight");
     }
     assert!(
-        !app.container_state.cache.contains_key(&ghost),
+        !app.container_state.cache_contains(&ghost),
         "container_state.cache"
     );
     assert!(
@@ -10775,10 +10773,8 @@ fn auto_fetch_new_hosts_only_fetches_queued_aliases() {
     // when sync confirmed an inventory of pre-existing hosts on
     // first run.
     let mut app = make_app("Host queued\n  HostName 1.1.1.1\n\nHost ignored\n  HostName 2.2.2.2\n");
-    app.container_state.cache.clear();
-    app.container_state
-        .pending_fetch_aliases
-        .push("queued".to_string());
+    app.container_state.clear_cache();
+    app.container_state.queue_fetch("queued".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
 
@@ -10794,7 +10790,7 @@ fn auto_fetch_new_hosts_only_fetches_queued_aliases() {
         vec!["queued".to_string()]
     );
     assert!(
-        app.container_state.pending_fetch_aliases.is_empty(),
+        !app.container_state.has_pending_fetches(),
         "queue must be drained"
     );
 }
@@ -10805,8 +10801,8 @@ fn auto_fetch_new_hosts_dedupes_aliases() {
     // alias before the next drain; the helper must dedupe so we do
     // not spawn parallel SSH for the same host.
     let mut app = make_app("Host dup\n  HostName 1.1.1.1\n");
-    app.container_state.cache.clear();
-    app.container_state.pending_fetch_aliases.extend([
+    app.container_state.clear_cache();
+    app.container_state.extend_pending_fetches([
         "dup".to_string(),
         "dup".to_string(),
         "dup".to_string(),
@@ -10828,8 +10824,8 @@ fn auto_fetch_new_hosts_skips_alias_with_existing_cache() {
     // A parallel `C` press (or earlier auto-fetch) may have
     // populated the cache between push and drain. Skip it.
     let mut app = make_app("Host already\n  HostName 1.1.1.1\n");
-    app.container_state.cache.clear();
-    app.container_state.cache.insert(
+    app.container_state.clear_cache();
+    app.container_state.insert_cache_entry(
         "already".to_string(),
         crate::containers::ContainerCacheEntry {
             timestamp: 100,
@@ -10838,9 +10834,7 @@ fn auto_fetch_new_hosts_skips_alias_with_existing_cache() {
             containers: vec![],
         },
     );
-    app.container_state
-        .pending_fetch_aliases
-        .push("already".to_string());
+    app.container_state.queue_fetch("already".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     assert!(app.containers_overview.refresh_batch.is_none());
@@ -10851,10 +10845,8 @@ fn auto_fetch_new_hosts_skips_unknown_alias() {
     // Race guard: the alias may have been deleted between push and
     // drain (manual delete, stale purge, external edit).
     let mut app = make_app("Host real\n  HostName 1.1.1.1\n");
-    app.container_state.cache.clear();
-    app.container_state
-        .pending_fetch_aliases
-        .push("ghost".to_string());
+    app.container_state.clear_cache();
+    app.container_state.queue_fetch("ghost".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     assert!(app.containers_overview.refresh_batch.is_none());
@@ -10864,10 +10856,8 @@ fn auto_fetch_new_hosts_skips_unknown_alias() {
 fn auto_fetch_new_hosts_skips_host_without_hostname() {
     // Placeholder entries (Host with no HostName) cannot be SSH'd.
     let mut app = make_app("Host placeholder\n  User root\n");
-    app.container_state.cache.clear();
-    app.container_state
-        .pending_fetch_aliases
-        .push("placeholder".to_string());
+    app.container_state.clear_cache();
+    app.container_state.queue_fetch("placeholder".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     assert!(app.containers_overview.refresh_batch.is_none());
@@ -10876,16 +10866,14 @@ fn auto_fetch_new_hosts_skips_host_without_hostname() {
 #[test]
 fn auto_fetch_new_hosts_no_op_in_demo_mode() {
     let mut app = make_app("Host a\n  HostName 1.1.1.1\n");
-    app.container_state.cache.clear();
+    app.container_state.clear_cache();
     app.demo_mode = true;
-    app.container_state
-        .pending_fetch_aliases
-        .push("a".to_string());
+    app.container_state.queue_fetch("a".to_string());
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     assert!(app.containers_overview.refresh_batch.is_none());
     // Queue is still drained (cleared) so a second tick does not retry.
-    assert!(app.container_state.pending_fetch_aliases.is_empty());
+    assert!(!app.container_state.has_pending_fetches());
 }
 
 #[test]
@@ -10894,7 +10882,7 @@ fn auto_fetch_new_hosts_no_op_when_queue_empty() {
     // is empty for every host. This is the regression guard for the
     // first-run askpass storm.
     let mut app = make_app("Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n");
-    app.container_state.cache.clear();
+    app.container_state.clear_cache();
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     assert!(app.containers_overview.refresh_batch.is_none());
@@ -10906,12 +10894,9 @@ fn auto_fetch_new_hosts_dedupes_mixed_queue() {
     // accidentally double-emitted. Both unique aliases must end up
     // in the batch exactly once.
     let mut app = make_app("Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n");
-    app.container_state.cache.clear();
-    app.container_state.pending_fetch_aliases.extend([
-        "a".to_string(),
-        "a".to_string(),
-        "b".to_string(),
-    ]);
+    app.container_state.clear_cache();
+    app.container_state
+        .extend_pending_fetches(["a".to_string(), "a".to_string(), "b".to_string()]);
     let (tx, _rx) = mpsc::channel();
     crate::handler::containers_overview::auto_fetch_new_hosts(&mut app, &tx);
     let batch = app
@@ -10940,8 +10925,8 @@ fn queue_new_aliases_since_pushes_only_new() {
         });
     app.queue_new_aliases_since(&before);
     assert_eq!(
-        app.container_state.pending_fetch_aliases,
-        vec!["fresh".to_string()]
+        app.container_state.pending_fetch_aliases(),
+        ["fresh".to_string()]
     );
 }
 
@@ -10953,7 +10938,7 @@ fn queue_new_aliases_since_no_op_when_unchanged() {
     let mut app = make_app("Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n");
     let before = app.snapshot_alias_set();
     app.queue_new_aliases_since(&before);
-    assert!(app.container_state.pending_fetch_aliases.is_empty());
+    assert!(!app.container_state.has_pending_fetches());
 }
 
 #[test]
@@ -10997,7 +10982,7 @@ fn ensure_list_for_selected_host_skips_when_fresh() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    if let Some(entry) = app.container_state.cache.get_mut("db") {
+    if let Some(entry) = app.container_state.cache_entry_mut("db") {
         entry.timestamp = now;
     }
     let (tx, _rx) = mpsc::channel();
@@ -11150,7 +11135,7 @@ fn ensure_list_for_selected_host_refreshes_when_cursor_on_header() {
     // Force the cache for `db` stale enough that the helper wants to
     // re-fetch (TTL is 30s; timestamp 100 in the fixture is far in
     // the past).
-    let _ = app.container_state.cache.get("db");
+    let _ = app.container_state.cache_entry("db");
     // Items[0] is HostHeader(db) in the fixture's AlphaHost layout.
     app.ui.containers_overview_state.select(Some(0));
     let (tx, _rx) = mpsc::channel();
@@ -11423,7 +11408,7 @@ fn containers_overview_l_queues_logs_fetch_and_opens_overlay() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('l')), &tx);
     assert!(matches!(app.screen, Screen::ContainerLogs { .. }));
     assert!(
-        app.container_state.pending_logs.is_some(),
+        app.container_state.pending_logs_request().is_some(),
         "expected pending fetch request"
     );
 }
@@ -11525,8 +11510,8 @@ fn confirm_container_restart_y_enqueues_action_and_returns() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert_eq!(app.container_state.pending_actions.len(), 1);
-    let req = &app.container_state.pending_actions[0];
+    assert_eq!(app.container_state.pending_actions_len(), 1);
+    let req = app.container_state.pending_actions_at(0).unwrap();
     assert_eq!(req.alias, "db");
     assert_eq!(req.container_id, "c3");
     assert_eq!(req.action, crate::containers::ContainerAction::Restart);
@@ -11545,7 +11530,7 @@ fn confirm_container_restart_n_cancels_without_enqueue() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert!(app.container_state.pending_actions.is_empty());
+    assert!(app.container_state.pending_actions_len() == 0);
 }
 
 #[test]
@@ -11567,7 +11552,7 @@ fn confirm_container_restart_stray_key_ignored() {
         "stray key must not transition; got {:?}",
         app.screen
     );
-    assert!(app.container_state.pending_actions.is_empty());
+    assert!(app.container_state.pending_actions_len() == 0);
 }
 
 // --- Container stop confirm dialog -----------------------------------
@@ -11585,9 +11570,9 @@ fn confirm_container_stop_y_enqueues_stop_action() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
-    assert_eq!(app.container_state.pending_actions.len(), 1);
+    assert_eq!(app.container_state.pending_actions_len(), 1);
     assert_eq!(
-        app.container_state.pending_actions[0].action,
+        app.container_state.pending_actions_at(0).unwrap().action,
         crate::containers::ContainerAction::Stop
     );
 }
@@ -11633,10 +11618,19 @@ fn confirm_stack_restart_y_enqueues_one_action_per_member() {
     assert!(matches!(app.screen, Screen::HostList));
     // Both members were running on alias "web" which exists in the
     // fixture cache; both are enqueued.
-    assert_eq!(app.container_state.pending_actions.len(), 2);
-    assert_eq!(app.container_state.pending_actions[0].container_id, "c1");
+    assert_eq!(app.container_state.pending_actions_len(), 2);
     assert_eq!(
-        app.container_state.pending_actions[1].container_id,
+        app.container_state
+            .pending_actions_at(0)
+            .unwrap()
+            .container_id,
+        "c1"
+    );
+    assert_eq!(
+        app.container_state
+            .pending_actions_at(1)
+            .unwrap()
+            .container_id,
         "cextra"
     );
 }
@@ -11670,8 +11664,7 @@ fn exec_prompt_enter_with_command_queues_exec_and_returns() {
     assert!(matches!(app.screen, Screen::HostList));
     let queued = app
         .container_state
-        .pending_exec
-        .as_ref()
+        .pending_exec_request()
         .expect("exec request queued");
     assert_eq!(queued.command.as_deref(), Some("ls -la"));
 }
@@ -11688,7 +11681,7 @@ fn exec_prompt_enter_empty_query_is_no_op() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     assert!(matches!(app.screen, Screen::ContainerExecPrompt { .. }));
-    assert!(app.container_state.pending_exec.is_none());
+    assert!(app.container_state.pending_exec_request().is_none());
 }
 
 #[test]
@@ -11704,7 +11697,7 @@ fn exec_prompt_enter_with_control_char_warns_and_does_not_queue() {
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Embedded newline is a control char; the prompt rejects it.
     assert!(matches!(app.screen, Screen::ContainerExecPrompt { .. }));
-    assert!(app.container_state.pending_exec.is_none());
+    assert!(app.container_state.pending_exec_request().is_none());
     assert!(app.status_center.toast().is_some());
 }
 

@@ -63,7 +63,7 @@ fn queue_exec_with_command(
     container_name: String,
     command: String,
 ) {
-    let Some(entry) = app.container_state.cache.get(&alias) else {
+    let Some(entry) = app.container_state.cache_entry(&alias) else {
         log::debug!(
             "[purple] container_exec_prompt: submit aborted, no cache for alias={}",
             alias

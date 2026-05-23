@@ -20,7 +20,7 @@ pub(super) fn open_overlay_for_host(
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
     let (cached_runtime, cached_containers) =
-        if let Some(entry) = app.container_state.cache.get(&alias) {
+        if let Some(entry) = app.container_state.cache_entry(&alias) {
             (Some(entry.runtime), entry.containers.clone())
         } else {
             (None, Vec::new())

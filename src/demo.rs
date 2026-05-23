@@ -482,7 +482,7 @@ fn seed_demo_inspect_cache(app: &mut App) {
     let now = crate::demo_flag::now_secs();
     let aliases: Vec<(String, Vec<crate::containers::ContainerInfo>)> = app
         .container_state
-        .cache
+        .cache()
         .iter()
         .map(|(a, e)| (a.clone(), e.containers.clone()))
         .collect();
@@ -1203,8 +1203,10 @@ pub fn build_demo_app() -> App {
     app.snippets.store = SnippetStore::parse(DEMO_SNIPPETS);
 
     // Container cache (timestamps relative to now)
-    app.container_state.cache =
-        containers::parse_container_cache_content(&build_demo_container_cache());
+    app.container_state
+        .set_cache(containers::parse_container_cache_content(
+            &build_demo_container_cache(),
+        ));
     seed_demo_inspect_cache(&mut app);
     // One pre-folded host group so a fresh `--demo` boot already
     // showcases the divider's `(N hidden)` summary without the user
@@ -2384,17 +2386,20 @@ mod tests {
     #[test]
     fn demo_app_has_containers() {
         let (app, _guard) = demo_app();
-        assert_eq!(app.container_state.cache.len(), 8);
-        assert!(app.container_state.cache.contains_key("bastion-ams"));
-        assert!(app.container_state.cache.contains_key("db-primary"));
-        assert!(app.container_state.cache.contains_key("do-work-web-ams"));
-        assert!(app.container_state.cache.contains_key("pve-web-01"));
-        assert!(app.container_state.cache.contains_key("aws-api-staging"));
-        assert!(app.container_state.cache.contains_key("aws-batch-us"));
-        assert!(app.container_state.cache.contains_key("gateway-vpn"));
-        assert!(app.container_state.cache.contains_key("podman-edge"));
+        assert_eq!(app.container_state.cache_len(), 8);
+        assert!(app.container_state.cache_contains("bastion-ams"));
+        assert!(app.container_state.cache_contains("db-primary"));
+        assert!(app.container_state.cache_contains("do-work-web-ams"));
+        assert!(app.container_state.cache_contains("pve-web-01"));
+        assert!(app.container_state.cache_contains("aws-api-staging"));
+        assert!(app.container_state.cache_contains("aws-batch-us"));
+        assert!(app.container_state.cache_contains("gateway-vpn"));
+        assert!(app.container_state.cache_contains("podman-edge"));
         assert_eq!(
-            app.container_state.cache["podman-edge"].runtime,
+            app.container_state
+                .cache_entry("podman-edge")
+                .unwrap()
+                .runtime,
             crate::containers::ContainerRuntime::Podman
         );
     }

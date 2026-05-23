@@ -20,7 +20,7 @@ pub(crate) fn uncached_aliases(app: &App) -> Vec<String> {
     app.hosts_state
         .list
         .iter()
-        .filter(|h| !app.container_state.cache.contains_key(&h.alias))
+        .filter(|h| !app.container_state.cache_contains(&h.alias))
         .map(|h| h.alias.clone())
         .collect()
 }
@@ -33,7 +33,7 @@ pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
     app.hosts_state
         .list
         .iter()
-        .filter(|h| !app.container_state.cache.contains_key(&h.alias))
+        .filter(|h| !app.container_state.cache_contains(&h.alias))
         .filter(|h| {
             if query.is_empty() {
                 return true;

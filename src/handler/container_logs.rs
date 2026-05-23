@@ -260,7 +260,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender
 }
 
 fn requeue_logs_fetch(app: &mut App, alias: String, container_id: String, container_name: String) {
-    let Some(entry) = app.container_state.cache.get(&alias) else {
+    let Some(entry) = app.container_state.cache_entry(&alias) else {
         log::debug!(
             "[purple] container_logs: refresh aborted, no cache for alias={}",
             alias
