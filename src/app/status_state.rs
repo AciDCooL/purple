@@ -34,7 +34,7 @@ impl StatusCenter {
         self.status.take()
     }
 
-    pub fn set_status_message(&mut self, message: Option<StatusMessage>) {
+    pub fn restore_status(&mut self, message: Option<StatusMessage>) {
         self.status = message;
     }
 

@@ -85,7 +85,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         TopPage::Keys => keys_overview::render(frame, app, anim.spinner_tick),
     }
     if let Some(s) = status {
-        app.status_center.set_status_message(Some(s));
+        app.status_center.restore_status(Some(s));
     }
     match &app.screen {
         Screen::HostList => {
@@ -1036,7 +1036,7 @@ mod tests {
         );
         // Restore and verify status is preserved for overlay.
         if let Some(s) = status {
-            app.status_center.set_status_message(Some(s));
+            app.status_center.restore_status(Some(s));
         }
         assert!(
             app.status_center.status().is_some(),
