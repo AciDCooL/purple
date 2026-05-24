@@ -720,7 +720,11 @@ fn render_vault_cert(
             // No cached status -- check file existence as fallback.
             // Any resolve error collapses to "Not signed" since the cert
             // path is unreachable in practice (alias validated upstream).
-            match crate::vault_ssh::resolve_cert_path(&host.alias, &host.certificate_file) {
+            match crate::vault_ssh::resolve_cert_path(
+                app.env().paths(),
+                &host.alias,
+                &host.certificate_file,
+            ) {
                 Ok(cert_path) if cert_path.exists() => ("Signed".to_string(), theme::success()),
                 _ => {
                     needs_action = true;

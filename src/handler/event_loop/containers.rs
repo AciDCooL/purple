@@ -50,7 +50,7 @@ pub(crate) fn handle_container_listing(
                     containers: listing.containers.clone(),
                 },
             );
-            containers::save_container_cache(app.container_state.cache());
+            containers::save_container_cache(app.env().paths(), app.container_state.cache());
             // Prefetch `docker inspect` for every container in this
             // listing so HEALTH and the inspect-sourced detail cards
             // populate without waiting for the user to scroll over

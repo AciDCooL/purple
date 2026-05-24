@@ -169,8 +169,6 @@ mod tests {
 
     fn make_app(content: &str) -> App {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
-        crate::containers::set_path_override(scratch.join("container_cache.jsonl"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(content),
             path: scratch.join("test_config"),

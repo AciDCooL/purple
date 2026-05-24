@@ -832,12 +832,10 @@ impl JumpState {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use std::sync::Mutex;
 
-    pub(crate) static ENV_LOCK: Mutex<()> = Mutex::new(());
-
+    // `test_path` is thread-local, so each test thread gets an isolated
+    // recents file with no shared state. No process-wide lock is needed.
     fn with_temp<F: FnOnce(&std::path::Path)>(f: F) {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("recents.json");
         test_path::set(path.clone());

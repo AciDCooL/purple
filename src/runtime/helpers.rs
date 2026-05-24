@@ -29,7 +29,11 @@ pub fn expand_user_path(path: &str) -> Result<PathBuf> {
     Ok(PathBuf::from(path))
 }
 
-pub fn resolve_token(explicit: Option<String>, from_stdin: bool) -> Result<String> {
+pub fn resolve_token(
+    env: &crate::runtime::env::Env,
+    explicit: Option<String>,
+    from_stdin: bool,
+) -> Result<String> {
     if let Some(t) = explicit {
         return Ok(t);
     }
@@ -38,8 +42,8 @@ pub fn resolve_token(explicit: Option<String>, from_stdin: bool) -> Result<Strin
         std::io::stdin().read_line(&mut buf)?;
         return Ok(buf.trim().to_string());
     }
-    if let Ok(t) = std::env::var("PURPLE_TOKEN") {
-        return Ok(t);
+    if let Some(t) = env.purple_token() {
+        return Ok(t.to_string());
     }
     anyhow::bail!("{}", crate::messages::cli::NO_TOKEN)
 }
@@ -192,6 +196,7 @@ pub fn first_launch_init(purple_dir: &Path, config_path: &Path) -> Option<bool> 
 /// Writes the cert file to ~/.purple/certs/ AND sets CertificateFile on the host
 /// block when it is empty, so `ssh` actually uses the freshly signed cert.
 pub fn ensure_vault_ssh_if_needed(
+    env: &crate::runtime::env::Env,
     alias: &str,
     host: &ssh_config::model::HostEntry,
     provider_config: &providers::config::ProviderConfig,
@@ -204,15 +209,16 @@ pub fn ensure_vault_ssh_if_needed(
         provider_config,
     )?;
 
-    let pubkey = match vault_ssh::resolve_pubkey_path(&host.identity_file) {
+    let pubkey = match vault_ssh::resolve_pubkey_path(env.paths(), &host.identity_file) {
         Ok(p) => p,
         Err(e) => {
             return Some((crate::messages::vault_cert_pubkey_resolve_failed(&e), true));
         }
     };
 
-    let check_path = vault_ssh::resolve_cert_path(alias, &host.certificate_file).ok()?;
-    let status = vault_ssh::check_cert_validity(&check_path);
+    let check_path =
+        vault_ssh::resolve_cert_path(env.paths(), alias, &host.certificate_file).ok()?;
+    let status = vault_ssh::check_cert_validity(env, &check_path);
     if !vault_ssh::needs_renewal(&status) {
         return None;
     }
@@ -224,6 +230,7 @@ pub fn ensure_vault_ssh_if_needed(
         provider_config,
     );
     match vault_ssh::ensure_cert(
+        env,
         &role,
         &pubkey,
         alias,
@@ -265,6 +272,7 @@ pub fn ensure_vault_ssh_if_needed(
 /// Resolve the effective ProxyJump chain for `target_alias` and run
 /// `ensure_vault_ssh_if_needed` for every host in it.
 pub fn ensure_vault_ssh_chain_if_needed(
+    env: &crate::runtime::env::Env,
     target_alias: &str,
     config_path: &Path,
     provider_config: &providers::config::ProviderConfig,
@@ -283,7 +291,7 @@ pub fn ensure_vault_ssh_chain_if_needed(
             continue;
         };
         if let Some((msg, is_error)) =
-            ensure_vault_ssh_if_needed(hop_alias, &host, provider_config, config)
+            ensure_vault_ssh_if_needed(env, hop_alias, &host, provider_config, config)
         {
             if is_error {
                 last_error = Some(msg);
@@ -330,7 +338,11 @@ fn renewal_lock(alias: &str) -> Arc<Mutex<()>> {
 /// Serialized per alias so concurrent fetches never sign the same cert twice.
 /// Returns the same `(message, is_error)` summary as the chain helper;
 /// chokepoints log it and continue, the SSH call surfaces any real failure.
-pub fn ensure_vault_cert_for_alias(alias: &str, config_path: &Path) -> Option<(String, bool)> {
+pub fn ensure_vault_cert_for_alias(
+    env: &crate::runtime::env::Env,
+    alias: &str,
+    config_path: &Path,
+) -> Option<(String, bool)> {
     let lock = renewal_lock(alias);
     let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
 
@@ -343,7 +355,7 @@ pub fn ensure_vault_cert_for_alias(alias: &str, config_path: &Path) -> Option<(S
     };
     let provider_config = providers::config::ProviderConfig::load();
     let result =
-        ensure_vault_ssh_chain_if_needed(alias, config_path, &provider_config, &mut config);
+        ensure_vault_ssh_chain_if_needed(env, alias, config_path, &provider_config, &mut config);
     match &result {
         Some((msg, true)) => warn!("[external] Vault SSH renewal for '{alias}': {msg}"),
         Some((msg, false)) => debug!("Vault SSH renewal for '{alias}': {msg}"),
@@ -363,12 +375,16 @@ pub fn should_write_certificate_file(existing: &str) -> bool {
 
 /// Pre-flight check for Bitwarden vault. If the askpass source uses `bw:` and
 /// no session token is cached, prompts the user to unlock the vault.
-pub fn ensure_bw_session(existing: Option<&str>, askpass: Option<&str>) -> Option<String> {
+pub fn ensure_bw_session(
+    env: &crate::runtime::env::Env,
+    existing: Option<&str>,
+    askpass: Option<&str>,
+) -> Option<String> {
     let askpass = askpass?;
     if !askpass.starts_with("bw:") || existing.is_some() {
         return None;
     }
-    let status = askpass::bw_vault_status();
+    let status = askpass::bw_vault_status(env);
     match status {
         askpass::BwStatus::Unlocked => None,
         askpass::BwStatus::NotInstalled => {
@@ -393,7 +409,7 @@ pub fn ensure_bw_session(existing: Option<&str>, askpass: Option<&str>) -> Optio
                         return None;
                     }
                 };
-                match askpass::bw_unlock(&password) {
+                match askpass::bw_unlock(env, &password) {
                     Ok(token) => return Some(token),
                     Err(e) => {
                         if attempt == 0 {
@@ -412,17 +428,24 @@ pub fn ensure_bw_session(existing: Option<&str>, askpass: Option<&str>) -> Optio
 /// Pre-flight Proton Pass login. If the askpass source is `proton:` and the
 /// CLI is installed but the user is not authenticated, prompt for a Personal
 /// Access Token on stdin and run `pass-cli login`.
-pub fn ensure_proton_login(askpass: Option<&str>) {
-    ensure_proton_login_with(askpass, askpass::proton_status, || {
-        cli::prompt_hidden_input(crate::messages::askpass::PROTON_LOGIN_PROMPT)
-    });
+pub fn ensure_proton_login(env: &crate::runtime::env::Env, askpass: Option<&str>) {
+    ensure_proton_login_with(
+        env,
+        askpass,
+        || askpass::proton_status(env),
+        || cli::prompt_hidden_input(crate::messages::askpass::PROTON_LOGIN_PROMPT),
+    );
 }
 
 /// Test seam for `ensure_proton_login`. Inject the status check and the PAT
 /// prompt so the routing logic can be exercised without a real `pass-cli` or a
 /// real stdin tty.
-pub fn ensure_proton_login_with<S, P>(askpass: Option<&str>, status_fn: S, mut prompt_pat: P)
-where
+pub fn ensure_proton_login_with<S, P>(
+    env: &crate::runtime::env::Env,
+    askpass: Option<&str>,
+    status_fn: S,
+    mut prompt_pat: P,
+) where
     S: FnOnce() -> askpass::ProtonStatus,
     P: FnMut() -> Result<Option<String>>,
 {
@@ -460,7 +483,7 @@ where
                         return;
                     }
                 };
-                match askpass::proton_login(&pat) {
+                match askpass::proton_login(env, &pat) {
                     Ok(()) => {
                         debug!("Proton Pass pre-flight: login succeeded on attempt {attempt}");
                         eprintln!("{}", crate::messages::askpass::PROTON_LOGIN_SUCCESS);
@@ -492,15 +515,17 @@ where
 /// group keys, and re-runs `apply_sort` plus `select_first_host` so the
 /// first row visible after startup matches the saved sort order.
 pub fn apply_saved_sort(app: &mut App) {
-    let saved = crate::preferences::load_sort_mode();
-    let group = crate::preferences::load_group_by();
+    let paths = app.env().paths().cloned();
+    let p = paths.as_ref();
+    let saved = crate::preferences::load_sort_mode(p);
+    let group = crate::preferences::load_group_by(p);
     app.hosts_state.set_sort_mode(saved);
     app.hosts_state.set_group_by_raw(group);
     app.hosts_state
-        .set_view_mode(crate::preferences::load_view_mode());
-    app.containers_overview.hydrate_from_prefs();
+        .set_view_mode(crate::preferences::load_view_mode(p));
+    app.containers_overview.hydrate_from_prefs(p);
     if app.clear_stale_group_tag() {
-        if let Err(e) = crate::preferences::save_group_by(app.hosts_state.group_by()) {
+        if let Err(e) = crate::preferences::save_group_by(p, app.hosts_state.group_by()) {
             app.notify_error(crate::messages::group_pref_reset_failed(&e));
         }
     }
@@ -513,11 +538,15 @@ pub fn apply_saved_sort(app: &mut App) {
 
 /// Pre-flight check for keychain password. If the askpass source is `keychain` and
 /// no password is stored yet, prompts the user to enter one and stores it.
-pub fn ensure_keychain_password(alias: &str, askpass: Option<&str>) {
+pub fn ensure_keychain_password(
+    env: &crate::runtime::env::Env,
+    alias: &str,
+    askpass: Option<&str>,
+) {
     if askpass != Some("keychain") {
         return;
     }
-    if askpass::keychain_has_password(alias) {
+    if askpass::keychain_has_password(env, alias) {
         return;
     }
     let password = match cli::prompt_hidden_input(
@@ -531,7 +560,7 @@ pub fn ensure_keychain_password(alias: &str, askpass: Option<&str>) {
         Ok(None) => return,
         Err(_) => return,
     };
-    match askpass::store_in_keychain(alias, &password) {
+    match askpass::store_in_keychain(env, alias, &password) {
         Ok(()) => eprintln!("{}", crate::messages::askpass::PASSWORD_IN_KEYCHAIN),
         Err(e) => eprintln!("{}", crate::messages::askpass::keychain_store_failed(&e)),
     }

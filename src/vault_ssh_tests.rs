@@ -1,26 +1,19 @@
 use super::*;
 
-/// Process-wide lock serialising every test that mutates a global env var.
-/// Covers `PATH` (installing mock `ssh-keygen` or `vault` binaries),
-/// `HOME` (overriding the user config dir), and `VAULT_ADDR` (forcing a
-/// resolver result). Marked `pub(crate)` so regression tests in sibling
-/// modules (e.g. `main_tests.rs`, `askpass_tests.rs`) can serialise against
-/// the vault/ssh-keygen mocks defined here. Any new test in the binary
-/// crate that touches `std::env::set_var` MUST hold this lock for the
-/// duration of the mutation and restore the prior value before releasing.
-#[cfg(unix)]
-pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
 #[test]
 fn cert_path_for_simple_alias() {
-    let path = cert_path_for("webserver").unwrap();
-    assert!(path.ends_with("certs/webserver-cert.pub"));
-    assert!(path.to_string_lossy().contains(".purple/certs/"));
+    let paths = crate::runtime::env::Paths::new("/home/u");
+    let path = cert_path_for(Some(&paths), "webserver").unwrap();
+    assert_eq!(
+        path,
+        std::path::Path::new("/home/u/.purple/certs/webserver-cert.pub")
+    );
 }
 
 #[test]
 fn cert_path_for_alias_with_prefix() {
-    let path = cert_path_for("aws-prod-web01").unwrap();
+    let paths = crate::runtime::env::Paths::new("/home/u");
+    let path = cert_path_for(Some(&paths), "aws-prod-web01").unwrap();
     assert!(path.ends_with("certs/aws-prod-web01-cert.pub"));
 }
 
@@ -39,7 +32,8 @@ fn sign_certificate_rejects_pubkey_path_with_equals() {
     let bad = dir.join("key=foo.pub");
     std::fs::write(&bad, "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@test\n").unwrap();
 
-    let result = sign_certificate("ssh/sign/test", &bad, "alias", None);
+    let env = crate::runtime::env::Env::from_process();
+    let result = sign_certificate(&env, "ssh/sign/test", &bad, "alias", None);
     let err = result.unwrap_err().to_string();
     assert!(
         err.contains('=') && err.contains("Vault CLI"),
@@ -51,7 +45,9 @@ fn sign_certificate_rejects_pubkey_path_with_equals() {
 
 #[test]
 fn sign_certificate_missing_pubkey() {
+    let env = crate::runtime::env::Env::from_process();
     let result = sign_certificate(
+        &env,
         "ssh/sign/test",
         Path::new("/tmp/purple_nonexistent_key.pub"),
         "test",
@@ -64,11 +60,6 @@ fn sign_certificate_missing_pubkey() {
 
 #[test]
 fn sign_certificate_vault_not_configured() {
-    // Serialize against other vault tests that inject a mock `vault` into
-    // PATH. Without this lock a parallel mock injection makes the spawn
-    // here succeed and the assertion below fails.
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-
     let tmpdir = std::env::temp_dir();
     let fake_key = tmpdir.join("purple_test_vault_sign_key.pub");
     std::fs::write(
@@ -77,7 +68,11 @@ fn sign_certificate_vault_not_configured() {
     )
     .unwrap();
 
-    let result = sign_certificate("nonexistent/sign/role", &fake_key, "test-host", None);
+    // Clean Env: empty PATH means no `vault` binary is reachable and the
+    // env carries no VAULT_ADDR, so the sign attempt fails deterministically
+    // without touching the process env or serializing on a lock.
+    let env = crate::runtime::env::Env::for_test("/tmp/x");
+    let result = sign_certificate(&env, "nonexistent/sign/role", &fake_key, "test-host", None);
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(
@@ -125,7 +120,8 @@ fn parse_ssh_datetime_invalid() {
 #[test]
 fn check_cert_validity_missing() {
     let path = Path::new("/tmp/purple_test_nonexistent_cert.pub");
-    assert_eq!(check_cert_validity(path), CertStatus::Missing);
+    let env = crate::runtime::env::Env::from_process();
+    assert_eq!(check_cert_validity(&env, path), CertStatus::Missing);
 }
 
 #[test]
@@ -294,35 +290,45 @@ fn needs_renewal_short_ttl_at_exact_threshold() {
 
 #[test]
 fn resolve_pubkey_from_identity_file() {
-    let path = resolve_pubkey_path("~/.ssh/id_rsa").unwrap();
+    let home = tempfile::tempdir().expect("tempdir");
+    let paths = crate::runtime::env::Paths::new(home.path());
+    let path = resolve_pubkey_path(Some(&paths), "~/.ssh/id_rsa").unwrap();
     let s = path.to_string_lossy();
     assert!(s.ends_with("id_rsa.pub"), "got: {}", s);
     assert!(!s.contains('~'), "tilde should be expanded: {}", s);
+    assert_eq!(path, home.path().join(".ssh/id_rsa.pub"));
 }
 
 #[test]
 fn resolve_pubkey_already_pub_no_double_suffix() {
-    let path = resolve_pubkey_path("~/.ssh/id_ed25519.pub").unwrap();
+    let home = tempfile::tempdir().expect("tempdir");
+    let paths = crate::runtime::env::Paths::new(home.path());
+    let path = resolve_pubkey_path(Some(&paths), "~/.ssh/id_ed25519.pub").unwrap();
     let s = path.to_string_lossy();
     assert!(s.ends_with("id_ed25519.pub"), "got: {}", s);
     assert!(!s.ends_with(".pub.pub"), "double .pub suffix: {}", s);
+    assert_eq!(path, home.path().join(".ssh/id_ed25519.pub"));
 }
 
 #[test]
 fn resolve_pubkey_empty_falls_back() {
-    let path = resolve_pubkey_path("").unwrap();
+    let home = tempfile::tempdir().expect("tempdir");
+    let paths = crate::runtime::env::Paths::new(home.path());
+    let path = resolve_pubkey_path(Some(&paths), "").unwrap();
     let s = path.to_string_lossy();
     assert!(s.ends_with("id_ed25519.pub"), "got: {}", s);
     assert!(s.contains(".ssh/"), "should be in .ssh dir: {}", s);
+    assert_eq!(path, home.path().join(".ssh/id_ed25519.pub"));
 }
 
 #[test]
 fn resolve_pubkey_absolute_path_inside_home() {
-    // An absolute path inside the user's home should be honored.
-    let home = dirs::home_dir().expect("home dir");
-    let abs = home.join(".ssh/deploy_key");
-    let path = resolve_pubkey_path(abs.to_str().unwrap()).unwrap();
-    let expected = home.join(".ssh/deploy_key.pub");
+    // An absolute path inside the sandbox home should be honored.
+    let home = tempfile::tempdir().expect("tempdir");
+    let paths = crate::runtime::env::Paths::new(home.path());
+    let abs = home.path().join(".ssh/deploy_key");
+    let path = resolve_pubkey_path(Some(&paths), abs.to_str().unwrap()).unwrap();
+    let expected = home.path().join(".ssh/deploy_key.pub");
     assert_eq!(path, expected);
 }
 
@@ -668,7 +674,8 @@ fn format_remaining_expired() {
 
 #[test]
 fn resolve_cert_path_uses_certificate_file_when_set() {
-    let path = resolve_cert_path("myhost", "~/.ssh/my-cert.pub").unwrap();
+    let paths = crate::runtime::env::Paths::new("/home/u");
+    let path = resolve_cert_path(Some(&paths), "myhost", "~/.ssh/my-cert.pub").unwrap();
     let s = path.to_string_lossy();
     assert!(s.ends_with("my-cert.pub"), "got: {}", s);
     assert!(!s.contains('~'), "tilde should be expanded: {}", s);
@@ -676,7 +683,8 @@ fn resolve_cert_path_uses_certificate_file_when_set() {
 
 #[test]
 fn resolve_cert_path_falls_back_to_default() {
-    let path = resolve_cert_path("myhost", "").unwrap();
+    let paths = crate::runtime::env::Paths::new("/home/u");
+    let path = resolve_cert_path(Some(&paths), "myhost", "").unwrap();
     assert!(
         path.to_string_lossy()
             .contains(".purple/certs/myhost-cert.pub"),
@@ -687,21 +695,21 @@ fn resolve_cert_path_falls_back_to_default() {
 
 #[test]
 fn resolve_cert_path_absolute() {
-    let path = resolve_cert_path("myhost", "/etc/ssh/certs/myhost.pub").unwrap();
+    let path = resolve_cert_path(None, "myhost", "/etc/ssh/certs/myhost.pub").unwrap();
     assert_eq!(path, PathBuf::from("/etc/ssh/certs/myhost.pub"));
 }
 
 #[test]
 fn cert_path_for_rejects_path_traversal() {
-    assert!(cert_path_for("../../tmp/evil").is_err());
-    assert!(cert_path_for("foo/bar").is_err());
-    assert!(cert_path_for("foo\\bar").is_err());
-    assert!(cert_path_for("host:22").is_err());
+    assert!(cert_path_for(None, "../../tmp/evil").is_err());
+    assert!(cert_path_for(None, "foo/bar").is_err());
+    assert!(cert_path_for(None, "foo\\bar").is_err());
+    assert!(cert_path_for(None, "host:22").is_err());
 }
 
 #[test]
 fn cert_path_for_rejects_empty_alias() {
-    assert!(cert_path_for("").is_err());
+    assert!(cert_path_for(None, "").is_err());
 }
 
 #[test]
@@ -713,7 +721,8 @@ fn sign_certificate_rejects_role_starting_with_dash() {
         "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@test\n",
     )
     .unwrap();
-    let result = sign_certificate("-format=json", &fake_key, "test", None);
+    let env = crate::runtime::env::Env::from_process();
+    let result = sign_certificate(&env, "-format=json", &fake_key, "test", None);
     assert!(result.is_err());
     assert!(
         result
@@ -736,12 +745,6 @@ fn resolve_vault_role_empty_host_falls_through_to_provider() {
 #[cfg(unix)]
 #[test]
 fn ensure_cert_returns_error_without_vault() {
-    // Serialize against every other test that injects a mock `vault` into
-    // PATH. Without this lock a concurrent mock makes `ensure_cert`
-    // succeed and the `is_err` assertion below flips, manifesting as a
-    // flaky failure under the precommit's repeated `cargo test` runs.
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-
     let tmpdir = std::env::temp_dir();
     let fake_key = tmpdir.join("purple_test_ensure_cert_key.pub");
     std::fs::write(
@@ -750,7 +753,17 @@ fn ensure_cert_returns_error_without_vault() {
     )
     .unwrap();
 
-    let result = ensure_cert("ssh/sign/test", &fake_key, "ensure-test-host", "", None);
+    // Clean Env with an empty PATH: the vault CLI is unreachable, so the
+    // spawn fails deterministically without serializing on a lock.
+    let env = crate::runtime::env::Env::for_test("/tmp/x");
+    let result = ensure_cert(
+        &env,
+        "ssh/sign/test",
+        &fake_key,
+        "ensure-test-host",
+        "",
+        None,
+    );
     // Should fail because vault CLI is not available
     assert!(result.is_err());
     let _ = std::fs::remove_file(&fake_key);
@@ -767,7 +780,15 @@ fn ensure_cert_returns_error_without_vault() {
     )
     .unwrap();
 
-    let result = ensure_cert("ssh/sign/test", &fake_key, "ensure-test-host", "", None);
+    let env = crate::runtime::env::Env::for_test("/tmp/x");
+    let result = ensure_cert(
+        &env,
+        "ssh/sign/test",
+        &fake_key,
+        "ensure-test-host",
+        "",
+        None,
+    );
     assert!(result.is_err());
     let _ = std::fs::remove_file(&fake_key);
 }
@@ -785,7 +806,25 @@ fn format_remaining_exactly_one_hour() {
 
 #[test]
 fn cert_path_rejects_nul_byte() {
-    assert!(cert_path_for("host\0name").is_err());
+    assert!(cert_path_for(None, "host\0name").is_err());
+}
+
+// Regression for the env-DI refactor: `ensure_cert` resolves its existence
+// check via `resolve_cert_path` and `sign_certificate` writes via
+// `cert_path_for`. Both must derive from the SAME injected `Paths`, otherwise a
+// sandbox-Env check looks at one home while the signed cert lands under another
+// and the cache-hit can never fire. Asserting they agree for the default
+// (no CertificateFile) case locks that invariant in.
+#[test]
+fn ensure_cert_check_path_matches_sign_path() {
+    let paths = crate::runtime::env::Paths::new("/home/u");
+    let check = resolve_cert_path(Some(&paths), "web-1", "").unwrap();
+    let write = cert_path_for(Some(&paths), "web-1").unwrap();
+    assert_eq!(check, write);
+    assert_eq!(
+        write,
+        std::path::Path::new("/home/u/.purple/certs/web-1-cert.pub")
+    );
 }
 
 #[test]
@@ -862,11 +901,6 @@ fn parse_proxy_jump_host_bare_alias() {
 /// containing only itself.
 #[test]
 fn resolve_proxy_chain_no_proxy_returns_target_only() {
-    // `resolve_proxy_chain` spawns `ssh -G`, which reads PATH. Hold ENV_LOCK
-    // so parallel tests that mutate PATH cannot make the ssh binary
-    // momentarily unfindable, which would silently degrade the chain to
-    // `[target]` only.
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -882,7 +916,6 @@ fn resolve_proxy_chain_no_proxy_returns_target_only() {
 /// proxy listed before the target so callers can sign in dependency order.
 #[test]
 fn resolve_proxy_chain_explicit_proxy_jump() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -900,7 +933,6 @@ fn resolve_proxy_chain_explicit_proxy_jump() {
 /// invisible because the target's own host block has no ProxyJump line.
 #[test]
 fn resolve_proxy_chain_wildcard_inherited_proxy() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -920,7 +952,6 @@ fn resolve_proxy_chain_wildcard_inherited_proxy() {
 /// A ProxyJump cycle (a→b→a) must terminate. Visited set guarantees this.
 #[test]
 fn resolve_proxy_chain_breaks_cycles() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -943,7 +974,6 @@ fn resolve_proxy_chain_breaks_cycles() {
 /// own dependency bastion.
 #[test]
 fn resolve_proxy_chain_multi_hop() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -972,7 +1002,6 @@ fn resolve_proxy_chain_multi_hop() {
 /// were processed.
 #[test]
 fn resolve_proxy_chain_comma_separated_proxies() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(
@@ -1003,10 +1032,35 @@ fn scrub_vault_stderr_default_when_all_filtered() {
     );
 }
 
-// TODO: resolve_pubkey_path_rejects_symlink_escape — requires mutating $HOME
-// for the current process, which races with other tests that read dirs::home_dir().
-// The canonicalize-based check is exercised manually; skipped here to keep the
-// test suite hermetic and parallel-safe.
+// A symlink that lives inside home but resolves to a target outside home must
+// be rejected to the fallback. The lexical `starts_with(&home)` check passes
+// for such a path, so only the canonicalize-based comparison catches it. With
+// `Paths` threaded in, this is hermetic: the sandbox home is a real tempdir we
+// can place a symlink in.
+#[cfg(unix)]
+#[test]
+fn resolve_pubkey_path_rejects_symlink_escape() {
+    let home = tempfile::tempdir().expect("tempdir");
+    let outside = tempfile::tempdir().expect("tempdir outside home");
+    std::fs::create_dir_all(home.path().join(".ssh")).unwrap();
+
+    // A real key outside home, and a symlink inside ~/.ssh pointing at it.
+    let real_key = outside.path().join("escape_key.pub");
+    std::fs::write(
+        &real_key,
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@test\n",
+    )
+    .unwrap();
+    let link = home.path().join(".ssh/escape.pub");
+    std::os::unix::fs::symlink(&real_key, &link).unwrap();
+
+    let paths = crate::runtime::env::Paths::new(home.path());
+    let resolved = resolve_pubkey_path(Some(&paths), link.to_str().unwrap()).unwrap();
+
+    // The symlink target is outside home, so the function must fall back to the
+    // default key path inside the sandbox home, not honor the escaping link.
+    assert_eq!(resolved, home.path().join(".ssh/id_ed25519.pub"));
+}
 
 #[test]
 fn is_valid_role_accepts_typical_paths() {
@@ -1069,10 +1123,13 @@ fn scrub_vault_stderr_truncates_long_output() {
 #[test]
 fn resolve_pubkey_rejects_path_outside_home() {
     // Absolute path outside home should fall back to default in ~/.ssh
-    let path = resolve_pubkey_path("/etc/passwd").unwrap();
+    let home = tempfile::tempdir().expect("tempdir");
+    let paths = crate::runtime::env::Paths::new(home.path());
+    let path = resolve_pubkey_path(Some(&paths), "/etc/passwd").unwrap();
     let s = path.to_string_lossy();
     assert!(s.ends_with("id_ed25519.pub"), "got: {}", s);
     assert!(s.contains(".ssh/"), "should be fallback: {}", s);
+    assert_eq!(path, home.path().join(".ssh/id_ed25519.pub"));
 }
 
 #[cfg(unix)]
@@ -1093,11 +1150,14 @@ fn unique_tmp_subdir(tag: &str) -> PathBuf {
 }
 
 #[cfg(unix)]
-fn with_mock_vault<F: FnOnce()>(tag: &str, stderr: &str, stdout: &str, exit_code: i32, f: F) {
+fn with_mock_vault<F: FnOnce(&crate::runtime::env::Env)>(
+    tag: &str,
+    stderr: &str,
+    stdout: &str,
+    exit_code: i32,
+    f: F,
+) {
     use std::os::unix::fs::PermissionsExt;
-    // Use the module-wide ENV_LOCK so vault-mocking tests don't race
-    // against ssh-keygen-mocking tests (both mutate the same PATH).
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir(tag);
     let script = dir.join("vault");
@@ -1113,18 +1173,15 @@ fn with_mock_vault<F: FnOnce()>(tag: &str, stderr: &str, stdout: &str, exit_code
     perms.set_mode(0o755);
     std::fs::set_permissions(&script, perms).unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{}", dir.display(), old_path);
-    // SAFETY: std::env::set_var is unsound in multi-threaded processes
-    // (rust-lang/rust#27970). The invariant we uphold here is: all mutations
-    // of PATH within this test binary happen through `with_mock_vault`, which
-    // holds the process-wide `LOCK` for the full mutate/use/restore cycle.
-    // No other test in this crate reads or writes PATH concurrently. If a
-    // future test introduces another PATH writer, it MUST acquire this same
-    // LOCK. PATH is restored before the guard is dropped.
-    unsafe { std::env::set_var("PATH", &new_path) };
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    unsafe { std::env::set_var("PATH", &old_path) };
+    // Inject the stub directory ahead of the real PATH via an `Env` rather than
+    // mutating the process-global PATH. No process env mutation, no lock: each
+    // call is a distinct `Env` and a distinct sandbox home (signed certs land
+    // there).
+    let real_path = std::env::var("PATH").unwrap_or_default();
+    let home = unique_tmp_subdir(&format!("{tag}_home"));
+    let env = crate::runtime::env::Env::for_test(home)
+        .with_var("PATH", format!("{}:{}", dir.display(), real_path));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&env)));
     let _ = std::fs::remove_dir_all(&dir);
     if let Err(e) = result {
         std::panic::resume_unwind(e);
@@ -1149,8 +1206,8 @@ fn sign_certificate_permission_denied_maps_to_friendly_error() {
         "Error making API request.\npermission denied",
         "",
         1,
-        || {
-            let result = sign_certificate("ssh/sign/role", &key, alias, None);
+        |env| {
+            let result = sign_certificate(env, "ssh/sign/role", &key, alias, None);
             let err = result.unwrap_err().to_string();
             assert!(err.contains("Vault SSH permission denied"), "got: {}", err);
         },
@@ -1163,8 +1220,8 @@ fn sign_certificate_permission_denied_maps_to_friendly_error() {
 fn sign_certificate_token_expired_maps_to_friendly_error() {
     let key = write_fake_pubkey("tok_exp");
     let alias = "mock-tok-exp";
-    with_mock_vault("tok_exp", "missing client token", "", 1, || {
-        let result = sign_certificate("ssh/sign/role", &key, alias, None);
+    with_mock_vault("tok_exp", "missing client token", "", 1, |env| {
+        let result = sign_certificate(env, "ssh/sign/role", &key, alias, None);
         let err = result.unwrap_err().to_string();
         assert!(err.contains("token missing or expired"), "got: {}", err);
     });
@@ -1181,8 +1238,8 @@ fn sign_certificate_scrubs_sensitive_stderr() {
         "role not configured\nX-Vault-Token: hvs.ABCDEFG",
         "",
         1,
-        || {
-            let result = sign_certificate("ssh/sign/role", &key, alias, None);
+        |env| {
+            let result = sign_certificate(env, "ssh/sign/role", &key, alias, None);
             let err = result.unwrap_err().to_string();
             assert!(!err.contains("hvs.ABCDEFG"), "leaked token: {}", err);
             assert!(!err.contains("X-Vault-Token"), "leaked header: {}", err);
@@ -1196,8 +1253,8 @@ fn sign_certificate_scrubs_sensitive_stderr() {
 fn sign_certificate_empty_stdout_errors() {
     let key = write_fake_pubkey("empty");
     let alias = "mock-empty";
-    with_mock_vault("empty", "", "", 0, || {
-        let result = sign_certificate("ssh/sign/role", &key, alias, None);
+    with_mock_vault("empty", "", "", 0, |env| {
+        let result = sign_certificate(env, "ssh/sign/role", &key, alias, None);
         let err = result.unwrap_err().to_string();
         assert!(err.contains("empty certificate"), "got: {}", err);
     });
@@ -1209,8 +1266,8 @@ fn sign_certificate_empty_stdout_errors() {
 fn sign_certificate_generic_failure_no_stderr() {
     let key = write_fake_pubkey("generic");
     let alias = "mock-generic";
-    with_mock_vault("generic", "", "", 1, || {
-        let result = sign_certificate("ssh/sign/role", &key, alias, None);
+    with_mock_vault("generic", "", "", 1, |env| {
+        let result = sign_certificate(env, "ssh/sign/role", &key, alias, None);
         let err = result.unwrap_err().to_string();
         assert!(err.contains("Vault SSH failed"), "got: {}", err);
     });
@@ -1223,8 +1280,8 @@ fn sign_certificate_success_writes_cert() {
     let key = write_fake_pubkey("success");
     let alias = "mock-success-host";
     let expected_cert = "ssh-ed25519-cert-v01@openssh.com AAAAFAKECERT test";
-    with_mock_vault("success", "", expected_cert, 0, || {
-        let result = sign_certificate("ssh/sign/role", &key, alias, None).unwrap();
+    with_mock_vault("success", "", expected_cert, 0, |env| {
+        let result = sign_certificate(env, "ssh/sign/role", &key, alias, None).unwrap();
         assert!(result.cert_path.exists());
         let content = std::fs::read_to_string(&result.cert_path).unwrap();
         assert_eq!(content, expected_cert);
@@ -1237,9 +1294,8 @@ fn sign_certificate_success_writes_cert() {
 /// and echoes a dummy cert on stdout. Returns the capture file path so
 /// callers can assert on the recorded value.
 #[cfg(unix)]
-fn with_env_capturing_vault<F: FnOnce(&Path)>(tag: &str, f: F) {
+fn with_env_capturing_vault<F: FnOnce(&crate::runtime::env::Env, &Path)>(tag: &str, f: F) {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir(tag);
     let capture = dir.join("captured_addr.txt");
@@ -1256,24 +1312,15 @@ fn with_env_capturing_vault<F: FnOnce(&Path)>(tag: &str, f: F) {
     perms.set_mode(0o755);
     std::fs::set_permissions(&script, perms).unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let old_vault_addr = std::env::var("VAULT_ADDR").ok();
-    let new_path = format!("{}:{}", dir.display(), old_path);
-    // SAFETY: see with_mock_vault — ENV_LOCK serializes all env mutations
-    // in this test module. We clear VAULT_ADDR up front so the
-    // "None = inherit parent env" test starts from a clean slate.
-    unsafe {
-        std::env::set_var("PATH", &new_path);
-        std::env::remove_var("VAULT_ADDR");
-    }
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&capture)));
-    unsafe {
-        std::env::set_var("PATH", &old_path);
-        match old_vault_addr {
-            Some(v) => std::env::set_var("VAULT_ADDR", v),
-            None => std::env::remove_var("VAULT_ADDR"),
-        }
-    }
+    // The Env carries only PATH (stub ahead of the real one). `env.command`
+    // does `env_clear`, so the subprocess starts with no VAULT_ADDR; the
+    // "None = inherit" case is therefore deterministic without touching the
+    // process env, and `sign_certificate` sets VAULT_ADDR only when `Some`.
+    let real_path = std::env::var("PATH").unwrap_or_default();
+    let home = unique_tmp_subdir(&format!("{tag}_home"));
+    let env = crate::runtime::env::Env::for_test(home)
+        .with_var("PATH", format!("{}:{}", dir.display(), real_path));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(&env, &capture)));
     let _ = std::fs::remove_dir_all(&dir);
     if let Err(e) = result {
         std::panic::resume_unwind(e);
@@ -1285,8 +1332,9 @@ fn with_env_capturing_vault<F: FnOnce(&Path)>(tag: &str, f: F) {
 fn sign_certificate_sets_vault_addr_env_on_subprocess() {
     let key = write_fake_pubkey("addr_set");
     let alias = "mock-addr-set";
-    with_env_capturing_vault("addr_set", |capture| {
+    with_env_capturing_vault("addr_set", |env, capture| {
         let res = sign_certificate(
+            env,
             "ssh/sign/role",
             &key,
             alias,
@@ -1310,11 +1358,11 @@ fn sign_certificate_sets_vault_addr_env_on_subprocess() {
 fn sign_certificate_does_not_set_vault_addr_when_none() {
     let key = write_fake_pubkey("addr_none");
     let alias = "mock-addr-none";
-    with_env_capturing_vault("addr_none", |capture| {
+    with_env_capturing_vault("addr_none", |env, capture| {
         // with_env_capturing_vault clears VAULT_ADDR on entry, so when
         // sign_certificate passes None the subprocess inherits an empty
-        // value. Assert exactly that — no override leaked through.
-        let res = sign_certificate("ssh/sign/role", &key, alias, None);
+        // value. Assert exactly that. No override leaked through.
+        let res = sign_certificate(env, "ssh/sign/role", &key, alias, None);
         assert!(res.is_ok(), "sign failed: {:?}", res);
         let captured = std::fs::read_to_string(capture).unwrap();
         assert!(
@@ -1336,7 +1384,14 @@ fn sign_certificate_rejects_invalid_vault_addr() {
     // clear error before spawning the vault CLI.
     let key = write_fake_pubkey("addr_bad");
     let alias = "mock-addr-bad";
-    let res = sign_certificate("ssh/sign/role", &key, alias, Some("http://has space:8200"));
+    let env = crate::runtime::env::Env::from_process();
+    let res = sign_certificate(
+        &env,
+        "ssh/sign/role",
+        &key,
+        alias,
+        Some("http://has space:8200"),
+    );
     assert!(res.is_err());
     let msg = res.unwrap_err().to_string();
     assert!(
@@ -1351,7 +1406,6 @@ fn sign_certificate_rejects_invalid_vault_addr() {
 #[test]
 fn check_cert_validity_handles_forever() {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir("forever");
     let script = dir.join("ssh-keygen");
@@ -1363,13 +1417,18 @@ fn check_cert_validity_handles_forever() {
     let cert = dir.join("cert.pub");
     std::fs::write(&cert, "stub").unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{}", dir.display(), old_path);
-    // SAFETY: PATH mutation is serialized via LOCK above and restored before
-    // the guard is released.
-    unsafe { std::env::set_var("PATH", &new_path) };
-    let status = check_cert_validity(&cert);
-    unsafe { std::env::set_var("PATH", &old_path) };
+    // Stub ssh-keygen lives in `dir`; put it ahead of the real PATH on an
+    // Env rather than mutating the process-global PATH. No lock needed.
+    let home = unique_tmp_subdir("forever_home");
+    let env = crate::runtime::env::Env::for_test(home).with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+    let status = check_cert_validity(&env, &cert);
     let _ = std::fs::remove_dir_all(&dir);
 
     match status {
@@ -1394,7 +1453,6 @@ fn check_cert_validity_rejects_non_positive_window() {
     // calculation. The guard in check_cert_validity must reject it as
     // Invalid before it ever reaches the cache.
     use std::os::unix::fs::PermissionsExt;
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir("non_positive");
     let script = dir.join("ssh-keygen");
@@ -1407,13 +1465,18 @@ fn check_cert_validity_rejects_non_positive_window() {
     let cert = dir.join("cert.pub");
     std::fs::write(&cert, "stub").unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{}", dir.display(), old_path);
-    // SAFETY: see with_mock_vault for the full invariant. PATH is
-    // serialized via LOCK and restored before the guard is released.
-    unsafe { std::env::set_var("PATH", &new_path) };
-    let status = check_cert_validity(&cert);
-    unsafe { std::env::set_var("PATH", &old_path) };
+    // Stub ssh-keygen on an Env PATH ahead of the real one. No process-env
+    // mutation, no lock; see with_mock_vault for the pattern.
+    let home = unique_tmp_subdir("non_positive_home");
+    let env = crate::runtime::env::Env::for_test(home).with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+    let status = check_cert_validity(&env, &cert);
     let _ = std::fs::remove_dir_all(&dir);
 
     match status {
@@ -1475,7 +1538,6 @@ fn check_cert_validity_invalid_file() {
     // ssh-keygen behavior on non-certificate files varies across
     // platforms (macOS returns Invalid, some Linux versions return Valid).
     use std::os::unix::fs::PermissionsExt;
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
 
     let dir = unique_tmp_subdir("invalid_file");
     let script = dir.join("ssh-keygen");
@@ -1487,11 +1549,18 @@ fn check_cert_validity_invalid_file() {
     let cert = dir.join("cert.pub");
     std::fs::write(&cert, "this is not a certificate\n").unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{}", dir.display(), old_path);
-    unsafe { std::env::set_var("PATH", &new_path) };
-    let status = check_cert_validity(&cert);
-    unsafe { std::env::set_var("PATH", &old_path) };
+    // Stub ssh-keygen on an Env PATH ahead of the real one. No process-env
+    // mutation, no lock.
+    let home = unique_tmp_subdir("invalid_file_home");
+    let env = crate::runtime::env::Env::for_test(home).with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+    let status = check_cert_validity(&env, &cert);
     let _ = std::fs::remove_dir_all(&dir);
 
     assert!(

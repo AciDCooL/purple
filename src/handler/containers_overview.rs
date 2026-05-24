@@ -97,9 +97,10 @@ fn toggle_collapse_for_selected_host(app: &mut App) {
     };
     let collapsed = app.containers_overview.toggle_host_collapsed(&alias);
     log::debug!("[purple] containers fold toggle: alias={alias} collapsed={collapsed}");
-    if let Err(e) =
-        preferences::save_containers_collapsed_hosts(app.containers_overview.collapsed_hosts())
-    {
+    if let Err(e) = preferences::save_containers_collapsed_hosts(
+        app.env().paths(),
+        app.containers_overview.collapsed_hosts(),
+    ) {
         log::warn!("[config] Failed to persist containers collapsed hosts: {e}");
     }
 }
@@ -786,7 +787,10 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             let was_header = selected_header_alias(app).is_some();
             let pinned = selected_container_alias(app).or_else(|| selected_header_alias(app));
             let new_mode = app.containers_overview.sort_mode().next();
-            let save_result = app.containers_overview.set_sort_mode(new_mode);
+            let paths = app.env().paths().cloned();
+            let save_result = app
+                .containers_overview
+                .set_sort_mode(paths.as_ref(), new_mode);
             match pinned {
                 Some(alias) => reposition_cursor_on(app, &alias, was_header),
                 None => {
@@ -881,7 +885,10 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             } else {
                 ViewMode::Compact
             };
-            let _ = app.containers_overview.set_view_mode(new_mode);
+            let paths = app.env().paths().cloned();
+            let _ = app
+                .containers_overview
+                .set_view_mode(paths.as_ref(), new_mode);
             app.ui.set_detail_toggle_pending(true);
             app.ui.set_detail_scroll(0);
         }

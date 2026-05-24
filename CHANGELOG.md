@@ -1,3 +1,8 @@
+## 3.17.1 - 2026-05-24
+
+- change: Safer, more reliable releases.
+- change: Reworked how purple locates its settings and key files internally so the test suite runs fully isolated and reliably catches regressions before a release reaches you. Nothing changes in how purple looks or behaves.
+
 ## 3.17.0 - 2026-05-24
 
 - feat: Vault SSH certs stay fresh for files and containers.

@@ -1069,7 +1069,6 @@ mod label_migration_tests {
 
     fn make_app() -> App {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(""),
             path: scratch.join("test_config"),
@@ -1134,7 +1133,6 @@ mod labeled_add_tests {
 
     fn make_app() -> App {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(""),
             path: scratch.join("test_config"),

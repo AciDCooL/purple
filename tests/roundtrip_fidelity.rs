@@ -6347,10 +6347,12 @@ fn include_glob_dirs_expands_env_vars() {
     let extra_path = config_d.join("extra.conf");
     std::fs::write(&extra_path, "Host from-include\n  HostName 10.0.0.3\n").unwrap();
 
-    // Set env var pointing to our temp dir
-    // SAFETY: test-only, and we use a unique var name with PID
+    // Inject the variable through an Env instead of mutating the process env,
+    // so the test is hermetic and needs no `unsafe set_var`.
     let var_name = format!("_PURPLE_GLOB_TEST_{}", std::process::id());
-    unsafe { std::env::set_var(&var_name, dir.to_str().unwrap()) };
+    let env = purple_ssh::runtime::env::Env::for_test("/tmp/x")
+        .with_var(&var_name, dir.to_str().unwrap());
+    let lookup = |n: &str| env.var(n).map(str::to_string);
 
     // Main config uses ${VAR} in Include
     let main_path = dir.join("config");
@@ -6360,7 +6362,7 @@ fn include_glob_dirs_expands_env_vars() {
     );
     std::fs::write(&main_path, &main_content).unwrap();
 
-    let config = SshConfigFile::parse(&main_path).unwrap();
+    let config = SshConfigFile::parse_with_env(&main_path, &env).unwrap();
 
     // The included host should be resolved
     let entries = config.host_entries();
@@ -6371,7 +6373,7 @@ fn include_glob_dirs_expands_env_vars() {
     );
 
     // include_glob_dirs should return the expanded directory
-    let glob_dirs = config.include_glob_dirs();
+    let glob_dirs = config.include_glob_dirs_with(&lookup);
     assert!(
         glob_dirs.iter().any(|d| d == &config_d),
         "include_glob_dirs should expand ${{{}}} to {}. Got: {:?}",
@@ -6380,7 +6382,6 @@ fn include_glob_dirs_expands_env_vars() {
         glob_dirs
     );
 
-    unsafe { std::env::remove_var(&var_name) };
     let _ = std::fs::remove_dir_all(&dir);
 }
 

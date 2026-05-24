@@ -7,36 +7,11 @@ use log::debug;
 
 use crate::ssh_config::model::HostEntry;
 
-thread_local! {
-    /// Test-scoped override of the SSH directory. When set, `resolve_ssh_dir`
-    /// returns this path instead of `~/.ssh`. Lets tests that exercise
-    /// `discover_keys` or `finalize_key_push` point at a synthetic tree
-    /// without touching the test runner's actual `~/.ssh`.
-    static SSH_DIR_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-/// Resolve the SSH directory to scan for keys. Honours a thread-local
-/// override set by tests; falls back to `~/.ssh` in production. Returns
-/// `None` when the home directory cannot be determined and no override
-/// is set, so callers can short-circuit cleanly.
-pub fn resolve_ssh_dir() -> Option<PathBuf> {
-    let override_path = SSH_DIR_OVERRIDE.with(|p| p.borrow().clone());
-    override_path.or_else(|| dirs::home_dir().map(|h| h.join(".ssh")))
-}
-
-/// Set the test-scoped SSH directory override. Scoped to the calling
-/// thread. Restored by `clear_ssh_dir_override`.
-#[cfg(test)]
-pub fn set_ssh_dir_override(path: PathBuf) {
-    SSH_DIR_OVERRIDE.with(|p| *p.borrow_mut() = Some(path));
-}
-
-/// Clear the test-scoped SSH directory override.
-#[cfg(test)]
-#[allow(dead_code)]
-pub fn clear_ssh_dir_override() {
-    SSH_DIR_OVERRIDE.with(|p| *p.borrow_mut() = None);
+/// Resolve the SSH directory (`~/.ssh`) from the injected paths. Returns
+/// `None` when the home directory is unknown, so callers can short-circuit
+/// cleanly. Tests pass a sandboxed `Paths` instead of touching the real `~/.ssh`.
+pub fn resolve_ssh_dir(paths: Option<&crate::runtime::env::Paths>) -> Option<PathBuf> {
+    paths.map(crate::runtime::env::Paths::ssh_dir)
 }
 
 /// Information about an SSH key found on disk.

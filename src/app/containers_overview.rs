@@ -353,28 +353,36 @@ impl ContainersOverviewState {
     /// Load the persisted overview fields from `preferences`. Startup only:
     /// clobbers any in-memory state with whatever is on disk. `pub(crate)`
     /// so a stray mid-session caller cannot quietly revert user edits.
-    pub(crate) fn hydrate_from_prefs(&mut self) {
-        self.view_mode = crate::preferences::load_containers_view_mode();
-        self.sort_mode = crate::preferences::load_containers_sort_mode();
-        self.collapsed_hosts = crate::preferences::load_containers_collapsed_hosts();
+    pub(crate) fn hydrate_from_prefs(&mut self, paths: Option<&crate::runtime::env::Paths>) {
+        self.view_mode = crate::preferences::load_containers_view_mode(paths);
+        self.sort_mode = crate::preferences::load_containers_sort_mode(paths);
+        self.collapsed_hosts = crate::preferences::load_containers_collapsed_hosts(paths);
     }
 
     /// Update `view_mode` and persist. Returns the persist error so the
     /// caller can surface it (current call site discards it intentionally
     /// to match the pre-encapsulation behavior where view-mode persist
     /// failures only logged).
-    pub fn set_view_mode(&mut self, mode: ViewMode) -> std::io::Result<()> {
+    pub fn set_view_mode(
+        &mut self,
+        paths: Option<&crate::runtime::env::Paths>,
+        mode: ViewMode,
+    ) -> std::io::Result<()> {
         self.view_mode = mode;
-        crate::preferences::save_containers_view_mode(mode).inspect_err(|e| {
+        crate::preferences::save_containers_view_mode(paths, mode).inspect_err(|e| {
             log::warn!("[config] Failed to persist containers view mode: {e}");
         })
     }
 
     /// Update `sort_mode` and persist. Same contract as `set_view_mode`;
     /// the call site does surface the error via a toast.
-    pub fn set_sort_mode(&mut self, mode: ContainersSortMode) -> std::io::Result<()> {
+    pub fn set_sort_mode(
+        &mut self,
+        paths: Option<&crate::runtime::env::Paths>,
+        mode: ContainersSortMode,
+    ) -> std::io::Result<()> {
         self.sort_mode = mode;
-        crate::preferences::save_containers_sort_mode(mode).inspect_err(|e| {
+        crate::preferences::save_containers_sort_mode(paths, mode).inspect_err(|e| {
             log::warn!("[config] Failed to persist containers sort mode: {e}");
         })
     }
@@ -441,7 +449,7 @@ impl LogsCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::preferences::tests_helpers::with_temp_prefs;
+    use crate::runtime::env::Paths;
 
     fn batch_with_aliases(aliases: &[&str]) -> RefreshBatch {
         RefreshBatch {
@@ -474,48 +482,53 @@ mod tests {
 
     #[test]
     fn hydrate_from_prefs_reads_persisted_values() {
-        with_temp_prefs("hydrate_from_prefs", |_path| {
-            crate::preferences::save_containers_view_mode(ViewMode::Compact).unwrap();
-            crate::preferences::save_containers_sort_mode(ContainersSortMode::AlphaContainer)
-                .unwrap();
-            let mut collapsed = std::collections::HashSet::new();
-            collapsed.insert("folded-host".to_string());
-            crate::preferences::save_containers_collapsed_hosts(&collapsed).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        crate::preferences::save_containers_view_mode(Some(&paths), ViewMode::Compact).unwrap();
+        crate::preferences::save_containers_sort_mode(
+            Some(&paths),
+            ContainersSortMode::AlphaContainer,
+        )
+        .unwrap();
+        let mut collapsed = std::collections::HashSet::new();
+        collapsed.insert("folded-host".to_string());
+        crate::preferences::save_containers_collapsed_hosts(Some(&paths), &collapsed).unwrap();
 
-            let mut state = ContainersOverviewState::default();
-            state.hydrate_from_prefs();
-            assert_eq!(state.view_mode, ViewMode::Compact);
-            assert_eq!(state.sort_mode, ContainersSortMode::AlphaContainer);
-            assert!(state.collapsed_hosts.contains("folded-host"));
-        });
+        let mut state = ContainersOverviewState::default();
+        state.hydrate_from_prefs(Some(&paths));
+        assert_eq!(state.view_mode, ViewMode::Compact);
+        assert_eq!(state.sort_mode, ContainersSortMode::AlphaContainer);
+        assert!(state.collapsed_hosts.contains("folded-host"));
     }
 
     #[test]
     fn set_view_mode_updates_field_and_persists() {
-        with_temp_prefs("set_view_mode", |_path| {
-            let mut state = ContainersOverviewState::default();
-            state.set_view_mode(ViewMode::Compact).unwrap();
-            assert_eq!(state.view_mode, ViewMode::Compact);
-            assert_eq!(
-                crate::preferences::load_containers_view_mode(),
-                ViewMode::Compact
-            );
-        });
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        let mut state = ContainersOverviewState::default();
+        state
+            .set_view_mode(Some(&paths), ViewMode::Compact)
+            .unwrap();
+        assert_eq!(state.view_mode, ViewMode::Compact);
+        assert_eq!(
+            crate::preferences::load_containers_view_mode(Some(&paths)),
+            ViewMode::Compact
+        );
     }
 
     #[test]
     fn set_sort_mode_updates_field_and_persists() {
-        with_temp_prefs("set_sort_mode", |_path| {
-            let mut state = ContainersOverviewState::default();
-            state
-                .set_sort_mode(ContainersSortMode::AlphaContainer)
-                .unwrap();
-            assert_eq!(state.sort_mode, ContainersSortMode::AlphaContainer);
-            assert_eq!(
-                crate::preferences::load_containers_sort_mode(),
-                ContainersSortMode::AlphaContainer
-            );
-        });
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        let mut state = ContainersOverviewState::default();
+        state
+            .set_sort_mode(Some(&paths), ContainersSortMode::AlphaContainer)
+            .unwrap();
+        assert_eq!(state.sort_mode, ContainersSortMode::AlphaContainer);
+        assert_eq!(
+            crate::preferences::load_containers_sort_mode(Some(&paths)),
+            ContainersSortMode::AlphaContainer
+        );
     }
 
     #[test]

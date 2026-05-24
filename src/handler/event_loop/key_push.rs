@@ -95,7 +95,7 @@ fn finalize_key_push(app: &mut App) {
     // Refresh keys so linked_hosts picks up the newly-authorized aliases.
     // Honour the test override so suite runs never touch the real ~/.ssh.
     if appended > 0 {
-        let ssh_dir = crate::ssh_keys::resolve_ssh_dir();
+        let ssh_dir = crate::ssh_keys::resolve_ssh_dir(app.env().paths());
         if let Some(dir) = ssh_dir {
             app.keys
                 .set_list(crate::ssh_keys::discover_keys(&dir, app.hosts_state.list()));
@@ -125,15 +125,11 @@ mod tests {
     use crate::ssh_config::model::SshConfigFile;
 
     fn make_app() -> App {
-        // Tempdir + preferences override so the in-test App does not touch
-        // ~/.purple/ or ~/.ssh/. The SSH override scopes finalize_key_push's
-        // `discover_keys` refresh at an empty synthetic dir so the
-        // appended>0 path is exercisable in a clean HOME.
+        // App::new auto-sandboxes the in-test env so it never touches the
+        // real ~/.purple/ or ~/.ssh/. Create the sandbox `.ssh` so
+        // finalize_key_push's `discover_keys` refresh runs against an empty
+        // dir and the appended>0 path stays exercisable.
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
-        crate::containers::set_path_override(scratch.join("container_cache.jsonl"));
-        std::fs::create_dir_all(scratch.join("synthetic-ssh")).unwrap();
-        crate::ssh_keys::set_ssh_dir_override(scratch.join("synthetic-ssh"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(""),
             path: scratch.join("test_config"),
@@ -141,6 +137,9 @@ mod tests {
             bom: false,
         };
         let mut app = App::new(config);
+        if let Some(ssh_dir) = crate::ssh_keys::resolve_ssh_dir(app.env().paths()) {
+            std::fs::create_dir_all(&ssh_dir).unwrap();
+        }
         // Tests assume a fresh run_id so they can fire results with run_id=1
         // without colliding with whatever default App::new set up.
         app.keys.push_mut().run_id = 1;

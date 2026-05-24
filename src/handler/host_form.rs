@@ -296,19 +296,24 @@ pub(super) fn submit_form(app: &mut App) {
             let mut final_msg = msg;
             if old_askpass.as_deref() == Some("keychain") {
                 if app.forms.host_mut().askpass != "keychain" {
-                    // Source changed away from keychain — remove old entry
+                    // Source changed away from keychain. remove old entry
                     if let Screen::EditHost { ref alias } = app.screen {
-                        let _ = crate::askpass::remove_from_keychain(alias);
+                        let _ = crate::askpass::remove_from_keychain(&app.env, alias);
                     }
                     final_msg = format!("{}. Keychain entry removed.", final_msg);
                 } else if let Screen::EditHost { ref alias } = app.screen {
-                    // Alias renamed — migrate keychain entry
+                    // Alias renamed. migrate keychain entry
                     if *alias != app.forms.host_mut().alias {
-                        if let Ok(pw) = crate::askpass::retrieve_keychain_password(alias) {
-                            if crate::askpass::store_in_keychain(&app.forms.host_mut().alias, &pw)
-                                .is_ok()
+                        if let Ok(pw) = crate::askpass::retrieve_keychain_password(&app.env, alias)
+                        {
+                            if crate::askpass::store_in_keychain(
+                                &app.env,
+                                &app.forms.host_mut().alias,
+                                &pw,
+                            )
+                            .is_ok()
                             {
-                                let _ = crate::askpass::remove_from_keychain(alias);
+                                let _ = crate::askpass::remove_from_keychain(&app.env, alias);
                             }
                         }
                     }

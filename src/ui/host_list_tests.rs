@@ -937,7 +937,6 @@ mod top_bar {
             crlf: false,
             bom: false,
         };
-        crate::preferences::set_path_override(scratch.join("preferences"));
         App::new(config)
     }
 

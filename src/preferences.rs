@@ -5,67 +5,26 @@ use log::debug;
 
 use crate::app::{ContainersSortMode, SortMode, ViewMode};
 use crate::fs_util;
+use crate::runtime::env::Paths;
 
-// In test mode the override is thread-local: cargo runs each test on its own
-// thread, so every test gets an isolated preferences path even when multiple
-// suites call `set_path_override` concurrently. This prevents the classic race
-// where a handler test's `App::new()` reset the override while a preferences
-// test was midway through a two-step write (e.g. save_value + remove_value).
-#[cfg(test)]
-thread_local! {
-    static PATH_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-/// Cross-suite test lock for the `demo_flag` global. Aliases the
-/// library's `purple_ssh::demo_flag::GLOBAL_TEST_LOCK` so binary-only
-/// callers (here, plus visual regression) share the same mutex with
-/// library-only callers (key_activity tests). One mutex per process is
-/// the invariant; the binary-vs-library crate split must not produce
-/// two distinct locks.
+/// Cross-suite test lock for the `demo_flag` and theme globals, which remain
+/// process-global for now. Aliased here so existing binary-side callers keep
+/// resolving it under its historical name. The preferences file path itself is
+/// no longer global: it is derived from the injected `Paths`.
 #[cfg(test)]
 pub(crate) use crate::demo_flag::GLOBAL_TEST_LOCK as GLOBAL_TEST_IO_LOCK;
 
-/// Override the preferences file path (used in tests to avoid writing to ~/.purple).
-/// Scoped to the calling thread only.
-#[cfg(test)]
-pub fn set_path_override(path: PathBuf) {
-    PATH_OVERRIDE.with(|p| *p.borrow_mut() = Some(path));
+/// The preferences file under the given paths, or `None` when the home
+/// directory is unknown. A `None` here makes every load return the default and
+/// every save a silent no-op, matching the historical behaviour when
+/// `dirs::home_dir()` returned `None`.
+fn prefs_file(paths: Option<&Paths>) -> Option<PathBuf> {
+    paths.map(Paths::preferences)
 }
 
-/// Clear the path override so `path()` falls back to the real ~/.purple/preferences.
-/// Scoped to the calling thread only.
-#[cfg(test)]
-fn clear_path_override() {
-    PATH_OVERRIDE.with(|p| *p.borrow_mut() = None);
-}
-
-/// Public wrapper for `clear_path_override`, callable from visual regression
-/// tests and other test suites that need to reset the thread-local override.
-#[cfg(test)]
-pub fn clear_path_override_for_tests() {
-    clear_path_override();
-}
-
-fn path() -> Option<PathBuf> {
-    // Tests MUST opt in via `set_path_override`. Falling through to
-    // the real `~/.purple/preferences` would let a forgotten
-    // override read the user's saved settings and, worse, write
-    // back into them on `save_value`. Mirrors the same guard in
-    // `containers::cache_path`.
-    #[cfg(test)]
-    {
-        PATH_OVERRIDE.with(|p| p.borrow().clone())
-    }
-    #[cfg(not(test))]
-    {
-        dirs::home_dir().map(|h| h.join(".purple/preferences"))
-    }
-}
-
-/// Load a value for a given key from ~/.purple/preferences.
-fn load_value(key: &str) -> Option<String> {
-    let path = path()?;
+/// Load a value for a given key from the preferences file.
+fn load_value(paths: Option<&Paths>, key: &str) -> Option<String> {
+    let path = prefs_file(paths)?;
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
         Err(e) => {
@@ -89,18 +48,17 @@ fn load_value(key: &str) -> Option<String> {
     None
 }
 
-/// Save a key=value pair to ~/.purple/preferences. Preserves unknown keys and comments.
-fn save_value(key: &str, value: &str) -> io::Result<()> {
-    let path = match path() {
+/// Save a key=value pair to the preferences file. Preserves unknown keys and comments.
+fn save_value(paths: Option<&Paths>, key: &str, value: &str) -> io::Result<()> {
+    let path = match prefs_file(paths) {
         Some(p) => p,
         None => return Ok(()),
     };
     // In production demo mode disk writes are suppressed so the user's
-    // real preferences file stays untouched. Inside tests the path
-    // resolves to a tempfile via the thread-local override, so we let
-    // writes through regardless of the global demo flag (handler
-    // fixtures flip that flag and would otherwise mute every prefs
-    // assertion that runs in parallel with them).
+    // real preferences file stays untouched. Inside tests the path comes
+    // from the injected sandbox `Paths`, so we let writes through regardless
+    // of the global demo flag (handler fixtures flip that flag and would
+    // otherwise mute every prefs assertion that runs in parallel with them).
     #[cfg(not(test))]
     if crate::demo_flag::is_demo() {
         return Ok(());
@@ -135,16 +93,16 @@ fn save_value(key: &str, value: &str) -> io::Result<()> {
 }
 
 /// Load sort mode from ~/.purple/preferences. Returns MostRecent if missing or invalid.
-pub fn load_sort_mode() -> SortMode {
-    load_value("sort_mode")
+pub fn load_sort_mode(paths: Option<&Paths>) -> SortMode {
+    load_value(paths, "sort_mode")
         .map(|v| SortMode::from_key(&v))
         .unwrap_or(SortMode::MostRecent)
 }
 
 /// Save sort mode to ~/.purple/preferences.
-pub fn save_sort_mode(mode: SortMode) -> io::Result<()> {
+pub fn save_sort_mode(paths: Option<&Paths>, mode: SortMode) -> io::Result<()> {
     log::debug!("[purple] saving sort_mode={}", mode.to_key());
-    save_value("sort_mode", mode.to_key()).inspect_err(|e| {
+    save_value(paths, "sort_mode", mode.to_key()).inspect_err(|e| {
         log::warn!("[config] failed to save sort_mode={}: {}", mode.to_key(), e);
     })
 }
@@ -152,12 +110,12 @@ pub fn save_sort_mode(mode: SortMode) -> io::Result<()> {
 /// Load group_by from ~/.purple/preferences. New `group_by` key takes precedence
 /// over the legacy `group_by_provider` key for backward compatibility.
 /// Returns `GroupBy::Provider` if missing (preserving old default behavior).
-pub fn load_group_by() -> crate::app::GroupBy {
+pub fn load_group_by(paths: Option<&Paths>) -> crate::app::GroupBy {
     use crate::app::GroupBy;
-    if let Some(v) = load_value("group_by") {
+    if let Some(v) = load_value(paths, "group_by") {
         return GroupBy::from_key(&v);
     }
-    if let Some(v) = load_value("group_by_provider") {
+    if let Some(v) = load_value(paths, "group_by_provider") {
         return if v == "true" {
             GroupBy::Provider
         } else {
@@ -167,15 +125,15 @@ pub fn load_group_by() -> crate::app::GroupBy {
     GroupBy::Provider
 }
 
-/// Remove a key from ~/.purple/preferences. No-op if the key or file does not exist.
-fn remove_value(key: &str) -> io::Result<()> {
-    let path = match path() {
+/// Remove a key from the preferences file. No-op if the key or file does not exist.
+fn remove_value(paths: Option<&Paths>, key: &str) -> io::Result<()> {
+    let path = match prefs_file(paths) {
         Some(p) => p,
         None => return Ok(()),
     };
     // Same demo-vs-test gate as `save_value`: production demo mode
-    // suppresses disk writes; test mode lets a tempfile override
-    // through irrespective of the global flag.
+    // suppresses disk writes; in tests the path is an injected sandbox
+    // so writes go through irrespective of the global flag.
     #[cfg(not(test))]
     if crate::demo_flag::is_demo() {
         return Ok(());
@@ -211,20 +169,20 @@ fn remove_value(key: &str) -> io::Result<()> {
 }
 
 /// Save group_by to ~/.purple/preferences.
-pub fn save_group_by(mode: &crate::app::GroupBy) -> io::Result<()> {
+pub fn save_group_by(paths: Option<&Paths>, mode: &crate::app::GroupBy) -> io::Result<()> {
     log::debug!("[purple] saving group_by={}", mode.to_key());
-    save_value("group_by", &mode.to_key()).inspect_err(|e| {
+    save_value(paths, "group_by", &mode.to_key()).inspect_err(|e| {
         log::warn!("[config] failed to save group_by={}: {}", mode.to_key(), e);
     })?;
     // Best-effort cleanup: group_by key takes precedence on load, so
     // a leftover group_by_provider key is harmless if removal fails.
-    let _ = remove_value("group_by_provider");
+    let _ = remove_value(paths, "group_by_provider");
     Ok(())
 }
 
 /// Load view mode from ~/.purple/preferences. Returns Detailed if missing or invalid.
-pub fn load_view_mode() -> ViewMode {
-    load_value("view_mode")
+pub fn load_view_mode(paths: Option<&Paths>) -> ViewMode {
+    load_value(paths, "view_mode")
         .map(|v| match v.as_str() {
             "compact" => ViewMode::Compact,
             _ => ViewMode::Detailed,
@@ -233,13 +191,13 @@ pub fn load_view_mode() -> ViewMode {
 }
 
 /// Save view mode to ~/.purple/preferences.
-pub fn save_view_mode(mode: ViewMode) -> io::Result<()> {
+pub fn save_view_mode(paths: Option<&Paths>, mode: ViewMode) -> io::Result<()> {
     let value = match mode {
         ViewMode::Compact => "compact",
         ViewMode::Detailed => "detailed",
     };
     log::debug!("[purple] saving view_mode={}", value);
-    save_value("view_mode", value).inspect_err(|e| {
+    save_value(paths, "view_mode", value).inspect_err(|e| {
         log::warn!("[config] failed to save view_mode={}: {}", value, e);
     })
 }
@@ -247,15 +205,18 @@ pub fn save_view_mode(mode: ViewMode) -> io::Result<()> {
 /// Containers-tab sort order. Separate key from the host-list `sort_mode`
 /// so the two screens persist independently. Default `AlphaHost` matches
 /// `ContainersSortMode::default()`.
-pub fn load_containers_sort_mode() -> ContainersSortMode {
-    load_value("containers_sort_mode")
+pub fn load_containers_sort_mode(paths: Option<&Paths>) -> ContainersSortMode {
+    load_value(paths, "containers_sort_mode")
         .map(|v| ContainersSortMode::from_key(&v))
         .unwrap_or_default()
 }
 
-pub fn save_containers_sort_mode(mode: ContainersSortMode) -> io::Result<()> {
+pub fn save_containers_sort_mode(
+    paths: Option<&Paths>,
+    mode: ContainersSortMode,
+) -> io::Result<()> {
     log::debug!("[purple] saving containers_sort_mode={}", mode.to_key());
-    save_value("containers_sort_mode", mode.to_key()).inspect_err(|e| {
+    save_value(paths, "containers_sort_mode", mode.to_key()).inspect_err(|e| {
         log::warn!(
             "[config] failed to save containers_sort_mode={}: {}",
             mode.to_key(),
@@ -268,8 +229,8 @@ pub fn save_containers_sort_mode(mode: ContainersSortMode) -> io::Result<()> {
 /// preference does not bleed into the containers screen and vice versa.
 /// Default Detailed: when nothing is saved yet the detail panel renders
 /// alongside the list whenever the terminal is wide enough.
-pub fn load_containers_view_mode() -> ViewMode {
-    load_value("containers_view_mode")
+pub fn load_containers_view_mode(paths: Option<&Paths>) -> ViewMode {
+    load_value(paths, "containers_view_mode")
         .map(|v| match v.as_str() {
             "compact" => ViewMode::Compact,
             _ => ViewMode::Detailed,
@@ -277,13 +238,13 @@ pub fn load_containers_view_mode() -> ViewMode {
         .unwrap_or(ViewMode::Detailed)
 }
 
-pub fn save_containers_view_mode(mode: ViewMode) -> io::Result<()> {
+pub fn save_containers_view_mode(paths: Option<&Paths>, mode: ViewMode) -> io::Result<()> {
     let value = match mode {
         ViewMode::Compact => "compact",
         ViewMode::Detailed => "detailed",
     };
     log::debug!("[purple] saving containers_view_mode={}", value);
-    save_value("containers_view_mode", value).inspect_err(|e| {
+    save_value(paths, "containers_view_mode", value).inspect_err(|e| {
         log::warn!(
             "[config] failed to save containers_view_mode={}: {}",
             value,
@@ -296,8 +257,8 @@ pub fn save_containers_view_mode(mode: ViewMode) -> io::Result<()> {
 /// containers-tab AlphaHost view. Persists as a comma-separated list so
 /// a fresh start restores the user's last fold state. Empty list means
 /// every group is expanded.
-pub fn load_containers_collapsed_hosts() -> std::collections::HashSet<String> {
-    load_value("containers_collapsed_hosts")
+pub fn load_containers_collapsed_hosts(paths: Option<&Paths>) -> std::collections::HashSet<String> {
+    load_value(paths, "containers_collapsed_hosts")
         .map(|raw| {
             raw.split(',')
                 .map(|s| s.trim().to_string())
@@ -308,11 +269,12 @@ pub fn load_containers_collapsed_hosts() -> std::collections::HashSet<String> {
 }
 
 pub fn save_containers_collapsed_hosts(
+    paths: Option<&Paths>,
     aliases: &std::collections::HashSet<String>,
 ) -> io::Result<()> {
     if aliases.is_empty() {
         log::debug!("[purple] clearing containers_collapsed_hosts");
-        let _ = remove_value("containers_collapsed_hosts");
+        let _ = remove_value(paths, "containers_collapsed_hosts");
         return Ok(());
     }
     let mut sorted: Vec<&str> = aliases.iter().map(|s| s.as_str()).collect();
@@ -323,49 +285,49 @@ pub fn save_containers_collapsed_hosts(
         joined,
         sorted.len()
     );
-    save_value("containers_collapsed_hosts", &joined).inspect_err(|e| {
+    save_value(paths, "containers_collapsed_hosts", &joined).inspect_err(|e| {
         log::warn!("[config] failed to save containers_collapsed_hosts: {}", e);
     })
 }
 
 /// Load global askpass default from ~/.purple/preferences.
-pub fn load_askpass_default() -> Option<String> {
-    load_value("askpass").filter(|v| !v.is_empty())
+pub fn load_askpass_default(paths: Option<&Paths>) -> Option<String> {
+    load_value(paths, "askpass").filter(|v| !v.is_empty())
 }
 
 /// Save global askpass default to ~/.purple/preferences.
-pub fn save_askpass_default(source: &str) -> io::Result<()> {
+pub fn save_askpass_default(paths: Option<&Paths>, source: &str) -> io::Result<()> {
     log::debug!("[purple] saving askpass default={}", source);
-    save_value("askpass", source).inspect_err(|e| {
+    save_value(paths, "askpass", source).inspect_err(|e| {
         log::warn!("[config] failed to save askpass={}: {}", source, e);
     })
 }
 
 /// Load slow threshold from ~/.purple/preferences. Returns 200 if missing or invalid.
-pub fn load_slow_threshold() -> u16 {
-    load_value("slow_threshold_ms")
+pub fn load_slow_threshold(paths: Option<&Paths>) -> u16 {
+    load_value(paths, "slow_threshold_ms")
         .and_then(|v| v.parse().ok())
         .unwrap_or(200)
 }
 
 /// Save slow threshold to ~/.purple/preferences.
 #[allow(dead_code)]
-pub fn save_slow_threshold(ms: u16) -> io::Result<()> {
+pub fn save_slow_threshold(paths: Option<&Paths>, ms: u16) -> io::Result<()> {
     log::debug!("[purple] saving slow_threshold_ms={}", ms);
-    save_value("slow_threshold_ms", &ms.to_string()).inspect_err(|e| {
+    save_value(paths, "slow_threshold_ms", &ms.to_string()).inspect_err(|e| {
         log::warn!("[config] failed to save slow_threshold_ms={}: {}", ms, e);
     })
 }
 
 /// Load theme name from ~/.purple/preferences. Returns None if missing.
-pub fn load_theme() -> Option<String> {
-    load_value("theme").filter(|v| !v.is_empty())
+pub fn load_theme(paths: Option<&Paths>) -> Option<String> {
+    load_value(paths, "theme").filter(|v| !v.is_empty())
 }
 
 /// Save theme name to ~/.purple/preferences.
-pub fn save_theme(name: &str) -> io::Result<()> {
+pub fn save_theme(paths: Option<&Paths>, name: &str) -> io::Result<()> {
     log::debug!("[purple] saving theme={}", name);
-    save_value("theme", name).inspect_err(|e| {
+    save_value(paths, "theme", name).inspect_err(|e| {
         log::warn!("[config] failed to save theme={}: {}", name, e);
     })
 }
@@ -373,55 +335,44 @@ pub fn save_theme(name: &str) -> io::Result<()> {
 const LAST_SEEN_VERSION_KEY: &str = "last_seen_version";
 
 /// Save the last seen version string to ~/.purple/preferences.
-pub fn save_last_seen_version(version: &str) -> io::Result<()> {
+pub fn save_last_seen_version(paths: Option<&Paths>, version: &str) -> io::Result<()> {
     log::debug!("[purple] saving last_seen_version={}", version);
-    save_value(LAST_SEEN_VERSION_KEY, version)
+    save_value(paths, LAST_SEEN_VERSION_KEY, version)
 }
 
 /// Load the last seen version string from ~/.purple/preferences. Returns None if missing.
-pub fn load_last_seen_version() -> io::Result<Option<String>> {
-    Ok(load_value(LAST_SEEN_VERSION_KEY))
+pub fn load_last_seen_version(paths: Option<&Paths>) -> io::Result<Option<String>> {
+    Ok(load_value(paths, LAST_SEEN_VERSION_KEY))
 }
 
 /// Public test helpers for other test modules that need isolated preferences I/O.
 #[cfg(test)]
 pub(crate) mod tests_helpers {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-    pub fn with_temp_prefs<F: FnOnce(&std::path::Path)>(label: &str, f: F) {
-        let _guard = super::GLOBAL_TEST_IO_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let id = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "purple_prefs_{}_{}_{id}",
-            label,
-            std::process::id(),
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("preferences");
-        super::set_path_override(path.clone());
-        f(&path);
-        std::fs::remove_dir_all(&dir).ok();
-        super::clear_path_override();
+    pub fn with_temp_prefs<F: FnOnce(&crate::runtime::env::Paths)>(f: F) {
+        let dir = tempfile::tempdir().expect("create temp prefs dir");
+        let paths = crate::runtime::env::Paths::new(dir.path());
+        // Tests that seed the file with std::fs::write need the parent to exist;
+        // atomic_write creates it on its own but a bare std::fs::write does not.
+        if let Some(parent) = paths.preferences().parent() {
+            std::fs::create_dir_all(parent).expect("create prefs parent dir");
+        }
+        f(&paths);
     }
 }
 
 /// Load auto_ping preference. Returns true if missing (default: enabled).
-pub fn load_auto_ping() -> bool {
-    load_value("auto_ping")
+pub fn load_auto_ping(paths: Option<&Paths>) -> bool {
+    load_value(paths, "auto_ping")
         .map(|v| v != "false")
         .unwrap_or(true)
 }
 
 /// Save auto_ping preference.
 #[allow(dead_code)]
-pub fn save_auto_ping(enabled: bool) -> io::Result<()> {
+pub fn save_auto_ping(paths: Option<&Paths>, enabled: bool) -> io::Result<()> {
     let value = if enabled { "true" } else { "false" };
     log::debug!("[purple] saving auto_ping={}", value);
-    save_value("auto_ping", value).inspect_err(|e| {
+    save_value(paths, "auto_ping", value).inspect_err(|e| {
         log::warn!("[config] failed to save auto_ping={}: {}", value, e);
     })
 }
@@ -677,51 +628,50 @@ mod tests {
         assert!(!found); // Was appended, not replaced
     }
 
-    // --- Real file I/O tests using set_path_override ---
+    // --- Real file I/O tests against a per-test temp Paths ---
     //
-    // PATH_OVERRIDE is a global Mutex<Option<PathBuf>>, so these tests must
-    // not run concurrently. They acquire the crate-level GLOBAL_TEST_IO_LOCK,
-    // which is also held by visual_regression_tests::setup() so the two
-    // suites cannot race on PATH_OVERRIDE or on demo_flag::DEMO_MODE.
+    // Each test gets its own tempfile::tempdir() via with_temp_prefs, so the
+    // tests are isolated and need no shared lock.
 
-    fn with_temp_prefs<F: FnOnce(&std::path::Path)>(label: &str, f: F) {
-        super::tests_helpers::with_temp_prefs(label, f);
+    fn with_temp_prefs<F: FnOnce(&crate::runtime::env::Paths)>(f: F) {
+        super::tests_helpers::with_temp_prefs(f);
     }
 
     #[test]
     fn save_and_load_group_by_roundtrip_tag() {
-        with_temp_prefs("roundtrip_tag", |_path| {
+        with_temp_prefs(|paths| {
             let mode = crate::app::GroupBy::Tag("production".to_string());
-            save_group_by(&mode).unwrap();
-            let loaded = load_group_by();
+            save_group_by(Some(paths), &mode).unwrap();
+            let loaded = load_group_by(Some(paths));
             assert_eq!(loaded, crate::app::GroupBy::Tag("production".to_string()));
         });
     }
 
     #[test]
     fn save_and_load_group_by_roundtrip_provider() {
-        with_temp_prefs("roundtrip_provider", |_path| {
-            save_group_by(&crate::app::GroupBy::Provider).unwrap();
-            let loaded = load_group_by();
+        with_temp_prefs(|paths| {
+            save_group_by(Some(paths), &crate::app::GroupBy::Provider).unwrap();
+            let loaded = load_group_by(Some(paths));
             assert_eq!(loaded, crate::app::GroupBy::Provider);
         });
     }
 
     #[test]
     fn save_and_load_group_by_roundtrip_none() {
-        with_temp_prefs("roundtrip_none", |_path| {
-            save_group_by(&crate::app::GroupBy::None).unwrap();
-            let loaded = load_group_by();
+        with_temp_prefs(|paths| {
+            save_group_by(Some(paths), &crate::app::GroupBy::None).unwrap();
+            let loaded = load_group_by(Some(paths));
             assert_eq!(loaded, crate::app::GroupBy::None);
         });
     }
 
     #[test]
     fn save_group_by_removes_legacy_key() {
-        with_temp_prefs("legacy_key", |path| {
-            std::fs::write(path, "group_by_provider=true\nsort_mode=alpha\n").unwrap();
-            save_group_by(&crate::app::GroupBy::Provider).unwrap();
-            let content = std::fs::read_to_string(path).unwrap();
+        with_temp_prefs(|paths| {
+            let path = paths.preferences();
+            std::fs::write(&path, "group_by_provider=true\nsort_mode=alpha\n").unwrap();
+            save_group_by(Some(paths), &crate::app::GroupBy::Provider).unwrap();
+            let content = std::fs::read_to_string(&path).unwrap();
             assert!(
                 content.contains("group_by=provider"),
                 "new key should exist"
@@ -736,53 +686,54 @@ mod tests {
 
     #[test]
     fn load_group_by_backward_compat_real_file() {
-        with_temp_prefs("compat_true", |path| {
-            std::fs::write(path, "group_by_provider=true\n").unwrap();
-            let loaded = load_group_by();
+        with_temp_prefs(|paths| {
+            std::fs::write(paths.preferences(), "group_by_provider=true\n").unwrap();
+            let loaded = load_group_by(Some(paths));
             assert_eq!(loaded, crate::app::GroupBy::Provider);
         });
     }
 
     #[test]
     fn load_group_by_empty_file_defaults_to_provider() {
-        with_temp_prefs("empty_file", |path| {
-            std::fs::write(path, "").unwrap();
-            let loaded = load_group_by();
+        with_temp_prefs(|paths| {
+            std::fs::write(paths.preferences(), "").unwrap();
+            let loaded = load_group_by(Some(paths));
             assert_eq!(loaded, crate::app::GroupBy::Provider);
         });
     }
 
     #[test]
     fn load_group_by_missing_file_defaults_to_provider() {
-        let _guard = super::GLOBAL_TEST_IO_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let path =
-            std::env::temp_dir().join(format!("purple_prefs_missing_{}", std::process::id()));
-        // Ensure it does not exist
-        let _ = std::fs::remove_file(&path);
-        set_path_override(path);
-        let loaded = load_group_by();
-        assert_eq!(loaded, crate::app::GroupBy::Provider);
-        clear_path_override();
+        with_temp_prefs(|paths| {
+            // The preferences file is never created in the temp dir, so this
+            // exercises the missing-file path.
+            assert!(!paths.preferences().exists());
+            let loaded = load_group_by(Some(paths));
+            assert_eq!(loaded, crate::app::GroupBy::Provider);
+        });
     }
 
     #[test]
     fn save_group_by_tag_with_special_chars_roundtrip() {
-        with_temp_prefs("tag_special", |_path| {
+        with_temp_prefs(|paths| {
             let mode = crate::app::GroupBy::Tag("us-east-1".to_string());
-            save_group_by(&mode).unwrap();
-            let loaded = load_group_by();
+            save_group_by(Some(paths), &mode).unwrap();
+            let loaded = load_group_by(Some(paths));
             assert_eq!(loaded, crate::app::GroupBy::Tag("us-east-1".to_string()));
         });
     }
 
     #[test]
     fn save_group_by_preserves_other_prefs() {
-        with_temp_prefs("preserves_other", |path| {
-            std::fs::write(path, "sort_mode=alpha\nview_mode=detailed\n").unwrap();
-            save_group_by(&crate::app::GroupBy::Tag("staging".to_string())).unwrap();
-            let content = std::fs::read_to_string(path).unwrap();
+        with_temp_prefs(|paths| {
+            let path = paths.preferences();
+            std::fs::write(&path, "sort_mode=alpha\nview_mode=detailed\n").unwrap();
+            save_group_by(
+                Some(paths),
+                &crate::app::GroupBy::Tag("staging".to_string()),
+            )
+            .unwrap();
+            let content = std::fs::read_to_string(&path).unwrap();
             assert!(content.contains("sort_mode=alpha"), "sort_mode preserved");
             assert!(
                 content.contains("view_mode=detailed"),
@@ -850,15 +801,16 @@ mod tests {
 
     #[test]
     fn remove_value_real_file_io() {
-        with_temp_prefs("remove_real_io", |path| {
+        with_temp_prefs(|paths| {
+            let path = paths.preferences();
             std::fs::write(
-                path,
+                &path,
                 "sort_mode=alpha\ngroup_by_provider=true\nview_mode=compact\n",
             )
             .unwrap();
             // save_group_by calls remove_value("group_by_provider") internally
-            save_group_by(&crate::app::GroupBy::Provider).unwrap();
-            let content = std::fs::read_to_string(path).unwrap();
+            save_group_by(Some(paths), &crate::app::GroupBy::Provider).unwrap();
+            let content = std::fs::read_to_string(&path).unwrap();
             assert!(!content.contains("group_by_provider"));
             assert!(content.contains("sort_mode=alpha"));
             assert!(content.contains("view_mode=compact"));
@@ -867,13 +819,14 @@ mod tests {
 
     #[test]
     fn remove_value_noop_real_file_io() {
-        with_temp_prefs("remove_noop_io", |path| {
-            std::fs::write(path, "sort_mode=alpha\n").unwrap();
-            let before = std::fs::read_to_string(path).unwrap();
+        with_temp_prefs(|paths| {
+            let path = paths.preferences();
+            std::fs::write(&path, "sort_mode=alpha\n").unwrap();
+            let before = std::fs::read_to_string(&path).unwrap();
             // save_group_by calls remove_value("group_by_provider"), which should be a no-op
             // since the key doesn't exist. We save Provider to trigger the remove path.
-            save_group_by(&crate::app::GroupBy::Provider).unwrap();
-            let after = std::fs::read_to_string(path).unwrap();
+            save_group_by(Some(paths), &crate::app::GroupBy::Provider).unwrap();
+            let after = std::fs::read_to_string(&path).unwrap();
             // The file will have group_by=provider added, but group_by_provider should
             // not have been written and removed (no-op path exercised)
             assert!(after.contains("sort_mode=alpha"));
@@ -886,19 +839,19 @@ mod tests {
 
     #[test]
     fn load_view_mode_defaults_to_detailed() {
-        with_temp_prefs("view_mode_default", |_path| {
-            // No preferences file content written, but file exists (empty)
+        with_temp_prefs(|paths| {
+            // No preferences file content written.
             // load_view_mode reads "view_mode" key; missing -> Detailed
-            let mode = load_view_mode();
+            let mode = load_view_mode(Some(paths));
             assert_eq!(mode, ViewMode::Detailed);
         });
     }
 
     #[test]
     fn load_view_mode_explicit_compact() {
-        with_temp_prefs("view_mode_compact", |path| {
-            std::fs::write(path, "view_mode=compact\n").unwrap();
-            let mode = load_view_mode();
+        with_temp_prefs(|paths| {
+            std::fs::write(paths.preferences(), "view_mode=compact\n").unwrap();
+            let mode = load_view_mode(Some(paths));
             assert_eq!(mode, ViewMode::Compact);
         });
     }
@@ -907,43 +860,52 @@ mod tests {
 
     #[test]
     fn load_containers_sort_mode_defaults_to_alpha_host() {
-        with_temp_prefs("containers_sort_mode_default", |_path| {
-            assert_eq!(load_containers_sort_mode(), ContainersSortMode::AlphaHost);
+        with_temp_prefs(|paths| {
+            assert_eq!(
+                load_containers_sort_mode(Some(paths)),
+                ContainersSortMode::AlphaHost
+            );
         });
     }
 
     #[test]
     fn save_load_containers_sort_mode_round_trip() {
-        with_temp_prefs("containers_sort_mode_round_trip", |_path| {
-            save_containers_sort_mode(ContainersSortMode::AlphaContainer).unwrap();
+        with_temp_prefs(|paths| {
+            save_containers_sort_mode(Some(paths), ContainersSortMode::AlphaContainer).unwrap();
             assert_eq!(
-                load_containers_sort_mode(),
+                load_containers_sort_mode(Some(paths)),
                 ContainersSortMode::AlphaContainer
             );
-            save_containers_sort_mode(ContainersSortMode::AlphaHost).unwrap();
-            assert_eq!(load_containers_sort_mode(), ContainersSortMode::AlphaHost);
+            save_containers_sort_mode(Some(paths), ContainersSortMode::AlphaHost).unwrap();
+            assert_eq!(
+                load_containers_sort_mode(Some(paths)),
+                ContainersSortMode::AlphaHost
+            );
         });
     }
 
     #[test]
     fn load_containers_sort_mode_unknown_value_falls_back_to_default() {
-        with_temp_prefs("containers_sort_mode_unknown", |path| {
-            std::fs::write(path, "containers_sort_mode=garbage\n").unwrap();
-            assert_eq!(load_containers_sort_mode(), ContainersSortMode::AlphaHost);
+        with_temp_prefs(|paths| {
+            std::fs::write(paths.preferences(), "containers_sort_mode=garbage\n").unwrap();
+            assert_eq!(
+                load_containers_sort_mode(Some(paths)),
+                ContainersSortMode::AlphaHost
+            );
         });
     }
 
     #[test]
     fn containers_sort_mode_does_not_clobber_host_sort_mode() {
-        with_temp_prefs("containers_sort_mode_isolation", |path| {
-            save_sort_mode(SortMode::AlphaAlias).unwrap();
-            save_containers_sort_mode(ContainersSortMode::AlphaContainer).unwrap();
-            let content = std::fs::read_to_string(path).unwrap();
+        with_temp_prefs(|paths| {
+            save_sort_mode(Some(paths), SortMode::AlphaAlias).unwrap();
+            save_containers_sort_mode(Some(paths), ContainersSortMode::AlphaContainer).unwrap();
+            let content = std::fs::read_to_string(paths.preferences()).unwrap();
             assert!(content.contains("sort_mode=alpha_alias"));
             assert!(content.contains("containers_sort_mode=alpha_container"));
-            assert_eq!(load_sort_mode(), SortMode::AlphaAlias);
+            assert_eq!(load_sort_mode(Some(paths)), SortMode::AlphaAlias);
             assert_eq!(
-                load_containers_sort_mode(),
+                load_containers_sort_mode(Some(paths)),
                 ContainersSortMode::AlphaContainer
             );
         });
@@ -953,30 +915,30 @@ mod tests {
 
     #[test]
     fn load_containers_view_mode_defaults_to_detailed() {
-        with_temp_prefs("containers_view_mode_default", |_path| {
-            assert_eq!(load_containers_view_mode(), ViewMode::Detailed);
+        with_temp_prefs(|paths| {
+            assert_eq!(load_containers_view_mode(Some(paths)), ViewMode::Detailed);
         });
     }
 
     #[test]
     fn save_load_containers_view_mode_round_trip() {
-        with_temp_prefs("containers_view_mode_round_trip", |_path| {
-            save_containers_view_mode(ViewMode::Compact).unwrap();
-            assert_eq!(load_containers_view_mode(), ViewMode::Compact);
-            save_containers_view_mode(ViewMode::Detailed).unwrap();
-            assert_eq!(load_containers_view_mode(), ViewMode::Detailed);
+        with_temp_prefs(|paths| {
+            save_containers_view_mode(Some(paths), ViewMode::Compact).unwrap();
+            assert_eq!(load_containers_view_mode(Some(paths)), ViewMode::Compact);
+            save_containers_view_mode(Some(paths), ViewMode::Detailed).unwrap();
+            assert_eq!(load_containers_view_mode(Some(paths)), ViewMode::Detailed);
         });
     }
 
     #[test]
     fn save_containers_collapsed_hosts_writes_sorted_csv() {
-        with_temp_prefs("containers_collapsed_save", |path| {
+        with_temp_prefs(|paths| {
             let mut set = std::collections::HashSet::new();
             set.insert("zeus".to_string());
             set.insert("apollo".to_string());
             set.insert("hera".to_string());
-            save_containers_collapsed_hosts(&set).unwrap();
-            let content = std::fs::read_to_string(path).unwrap();
+            save_containers_collapsed_hosts(Some(paths), &set).unwrap();
+            let content = std::fs::read_to_string(paths.preferences()).unwrap();
             // Sorted output keeps the prefs file diff-friendly across runs.
             assert!(content.contains("containers_collapsed_hosts=apollo,hera,zeus"));
         });
@@ -984,10 +946,12 @@ mod tests {
 
     #[test]
     fn save_containers_collapsed_hosts_empty_clears_key() {
-        with_temp_prefs("containers_collapsed_clear", |path| {
-            std::fs::write(path, "containers_collapsed_hosts=alpha\n").unwrap();
-            save_containers_collapsed_hosts(&std::collections::HashSet::new()).unwrap();
-            let content = std::fs::read_to_string(path).unwrap();
+        with_temp_prefs(|paths| {
+            let path = paths.preferences();
+            std::fs::write(&path, "containers_collapsed_hosts=alpha\n").unwrap();
+            save_containers_collapsed_hosts(Some(paths), &std::collections::HashSet::new())
+                .unwrap();
+            let content = std::fs::read_to_string(&path).unwrap();
             assert!(
                 !content.contains("containers_collapsed_hosts"),
                 "empty set must remove the key entirely"
@@ -997,12 +961,12 @@ mod tests {
 
     #[test]
     fn load_containers_collapsed_hosts_round_trip() {
-        with_temp_prefs("containers_collapsed_round_trip", |_path| {
+        with_temp_prefs(|paths| {
             let mut set = std::collections::HashSet::new();
             set.insert("alpha".to_string());
             set.insert("bravo".to_string());
-            save_containers_collapsed_hosts(&set).unwrap();
-            let loaded = load_containers_collapsed_hosts();
+            save_containers_collapsed_hosts(Some(paths), &set).unwrap();
+            let loaded = load_containers_collapsed_hosts(Some(paths));
             assert_eq!(loaded, set);
         });
     }
@@ -1043,18 +1007,17 @@ mod tests {
 
     #[test]
     fn save_and_load_slow_threshold_roundtrip() {
-        with_temp_prefs("slow_threshold", |_path| {
-            save_slow_threshold(500).unwrap();
-            let loaded = load_slow_threshold();
+        with_temp_prefs(|paths| {
+            save_slow_threshold(Some(paths), 500).unwrap();
+            let loaded = load_slow_threshold(Some(paths));
             assert_eq!(loaded, 500);
         });
     }
 
     #[test]
     fn auto_ping_roundtrip_true() {
-        // Verify save_auto_ping writes a value that load_auto_ping parses back
-        // correctly. Uses the parse_value helper to avoid global PATH_OVERRIDE
-        // races when other tests call App::new() → load_auto_ping() in parallel.
+        // Verify the auto_ping parse logic with the inline parse_value helper.
+        // Pure parsing, no disk I/O needed for this assertion.
         let content = "auto_ping=true\n";
         let val = parse_value(content, "auto_ping");
         assert_eq!(val.as_deref(), Some("true"));
@@ -1081,18 +1044,18 @@ mod tests {
 
     #[test]
     fn save_and_load_theme_roundtrip() {
-        with_temp_prefs("theme_roundtrip", |_path| {
-            save_theme("catppuccin-mocha").unwrap();
-            let loaded = load_theme();
+        with_temp_prefs(|paths| {
+            save_theme(Some(paths), "catppuccin-mocha").unwrap();
+            let loaded = load_theme(Some(paths));
             assert_eq!(loaded, Some("catppuccin-mocha".to_string()));
         });
     }
 
     #[test]
     fn load_theme_missing_returns_none() {
-        with_temp_prefs("theme_missing", |path| {
-            std::fs::write(path, "sort_mode=alpha\n").unwrap();
-            let loaded = load_theme();
+        with_temp_prefs(|paths| {
+            std::fs::write(paths.preferences(), "sort_mode=alpha\n").unwrap();
+            let loaded = load_theme(Some(paths));
             assert_eq!(loaded, None);
         });
     }
@@ -1105,24 +1068,19 @@ mod tests {
         assert!(!auto_ping);
     }
 
-    // Verifies the poison-recovery pattern used by `GLOBAL_TEST_IO_LOCK` callers
-    // (`with_temp_prefs` and `visual_regression_tests::setup`). Uses a local Mutex
-    // to avoid poisoning the real lock permanently. The same
-    // `.lock().unwrap_or_else(|e| e.into_inner())` pattern is used wherever a
-    // shared Mutex guards cross-test state.
     #[test]
     fn last_seen_version_round_trip() {
-        with_temp_prefs("last_seen_roundtrip", |_path| {
-            save_last_seen_version("2.41.0").unwrap();
-            let loaded = load_last_seen_version().unwrap();
+        with_temp_prefs(|paths| {
+            save_last_seen_version(Some(paths), "2.41.0").unwrap();
+            let loaded = load_last_seen_version(Some(paths)).unwrap();
             assert_eq!(loaded.as_deref(), Some("2.41.0"));
         });
     }
 
     #[test]
     fn last_seen_version_returns_none_when_unset() {
-        with_temp_prefs("last_seen_none", |_path| {
-            let loaded = load_last_seen_version().unwrap();
+        with_temp_prefs(|paths| {
+            let loaded = load_last_seen_version(Some(paths)).unwrap();
             assert_eq!(loaded, None);
         });
     }
@@ -1140,7 +1098,7 @@ mod tests {
         assert!(joined.is_err(), "poisoning thread must have panicked");
         assert!(lock.is_poisoned(), "mutex must be poisoned after panic");
 
-        // The exact pattern used by path() and set_path_override().
+        // The poison-recovery idiom used wherever a shared Mutex guards cross-test state.
         let recovered = lock.lock().unwrap_or_else(|e| e.into_inner());
         assert!(
             recovered.is_none(),

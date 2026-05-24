@@ -74,12 +74,11 @@ pub fn import_from_file(
 /// Count how many importable entries exist in ~/.ssh/known_hosts.
 /// Returns the count of parseable hostname entries, or 0 if the file
 /// doesn't exist or can't be read.
-pub fn count_known_hosts_candidates() -> usize {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return 0,
+pub fn count_known_hosts_candidates(paths: Option<&crate::runtime::env::Paths>) -> usize {
+    let Some(paths) = paths else {
+        return 0;
     };
-    let known_hosts_path = home.join(".ssh").join("known_hosts");
+    let known_hosts_path = paths.ssh_dir().join("known_hosts");
     let file = match std::fs::File::open(&known_hosts_path) {
         Ok(f) => f,
         Err(_) => return 0,
@@ -99,12 +98,15 @@ pub fn count_known_hosts_candidates() -> usize {
 /// Import hosts from ~/.ssh/known_hosts.
 /// Returns (imported, skipped, parse_failures, read_errors).
 pub fn import_from_known_hosts(
+    paths: Option<&crate::runtime::env::Paths>,
     config: &mut SshConfigFile,
     group: Option<&str>,
 ) -> Result<(usize, usize, usize, usize), String> {
     info!("Import started: source=~/.ssh/known_hosts");
-    let home = dirs::home_dir().ok_or(crate::messages::IMPORT_HOME_DIR_UNKNOWN)?;
-    let known_hosts_path = home.join(".ssh").join("known_hosts");
+    let known_hosts_path = paths
+        .ok_or(crate::messages::IMPORT_HOME_DIR_UNKNOWN)?
+        .ssh_dir()
+        .join("known_hosts");
 
     if !known_hosts_path.exists() {
         return Err(crate::messages::IMPORT_KNOWN_HOSTS_MISSING.to_string());

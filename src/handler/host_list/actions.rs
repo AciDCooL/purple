@@ -95,7 +95,7 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
             e.provider_label.as_deref(),
             &provider_config,
         );
-        match crate::vault_ssh::resolve_pubkey_path(&e.identity_file) {
+        match crate::vault_ssh::resolve_pubkey_path(app.env().paths(), &e.identity_file) {
             Ok(pubkey) => signable.push(crate::vault_ssh::VaultSignTarget {
                 alias: e.alias.clone(),
                 role,
@@ -124,7 +124,7 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
     // process env also has none, the vault CLI will fail with a cryptic
     // error only after the user confirms the dialog. Surface this upfront
     // with a clear, actionable message.
-    let env_vault_addr = std::env::var("VAULT_ADDR").ok();
+    let env_vault_addr = app.env().vault_addr().map(str::to_string);
     let host_addrs: Vec<Option<&str>> = signable.iter().map(|t| t.vault_addr.as_deref()).collect();
     if vault_addr_missing(&host_addrs, env_vault_addr.as_deref()) {
         app.notify_error(crate::messages::VAULT_NO_ADDRESS);
@@ -137,15 +137,18 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
     let mut needs_signing: Vec<crate::vault_ssh::VaultSignTarget> =
         Vec::with_capacity(signable.len());
     for entry in &signable {
-        let check_path =
-            match crate::vault_ssh::resolve_cert_path(&entry.alias, &entry.certificate_file) {
-                Ok(p) => p,
-                Err(_) => {
-                    needs_signing.push(entry.clone());
-                    continue;
-                }
-            };
-        let status = crate::vault_ssh::check_cert_validity(&check_path);
+        let check_path = match crate::vault_ssh::resolve_cert_path(
+            app.env().paths(),
+            &entry.alias,
+            &entry.certificate_file,
+        ) {
+            Ok(p) => p,
+            Err(_) => {
+                needs_signing.push(entry.clone());
+                continue;
+            }
+        };
+        let status = crate::vault_ssh::check_cert_validity(app.env(), &check_path);
         if crate::vault_ssh::needs_renewal(&status) {
             needs_signing.push(entry.clone());
         }
@@ -310,7 +313,9 @@ pub(super) fn cycle_group_by(app: &mut App) {
         GroupBy::None => {
             app.hosts_state.set_group_by(GroupBy::Provider);
             app.apply_sort();
-            if let Err(e) = crate::preferences::save_group_by(app.hosts_state.group_by()) {
+            if let Err(e) =
+                crate::preferences::save_group_by(app.env().paths(), app.hosts_state.group_by())
+            {
                 app.notify_error(crate::messages::grouped_by_save_failed(
                     &app.hosts_state.group_by().label(),
                     &e,
@@ -338,7 +343,9 @@ pub(super) fn cycle_group_by(app: &mut App) {
             if user_tags.is_empty() {
                 app.hosts_state.set_group_by(GroupBy::None);
                 app.apply_sort();
-                if let Err(e) = crate::preferences::save_group_by(app.hosts_state.group_by()) {
+                if let Err(e) =
+                    crate::preferences::save_group_by(app.env().paths(), app.hosts_state.group_by())
+                {
                     app.notify_error(crate::messages::ungrouped_save_failed(&e));
                 } else {
                     app.notify(crate::messages::UNGROUPED);
@@ -348,7 +355,9 @@ pub(super) fn cycle_group_by(app: &mut App) {
                 // tabs, no picker needed.
                 app.hosts_state.set_group_by(GroupBy::Tag(String::new()));
                 app.apply_sort();
-                if let Err(e) = crate::preferences::save_group_by(app.hosts_state.group_by()) {
+                if let Err(e) =
+                    crate::preferences::save_group_by(app.env().paths(), app.hosts_state.group_by())
+                {
                     app.notify_error(crate::messages::grouped_by_tag_save_failed(&e));
                 } else {
                     app.notify(crate::messages::GROUPED_BY_TAG);
@@ -358,7 +367,9 @@ pub(super) fn cycle_group_by(app: &mut App) {
         GroupBy::Tag(_) => {
             app.hosts_state.set_group_by(GroupBy::None);
             app.apply_sort();
-            if let Err(e) = crate::preferences::save_group_by(app.hosts_state.group_by()) {
+            if let Err(e) =
+                crate::preferences::save_group_by(app.env().paths(), app.hosts_state.group_by())
+            {
                 app.notify_error(crate::messages::ungrouped_save_failed(&e));
             } else {
                 app.notify(crate::messages::UNGROUPED);
@@ -443,7 +454,7 @@ pub(super) fn open_theme_picker(app: &mut App) {
     app.ui.theme_picker_mut().builtins = builtins;
     app.ui.theme_picker_mut().custom = custom;
     app.ui.theme_picker_mut().saved_name =
-        crate::preferences::load_theme().unwrap_or_else(|| "Purple".to_string());
+        crate::preferences::load_theme(app.env().paths()).unwrap_or_else(|| "Purple".to_string());
     app.ui.theme_picker_mut().original = Some(crate::ui::theme::current_theme());
     app.set_screen(Screen::ThemePicker);
 }

@@ -252,7 +252,7 @@ fn copy_selected_pubkey(app: &mut App) {
         return;
     };
     let pub_path = format!("{}.pub", key_info.display_path);
-    let expanded = expand_tilde(&pub_path);
+    let expanded = expand_tilde(app.env().paths(), &pub_path);
     let body = match std::fs::read_to_string(&expanded) {
         Ok(s) => s,
         Err(e) => {
@@ -306,11 +306,11 @@ fn open_push_picker(app: &mut App) {
     log::debug!("[purple] keys: opened push picker for index={}", key_index);
 }
 
-/// Expand a leading `~/` to the current home directory. Unchanged otherwise.
-fn expand_tilde(p: &str) -> String {
+/// Expand a leading `~/` to the injected home directory. Unchanged otherwise.
+fn expand_tilde(paths: Option<&crate::runtime::env::Paths>, p: &str) -> String {
     if let Some(rest) = p.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest).display().to_string();
+        if let Some(paths) = paths {
+            return paths.home().join(rest).display().to_string();
         }
     }
     p.to_string()
@@ -328,19 +328,26 @@ mod tests {
 
     #[test]
     fn expand_tilde_replaces_prefix() {
-        let result = expand_tilde("~/.ssh/id_ed25519.pub");
-        assert!(result.contains(".ssh/id_ed25519.pub"));
+        let paths = crate::runtime::env::Paths::new("/home/u");
+        let result = expand_tilde(Some(&paths), "~/.ssh/id_ed25519.pub");
+        assert_eq!(result, "/home/u/.ssh/id_ed25519.pub");
         assert!(!result.starts_with('~'));
     }
 
     #[test]
     fn expand_tilde_passthrough_for_absolute() {
-        assert_eq!(expand_tilde("/tmp/id_ed25519.pub"), "/tmp/id_ed25519.pub");
+        assert_eq!(
+            expand_tilde(None, "/tmp/id_ed25519.pub"),
+            "/tmp/id_ed25519.pub"
+        );
     }
 
     #[test]
     fn expand_tilde_passthrough_for_relative() {
-        assert_eq!(expand_tilde("keys/id_ed25519.pub"), "keys/id_ed25519.pub");
+        assert_eq!(
+            expand_tilde(None, "keys/id_ed25519.pub"),
+            "keys/id_ed25519.pub"
+        );
     }
 
     fn key(name: &str) -> SshKeyInfo {
@@ -363,8 +370,6 @@ mod tests {
 
     fn make_app() -> App {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
-        crate::containers::set_path_override(scratch.join("container_cache.jsonl"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(""),
             path: scratch.join("test_config"),

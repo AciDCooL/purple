@@ -7321,7 +7321,6 @@ use crate::app::SourceKind;
 
 fn make_jump_app(content: &str) -> App {
     let scratch = tempfile::tempdir().expect("tempdir").keep();
-    crate::preferences::set_path_override(scratch.join("preferences"));
     let config = crate::ssh_config::model::SshConfigFile {
         elements: crate::ssh_config::model::SshConfigFile::parse_content(content),
         path: scratch.join("test_config"),
@@ -7573,9 +7572,6 @@ fn resolve_recent_ref_snippet_dangling_returns_none() {
 fn record_jump_hit_round_trips_via_recents() {
     // End-to-end: record a hit through the public API, then opening the
     // jump again should surface it as a recent.
-    let _g = crate::app::jump::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let recents_dir = tempfile::tempdir().expect("tempdir");
     crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
     let mut app = make_jump_app("Host visited\n  HostName visited.example\n");
@@ -8702,70 +8698,66 @@ fn bulk_open_with_zero_tags_in_config_succeeds() {
 
 #[test]
 fn post_init_enqueues_toast_when_version_advanced() {
-    crate::preferences::tests_helpers::with_temp_prefs("post_init_toast", |_path| {
-        crate::preferences::save_last_seen_version("0.0.1").unwrap();
-        let mut app = make_app("");
-        app.post_init();
-        let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
-        assert!(
-            app.status_center
-                .toast
-                .as_ref()
-                .is_some_and(|t| t.text.contains(fragment)),
-            "expected sticky upgrade toast"
-        );
-        assert!(app.status_center.toast.as_ref().is_some_and(|t| t.sticky));
-    });
+    let mut app = make_app("");
+    crate::preferences::save_last_seen_version(app.env().paths(), "0.0.1").unwrap();
+    app.post_init();
+    let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
+    assert!(
+        app.status_center
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.text.contains(fragment)),
+        "expected sticky upgrade toast"
+    );
+    assert!(app.status_center.toast.as_ref().is_some_and(|t| t.sticky));
 }
 
 #[test]
 fn post_init_silent_when_versions_equal() {
-    crate::preferences::tests_helpers::with_temp_prefs("post_init_silent", |_path| {
-        crate::preferences::save_last_seen_version(env!("CARGO_PKG_VERSION")).unwrap();
-        let mut app = make_app("");
-        app.post_init();
-        let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
-        assert!(
-            !app.status_center
-                .toast
-                .as_ref()
-                .is_some_and(|t| t.text.contains(fragment)),
-            "no toast when last_seen matches current"
-        );
-    });
+    let mut app = make_app("");
+    crate::preferences::save_last_seen_version(app.env().paths(), env!("CARGO_PKG_VERSION"))
+        .unwrap();
+    app.post_init();
+    let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
+    assert!(
+        !app.status_center
+            .toast
+            .as_ref()
+            .is_some_and(|t| t.text.contains(fragment)),
+        "no toast when last_seen matches current"
+    );
 }
 
 #[test]
 fn post_init_invokes_scan_keys() {
-    crate::preferences::tests_helpers::with_temp_prefs("post_init_scan_keys", |_path| {
-        crate::preferences::save_last_seen_version(env!("CARGO_PKG_VERSION")).unwrap();
-        let mut app = make_app("");
-        // Sentinel that only survives if scan_keys is NOT called: scan_keys
-        // unconditionally replaces self.keys.list when dirs::home_dir() returns Some.
-        app.keys.list.push(crate::ssh_keys::SshKeyInfo {
-            name: "_post_init_sentinel".into(),
-            display_path: String::new(),
-            key_type: String::new(),
-            bits: String::new(),
-            fingerprint: String::new(),
-            comment: String::new(),
-            linked_hosts: vec![],
-            bishop_art: String::new(),
-            strength_score: 0,
-            encrypted: false,
-            agent_loaded: false,
-            is_certificate: false,
-            mtime_ts: None,
-        });
-        app.post_init();
-        assert!(
-            !app.keys
-                .list
-                .iter()
-                .any(|k| k.name == "_post_init_sentinel"),
-            "post_init must invoke scan_keys so the Keys tab is populated on first Tab navigation"
-        );
+    let mut app = make_app("");
+    crate::preferences::save_last_seen_version(app.env().paths(), env!("CARGO_PKG_VERSION"))
+        .unwrap();
+    // Sentinel that only survives if scan_keys is NOT called: scan_keys
+    // unconditionally replaces self.keys.list when dirs::home_dir() returns Some.
+    app.keys.list.push(crate::ssh_keys::SshKeyInfo {
+        name: "_post_init_sentinel".into(),
+        display_path: String::new(),
+        key_type: String::new(),
+        bits: String::new(),
+        fingerprint: String::new(),
+        comment: String::new(),
+        linked_hosts: vec![],
+        bishop_art: String::new(),
+        strength_score: 0,
+        encrypted: false,
+        agent_loaded: false,
+        is_certificate: false,
+        mtime_ts: None,
     });
+    app.post_init();
+    assert!(
+        !app.keys
+            .list
+            .iter()
+            .any(|k| k.name == "_post_init_sentinel"),
+        "post_init must invoke scan_keys so the Keys tab is populated on first Tab navigation"
+    );
 }
 
 #[test]
@@ -8776,7 +8768,6 @@ fn apply_alias_renames_migrates_history_and_recents_in_batch() {
     // so its prune in `reload_hosts` sees the new alias as live.
     let dir = tempfile::tempdir().expect("tempdir");
     crate::app::jump::test_path::set(dir.path().join("recents.json"));
-    crate::preferences::set_path_override(dir.path().join("preferences"));
 
     let mut app = make_app("Host a\n  HostName 1.2.3.4\nHost c\n  HostName 5.6.7.8\n");
     app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
@@ -8840,7 +8831,6 @@ fn apply_alias_renames_migrates_history_and_recents_in_batch() {
     assert_eq!(host_keys, vec!["b".to_string(), "c".to_string()]);
 
     crate::app::jump::test_path::clear();
-    crate::preferences::clear_path_override_for_tests();
 }
 
 #[test]
@@ -8851,9 +8841,6 @@ fn migrate_alias_keyed_caches_moves_ping_container_and_in_flight_sets() {
     // runs first. cert_cache is intentionally NOT migrated here; the
     // rename invalidates the certificate path so `refresh_cert_cache`
     // rebuilds it under the new alias from scratch.
-    let dir = tempfile::tempdir().expect("tempdir");
-    crate::containers::set_path_override(dir.path().join("container_cache.jsonl"));
-
     let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
 
     app.ping.status.insert(
@@ -8906,8 +8893,6 @@ fn migrate_alias_keyed_caches_moves_ping_container_and_in_flight_sets() {
     // new alias, which checks the disk-side cert path.
     assert!(app.vault.cert_cache.contains_key("a"));
     assert!(!app.vault.cert_cache.contains_key("b"));
-
-    crate::containers::clear_path_override();
 }
 
 #[test]
@@ -8915,9 +8900,6 @@ fn migrate_alias_keyed_caches_moves_host_paths_refresh_batch_and_sign_in_flight(
     // file_browser host_paths, refresh_batch in_flight_aliases, and the
     // vault sign_in_flight set are all alias-keyed. Without migration a
     // rename would silently drop in-flight state and leak preferences.
-    let dir = tempfile::tempdir().expect("tempdir");
-    crate::containers::set_path_override(dir.path().join("container_cache.jsonl"));
-
     let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
 
     app.file_browser_state.host_paths.insert(
@@ -8952,15 +8934,10 @@ fn migrate_alias_keyed_caches_moves_host_paths_refresh_batch_and_sign_in_flight(
         assert!(!sign.contains("a"));
         assert!(sign.contains("b"));
     }
-
-    crate::containers::clear_path_override();
 }
 
 #[test]
 fn migrate_alias_keyed_caches_identity_pair_is_noop() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    crate::containers::set_path_override(dir.path().join("container_cache.jsonl"));
-
     let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
     app.ping.status.insert(
         "a".to_string(),
@@ -8973,8 +8950,6 @@ fn migrate_alias_keyed_caches_identity_pair_is_noop() {
         app.ping.status.get("a"),
         Some(crate::app::PingStatus::Reachable { rtt_ms: 7 })
     ));
-
-    crate::containers::clear_path_override();
 }
 
 #[test]
@@ -8986,13 +8961,8 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
     // both route through this function; if a future refactor splits
     // the protocol again, this test fails before the user sees a
     // regression.
-    let _g = crate::app::jump::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let dir = tempfile::tempdir().expect("tempdir");
     crate::app::jump::test_path::set(dir.path().join("recents.json"));
-    crate::preferences::set_path_override(dir.path().join("preferences"));
-    crate::containers::set_path_override(dir.path().join("container_cache.jsonl"));
 
     // Two hosts. After rename the SSH config has top-new + bot; history
     // for top-old should follow to top-new and keep its index-0 slot on
@@ -9069,8 +9039,6 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
     );
 
     crate::app::jump::test_path::clear();
-    crate::preferences::clear_path_override_for_tests();
-    crate::containers::clear_path_override();
 }
 
 #[test]
@@ -9098,7 +9066,7 @@ fn migrate_renames_persistent_state_moves_history_recents_and_collapsed_on_disk(
     let history_path = dir.path().join("history.tsv");
     crate::history::test_path::set(history_path.clone());
     crate::app::jump::test_path::set(dir.path().join("recents.json"));
-    crate::preferences::set_path_override(dir.path().join("preferences"));
+    let paths = crate::runtime::env::Paths::new(dir.path());
 
     // Seed history.tsv. Schema: alias \t last_connected \t count \t csv-of-timestamps.
     std::fs::write(&history_path, "web-old\t1700000000\t12\t1700000000\n").unwrap();
@@ -9117,9 +9085,13 @@ fn migrate_renames_persistent_state_moves_history_recents_and_collapsed_on_disk(
     // Seed the collapsed-hosts preference.
     let mut collapsed = std::collections::HashSet::new();
     collapsed.insert("web-old".to_string());
-    crate::preferences::save_containers_collapsed_hosts(&collapsed).expect("seed collapsed_hosts");
+    crate::preferences::save_containers_collapsed_hosts(Some(&paths), &collapsed)
+        .expect("seed collapsed_hosts");
 
-    crate::app::migrate_renames_persistent_state(&[("web-old".to_string(), "web-new".to_string())]);
+    crate::app::migrate_renames_persistent_state(
+        Some(&paths),
+        &[("web-old".to_string(), "web-new".to_string())],
+    );
 
     let history_after = std::fs::read_to_string(&history_path).unwrap();
     // First three TSV columns: alias \t last_connected \t count.
@@ -9144,13 +9116,12 @@ fn migrate_renames_persistent_state_moves_history_recents_and_collapsed_on_disk(
         .collect();
     assert_eq!(host_keys, vec!["web-new".to_string()]);
 
-    let collapsed_after = crate::preferences::load_containers_collapsed_hosts();
+    let collapsed_after = crate::preferences::load_containers_collapsed_hosts(Some(&paths));
     assert!(collapsed_after.contains("web-new"));
     assert!(!collapsed_after.contains("web-old"));
 
     crate::history::test_path::clear();
     crate::app::jump::test_path::clear();
-    crate::preferences::clear_path_override_for_tests();
 }
 
 #[test]
@@ -9164,7 +9135,7 @@ fn migrate_renames_persistent_state_skips_identity_pairs() {
     // refactor that accidentally rewrites the file on every call.
     std::fs::write(&history_path, "web\t1700000000\t5\t1700000000\n").unwrap();
 
-    crate::app::migrate_renames_persistent_state(&[("web".to_string(), "web".to_string())]);
+    crate::app::migrate_renames_persistent_state(None, &[("web".to_string(), "web".to_string())]);
 
     let after = std::fs::read_to_string(&history_path).unwrap();
     assert!(after.contains("web\t1700000000\t5"));
@@ -9177,7 +9148,7 @@ fn migrate_renames_persistent_state_empty_input_is_no_op() {
     let dir = tempfile::tempdir().expect("tempdir");
     crate::history::test_path::set(dir.path().join("history.tsv"));
     // History file deliberately absent. The helper must not panic.
-    crate::app::migrate_renames_persistent_state(&[]);
+    crate::app::migrate_renames_persistent_state(None, &[]);
     crate::history::test_path::clear();
 }
 
@@ -9198,7 +9169,6 @@ fn record_key_use_persists_via_app_boundary() {
     crate::key_activity::set_path_override(activity_dir.path().join("key_activity.json"));
 
     let scratch = tempfile::tempdir().expect("scratch tempdir");
-    crate::preferences::set_path_override(scratch.path().join("preferences"));
     let config = crate::ssh_config::model::SshConfigFile {
         elements: crate::ssh_config::model::SshConfigFile::parse_content(""),
         path: scratch.path().join("test_config"),

@@ -99,6 +99,7 @@ pub fn handle_quick_add(
 }
 
 pub fn handle_import(
+    env: &crate::runtime::env::Env,
     mut config: SshConfigFile,
     file: Option<&str>,
     known_hosts: bool,
@@ -114,7 +115,7 @@ pub fn handle_import(
         group
     );
     let result = if known_hosts {
-        import::import_from_known_hosts(&mut config, group)
+        import::import_from_known_hosts(env.paths(), &mut config, group)
     } else if let Some(path) = file {
         let resolved = super::resolve_config_path(path)?;
         import::import_from_file(&mut config, &resolved, group)
@@ -159,6 +160,7 @@ pub fn handle_import(
 }
 
 pub fn handle_sync(
+    env: &crate::runtime::env::Env,
     mut config: SshConfigFile,
     provider_name: Option<&str>,
     dry_run: bool,
@@ -345,7 +347,7 @@ pub fn handle_sync(
                     "[purple] cli sync: migrating per-host state for {} rename(s)",
                     all_renames.len()
                 );
-                crate::app::migrate_renames_persistent_state(&all_renames);
+                crate::app::migrate_renames_persistent_state(env.paths(), &all_renames);
             }
         }
     }
@@ -359,7 +361,10 @@ pub fn handle_sync(
     Ok(())
 }
 
-pub fn handle_provider_command(command: ProviderCommands) -> Result<()> {
+pub fn handle_provider_command(
+    env: &crate::runtime::env::Env,
+    command: ProviderCommands,
+) -> Result<()> {
     log::info!("[purple] cli provider: dispatch");
     match command {
         ProviderCommands::Add {
@@ -443,7 +448,7 @@ pub fn handle_provider_command(command: ProviderCommands) -> Result<()> {
                 }
                 if token.is_none()
                     && !token_stdin
-                    && std::env::var("PURPLE_TOKEN").is_err()
+                    && env.purple_token().is_none()
                     && !existing.token.is_empty()
                 {
                     token = Some(existing.token.clone());
@@ -510,11 +515,11 @@ pub fn handle_provider_command(command: ProviderCommands) -> Result<()> {
             let token = if aws_has_profile
                 && token.is_none()
                 && !token_stdin
-                && std::env::var("PURPLE_TOKEN").is_err()
+                && env.purple_token().is_none()
             {
                 String::new()
             } else {
-                match super::resolve_token(token, token_stdin) {
+                match super::resolve_token(env, token, token_stdin) {
                     Ok(t) => t,
                     Err(e) => {
                         eprintln!("{}", e);
@@ -941,7 +946,10 @@ pub fn prompt_hidden_input(prompt: &str) -> Result<Option<String>> {
 /// Used by the `CertCheckResult` handler so every cache entry carries a
 /// mtime alongside its status, enabling mtime-based lazy invalidation when
 /// an external actor (CLI, another purple instance) rewrites the cert.
-pub fn handle_password_command(command: PasswordCommands) -> Result<()> {
+pub fn handle_password_command(
+    env: &crate::runtime::env::Env,
+    command: PasswordCommands,
+) -> Result<()> {
     log::info!("[purple] cli password: dispatch");
     match command {
         PasswordCommands::Set { alias } => {
@@ -958,7 +966,7 @@ pub fn handle_password_command(command: PasswordCommands) -> Result<()> {
                     }
                 };
 
-            askpass::store_in_keychain(&alias, &password)?;
+            askpass::store_in_keychain(env, &alias, &password)?;
             println!(
                 "Password stored for {}. Set 'keychain' as password source to use it.",
                 alias
@@ -966,7 +974,7 @@ pub fn handle_password_command(command: PasswordCommands) -> Result<()> {
             Ok(())
         }
         PasswordCommands::Remove { alias } => {
-            askpass::remove_from_keychain(&alias)?;
+            askpass::remove_from_keychain(env, &alias)?;
             println!("{}", crate::messages::cli::password_removed(&alias));
             Ok(())
         }
@@ -974,6 +982,7 @@ pub fn handle_password_command(command: PasswordCommands) -> Result<()> {
 }
 
 pub fn handle_snippet_command(
+    env: &crate::runtime::env::Env,
     config: SshConfigFile,
     command: SnippetCommands,
     config_path: &Path,
@@ -1090,10 +1099,10 @@ pub fn handle_snippet_command(
                 let askpass = host
                     .askpass
                     .clone()
-                    .or_else(preferences::load_askpass_default);
-                super::ensure_proton_login(askpass.as_deref());
-                let bw_session = super::ensure_bw_session(None, askpass.as_deref());
-                super::ensure_keychain_password(&host.alias, askpass.as_deref());
+                    .or_else(|| preferences::load_askpass_default(env.paths()));
+                super::ensure_proton_login(env, askpass.as_deref());
+                let bw_session = super::ensure_bw_session(env, None, askpass.as_deref());
+                super::ensure_keychain_password(env, &host.alias, askpass.as_deref());
                 match snippet::run_snippet(
                     &host.alias,
                     config_path,
@@ -1126,7 +1135,10 @@ pub fn handle_snippet_command(
                 let config_path = config_path.to_path_buf();
                 // Resolve BW session if any target uses Bitwarden
                 let any_bw = targets.iter().any(|h| {
-                    let askpass = h.askpass.clone().or_else(preferences::load_askpass_default);
+                    let askpass = h
+                        .askpass
+                        .clone()
+                        .or_else(|| preferences::load_askpass_default(env.paths()));
                     askpass.as_deref().unwrap_or("").starts_with("bw:")
                 });
                 let bw_session = if any_bw {
@@ -1134,8 +1146,8 @@ pub fn handle_snippet_command(
                         .iter()
                         .find_map(|h| h.askpass.as_ref().filter(|a| a.starts_with("bw:")))
                         .cloned()
-                        .or_else(preferences::load_askpass_default);
-                    super::ensure_bw_session(None, bw_askpass.as_deref())
+                        .or_else(|| preferences::load_askpass_default(env.paths()));
+                    super::ensure_bw_session(env, None, bw_askpass.as_deref())
                 } else {
                     None
                 };
@@ -1144,16 +1156,20 @@ pub fn handle_snippet_command(
                 // only ensure the user is logged in once before the batch starts.
                 let target_askpass: Vec<Option<String>> =
                     targets.iter().map(|h| h.askpass.clone()).collect();
-                if let Some(askpass) =
-                    select_proton_askpass(&target_askpass, preferences::load_askpass_default())
-                {
-                    super::ensure_proton_login(Some(&askpass));
+                if let Some(askpass) = select_proton_askpass(
+                    &target_askpass,
+                    preferences::load_askpass_default(env.paths()),
+                ) {
+                    super::ensure_proton_login(env, Some(&askpass));
                 }
                 let targets_info: Vec<_> = targets
                     .iter()
                     .map(|h| {
-                        let askpass = h.askpass.clone().or_else(preferences::load_askpass_default);
-                        super::ensure_keychain_password(&h.alias, askpass.as_deref());
+                        let askpass = h
+                            .askpass
+                            .clone()
+                            .or_else(|| preferences::load_askpass_default(env.paths()));
+                        super::ensure_keychain_password(env, &h.alias, askpass.as_deref());
                         (h.alias.clone(), askpass)
                     })
                     .collect();
@@ -1207,14 +1223,14 @@ pub fn handle_snippet_command(
                     let askpass = host
                         .askpass
                         .clone()
-                        .or_else(preferences::load_askpass_default);
-                    super::ensure_proton_login(askpass.as_deref());
+                        .or_else(|| preferences::load_askpass_default(env.paths()));
+                    super::ensure_proton_login(env, askpass.as_deref());
                     if let Some(token) =
-                        super::ensure_bw_session(bw_session.as_deref(), askpass.as_deref())
+                        super::ensure_bw_session(env, bw_session.as_deref(), askpass.as_deref())
                     {
                         bw_session = Some(token);
                     }
-                    super::ensure_keychain_password(&host.alias, askpass.as_deref());
+                    super::ensure_keychain_password(env, &host.alias, askpass.as_deref());
                     println!("{}", crate::messages::cli::host_separator(&host.alias));
                     match snippet::run_snippet(
                         &host.alias,
@@ -1268,11 +1284,12 @@ pub fn handle_logs_command(tail: bool, clear: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn handle_theme_command(command: ThemeCommands) -> Result<()> {
+pub fn handle_theme_command(env: &crate::runtime::env::Env, command: ThemeCommands) -> Result<()> {
     log::info!("[purple] cli theme: dispatch");
     match command {
         ThemeCommands::List => {
-            let current = preferences::load_theme().unwrap_or_else(|| "Purple".to_string());
+            let current =
+                preferences::load_theme(env.paths()).unwrap_or_else(|| "Purple".to_string());
             println!("{}", crate::messages::cli::BUILTIN_THEMES);
             for theme in ui::theme::ThemeDef::builtins() {
                 let marker = if theme.name.eq_ignore_ascii_case(&current) {
@@ -1303,7 +1320,7 @@ pub fn handle_theme_command(command: ThemeCommands) -> Result<()> {
             });
             match found {
                 Some(theme) => {
-                    preferences::save_theme(&theme.name)?;
+                    preferences::save_theme(env.paths(), &theme.name)?;
                     println!("{}", crate::messages::cli::theme_set(&theme.name));
                 }
                 None => {
@@ -1316,6 +1333,7 @@ pub fn handle_theme_command(command: ThemeCommands) -> Result<()> {
 }
 
 pub fn handle_vault_sign_command(
+    env: &crate::runtime::env::Env,
     mut config: SshConfigFile,
     alias: Option<String>,
     all: bool,
@@ -1356,7 +1374,7 @@ pub fn handle_vault_sign_command(
                 }
             };
 
-            let pubkey = match vault_ssh::resolve_pubkey_path(&entry.identity_file) {
+            let pubkey = match vault_ssh::resolve_pubkey_path(env.paths(), &entry.identity_file) {
                 Ok(p) => p,
                 Err(e) => {
                     println!("{}", crate::messages::cli::skipping_host(&entry.alias, &e));
@@ -1364,8 +1382,9 @@ pub fn handle_vault_sign_command(
                     continue;
                 }
             };
-            let cert_path = vault_ssh::resolve_cert_path(&entry.alias, &entry.certificate_file)?;
-            let status = vault_ssh::check_cert_validity(&cert_path);
+            let cert_path =
+                vault_ssh::resolve_cert_path(env.paths(), &entry.alias, &entry.certificate_file)?;
+            let status = vault_ssh::check_cert_validity(env, &cert_path);
 
             if !vault_ssh::needs_renewal(&status) {
                 skipped += 1;
@@ -1383,6 +1402,7 @@ pub fn handle_vault_sign_command(
             });
             print!("{}", crate::messages::cli::vault_signing_host(&entry.alias));
             match vault_ssh::sign_certificate(
+                env,
                 &role,
                 &pubkey,
                 &entry.alias,
@@ -1438,7 +1458,7 @@ pub fn handle_vault_sign_command(
         )
         .with_context(|| crate::messages::cli::vault_no_role(&alias))?;
 
-        let pubkey = vault_ssh::resolve_pubkey_path(&entry.identity_file)?;
+        let pubkey = vault_ssh::resolve_pubkey_path(env.paths(), &entry.identity_file)?;
         let resolved_addr = cli_vault_addr.clone().or_else(|| {
             vault_ssh::resolve_vault_addr(
                 entry.vault_addr.as_deref(),
@@ -1447,7 +1467,8 @@ pub fn handle_vault_sign_command(
                 &provider_config,
             )
         });
-        let result = vault_ssh::sign_certificate(&role, &pubkey, &alias, resolved_addr.as_deref())?;
+        let result =
+            vault_ssh::sign_certificate(env, &role, &pubkey, &alias, resolved_addr.as_deref())?;
         // Honor the same invariant as the TUI paths: never overwrite a
         // user-set CertificateFile. Only write the directive (and the
         // SSH config) when the host has none yet.

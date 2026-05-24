@@ -42,7 +42,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 
 fn close_and_mark_seen(app: &mut App) {
     let version = env!("CARGO_PKG_VERSION");
-    if let Err(e) = crate::preferences::save_last_seen_version(version) {
+    if let Err(e) = crate::preferences::save_last_seen_version(app.env().paths(), version) {
         log::warn!("[purple] failed to persist last_seen_version: {}", e);
     }
     dismiss_whats_new_toast(app);
@@ -64,7 +64,6 @@ mod tests {
 
     fn make_app_on_whats_new(initial_scroll: u16) -> App {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(""),
             path: scratch.join("test_config"),

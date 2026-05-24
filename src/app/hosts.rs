@@ -72,7 +72,7 @@ impl App {
             // the same invariant as edit_host_from_form: never overwrite a
             // user-set custom path.
             if crate::should_write_certificate_file(&entry.certificate_file) {
-                let cert_path = crate::vault_ssh::cert_path_for(&alias)
+                let cert_path = crate::vault_ssh::cert_path_for(self.env().paths(), &alias)
                     .map_err(|e| crate::messages::cert_path_resolve_failed(&e))?;
                 // The host block was just upserted above, so the alias MUST
                 // exist. Assert the invariant to catch regressions early.
@@ -223,7 +223,7 @@ impl App {
         // custom CertificateFile is preserved across an edit.
         if entry.vault_ssh.is_some() {
             if crate::should_write_certificate_file(&old_entry.certificate_file) {
-                let cert_path = crate::vault_ssh::cert_path_for(&entry.alias)
+                let cert_path = crate::vault_ssh::cert_path_for(self.env().paths(), &entry.alias)
                     .map_err(|e| crate::messages::cert_path_resolve_failed(&e))?;
                 // Synchronous mutation: the host block was just updated, so
                 // the alias MUST exist. Assert the invariant.
@@ -243,11 +243,17 @@ impl App {
             // left alone. Compare the expanded form on both sides so a
             // tilde-relative directive (`~/.purple/certs/...`) and the
             // absolute path produced by `cert_path_for` match.
-            let purple_managed = crate::vault_ssh::cert_path_for(&entry.alias).ok();
+            let purple_managed =
+                crate::vault_ssh::cert_path_for(self.env().paths(), &entry.alias).ok();
             let existing_resolved = if old_entry.certificate_file.is_empty() {
                 None
             } else {
-                crate::vault_ssh::resolve_cert_path(&entry.alias, &old_entry.certificate_file).ok()
+                crate::vault_ssh::resolve_cert_path(
+                    self.env().paths(),
+                    &entry.alias,
+                    &old_entry.certificate_file,
+                )
+                .ok()
             };
             if purple_managed.is_some() && purple_managed == existing_resolved {
                 let _ = self
@@ -339,7 +345,8 @@ impl App {
             if old_alias == new_alias {
                 continue;
             }
-            let Ok(old_cert) = crate::vault_ssh::cert_path_for(old_alias) else {
+            let Ok(old_cert) = crate::vault_ssh::cert_path_for(self.env().paths(), old_alias)
+            else {
                 continue;
             };
             match std::fs::remove_file(&old_cert) {
@@ -439,10 +446,14 @@ impl App {
             }
         }
         if container_cache_changed {
-            crate::containers::save_container_cache(&self.container_state.cache);
+            crate::containers::save_container_cache(
+                self.env().paths(),
+                &self.container_state.cache,
+            );
         }
         if collapsed_hosts_changed {
             if let Err(e) = crate::preferences::save_containers_collapsed_hosts(
+                self.env().paths(),
                 &self.containers_overview.collapsed_hosts,
             ) {
                 log::warn!("[config] failed to save collapsed_hosts after rename: {e}");
@@ -654,7 +665,10 @@ impl App {
 /// the migration continues with the remaining state stores. Losing one
 /// store is a degradation; aborting the whole migration would leave the
 /// SSH config diverged from the on-disk per-host state stores.
-pub fn migrate_renames_persistent_state(renames: &[(String, String)]) {
+pub fn migrate_renames_persistent_state(
+    paths: Option<&crate::runtime::env::Paths>,
+    renames: &[(String, String)],
+) {
     for (old_alias, new_alias) in renames {
         if old_alias == new_alias {
             continue;
@@ -670,10 +684,10 @@ pub fn migrate_renames_persistent_state(renames: &[(String, String)]) {
             }
         }
 
-        let mut collapsed = crate::preferences::load_containers_collapsed_hosts();
+        let mut collapsed = crate::preferences::load_containers_collapsed_hosts(paths);
         if collapsed.remove(old_alias) {
             collapsed.insert(new_alias.clone());
-            if let Err(e) = crate::preferences::save_containers_collapsed_hosts(&collapsed) {
+            if let Err(e) = crate::preferences::save_containers_collapsed_hosts(paths, &collapsed) {
                 log::warn!("[config] failed to save collapsed_hosts after cli sync rename: {e}");
             }
         }

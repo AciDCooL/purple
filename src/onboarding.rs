@@ -4,7 +4,7 @@ pub struct PostInitOutcome {
     pub upgrade_toast: Option<String>,
 }
 
-pub fn evaluate() -> PostInitOutcome {
+pub fn evaluate(paths: Option<&crate::runtime::env::Paths>) -> PostInitOutcome {
     let current = match Version::parse(env!("CARGO_PKG_VERSION")) {
         Ok(v) => v,
         Err(_) => {
@@ -13,7 +13,7 @@ pub fn evaluate() -> PostInitOutcome {
             };
         }
     };
-    let last = crate::preferences::load_last_seen_version()
+    let last = crate::preferences::load_last_seen_version(paths)
         .ok()
         .flatten()
         .and_then(|s| Version::parse(s.as_str()).ok());
@@ -66,6 +66,7 @@ pub fn evaluate() -> PostInitOutcome {
 mod tests {
     use super::*;
     use crate::preferences;
+    use crate::runtime::env::Paths;
 
     fn current() -> String {
         env!("CARGO_PKG_VERSION").to_string()
@@ -73,55 +74,57 @@ mod tests {
 
     #[test]
     fn first_launch_returns_no_toast() {
-        preferences::tests_helpers::with_temp_prefs("onboarding_first", |_| {
-            let outcome = evaluate();
-            assert!(
-                outcome.upgrade_toast.is_none(),
-                "first launch must not show upgrade toast"
-            );
-        });
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        let outcome = evaluate(Some(&paths));
+        assert!(
+            outcome.upgrade_toast.is_none(),
+            "first launch must not show upgrade toast"
+        );
     }
 
     #[test]
     fn up_to_date_returns_no_toast() {
-        preferences::tests_helpers::with_temp_prefs("onboarding_up_to_date", |_| {
-            preferences::save_last_seen_version(&current()).unwrap();
-            let outcome = evaluate();
-            assert!(outcome.upgrade_toast.is_none());
-            // evaluate() must never rewrite last_seen_version: any write
-            // would race ahead of the installed release and suppress a
-            // legitimate upgrade toast after a brew/curl install.
-            assert_eq!(
-                preferences::load_last_seen_version().unwrap().as_deref(),
-                Some(current().as_str()),
-                "evaluate() must not touch last_seen_version when up-to-date"
-            );
-        });
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        preferences::save_last_seen_version(Some(&paths), &current()).unwrap();
+        let outcome = evaluate(Some(&paths));
+        assert!(outcome.upgrade_toast.is_none());
+        // evaluate() must never rewrite last_seen_version: any write
+        // would race ahead of the installed release and suppress a
+        // legitimate upgrade toast after a brew/curl install.
+        assert_eq!(
+            preferences::load_last_seen_version(Some(&paths))
+                .unwrap()
+                .as_deref(),
+            Some(current().as_str()),
+            "evaluate() must not touch last_seen_version when up-to-date"
+        );
     }
 
     #[test]
     fn downgrade_returns_no_toast() {
-        preferences::tests_helpers::with_temp_prefs("onboarding_downgrade", |_| {
-            preferences::save_last_seen_version("999.0.0").unwrap();
-            let outcome = evaluate();
-            assert!(outcome.upgrade_toast.is_none());
-        });
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        preferences::save_last_seen_version(Some(&paths), "999.0.0").unwrap();
+        let outcome = evaluate(Some(&paths));
+        assert!(outcome.upgrade_toast.is_none());
     }
 
     #[test]
     fn upgrade_with_new_sections_returns_toast() {
-        preferences::tests_helpers::with_temp_prefs("onboarding_upgrade_toast", |_| {
-            preferences::save_last_seen_version("0.0.1").unwrap();
-            let outcome = evaluate();
-            let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
-            assert!(
-                outcome
-                    .upgrade_toast
-                    .as_deref()
-                    .is_some_and(|t| t.contains(fragment)),
-                "expected upgrade toast with invite fragment"
-            );
-        });
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        preferences::save_last_seen_version(Some(&paths), "0.0.1").unwrap();
+        let outcome = evaluate(Some(&paths));
+        let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
+        assert!(
+            outcome
+                .upgrade_toast
+                .as_deref()
+                .is_some_and(|t| t.contains(fragment)),
+            "expected upgrade toast with invite fragment"
+        );
     }
 
     #[test]
@@ -147,34 +150,31 @@ mod tests {
             ("unparseable", Some("not-a-semver")),
         ];
         for (label, input) in scenarios {
-            preferences::tests_helpers::with_temp_prefs(
-                &format!("onboarding_no_writes_{label}"),
-                |_| {
-                    if let Some(v) = input {
-                        preferences::save_last_seen_version(v).unwrap();
-                    }
-                    let _ = evaluate();
-                    let after = preferences::load_last_seen_version().unwrap();
-                    assert_eq!(
-                        after.as_deref(),
-                        *input,
-                        "[{}] evaluate() must not touch last_seen_version",
-                        label
-                    );
-                },
+            let dir = tempfile::tempdir().unwrap();
+            let paths = Paths::new(dir.path());
+            if let Some(v) = input {
+                preferences::save_last_seen_version(Some(&paths), v).unwrap();
+            }
+            let _ = evaluate(Some(&paths));
+            let after = preferences::load_last_seen_version(Some(&paths)).unwrap();
+            assert_eq!(
+                after.as_deref(),
+                *input,
+                "[{}] evaluate() must not touch last_seen_version",
+                label
             );
         }
     }
 
     #[test]
     fn unparseable_last_seen_falls_through_to_first_launch() {
-        preferences::tests_helpers::with_temp_prefs("onboarding_unparseable", |_| {
-            preferences::save_last_seen_version("not-a-semver").unwrap();
-            let outcome = evaluate();
-            assert!(
-                outcome.upgrade_toast.is_none(),
-                "garbled last_seen must be treated as first launch, not surface a toast"
-            );
-        });
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path());
+        preferences::save_last_seen_version(Some(&paths), "not-a-semver").unwrap();
+        let outcome = evaluate(Some(&paths));
+        assert!(
+            outcome.upgrade_toast.is_none(),
+            "garbled last_seen must be treated as first launch, not surface a toast"
+        );
     }
 }

@@ -13,7 +13,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 
     // Closing Welcome seeds last_seen_version so future launches do not re-trigger the upgraded flow.
     let version = env!("CARGO_PKG_VERSION");
-    if let Err(e) = crate::preferences::save_last_seen_version(version) {
+    if let Err(e) = crate::preferences::save_last_seen_version(app.env().paths(), version) {
         log::warn!("[purple] failed to seed last_seen_version on welcome close: {e}");
     }
     if key.code == KeyCode::Char('?') {
@@ -36,7 +36,6 @@ mod tests {
 
     fn make_app_on_welcome(known_hosts_count: usize) -> App {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(""),
             path: scratch.join("test_config"),
@@ -82,35 +81,25 @@ mod tests {
 
     #[test]
     fn capital_i_with_known_hosts_triggers_import_path() {
-        // ENV_LOCK serialises HOME/PATH env mutation across the test binary.
-        let _path_guard = crate::vault_ssh::tests::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let old_home = std::env::var("HOME").ok();
-        let home = tempfile::tempdir().expect("tempdir").keep();
-        // SAFETY: ENV_LOCK held above serializes env mutation in this test
-        // binary; HOME is restored below before the lock drops.
-        unsafe {
-            std::env::set_var("HOME", &home);
-        }
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut app = make_app_on_welcome(1);
-            handle_key(&mut app, k(KeyCode::Char('I')));
-            assert!(matches!(app.screen, Screen::HostList));
-            assert!(
-                app.status_center.toast().is_some() || app.status_center.status().is_some(),
-                "I-key with known_hosts_count > 0 must attempt import and emit a status"
-            );
-        }));
-        // SAFETY: ENV_LOCK still held; restore prior HOME before lock drops.
-        unsafe {
-            match old_home {
-                Some(h) => std::env::set_var("HOME", h),
-                None => std::env::remove_var("HOME"),
-            }
-        }
-        if let Err(e) = result {
-            std::panic::resume_unwind(e);
-        }
+        let _lock = crate::demo_flag::GLOBAL_TEST_LOCK.lock().unwrap();
+        let mut app = make_app_on_welcome(1);
+        // The import reads the App's sandboxed `~/.ssh/known_hosts`. Seed it
+        // with a couple of parseable host entries so `execute_known_hosts_import`
+        // has something to act on.
+        let ssh_dir = app.env().paths().expect("sandbox paths").ssh_dir();
+        std::fs::create_dir_all(&ssh_dir).expect("create .ssh dir");
+        std::fs::write(
+            ssh_dir.join("known_hosts"),
+            "host-one ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTONE\n\
+             host-two ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTTWO\n",
+        )
+        .expect("write known_hosts");
+
+        handle_key(&mut app, k(KeyCode::Char('I')));
+        assert!(matches!(app.screen, Screen::HostList));
+        assert!(
+            app.status_center.toast().is_some() || app.status_center.status().is_some(),
+            "I-key with known_hosts_count > 0 must attempt import and emit a status"
+        );
     }
 }

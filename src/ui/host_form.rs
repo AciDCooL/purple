@@ -8,11 +8,15 @@ use super::design;
 use super::theme;
 use crate::app::{App, FormField, Screen};
 
-fn placeholder_for(field: FormField, is_pattern: bool) -> String {
+fn placeholder_for(
+    field: FormField,
+    is_pattern: bool,
+    paths: Option<&crate::runtime::env::Paths>,
+) -> String {
     use crate::messages::hints;
     match field {
         FormField::AskPass => {
-            if let Some(default) = crate::preferences::load_askpass_default() {
+            if let Some(default) = crate::preferences::load_askpass_default(paths) {
                 hints::askpass_default(&default)
             } else {
                 hints::HOST_ASKPASS_PICK.to_string()
@@ -207,6 +211,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             vault_provider_hint.as_ref(),
             vault_addr_provider_hint.as_ref(),
             has_vault_roles,
+            app.env().paths(),
         );
     }
 
@@ -467,12 +472,12 @@ fn render_password_picker_overlay(frame: &mut Frame, app: &mut App) {
 /// Get the placeholder text for a field (public for tests).
 #[cfg(test)]
 pub fn placeholder_text(field: FormField) -> String {
-    placeholder_for(field, false)
+    placeholder_for(field, false, None)
 }
 
 #[cfg(test)]
 pub fn placeholder_text_pattern(field: FormField) -> String {
-    placeholder_for(field, true)
+    placeholder_for(field, true, None)
 }
 
 /// Render a single field's content (value or placeholder) and set cursor.
@@ -486,6 +491,7 @@ fn render_field_content(
     vault_provider_hint: Option<&(String, String)>,
     vault_addr_provider_hint: Option<&(String, String)>,
     has_vault_roles: bool,
+    paths: Option<&crate::runtime::env::Paths>,
 ) {
     use crate::messages::hints;
     let is_focused = form.focused_field == field;
@@ -559,7 +565,7 @@ fn render_field_content(
         let hint = hints::inherits_from(addr, prov);
         Line::from(Span::styled(hint, theme::muted()))
     } else if value.is_empty() && is_focused && !is_picker {
-        let ph = placeholder_for(field, form.is_pattern);
+        let ph = placeholder_for(field, form.is_pattern, paths);
         Line::from(Span::styled(ph, theme::muted()))
     } else if is_picker && is_focused {
         let inner_width = area.width as usize;
@@ -568,7 +574,7 @@ fn render_field_content(
             let ph = if field == FormField::VaultSsh {
                 hints::HOST_VAULT_SSH_PICKER.to_string()
             } else {
-                placeholder_for(field, form.is_pattern)
+                placeholder_for(field, form.is_pattern, paths)
             };
             (ph, theme::muted())
         } else {

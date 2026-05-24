@@ -1391,7 +1391,9 @@ fn ensure_vault_ssh_returns_none_when_no_role_configured() {
     let mut config = SshConfigFile::parse(&config_path).unwrap();
     let host = config.host_entries().into_iter().next().unwrap();
     let provider_config = providers::config::ProviderConfig::parse("");
-    let result = ensure_vault_ssh_if_needed(&host.alias, &host, &provider_config, &mut config);
+    let env = crate::runtime::env::Env::from_process();
+    let result =
+        ensure_vault_ssh_if_needed(&env, &host.alias, &host, &provider_config, &mut config);
     assert!(
         result.is_none(),
         "no role configured: must short-circuit to None"
@@ -1420,8 +1422,14 @@ fn ensure_vault_ssh_chain_no_role_returns_none() {
     .unwrap();
     let mut config = SshConfigFile::parse(&config_path).unwrap();
     let provider_config = providers::config::ProviderConfig::parse("");
-    let result =
-        ensure_vault_ssh_chain_if_needed("target", &config_path, &provider_config, &mut config);
+    let env = crate::runtime::env::Env::from_process();
+    let result = ensure_vault_ssh_chain_if_needed(
+        &env,
+        "target",
+        &config_path,
+        &provider_config,
+        &mut config,
+    );
     assert!(
         result.is_none(),
         "no role on any chain host: must short-circuit to None, got {:?}",
@@ -1439,7 +1447,9 @@ fn ensure_vault_ssh_chain_unknown_target_safe() {
     std::fs::write(&config_path, "Host known\n  HostName 1.2.3.4\n").unwrap();
     let mut config = SshConfigFile::parse(&config_path).unwrap();
     let provider_config = providers::config::ProviderConfig::parse("");
+    let env = crate::runtime::env::Env::from_process();
     let result = ensure_vault_ssh_chain_if_needed(
+        &env,
         "completely-unknown-alias",
         &config_path,
         &provider_config,
@@ -1464,18 +1474,13 @@ fn ensure_vault_ssh_chain_unknown_target_safe() {
 /// they do not prove the chain is walked or signed in the right order.
 ///
 /// Lives in `main_tests.rs` (not `vault_ssh_tests.rs`) because the
-/// function under test only exists in the binary crate. The shared
-/// `ENV_LOCK` from `vault_ssh::tests` serializes env mutations against
-/// every other vault- and ssh-keygen-mocking test in the suite so we
-/// never race on `PATH` / `HOME`.
+/// function under test only exists in the binary crate. It threads a
+/// sandbox `Env` (its own `PATH` and home), so it never touches process
+/// env and needs no serialization lock.
 #[cfg(unix)]
 #[test]
 fn ensure_vault_ssh_chain_signs_proxy_before_target() {
     use std::os::unix::fs::PermissionsExt;
-
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
 
     // Isolated tempdir for the mock binary, the call log, and a sandboxed
     // HOME so signed certs do not pollute the developer's ~/.purple/certs.
@@ -1511,16 +1516,19 @@ fn ensure_vault_ssh_chain_signs_proxy_before_target() {
     )
     .unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let old_home = std::env::var("HOME").ok();
-    let new_path = format!("{}:{}", mock_dir.display(), old_path);
-
-    // SAFETY: ENV_LOCK held above serializes all env mutations within
-    // this test binary. Both PATH and HOME are restored before the lock
-    // releases. Any future test that mutates HOME MUST also acquire
-    // ENV_LOCK (or an equivalent process-wide lock).
-    unsafe { std::env::set_var("PATH", &new_path) };
-    unsafe { std::env::set_var("HOME", &home) };
+    // The mock `vault` is found via the Env's PATH (stub dir ahead of the
+    // real one), cert output lands in the Env's sandbox home, and
+    // `resolve_pubkey_path` reads the same sandbox home via the threaded
+    // `env.paths()` to expand and validate `~/.ssh/id_ed25519`. No process
+    // env mutation, so no serialization lock is needed.
+    let env = crate::runtime::env::Env::for_test(&home).with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            mock_dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let config_path = dir.path().join("ssh_config");
@@ -1541,8 +1549,13 @@ fn ensure_vault_ssh_chain_signs_proxy_before_target() {
         let mut config = SshConfigFile::parse(&config_path).unwrap();
         let provider_config = providers::config::ProviderConfig::parse("");
 
-        let result =
-            ensure_vault_ssh_chain_if_needed("target", &config_path, &provider_config, &mut config);
+        let result = ensure_vault_ssh_chain_if_needed(
+            &env,
+            "target",
+            &config_path,
+            &provider_config,
+            &mut config,
+        );
         assert!(
             result.is_some(),
             "expected chain helper to report at least one signing action"
@@ -1562,15 +1575,7 @@ fn ensure_vault_ssh_chain_signs_proxy_before_target() {
         );
     }));
 
-    // Restore env regardless of test outcome, then propagate panics so
-    // the test reports a normal failure rather than leaving global state
-    // tainted.
-    unsafe { std::env::set_var("PATH", &old_path) };
-    match old_home {
-        Some(h) => unsafe { std::env::set_var("HOME", h) },
-        None => unsafe { std::env::remove_var("HOME") },
-    }
-
+    // Propagate panics so the test reports a normal failure.
     if let Err(e) = result {
         std::panic::resume_unwind(e);
     }
@@ -1585,10 +1590,6 @@ fn ensure_vault_ssh_chain_signs_proxy_before_target() {
 #[test]
 fn ensure_vault_cert_for_alias_signs_vault_host() {
     use std::os::unix::fs::PermissionsExt;
-
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
 
     let dir = tempfile::tempdir().unwrap();
     let mock_dir = dir.path().join("bin");
@@ -1617,14 +1618,18 @@ fn ensure_vault_cert_for_alias_signs_vault_host() {
     )
     .unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let old_home = std::env::var("HOME").ok();
-    let new_path = format!("{}:{}", mock_dir.display(), old_path);
-
-    // SAFETY: ENV_LOCK held above serializes all env mutations in this
-    // binary. PATH and HOME are restored before the lock releases.
-    unsafe { std::env::set_var("PATH", &new_path) };
-    unsafe { std::env::set_var("HOME", &home) };
+    // The mock `vault` is found via the Env's PATH and the signed cert lands
+    // in the Env's sandbox home (`env.paths().cert_for("target")`).
+    // `resolve_pubkey_path` reads the same sandbox home via `env.paths()`. No
+    // process env mutation, so no serialization lock is needed.
+    let env = crate::runtime::env::Env::for_test(&home).with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            mock_dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let config_path = dir.path().join("ssh_config");
@@ -1637,7 +1642,7 @@ fn ensure_vault_cert_for_alias_signs_vault_host() {
         )
         .unwrap();
 
-        let result = ensure_vault_cert_for_alias("target", &config_path);
+        let result = ensure_vault_cert_for_alias(&env, "target", &config_path);
         assert!(
             result.is_some(),
             "expected renewal to report a signing action for the vault host"
@@ -1653,13 +1658,15 @@ fn ensure_vault_cert_for_alias_signs_vault_host() {
             "expected exactly one sign call for the target role, got {:?}",
             lines
         );
-    }));
 
-    unsafe { std::env::set_var("PATH", &old_path) };
-    match old_home {
-        Some(h) => unsafe { std::env::set_var("HOME", h) },
-        None => unsafe { std::env::remove_var("HOME") },
-    }
+        // The signed cert must land in the sandbox home, not the real ~/.purple.
+        let cert_path = env.paths().expect("sandbox paths").cert_for("target");
+        assert!(
+            cert_path.exists(),
+            "expected signed cert at sandbox path {}",
+            cert_path.display()
+        );
+    }));
 
     if let Err(e) = result {
         std::panic::resume_unwind(e);
@@ -1692,7 +1699,8 @@ fn ensure_vault_cert_for_alias_noop_for_non_vault_host() {
     let dir = tempfile::tempdir().unwrap();
     let config_path = dir.path().join("config");
     std::fs::write(&config_path, "Host plain\n  HostName 1.2.3.4\n").unwrap();
-    let result = ensure_vault_cert_for_alias("plain", &config_path);
+    let env = crate::runtime::env::Env::for_test(dir.path());
+    let result = ensure_vault_cert_for_alias(&env, "plain", &config_path);
     assert!(
         result.is_none(),
         "non-vault host must be a no-op, got {:?}",
@@ -1717,18 +1725,12 @@ fn cli_legacy_vault_sign_flat_form_rejected() {
 //
 // Each `expand_user_path_*` test below reads `dirs::home_dir()` twice:
 // once directly to capture the expected value and once inside
-// `expand_user_path()`. Both reads consult $HOME. Other tests in the
-// suite (e.g. `ensure_vault_ssh_chain_signs_proxy_before_target`)
-// mutate $HOME under `vault_ssh::tests::ENV_LOCK`. If we read $HOME
-// here without the lock, the mutator can change it between our two
-// reads and the assertion flips. Holding `ENV_LOCK` for the whole
-// test serialises us against every env-mutating test in the binary.
+// `expand_user_path()`. Both reads consult $HOME. No test in this binary
+// mutates $HOME anymore (the vault/cert tests thread a sandbox `Env`
+// instead), so the two reads are stable without any serialization lock.
 
 #[test]
 fn expand_user_path_tilde_slash() {
-    let _g = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     let result = super::expand_user_path("~/.ssh/config").unwrap();
     assert_eq!(result, home.join(".ssh/config"));
@@ -1736,9 +1738,6 @@ fn expand_user_path_tilde_slash() {
 
 #[test]
 fn expand_user_path_dollar_brace_home_slash() {
-    let _g = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     let result = super::expand_user_path("${HOME}/.ssh/config").unwrap();
     assert_eq!(result, home.join(".ssh/config"));
@@ -1746,9 +1745,6 @@ fn expand_user_path_dollar_brace_home_slash() {
 
 #[test]
 fn expand_user_path_dollar_home_slash() {
-    let _g = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     let result = super::expand_user_path("$HOME/.purple/mcp-audit.log").unwrap();
     assert_eq!(result, home.join(".purple/mcp-audit.log"));
@@ -1756,27 +1752,18 @@ fn expand_user_path_dollar_home_slash() {
 
 #[test]
 fn expand_user_path_bare_tilde() {
-    let _g = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     assert_eq!(super::expand_user_path("~").unwrap(), home);
 }
 
 #[test]
 fn expand_user_path_bare_dollar_brace_home() {
-    let _g = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     assert_eq!(super::expand_user_path("${HOME}").unwrap(), home);
 }
 
 #[test]
 fn expand_user_path_bare_dollar_home() {
-    let _g = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
     let home = dirs::home_dir().unwrap();
     assert_eq!(super::expand_user_path("$HOME").unwrap(), home);
 }
@@ -1810,37 +1797,28 @@ fn expand_user_path_tilde_other_user_not_expanded() {
 #[test]
 fn ensure_proton_login_skips_non_proton_askpass() {
     // Every non-proton: askpass must early-return without spawning a subprocess.
-    super::ensure_proton_login(Some("bw:foo"));
-    super::ensure_proton_login(Some("keychain"));
-    super::ensure_proton_login(Some("op://Vault/Item/p"));
-    super::ensure_proton_login(None);
+    let env = crate::runtime::env::Env::from_process();
+    super::ensure_proton_login(&env, Some("bw:foo"));
+    super::ensure_proton_login(&env, Some("keychain"));
+    super::ensure_proton_login(&env, Some("op://Vault/Item/p"));
+    super::ensure_proton_login(&env, None);
 }
 
 #[cfg(unix)]
 #[test]
 fn ensure_proton_login_skips_when_not_installed() {
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    // SAFETY: ENV_LOCK held.
-    unsafe { std::env::set_var("PATH", "/nonexistent-purple-test-path") };
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        super::ensure_proton_login(Some("proton:Foo/Bar/p"));
-    }));
-    unsafe { std::env::set_var("PATH", &old_path) };
-    if let Err(e) = result {
-        std::panic::resume_unwind(e);
-    }
+    // An Env whose PATH points at a nonexistent dir means `pass-cli` is
+    // unreachable, so proton_status reports NotInstalled. No process-env
+    // mutation, no lock: the Env carries its own snapshot.
+    let env = crate::runtime::env::Env::for_test("/tmp/purple-proton-noinstall")
+        .with_var("PATH", "/nonexistent-purple-test-path");
+    super::ensure_proton_login(&env, Some("proton:Foo/Bar/p"));
 }
 
 #[cfg(unix)]
 #[test]
 fn ensure_proton_login_skips_when_authenticated() {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
 
     let dir = tempfile::Builder::new()
         .prefix("purple_mock_passcli_ensure_")
@@ -1852,17 +1830,18 @@ fn ensure_proton_login_skips_when_authenticated() {
     perms.set_mode(0o755);
     std::fs::set_permissions(&script, perms).unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{old_path}", dir.path().display());
-    unsafe { std::env::set_var("PATH", &new_path) };
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        super::ensure_proton_login(Some("proton:Foo/Bar/p"));
-    }));
-    unsafe { std::env::set_var("PATH", &old_path) };
+    // The stub `pass-cli` (exit 0 == authenticated) lives in `dir`; expose it
+    // via the Env PATH instead of mutating the process-global PATH.
+    let env = crate::runtime::env::Env::for_test(dir.path()).with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+    super::ensure_proton_login(&env, Some("proton:Foo/Bar/p"));
     drop(dir);
-    if let Err(e) = result {
-        std::panic::resume_unwind(e);
-    }
 }
 
 #[cfg(test)]
@@ -1873,15 +1852,21 @@ mod proton_di_tests {
     /// Run `ensure_proton_login_with` with a scripted prompt sequence and
     /// return the number of times the prompt closure was invoked. The
     /// returned count plus the production code's hardcoded `0..2` loop bound
-    /// fully describes the retry behaviour to the test assertions.
-    fn run_with<S, P>(askpass: Option<&str>, status: S, prompts: P) -> usize
+    /// fully describes the retry behaviour to the test assertions. The `env`
+    /// controls subprocess resolution (`pass-cli` is spawned through it).
+    fn run_with<S, P>(
+        env: &crate::runtime::env::Env,
+        askpass: Option<&str>,
+        status: S,
+        prompts: P,
+    ) -> usize
     where
         S: FnOnce() -> ProtonStatus,
         P: IntoIterator<Item = anyhow::Result<Option<String>>>,
     {
         let count = RefCell::new(0usize);
         let mut iter = prompts.into_iter();
-        super::super::ensure_proton_login_with(askpass, status, || {
+        super::super::ensure_proton_login_with(env, askpass, status, || {
             *count.borrow_mut() += 1;
             iter.next()
                 .unwrap_or_else(|| Ok(Some("unexpected-extra-prompt".to_string())))
@@ -1891,13 +1876,16 @@ mod proton_di_tests {
 
     #[test]
     fn skip_when_askpass_none() {
-        let attempts = run_with(None, || panic!("status_fn must not run"), Vec::new());
+        let env = crate::runtime::env::Env::for_test("/tmp/purple-proton-di");
+        let attempts = run_with(&env, None, || panic!("status_fn must not run"), Vec::new());
         assert_eq!(attempts, 0, "must not invoke prompt");
     }
 
     #[test]
     fn skip_when_askpass_not_proton() {
+        let env = crate::runtime::env::Env::for_test("/tmp/purple-proton-di");
         let attempts = run_with(
+            &env,
             Some("bw:foo"),
             || panic!("status_fn must not run"),
             Vec::new(),
@@ -1907,7 +1895,9 @@ mod proton_di_tests {
 
     #[test]
     fn skip_when_authenticated_no_prompt() {
+        let env = crate::runtime::env::Env::for_test("/tmp/purple-proton-di");
         let attempts = run_with(
+            &env,
             Some("proton:Foo/Bar/p"),
             || ProtonStatus::Authenticated,
             Vec::new(),
@@ -1917,7 +1907,9 @@ mod proton_di_tests {
 
     #[test]
     fn skip_when_not_installed_no_prompt() {
+        let env = crate::runtime::env::Env::for_test("/tmp/purple-proton-di");
         let attempts = run_with(
+            &env,
             Some("proton:Foo/Bar/p"),
             || ProtonStatus::NotInstalled,
             Vec::new(),
@@ -1927,7 +1919,9 @@ mod proton_di_tests {
 
     #[test]
     fn empty_pat_aborts_after_first_prompt() {
+        let env = crate::runtime::env::Env::for_test("/tmp/purple-proton-di");
         let attempts = run_with(
+            &env,
             Some("proton:Foo/Bar/p"),
             || ProtonStatus::NotAuthenticated,
             vec![Ok(Some(String::new()))],
@@ -1937,7 +1931,9 @@ mod proton_di_tests {
 
     #[test]
     fn esc_eof_aborts_after_first_prompt() {
+        let env = crate::runtime::env::Env::for_test("/tmp/purple-proton-di");
         let attempts = run_with(
+            &env,
             Some("proton:Foo/Bar/p"),
             || ProtonStatus::NotAuthenticated,
             vec![Ok(None)],
@@ -1947,8 +1943,10 @@ mod proton_di_tests {
 
     #[test]
     fn read_error_aborts_after_first_prompt() {
+        let env = crate::runtime::env::Env::for_test("/tmp/purple-proton-di");
         let err = anyhow::anyhow!("tty broken");
         let attempts = run_with(
+            &env,
             Some("proton:Foo/Bar/p"),
             || ProtonStatus::NotAuthenticated,
             vec![Err(err)],
@@ -1959,30 +1957,22 @@ mod proton_di_tests {
     #[test]
     #[cfg(unix)]
     fn at_most_two_attempts_when_login_keeps_failing() {
-        // proton_login spawns `pass-cli` via PATH. To force every login attempt
-        // to fail (and prove the retry loop caps at 2), point PATH at a
-        // guaranteed-non-existent directory under ENV_LOCK so concurrent
-        // PATH-mutating tests cannot accidentally provide a working pass-cli
-        // shim.
-        let _guard = crate::vault_ssh::tests::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let old_path = std::env::var("PATH").unwrap_or_default();
-        // SAFETY: ENV_LOCK held.
-        unsafe { std::env::set_var("PATH", "/nonexistent-purple-di-test-path") };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_with(
-                Some("proton:Foo/Bar/p"),
-                || ProtonStatus::NotAuthenticated,
-                vec![
-                    Ok(Some("pst_first::key".to_string())),
-                    Ok(Some("pst_second::key".to_string())),
-                    Ok(Some("pst_should_not_be_used::key".to_string())),
-                ],
-            )
-        }));
-        unsafe { std::env::set_var("PATH", &old_path) };
-        let attempts = result.unwrap_or_else(|e| std::panic::resume_unwind(e));
+        // proton_login spawns `pass-cli` through the Env. An Env whose PATH
+        // points at a guaranteed-non-existent directory makes every login
+        // attempt fail, proving the retry loop caps at 2. No process-env
+        // mutation, no lock: the Env carries its own snapshot.
+        let env = crate::runtime::env::Env::for_test("/tmp/purple-proton-di-fail")
+            .with_var("PATH", "/nonexistent-purple-di-test-path");
+        let attempts = run_with(
+            &env,
+            Some("proton:Foo/Bar/p"),
+            || ProtonStatus::NotAuthenticated,
+            vec![
+                Ok(Some("pst_first::key".to_string())),
+                Ok(Some("pst_second::key".to_string())),
+                Ok(Some("pst_should_not_be_used::key".to_string())),
+            ],
+        );
         assert_eq!(attempts, 2, "must cap at 2 attempts");
     }
 }

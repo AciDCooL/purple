@@ -127,10 +127,10 @@ impl PingState {
     }
 
     /// Construct with slow threshold + auto-ping loaded from preferences.
-    pub fn from_preferences() -> Self {
+    pub fn from_preferences(paths: Option<&crate::runtime::env::Paths>) -> Self {
         Self {
-            slow_threshold_ms: crate::preferences::load_slow_threshold(),
-            auto_ping: crate::preferences::load_auto_ping(),
+            slow_threshold_ms: crate::preferences::load_slow_threshold(paths),
+            auto_ping: crate::preferences::load_auto_ping(paths),
             ..Self::default()
         }
     }

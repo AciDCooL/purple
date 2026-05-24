@@ -27,7 +27,11 @@ use crate::{
 /// when the chosen mode exits (subcommand return, direct-connect exit,
 /// TUI quit).
 pub fn run(cli: Cli) -> Result<()> {
-    ui::theme::init();
+    // Resolve the process environment once, at the edge. Everything downstream
+    // takes this snapshot rather than reading `std::env` / `dirs::home_dir`.
+    let env = std::sync::Arc::new(crate::runtime::env::Env::from_process());
+
+    ui::theme::init(&env);
 
     // Determine if this is a CLI subcommand (log to stderr too) or TUI (file only)
     let is_cli_subcommand = cli.command.is_some() || cli.list || cli.connect.is_some();
@@ -61,13 +65,13 @@ pub fn run(cli: Cli) -> Result<()> {
 
     // Provider and Update subcommands don't need SSH config
     if let Some(Commands::Provider { command }) = cli.command {
-        return cli::handle_provider_command(command);
+        return cli::handle_provider_command(&env, command);
     }
     if let Some(Commands::Update) = cli.command {
         return update::self_update();
     }
     if let Some(Commands::Password { command }) = cli.command {
-        return cli::handle_password_command(command);
+        return cli::handle_password_command(&env, command);
     }
     if let Some(Commands::Mcp {
         read_only,
@@ -93,7 +97,7 @@ pub fn run(cli: Cli) -> Result<()> {
         return cli::handle_logs_command(tail, clear);
     }
     if let Some(Commands::Theme { command }) = cli.command {
-        return cli::handle_theme_command(command);
+        return cli::handle_theme_command(&env, command);
     }
     if let Some(Commands::WhatsNew { since }) = &cli.command {
         let output = cli::run_whats_new(since.as_deref())?;
@@ -106,7 +110,7 @@ pub fn run(cli: Cli) -> Result<()> {
     let repaired_groups = config.repair_absorbed_group_comments();
     let orphaned_headers = config.remove_all_orphaned_group_headers();
 
-    write_startup_banner(&config, &config_path, cli.verbose);
+    write_startup_banner(&config, &config_path, cli.verbose, &env);
 
     // Handle subcommands that need SSH config
     match cli.command {
@@ -118,20 +122,26 @@ pub fn run(cli: Cli) -> Result<()> {
             known_hosts,
             group,
         }) => {
-            return cli::handle_import(config, file.as_deref(), known_hosts, group.as_deref());
+            return cli::handle_import(
+                &env,
+                config,
+                file.as_deref(),
+                known_hosts,
+                group.as_deref(),
+            );
         }
         Some(Commands::Sync {
             provider,
             dry_run,
             remove,
         }) => {
-            return cli::handle_sync(config, provider.as_deref(), dry_run, remove);
+            return cli::handle_sync(&env, config, provider.as_deref(), dry_run, remove);
         }
         Some(Commands::Tunnel { command }) => {
             return cli::handle_tunnel_command(config, command);
         }
         Some(Commands::Snippet { command }) => {
-            return cli::handle_snippet_command(config, command, &config_path);
+            return cli::handle_snippet_command(&env, config, command, &config_path);
         }
         Some(Commands::Vault {
             command:
@@ -141,7 +151,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     vault_addr: cli_vault_addr,
                 },
         }) => {
-            return cli::handle_vault_sign_command(config, alias, all, cli_vault_addr);
+            return cli::handle_vault_sign_command(&env, config, alias, all, cli_vault_addr);
         }
         Some(Commands::Provider { .. })
         | Some(Commands::Update)
@@ -155,7 +165,7 @@ pub fn run(cli: Cli) -> Result<()> {
 
     // Direct connect mode (--connect)
     if let Some(alias) = cli.connect {
-        run_direct_connect(alias, &mut config, &config_path)?;
+        run_direct_connect(alias, &mut config, &config_path, &env)?;
     }
 
     // List mode
@@ -172,11 +182,12 @@ pub fn run(cli: Cli) -> Result<()> {
             &config_path,
             repaired_groups,
             orphaned_headers,
+            env,
         );
     }
 
     // Interactive TUI mode
-    let mut app = App::new(config);
+    let mut app = App::with_env(config, std::sync::Arc::clone(&env));
     app.post_init();
     apply_saved_sort(&mut app);
     if repaired_groups > 0 || orphaned_headers > 0 {
@@ -189,7 +200,12 @@ pub fn run(cli: Cli) -> Result<()> {
 /// log file. Runs once at process start so support bundles always show
 /// the SSH config path, active providers, askpass sources and Vault
 /// posture under which purple ran.
-fn write_startup_banner(config: &SshConfigFile, config_path: &Path, verbose: bool) {
+fn write_startup_banner(
+    config: &SshConfigFile,
+    config_path: &Path,
+    verbose: bool,
+    env: &crate::runtime::env::Env,
+) {
     let level_str = logging::level_name(verbose);
     let provider_config = providers::config::ProviderConfig::load();
 
@@ -226,7 +242,7 @@ fn write_startup_banner(config: &SshConfigFile, config_path: &Path, verbose: boo
                         .find(|s| !s.vault_addr.is_empty())
                         .map(|s| s.vault_addr.clone())
                 })
-                .or_else(|| std::env::var("VAULT_ADDR").ok())
+                .or_else(|| env.vault_addr().map(str::to_string))
                 .unwrap_or_else(|| "not set".to_string());
             Some(format!("enabled (addr={addr})"))
         } else {
@@ -235,13 +251,13 @@ fn write_startup_banner(config: &SshConfigFile, config_path: &Path, verbose: boo
     };
 
     let ssh_version = logging::detect_ssh_version();
-    let term = std::env::var("TERM").unwrap_or_else(|_| "unset".to_string());
-    let colorterm = std::env::var("COLORTERM").unwrap_or_else(|_| "unset".to_string());
-    let theme = preferences::load_theme().unwrap_or_else(|| "Purple".to_string());
+    let term = env.term().unwrap_or("unset").to_string();
+    let colorterm = env.colorterm().unwrap_or("unset").to_string();
+    let theme = preferences::load_theme(env.paths()).unwrap_or_else(|| "Purple".to_string());
     let hosts = config.host_entries().len();
     let patterns = config.pattern_entries().len();
     let snippets = snippet::SnippetStore::load().snippets.len();
-    let proxy_env = collect_proxy_env();
+    let proxy_env = collect_proxy_env(env);
 
     logging::write_banner(&logging::BannerInfo {
         version: env!("CARGO_PKG_VERSION"),
@@ -264,13 +280,8 @@ fn write_startup_banner(config: &SshConfigFile, config_path: &Path, verbose: boo
 /// Build a compact string describing the proxy-related env vars in effect.
 /// Returns `"none"` when none of HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY
 /// are set. Only var names are recorded; values may contain credentials.
-fn collect_proxy_env() -> String {
-    let names = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
-    let set: Vec<&str> = names
-        .iter()
-        .copied()
-        .filter(|k| std::env::var(k).map(|v| !v.is_empty()).unwrap_or(false))
-        .collect();
+fn collect_proxy_env(env: &crate::runtime::env::Env) -> String {
+    let set = env.active_proxy_vars();
     if set.is_empty() {
         "none".to_string()
     } else {
@@ -281,12 +292,17 @@ fn collect_proxy_env() -> String {
 /// Direct-connect mode (`purple --connect <alias>`): resolve askpass and
 /// Vault SSH, run `ssh` inline and exit with its status code. Never
 /// returns on success. Always calls `std::process::exit`.
-fn run_direct_connect(alias: String, config: &mut SshConfigFile, config_path: &Path) -> Result<()> {
+fn run_direct_connect(
+    alias: String,
+    config: &mut SshConfigFile,
+    config_path: &Path,
+    env: &crate::runtime::env::Env,
+) -> Result<()> {
     let provider_config = providers::config::ProviderConfig::load();
     let host_entry = config.host_entries().into_iter().find(|h| h.alias == alias);
     if host_entry.is_some() {
         if let Some((msg, _is_error)) =
-            ensure_vault_ssh_chain_if_needed(&alias, config_path, &provider_config, config)
+            ensure_vault_ssh_chain_if_needed(env, &alias, config_path, &provider_config, config)
         {
             eprintln!("{}", msg);
         }
@@ -294,10 +310,10 @@ fn run_direct_connect(alias: String, config: &mut SshConfigFile, config_path: &P
     let askpass = host_entry
         .as_ref()
         .and_then(|h| h.askpass.clone())
-        .or_else(preferences::load_askpass_default);
-    ensure_proton_login(askpass.as_deref());
-    let bw_session = ensure_bw_session(None, askpass.as_deref());
-    ensure_keychain_password(&alias, askpass.as_deref());
+        .or_else(|| preferences::load_askpass_default(env.paths()));
+    ensure_proton_login(env, askpass.as_deref());
+    let bw_session = ensure_bw_session(env, None, askpass.as_deref());
+    ensure_keychain_password(env, &alias, askpass.as_deref());
     let result = connection::connect(
         &alias,
         config_path,
@@ -323,6 +339,7 @@ fn run_positional_alias(
     config_path: &Path,
     repaired_groups: usize,
     orphaned_headers: usize,
+    env: std::sync::Arc<crate::runtime::env::Env>,
 ) -> Result<()> {
     let host_opt = config
         .host_entries()
@@ -332,6 +349,7 @@ fn run_positional_alias(
     if let Some(host) = host_opt {
         let provider_config = providers::config::ProviderConfig::load();
         if let Some((msg, _is_error)) = ensure_vault_ssh_chain_if_needed(
+            &env,
             &host.alias,
             config_path,
             &provider_config,
@@ -343,10 +361,10 @@ fn run_positional_alias(
         let askpass = host
             .askpass
             .clone()
-            .or_else(preferences::load_askpass_default);
-        ensure_proton_login(askpass.as_deref());
-        let bw_session = ensure_bw_session(None, askpass.as_deref());
-        ensure_keychain_password(&alias, askpass.as_deref());
+            .or_else(|| preferences::load_askpass_default(env.paths()));
+        ensure_proton_login(&env, askpass.as_deref());
+        let bw_session = ensure_bw_session(&env, None, askpass.as_deref());
+        ensure_keychain_password(&env, &alias, askpass.as_deref());
         print!("{}", messages::cli::beaming_up(&alias));
         let result = connection::connect(
             &alias,
@@ -365,7 +383,7 @@ fn run_positional_alias(
     }
 
     // No exact match. Open TUI with search pre-filled.
-    let mut app = App::new(config);
+    let mut app = App::with_env(config, env);
     app.post_init();
     apply_saved_sort(&mut app);
     if repaired_groups > 0 || orphaned_headers > 0 {
@@ -405,47 +423,22 @@ fn print_host_list(config: &SshConfigFile) {
 mod tests {
     use super::*;
 
-    // Reads + mutates HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY. Serializes
-    // against any other lib-side env mutator via the shared test lock.
+    // Builds each scenario as an injected Env. No process-global mutation, so
+    // no lock and no serialization against other tests.
     #[test]
     fn collect_proxy_env_reports_set_vars_and_none() {
-        let _guard = crate::demo_flag::GLOBAL_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        let names = ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"];
-        let saved: Vec<(&str, Option<String>)> =
-            names.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+        use crate::runtime::env::Env;
 
-        unsafe {
-            for (k, _) in &saved {
-                std::env::remove_var(k);
-            }
-        }
-        assert_eq!(collect_proxy_env(), "none");
+        assert_eq!(collect_proxy_env(&Env::for_test("/tmp/x")), "none");
 
-        unsafe {
-            std::env::set_var("HTTPS_PROXY", "http://proxy.example:3128");
-        }
-        assert_eq!(collect_proxy_env(), "HTTPS_PROXY");
+        let one = Env::for_test("/tmp/x").with_var("HTTPS_PROXY", "http://proxy.example:3128");
+        assert_eq!(collect_proxy_env(&one), "HTTPS_PROXY");
 
-        unsafe {
-            std::env::set_var("NO_PROXY", "localhost,127.0.0.1");
-        }
-        assert_eq!(collect_proxy_env(), "HTTPS_PROXY,NO_PROXY");
+        let two = one.clone().with_var("NO_PROXY", "localhost,127.0.0.1");
+        assert_eq!(collect_proxy_env(&two), "HTTPS_PROXY,NO_PROXY");
 
         // Empty value counts as unset.
-        unsafe {
-            std::env::set_var("HTTPS_PROXY", "");
-        }
-        assert_eq!(collect_proxy_env(), "NO_PROXY");
-
-        unsafe {
-            for (k, v) in saved {
-                match v {
-                    Some(val) => std::env::set_var(k, val),
-                    None => std::env::remove_var(k),
-                }
-            }
-        }
+        let empty_https = two.with_var("HTTPS_PROXY", "");
+        assert_eq!(collect_proxy_env(&empty_https), "NO_PROXY");
     }
 }

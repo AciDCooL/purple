@@ -69,7 +69,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                 divider_idx,
             ) {
                 if !crate::demo_flag::is_demo() {
-                    let _ = crate::preferences::save_theme(&theme.name);
+                    let _ = crate::preferences::save_theme(app.env().paths(), &theme.name);
                 }
                 crate::ui::theme::set_theme(theme);
             }
@@ -120,7 +120,6 @@ mod tests {
 
     fn make_app_on_picker(builtins: Vec<ThemeDef>, custom: Vec<ThemeDef>) -> App {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(""),
             path: scratch.join("test_config"),

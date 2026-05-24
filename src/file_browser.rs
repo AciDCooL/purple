@@ -493,7 +493,11 @@ pub fn run_scp(
 ) -> anyhow::Result<ScpResult> {
     // Renew the Vault SSH cert before transferring so a file copy never
     // fails on an expired cert. No-op for non-vault hosts.
-    crate::runtime::helpers::ensure_vault_cert_for_alias(alias, config_path);
+    crate::runtime::helpers::ensure_vault_cert_for_alias(
+        &crate::runtime::env::Env::from_process(),
+        alias,
+        config_path,
+    );
 
     let mut cmd = Command::new("scp");
     cmd.arg("-F").arg(config_path);

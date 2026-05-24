@@ -200,12 +200,31 @@ pub struct App {
     /// Demo mode: all mutations are in-memory only, no disk writes.
     pub demo_mode: bool,
 
+    /// Resolved process environment and filesystem paths, injected once at
+    /// construction. Every env/path read goes through here instead of ambient
+    /// `std::env` / `dirs::home_dir`. `Arc` so worker closures clone cheaply.
+    pub(crate) env: std::sync::Arc<crate::runtime::env::Env>,
+
     /// Jump state. Some when the jump bar is open.
     pub(crate) jump: Option<JumpState>,
 }
 
 impl App {
+    /// Construct with the process environment resolved here. In test builds the
+    /// environment is a self-cleaning sandbox so fixtures never touch the real
+    /// `~/.purple` or process env and need no lock.
     pub fn new(config: SshConfigFile) -> Self {
+        #[cfg(test)]
+        let env = std::sync::Arc::new(crate::runtime::env::Env::sandboxed());
+        #[cfg(not(test))]
+        let env = std::sync::Arc::new(crate::runtime::env::Env::from_process());
+        Self::with_env(config, env)
+    }
+
+    /// Construct with an explicitly provided environment. The edge
+    /// (`launcher::run`) uses this to share one `Env` snapshot with the
+    /// pre-TUI CLI handlers.
+    pub fn with_env(config: SshConfigFile, env: std::sync::Arc<crate::runtime::env::Env>) -> Self {
         let hosts = config.host_entries();
         let patterns = config.pattern_entries();
         let display_list = Self::build_display_list_from(&config, &hosts, &patterns);
@@ -240,7 +259,7 @@ impl App {
             forms: FormState::default(),
             history: ConnectionHistory::load(),
             providers: ProviderState::load(),
-            ping: PingState::from_preferences(),
+            ping: PingState::from_preferences(env.paths()),
             vault: VaultState::default(),
             tunnels: TunnelState::default(),
             snippets: SnippetState::with_store_loaded(),
@@ -249,14 +268,20 @@ impl App {
             file_browser_state: FileBrowserState::default(),
             file_browser_session: None,
             container_state: ContainerState {
-                cache: crate::containers::load_container_cache(),
+                cache: crate::containers::load_container_cache(env.paths()),
                 ..ContainerState::default()
             },
             container_session: None,
             containers_overview: ContainersOverviewState::default(),
             demo_mode: false,
+            env,
             jump: None,
         }
+    }
+
+    /// The resolved process environment and filesystem paths for this run.
+    pub(crate) fn env(&self) -> &crate::runtime::env::Env {
+        &self.env
     }
 
     /// Record an SSH session against `alias` in the activity log. Appends
@@ -404,7 +429,10 @@ impl App {
                 "[purple] reload_hosts: dropped {} orphan container_cache host(s)",
                 dropped_container_hosts
             );
-            crate::containers::save_container_cache(&self.container_state.cache);
+            crate::containers::save_container_cache(
+                self.env().paths(),
+                &self.container_state.cache,
+            );
         }
 
         // Inspect cache is keyed on full container ID. Any ID whose
@@ -521,6 +549,7 @@ impl App {
                 dropped_collapsed
             );
             if let Err(e) = crate::preferences::save_containers_collapsed_hosts(
+                self.env().paths(),
                 &self.containers_overview.collapsed_hosts,
             ) {
                 log::warn!("[config] failed to save collapsed_hosts after prune: {e}");
@@ -626,14 +655,18 @@ impl App {
             self.vault.cert_cache.remove(alias);
             return;
         }
-        let cert_path = match crate::vault_ssh::resolve_cert_path(alias, &host.certificate_file) {
+        let cert_path = match crate::vault_ssh::resolve_cert_path(
+            self.env().paths(),
+            alias,
+            &host.certificate_file,
+        ) {
             Ok(p) => p,
             Err(_) => {
                 self.vault.cert_cache.remove(alias);
                 return;
             }
         };
-        let status = crate::vault_ssh::check_cert_validity(&cert_path);
+        let status = crate::vault_ssh::check_cert_validity(self.env(), &cert_path);
         let mtime = std::fs::metadata(&cert_path)
             .ok()
             .and_then(|m| m.modified().ok());
@@ -1008,7 +1041,7 @@ impl App {
     /// upgraded past their last-seen version, otherwise seed the preference
     /// so the next launch is silent.
     pub fn post_init(&mut self) {
-        let outcome = crate::onboarding::evaluate();
+        let outcome = crate::onboarding::evaluate(self.env().paths());
         if let Some(text) = outcome.upgrade_toast {
             self.enqueue_sticky_toast(text);
         }
@@ -1219,10 +1252,9 @@ impl App {
         ) {
             return;
         }
-        let Some(home) = dirs::home_dir() else {
+        let Some(ssh_dir) = self.env().paths().map(crate::runtime::env::Paths::ssh_dir) else {
             return;
         };
-        let ssh_dir = home.join(".ssh");
         let current_dir_mtime = reload_state::get_mtime(&ssh_dir);
         let dir_changed = current_dir_mtime != self.reload.keys_dir_mtime;
         let files_changed = self

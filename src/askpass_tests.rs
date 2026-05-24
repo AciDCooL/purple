@@ -1547,24 +1547,18 @@ fn find_askpass_source_works_for_any_host() {
 fn keychain_has_password_returns_bool() {
     // Can't test actual keychain access, but verify the function compiles
     // and returns false for a non-existent alias (won't be in test keychain)
-    let result = keychain_has_password("__purple_test_nonexistent_host__");
+    let env = crate::runtime::env::Env::from_process();
+    let result = keychain_has_password(&env, "__purple_test_nonexistent_host__");
     assert!(!result);
 }
 
-// retrieve_from_command shell escaping
-
-// These tests spawn `sh -c "echo ..."` which resolves `sh` and `echo` via
-// $PATH. Other tests in the binary acquire ENV_LOCK and temporarily set
-// $PATH to a non-existent path (see `with_empty_path` above), which causes
-// the shell lookup here to fail when scheduled in parallel. Acquiring
-// ENV_LOCK here serialises against those PATH mutators.
+// retrieve_from_command shell escaping. These spawn `sh -c "echo ..."`, so the
+// Env carries the real PATH (Env::from_process) to resolve `sh` and `echo`.
 
 #[test]
 fn retrieve_from_command_escapes_alias_metacharacters() {
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let result = retrieve_from_command("echo %a", "$(whoami)", "host.com");
+    let env = crate::runtime::env::Env::from_process();
+    let result = retrieve_from_command(&env, "echo %a", "$(whoami)", "host.com");
     assert!(result.is_ok());
     let output = result.unwrap();
     assert_eq!(output, "$(whoami)");
@@ -1572,10 +1566,8 @@ fn retrieve_from_command_escapes_alias_metacharacters() {
 
 #[test]
 fn retrieve_from_command_escapes_hostname_metacharacters() {
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let result = retrieve_from_command("echo %h", "myalias", "$(id)");
+    let env = crate::runtime::env::Env::from_process();
+    let result = retrieve_from_command(&env, "echo %h", "myalias", "$(id)");
     assert!(result.is_ok());
     let output = result.unwrap();
     assert_eq!(output, "$(id)");
@@ -1583,10 +1575,8 @@ fn retrieve_from_command_escapes_hostname_metacharacters() {
 
 #[test]
 fn retrieve_from_command_escapes_backtick_injection() {
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let result = retrieve_from_command("echo %a", "`uname`", "host");
+    let env = crate::runtime::env::Env::from_process();
+    let result = retrieve_from_command(&env, "echo %a", "`uname`", "host");
     assert!(result.is_ok());
     let output = result.unwrap();
     assert_eq!(output, "`uname`");
@@ -1594,10 +1584,8 @@ fn retrieve_from_command_escapes_backtick_injection() {
 
 #[test]
 fn retrieve_from_command_escapes_semicolon() {
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let result = retrieve_from_command("echo %a", "foo;id", "host");
+    let env = crate::runtime::env::Env::from_process();
+    let result = retrieve_from_command(&env, "echo %a", "foo;id", "host");
     assert!(result.is_ok());
     let output = result.unwrap();
     assert_eq!(output, "foo;id");
@@ -1605,10 +1593,8 @@ fn retrieve_from_command_escapes_semicolon() {
 
 #[test]
 fn retrieve_from_command_normal_values_unchanged() {
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let result = retrieve_from_command("echo %a %h", "myserver", "10.0.0.1");
+    let env = crate::runtime::env::Env::from_process();
+    let result = retrieve_from_command(&env, "echo %a %h", "myserver", "10.0.0.1");
     assert!(result.is_ok());
     let output = result.unwrap();
     assert_eq!(output, "myserver 10.0.0.1");
@@ -1993,7 +1979,7 @@ Host Target
 fn end_to_end_foreign_host_prompt_is_rejected() {
     // Server (compromised target) sends a keyboard-interactive prompt that
     // mimics a password prompt for an unrelated host. We must NOT resolve
-    // that host even though it exists in ~/.ssh/config — only chain hops
+    // that host even though it exists in ~/.ssh/config. Only chain hops
     // are permitted.
     let config = parse_config(
         "\
@@ -2015,12 +2001,18 @@ Host UnrelatedServer
     );
 }
 
+/// Write a stub `pass-cli` into a tempdir and run `f` with an `Env` whose PATH
+/// resolves to it. No process-global PATH mutation, so the helper needs no lock
+/// and runs concurrently with other tests.
 #[cfg(unix)]
-fn with_mock_passcli<F: FnOnce()>(tag: &str, stderr: &str, stdout: &str, exit_code: i32, f: F) {
+fn with_mock_passcli<F: FnOnce(&crate::runtime::env::Env)>(
+    tag: &str,
+    stderr: &str,
+    stdout: &str,
+    exit_code: i32,
+    f: F,
+) {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
 
     let dir = tempfile::Builder::new()
         .prefix(&format!("purple_mock_passcli_{tag}_"))
@@ -2039,31 +2031,25 @@ fn with_mock_passcli<F: FnOnce()>(tag: &str, stderr: &str, stdout: &str, exit_co
     perms.set_mode(0o755);
     std::fs::set_permissions(&script, perms).unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: ENV_LOCK serializes all PATH mutations across the crate.
-    unsafe { std::env::set_var("PATH", &new_path) };
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    unsafe { std::env::set_var("PATH", &old_path) };
+    let env = crate::runtime::env::Env::for_test("/tmp/x").with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+    f(&env);
     drop(dir);
-    if let Err(e) = result {
-        std::panic::resume_unwind(e);
-    }
 }
 
+/// Run `f` with an `Env` whose PATH points at a nonexistent directory, so any
+/// subprocess lookup fails with `NotFound`.
 #[cfg(unix)]
-fn with_empty_path<F: FnOnce()>(f: F) {
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    // SAFETY: ENV_LOCK guards all PATH mutations.
-    unsafe { std::env::set_var("PATH", "/nonexistent-purple-test-path") };
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    unsafe { std::env::set_var("PATH", &old_path) };
-    if let Err(e) = result {
-        std::panic::resume_unwind(e);
-    }
+fn with_empty_path<F: FnOnce(&crate::runtime::env::Env)>(f: F) {
+    let env = crate::runtime::env::Env::for_test("/tmp/x")
+        .with_var("PATH", "/nonexistent-purple-test-path");
+    f(&env);
 }
 
 #[cfg(unix)]
@@ -2074,8 +2060,11 @@ fn proton_status_authenticated_via_exit_code() {
         "",
         "garbage on stdout we should ignore",
         0,
-        || {
-            assert_eq!(super::proton_status(), super::ProtonStatus::Authenticated);
+        |env| {
+            assert_eq!(
+                super::proton_status(env),
+                super::ProtonStatus::Authenticated
+            );
         },
     );
 }
@@ -2083,9 +2072,9 @@ fn proton_status_authenticated_via_exit_code() {
 #[cfg(unix)]
 #[test]
 fn proton_status_not_authenticated_via_exit_code() {
-    with_mock_passcli("status_fail", "not logged in\n", "", 1, || {
+    with_mock_passcli("status_fail", "not logged in\n", "", 1, |env| {
         assert_eq!(
-            super::proton_status(),
+            super::proton_status(env),
             super::ProtonStatus::NotAuthenticated
         );
     });
@@ -2094,14 +2083,15 @@ fn proton_status_not_authenticated_via_exit_code() {
 #[cfg(unix)]
 #[test]
 fn proton_status_not_installed() {
-    with_empty_path(|| {
-        assert_eq!(super::proton_status(), super::ProtonStatus::NotInstalled);
+    with_empty_path(|env| {
+        assert_eq!(super::proton_status(env), super::ProtonStatus::NotInstalled);
     });
 }
 
 #[test]
 fn proton_login_empty_pat_rejected() {
-    let err = super::proton_login("").expect_err("empty PAT must be rejected");
+    let env = crate::runtime::env::Env::from_process();
+    let err = super::proton_login(&env, "").expect_err("empty PAT must be rejected");
     assert!(err.to_string().to_lowercase().contains("empty"));
 }
 
@@ -2109,9 +2099,6 @@ fn proton_login_empty_pat_rejected() {
 #[test]
 fn proton_login_pat_via_env_not_argv() {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
 
     let dir = tempfile::Builder::new()
         .prefix("purple_mock_passcli_login_")
@@ -2130,22 +2117,20 @@ fn proton_login_pat_via_env_not_argv() {
     perms.set_mode(0o755);
     std::fs::set_permissions(&script, perms).unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: ENV_LOCK held.
-    unsafe { std::env::set_var("PATH", &new_path) };
+    let env_di = crate::runtime::env::Env::for_test("/tmp/x").with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
     let pat = "pst_secret-value::tokenkey";
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        super::proton_login(pat).expect("login should succeed");
-    }));
-    unsafe { std::env::set_var("PATH", &old_path) };
+    super::proton_login(&env_di, pat).expect("login should succeed");
 
     let argv = std::fs::read_to_string(&argv_log).expect("mock did not write argv.log");
     let env = std::fs::read_to_string(&env_log).expect("mock did not write env.log");
     drop(dir);
-    if let Err(e) = result {
-        std::panic::resume_unwind(e);
-    }
 
     assert!(
         !argv.contains("pst_secret-value"),
@@ -2166,8 +2151,9 @@ fn proton_login_pat_via_env_not_argv() {
 #[cfg(unix)]
 #[test]
 fn proton_login_propagates_stderr() {
-    with_mock_passcli("login_fail", "invalid PAT\n", "", 2, || {
-        let err = super::proton_login("pst_bogus::key").expect_err("non-zero exit must return Err");
+    with_mock_passcli("login_fail", "invalid PAT\n", "", 2, |env| {
+        let err =
+            super::proton_login(env, "pst_bogus::key").expect_err("non-zero exit must return Err");
         let msg = err.to_string();
         assert!(msg.contains("invalid PAT"), "stderr not surfaced: {msg}");
     });
@@ -2177,9 +2163,6 @@ fn proton_login_propagates_stderr() {
 #[test]
 fn retrieve_from_proton_pass_constructs_uri() {
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
 
     let dir = tempfile::Builder::new()
         .prefix("purple_mock_passcli_view_")
@@ -2196,21 +2179,19 @@ fn retrieve_from_proton_pass_constructs_uri() {
     perms.set_mode(0o755);
     std::fs::set_permissions(&script, perms).unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: ENV_LOCK held.
-    unsafe { std::env::set_var("PATH", &new_path) };
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let got = super::retrieve_from_proton_pass("Personal/web/password").unwrap();
-        assert_eq!(got, "secret-value");
-    }));
-    unsafe { std::env::set_var("PATH", &old_path) };
+    let env = crate::runtime::env::Env::for_test("/tmp/x").with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+    let got = super::retrieve_from_proton_pass(&env, "Personal/web/password").unwrap();
+    assert_eq!(got, "secret-value");
 
     let argv = std::fs::read_to_string(&argv_log).expect("mock did not write argv.log");
     drop(dir);
-    if let Err(e) = result {
-        std::panic::resume_unwind(e);
-    }
     let argv_lines: Vec<&str> = argv
         .lines()
         .map(str::trim)
@@ -2234,9 +2215,9 @@ fn retrieve_from_proton_pass_constructs_uri() {
 #[cfg(unix)]
 #[test]
 fn retrieve_from_proton_pass_empty_stdout_bails() {
-    with_mock_passcli("view_empty", "", "", 0, || {
+    with_mock_passcli("view_empty", "", "", 0, |env| {
         let err =
-            super::retrieve_from_proton_pass("Foo/Bar/p").expect_err("empty stdout must bail");
+            super::retrieve_from_proton_pass(env, "Foo/Bar/p").expect_err("empty stdout must bail");
         assert!(err.to_string().to_lowercase().contains("empty"));
     });
 }
@@ -2244,9 +2225,9 @@ fn retrieve_from_proton_pass_empty_stdout_bails() {
 #[cfg(unix)]
 #[test]
 fn retrieve_from_proton_pass_not_installed() {
-    with_empty_path(|| {
-        let err =
-            super::retrieve_from_proton_pass("Foo/Bar/p").expect_err("missing binary must error");
+    with_empty_path(|env| {
+        let err = super::retrieve_from_proton_pass(env, "Foo/Bar/p")
+            .expect_err("missing binary must error");
         let root = err.root_cause();
         let io_err = root
             .downcast_ref::<std::io::Error>()
@@ -2258,9 +2239,9 @@ fn retrieve_from_proton_pass_not_installed() {
 #[cfg(unix)]
 #[test]
 fn retrieve_from_proton_pass_nonzero_exit_bails() {
-    with_mock_passcli("view_fail", "no such item\n", "", 1, || {
-        let err =
-            super::retrieve_from_proton_pass("Foo/Bar/p").expect_err("non-zero exit must bail");
+    with_mock_passcli("view_fail", "no such item\n", "", 1, |env| {
+        let err = super::retrieve_from_proton_pass(env, "Foo/Bar/p")
+            .expect_err("non-zero exit must bail");
         assert!(err.to_string().contains("Proton Pass lookup failed"));
     });
 }
@@ -2272,9 +2253,6 @@ fn retrieve_from_proton_pass_env_not_propagated() {
     // `pass-cli view` child. Only the login child gets the env var. This
     // catches any regression that copies the login env through.
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
 
     let dir = tempfile::Builder::new()
         .prefix("purple_mock_passcli_view_env_")
@@ -2291,20 +2269,18 @@ fn retrieve_from_proton_pass_env_not_propagated() {
     perms.set_mode(0o755);
     std::fs::set_permissions(&script, perms).unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: ENV_LOCK held.
-    unsafe { std::env::set_var("PATH", &new_path) };
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        super::retrieve_from_proton_pass("Foo/Bar/p").expect("view should succeed");
-    }));
-    unsafe { std::env::set_var("PATH", &old_path) };
+    let env_di = crate::runtime::env::Env::for_test("/tmp/x").with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+    super::retrieve_from_proton_pass(&env_di, "Foo/Bar/p").expect("view should succeed");
 
     let env = std::fs::read_to_string(&env_log).expect("mock did not write env.log");
     drop(dir);
-    if let Err(e) = result {
-        std::panic::resume_unwind(e);
-    }
     assert!(
         env.trim().is_empty(),
         "no PROTON_PASS_* env var should reach the view child, got: {env}"
@@ -2318,9 +2294,9 @@ fn retrieve_from_proton_pass_logout_after_status_bails() {
     // (Authenticated) earlier, but by the time `pass-cli item view` runs the
     // session has been invalidated (user ran `pass-cli logout` in another
     // terminal). The mock simulates this by exiting non-zero on `item view`.
-    with_mock_passcli("view_logout_race", "not logged in\n", "", 1, || {
-        let err =
-            super::retrieve_from_proton_pass("Foo/Bar/p").expect_err("view after logout must bail");
+    with_mock_passcli("view_logout_race", "not logged in\n", "", 1, |env| {
+        let err = super::retrieve_from_proton_pass(env, "Foo/Bar/p")
+            .expect_err("view after logout must bail");
         assert!(err.to_string().contains("Proton Pass lookup failed"));
     });
 }
@@ -2332,9 +2308,6 @@ fn proton_login_empty_pat_does_not_spawn() {
     // spawn. The mock would record any invocation; we assert the log file is
     // never created.
     use std::os::unix::fs::PermissionsExt;
-    let _guard = crate::vault_ssh::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|p| p.into_inner());
 
     let dir = tempfile::Builder::new()
         .prefix("purple_mock_passcli_empty_pat_")
@@ -2351,21 +2324,19 @@ fn proton_login_empty_pat_does_not_spawn() {
     perms.set_mode(0o755);
     std::fs::set_permissions(&script, perms).unwrap();
 
-    let old_path = std::env::var("PATH").unwrap_or_default();
-    let new_path = format!("{}:{old_path}", dir.path().display());
-    // SAFETY: ENV_LOCK held.
-    unsafe { std::env::set_var("PATH", &new_path) };
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let err = super::proton_login("").expect_err("empty PAT must reject");
-        assert!(err.to_string().to_lowercase().contains("empty"));
-    }));
-    unsafe { std::env::set_var("PATH", &old_path) };
+    let env = crate::runtime::env::Env::for_test("/tmp/x").with_var(
+        "PATH",
+        format!(
+            "{}:{}",
+            dir.path().display(),
+            std::env::var("PATH").unwrap_or_default()
+        ),
+    );
+    let err = super::proton_login(&env, "").expect_err("empty PAT must reject");
+    assert!(err.to_string().to_lowercase().contains("empty"));
 
     let spawned = spawn_log.exists();
     drop(dir);
-    if let Err(e) = result {
-        std::panic::resume_unwind(e);
-    }
     assert!(!spawned, "proton_login(\"\") must not spawn pass-cli");
 }
 

@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
@@ -67,6 +66,10 @@ pub fn handle() -> Result<()> {
     // Initialize file-only logging for askpass subprocess
     // verbose is determined by PURPLE_LOG env var only (no CLI flag in subprocess)
     crate::logging::init(false, false);
+
+    // The askpass subprocess runs in its own process, so it captures the real
+    // environment here rather than inheriting an Env from the parent.
+    let env = crate::runtime::env::Env::from_process();
 
     let alias = std::env::var("PURPLE_HOST_ALIAS").unwrap_or_default();
     let config_path = std::env::var("PURPLE_CONFIG_PATH").unwrap_or_default();
@@ -135,7 +138,7 @@ pub fn handle() -> Result<()> {
     debug!("Askpass invoked for alias={resolved_alias} source={source}");
 
     let hostname = find_hostname(&config, &resolved_alias);
-    match retrieve_password(&source, &resolved_alias, &hostname) {
+    match retrieve_password(&env, &source, &resolved_alias, &hostname) {
         Ok(password) => {
             debug!("Askpass retrieved password for {resolved_alias} via {source}");
             print!("{}", password);
@@ -290,35 +293,41 @@ fn find_hostname(config: &SshConfigFile, alias: &str) -> String {
 }
 
 /// Retrieve a password from the given source.
-fn retrieve_password(source: &str, alias: &str, hostname: &str) -> Result<String> {
+fn retrieve_password(
+    env: &crate::runtime::env::Env,
+    source: &str,
+    alias: &str,
+    hostname: &str,
+) -> Result<String> {
     if source == "keychain" {
-        return retrieve_from_keychain(alias);
+        return retrieve_from_keychain(env, alias);
     }
     if let Some(uri) = source.strip_prefix("op://") {
-        return retrieve_from_1password(&format!("op://{}", uri));
+        return retrieve_from_1password(env, &format!("op://{}", uri));
     }
     if let Some(entry) = source.strip_prefix("pass:") {
-        return retrieve_from_pass(entry);
+        return retrieve_from_pass(env, entry);
     }
     if let Some(item_id) = source.strip_prefix("bw:") {
-        return retrieve_from_bitwarden(item_id);
+        return retrieve_from_bitwarden(env, item_id);
     }
     if let Some(rest) = source.strip_prefix("vault:") {
-        return retrieve_from_vault(rest);
+        return retrieve_from_vault(env, rest);
     }
     if let Some(spec) = source.strip_prefix("proton:") {
-        return retrieve_from_proton_pass(spec);
+        return retrieve_from_proton_pass(env, spec);
     }
     // Custom command (with or without cmd: prefix)
     let cmd = source.strip_prefix("cmd:").unwrap_or(source);
-    retrieve_from_command(cmd, alias, hostname)
+    retrieve_from_command(env, cmd, alias, hostname)
 }
 
 /// Retrieve from OS keychain (macOS: Keychain, Linux: secret-tool).
-fn retrieve_from_keychain(alias: &str) -> Result<String> {
+fn retrieve_from_keychain(env: &crate::runtime::env::Env, alias: &str) -> Result<String> {
     #[cfg(target_os = "macos")]
     {
-        let output = Command::new("security")
+        let output = env
+            .command("security")
             .args([
                 "find-generic-password",
                 "-a",
@@ -343,7 +352,8 @@ fn retrieve_from_keychain(alias: &str) -> Result<String> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let output = Command::new("secret-tool")
+        let output = env
+            .command("secret-tool")
             .args(["lookup", "application", "purple-ssh", "host", alias])
             .output()
             .context("Failed to run secret-tool")?;
@@ -362,20 +372,25 @@ fn retrieve_from_keychain(alias: &str) -> Result<String> {
 }
 
 /// Check if a password exists in the OS keychain for this alias.
-pub fn keychain_has_password(alias: &str) -> bool {
-    retrieve_from_keychain(alias).is_ok()
+pub fn keychain_has_password(env: &crate::runtime::env::Env, alias: &str) -> bool {
+    retrieve_from_keychain(env, alias).is_ok()
 }
 
 /// Retrieve a password from the OS keychain. Public for keychain migration on alias rename.
-pub fn retrieve_keychain_password(alias: &str) -> Result<String> {
-    retrieve_from_keychain(alias)
+pub fn retrieve_keychain_password(env: &crate::runtime::env::Env, alias: &str) -> Result<String> {
+    retrieve_from_keychain(env, alias)
 }
 
 /// Store a password in the OS keychain.
-pub fn store_in_keychain(alias: &str, password: &str) -> Result<()> {
+pub fn store_in_keychain(
+    env: &crate::runtime::env::Env,
+    alias: &str,
+    password: &str,
+) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let status = Command::new("security")
+        let status = env
+            .command("security")
             .args([
                 "add-generic-password",
                 "-U",
@@ -395,7 +410,8 @@ pub fn store_in_keychain(alias: &str, password: &str) -> Result<()> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let mut child = Command::new("secret-tool")
+        let mut child = env
+            .command("secret-tool")
             .args([
                 "store",
                 "--label",
@@ -421,10 +437,11 @@ pub fn store_in_keychain(alias: &str, password: &str) -> Result<()> {
 }
 
 /// Remove a password from the OS keychain.
-pub fn remove_from_keychain(alias: &str) -> Result<()> {
+pub fn remove_from_keychain(env: &crate::runtime::env::Env, alias: &str) -> Result<()> {
     #[cfg(target_os = "macos")]
     {
-        let status = Command::new("security")
+        let status = env
+            .command("security")
             .args(["delete-generic-password", "-a", alias, "-s", "purple-ssh"])
             .status()
             .context("Failed to run security command")?;
@@ -435,7 +452,8 @@ pub fn remove_from_keychain(alias: &str) -> Result<()> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let status = Command::new("secret-tool")
+        let status = env
+            .command("secret-tool")
             .args(["clear", "application", "purple-ssh", "host", alias])
             .status()
             .context("Failed to run secret-tool")?;
@@ -447,8 +465,9 @@ pub fn remove_from_keychain(alias: &str) -> Result<()> {
 }
 
 /// Retrieve from 1Password CLI.
-fn retrieve_from_1password(uri: &str) -> Result<String> {
-    let result = Command::new("op")
+fn retrieve_from_1password(env: &crate::runtime::env::Env, uri: &str) -> Result<String> {
+    let result = env
+        .command("op")
         .args(["read", uri, "--no-newline"])
         .output();
     let output = match result {
@@ -472,8 +491,8 @@ fn retrieve_from_1password(uri: &str) -> Result<String> {
 }
 
 /// Retrieve from pass (password-store). Returns the first line.
-fn retrieve_from_pass(entry: &str) -> Result<String> {
-    let result = Command::new("pass").args(["show", entry]).output();
+fn retrieve_from_pass(env: &crate::runtime::env::Env, entry: &str) -> Result<String> {
+    let result = env.command("pass").args(["show", entry]).output();
     let output = match result {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             error!("[config] Password manager binary not found: pass");
@@ -497,8 +516,9 @@ fn retrieve_from_pass(entry: &str) -> Result<String> {
 
 /// Retrieve from Bitwarden CLI. The item_id can be an item ID or search term.
 /// Uses `bw get password <item_id>` which requires an unlocked vault (BW_SESSION).
-fn retrieve_from_bitwarden(item_id: &str) -> Result<String> {
-    let result = Command::new("bw")
+fn retrieve_from_bitwarden(env: &crate::runtime::env::Env, item_id: &str) -> Result<String> {
+    let result = env
+        .command("bw")
         .args(["get", "password", item_id])
         .output();
     let output = match result {
@@ -525,12 +545,13 @@ fn retrieve_from_bitwarden(item_id: &str) -> Result<String> {
 /// Spec format: `path#field` or just `path` (defaults to `password`).
 /// Distinct from the Vault SSH secrets engine (see src/vault_ssh.rs), which
 /// signs SSH certificates rather than storing passwords.
-fn retrieve_from_vault(spec: &str) -> Result<String> {
+fn retrieve_from_vault(env: &crate::runtime::env::Env, spec: &str) -> Result<String> {
     let (path, field) = match spec.rsplit_once('#') {
         Some((p, f)) => (p, f),
         None => (spec, "password"),
     };
-    let result = Command::new("vault")
+    let result = env
+        .command("vault")
         .args(["kv", "get", &format!("-field={}", field), path])
         .output();
     let output = match result {
@@ -556,11 +577,17 @@ fn retrieve_from_vault(spec: &str) -> Result<String> {
 
 /// Retrieve via custom command. Supports %h (hostname) and %a (alias) substitution.
 /// Values are shell-escaped to prevent metacharacter injection.
-fn retrieve_from_command(cmd: &str, alias: &str, hostname: &str) -> Result<String> {
+fn retrieve_from_command(
+    env: &crate::runtime::env::Env,
+    cmd: &str,
+    alias: &str,
+    hostname: &str,
+) -> Result<String> {
     let safe_alias = crate::snippet::shell_escape(alias);
     let safe_hostname = crate::snippet::shell_escape(hostname);
     let expanded = cmd.replace("%a", &safe_alias).replace("%h", &safe_hostname);
-    let output = Command::new("sh")
+    let output = env
+        .command("sh")
         .args(["-c", &expanded])
         .output()
         .context("Failed to run custom askpass command")?;
@@ -667,8 +694,8 @@ fn parse_bw_status(stdout: &str) -> BwStatus {
 }
 
 /// Check the Bitwarden vault status by running `bw status`.
-pub fn bw_vault_status() -> BwStatus {
-    let output = match Command::new("bw").arg("status").output() {
+pub fn bw_vault_status(env: &crate::runtime::env::Env) -> BwStatus {
+    let output = match env.command("bw").arg("status").output() {
         Ok(o) => o,
         Err(_) => return BwStatus::NotInstalled,
     };
@@ -679,8 +706,9 @@ pub fn bw_vault_status() -> BwStatus {
 /// Unlock the Bitwarden vault with the given master password.
 /// Passes the password via env var to avoid exposure in `ps` output.
 /// Returns the session token on success.
-pub fn bw_unlock(password: &str) -> Result<String> {
-    let output = Command::new("bw")
+pub fn bw_unlock(env: &crate::runtime::env::Env, password: &str) -> Result<String> {
+    let output = env
+        .command("bw")
         .args(["unlock", "--passwordenv", "PURPLE_BW_MASTER", "--raw"])
         .env("PURPLE_BW_MASTER", password)
         .output()
@@ -708,8 +736,8 @@ pub enum ProtonStatus {
 /// `pass-cli test` (not `info`) because in pass-cli 2.x `info` exits 0 even
 /// without a session and only reports the error on stderr. `test` is the
 /// command that actually exits non-zero when authentication is missing.
-pub fn proton_status() -> ProtonStatus {
-    let result = Command::new("pass-cli").arg("test").output();
+pub fn proton_status(env: &crate::runtime::env::Env) -> ProtonStatus {
+    let result = env.command("pass-cli").arg("test").output();
     let status = match result {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => ProtonStatus::NotInstalled,
         Err(_) => ProtonStatus::NotAuthenticated,
@@ -724,11 +752,12 @@ pub fn proton_status() -> ProtonStatus {
 /// PAT is supplied via the `PROTON_PASS_PERSONAL_ACCESS_TOKEN` env var so it
 /// never appears in argv. Returns an error wrapping pass-cli's stderr on
 /// non-zero exit so the prompt loop can surface it.
-pub fn proton_login(pat: &str) -> Result<()> {
+pub fn proton_login(env: &crate::runtime::env::Env, pat: &str) -> Result<()> {
     if pat.is_empty() {
         anyhow::bail!("empty PAT");
     }
-    let output = Command::new("pass-cli")
+    let output = env
+        .command("pass-cli")
         .arg("login")
         .env("PROTON_PASS_PERSONAL_ACCESS_TOKEN", pat)
         .output()
@@ -763,9 +792,10 @@ fn parse_proton_spec(spec: &str) -> Result<(&str, &str, &str)> {
 /// (`--vault-name`, `--item-title`, `--field`) rather than the URI form, so
 /// purple users can refer to their vaults and items by human-readable names
 /// instead of opaque share/item IDs.
-fn retrieve_from_proton_pass(spec: &str) -> Result<String> {
+fn retrieve_from_proton_pass(env: &crate::runtime::env::Env, spec: &str) -> Result<String> {
     let (vault, item, field) = parse_proton_spec(spec)?;
-    let result = Command::new("pass-cli")
+    let result = env
+        .command("pass-cli")
         .args([
             "item",
             "view",

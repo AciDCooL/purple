@@ -10,15 +10,17 @@ pub struct ConnectResult {
     pub stderr_output: String,
 }
 
-/// Returns true if the current process is running inside a tmux session.
+/// Returns true if the process is running inside a tmux session, per the
+/// resolved environment (so tests inject `TMUX` via `Env` instead of mutating
+/// the process env).
 #[cfg(unix)]
-pub fn is_in_tmux() -> bool {
-    std::env::var("TMUX").is_ok()
+pub fn is_in_tmux(env: &crate::runtime::env::Env) -> bool {
+    env.in_tmux()
 }
 
 /// Returns true if the current process is running inside a tmux session.
 #[cfg(not(unix))]
-pub fn is_in_tmux() -> bool {
+pub fn is_in_tmux(_env: &crate::runtime::env::Env) -> bool {
     false
 }
 
@@ -284,7 +286,11 @@ pub fn connect_with_remote_command(
     // Renew the Vault SSH cert before exec'ing into a container so an
     // expired cert is refreshed, mirroring the interactive connect path.
     // No-op for non-vault hosts.
-    crate::runtime::helpers::ensure_vault_cert_for_alias(alias, config_path);
+    crate::runtime::helpers::ensure_vault_cert_for_alias(
+        &crate::runtime::env::Env::from_process(),
+        alias,
+        config_path,
+    );
 
     let mut cmd = Command::new("ssh");
     cmd.arg("-F").arg(config_path).arg("-t");
@@ -322,7 +328,11 @@ pub fn connect_tmux_window_with_remote_command(
     // Renew the Vault SSH cert before exec'ing into a container so an
     // expired cert is refreshed, mirroring the interactive connect path.
     // No-op for non-vault hosts.
-    crate::runtime::helpers::ensure_vault_cert_for_alias(alias, config_path);
+    crate::runtime::helpers::ensure_vault_cert_for_alias(
+        &crate::runtime::env::Env::from_process(),
+        alias,
+        config_path,
+    );
 
     let config_str = config_path
         .to_str()
@@ -443,13 +453,6 @@ mod tests {
     #[test]
     fn connect_fails_with_nonexistent_config() {
         // connect() should return an error when the config file doesn't exist and
-        // SSH cannot be spawned (or fails immediately). Hold ENV_LOCK so a
-        // sibling test that sets PATH to a non-existent directory cannot race
-        // with the `Command::new("ssh")` spawn below and make it fail to find
-        // the binary.
-        let _guard = crate::vault_ssh::tests::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let result = connect(
             "nonexistent-host",
             Path::new("/tmp/__purple_test_nonexistent_config__"),
@@ -466,10 +469,6 @@ mod tests {
     #[test]
     fn connect_with_tunnel_flag_does_not_panic() {
         // Verify has_active_tunnel=true adds the ClearAllForwardings arg without panic.
-        // ENV_LOCK guards the ssh spawn against PATH-mutating siblings.
-        let _guard = crate::vault_ssh::tests::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
         let result = connect(
             "nonexistent-host",
             Path::new("/tmp/__purple_test_nonexistent_config__"),
@@ -483,11 +482,7 @@ mod tests {
 
     #[test]
     fn connect_captures_stderr() {
-        // SSH should produce some stderr output when failing. ENV_LOCK guards
-        // the ssh spawn against PATH-mutating siblings.
-        let _guard = crate::vault_ssh::tests::ENV_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        // SSH should produce some stderr output when failing.
         let result = connect(
             "nonexistent-host",
             Path::new("/tmp/__purple_test_nonexistent_config__"),
@@ -628,31 +623,15 @@ Host key verification failed.
 
     #[test]
     fn is_in_tmux_returns_true_when_set() {
-        let _guard = TMUX_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let prev = std::env::var("TMUX").ok();
-        // SAFETY: TMUX_LOCK serialises all env mutations in this test suite.
-        unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/default,12345,0") };
-        let result = is_in_tmux();
-        // SAFETY: TMUX_LOCK held, restoring previous value.
-        match prev {
-            Some(v) => unsafe { std::env::set_var("TMUX", v) },
-            None => unsafe { std::env::remove_var("TMUX") },
-        }
-        assert!(result);
+        let env = crate::runtime::env::Env::for_test("/tmp/x")
+            .with_var("TMUX", "/tmp/tmux-1000/default,12345,0");
+        assert!(is_in_tmux(&env));
     }
 
     #[test]
     fn is_in_tmux_returns_false_when_unset() {
-        let _guard = TMUX_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-        let prev = std::env::var("TMUX").ok();
-        // SAFETY: TMUX_LOCK serialises all env mutations in this test suite.
-        unsafe { std::env::remove_var("TMUX") };
-        let result = is_in_tmux();
-        // SAFETY: TMUX_LOCK held, restoring previous value.
-        if let Some(v) = prev {
-            unsafe { std::env::set_var("TMUX", v) };
-        }
-        assert!(!result);
+        let env = crate::runtime::env::Env::for_test("/tmp/x");
+        assert!(!is_in_tmux(&env));
     }
 
     // --- first_stderr_line tests ---

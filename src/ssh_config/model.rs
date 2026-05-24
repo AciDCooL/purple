@@ -400,10 +400,16 @@ impl SshConfigFile {
     /// Collect parent directories of Include glob patterns.
     /// When a file is added/removed under a glob dir, the directory's mtime changes.
     pub fn include_glob_dirs(&self) -> Vec<PathBuf> {
+        self.include_glob_dirs_with(&|n| std::env::var(n).ok())
+    }
+
+    /// Like `include_glob_dirs` but resolves `${VAR}` from an injected lookup
+    /// instead of the process env, so tests control expansion deterministically.
+    pub fn include_glob_dirs_with(&self, lookup: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
         let config_dir = self.path.parent();
         let mut seen = std::collections::HashSet::new();
         let mut dirs = Vec::new();
-        Self::collect_include_glob_dirs(&self.elements, config_dir, &mut seen, &mut dirs);
+        Self::collect_include_glob_dirs(&self.elements, config_dir, &mut seen, &mut dirs, lookup);
         dirs
     }
 
@@ -412,12 +418,13 @@ impl SshConfigFile {
         config_dir: Option<&std::path::Path>,
         seen: &mut std::collections::HashSet<PathBuf>,
         dirs: &mut Vec<PathBuf>,
+        lookup: &dyn Fn(&str) -> Option<String>,
     ) {
         for e in elements {
             if let ConfigElement::Include(include) = e {
                 // Split respecting quoted paths (same as resolve_include does)
                 for single in Self::split_include_patterns(&include.pattern) {
-                    let expanded = Self::expand_env_vars(&Self::expand_tilde(single));
+                    let expanded = Self::expand_env_vars_with(&Self::expand_tilde(single), lookup);
                     let resolved = if expanded.starts_with('/') {
                         PathBuf::from(&expanded)
                     } else if let Some(dir) = config_dir {
@@ -434,7 +441,13 @@ impl SshConfigFile {
                 }
                 // Recurse into resolved files
                 for file in &include.resolved_files {
-                    Self::collect_include_glob_dirs(&file.elements, file.path.parent(), seen, dirs);
+                    Self::collect_include_glob_dirs(
+                        &file.elements,
+                        file.path.parent(),
+                        seen,
+                        dirs,
+                        lookup,
+                    );
                 }
             }
         }

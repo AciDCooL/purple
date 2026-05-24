@@ -99,6 +99,38 @@ fn theme_selected_row_removes_dim() {
 }
 
 #[test]
+fn init_no_color_env_forces_mode_zero() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _lock = TEST_MUTEX.lock().unwrap();
+    // NO_COLOR wins over COLORTERM. The injected Env (no home) means load_theme
+    // finds no prefs file, so this exercises only the env-driven color decision.
+    let env = crate::runtime::env::Env::for_test("/nonexistent-purple-home")
+        .with_var("NO_COLOR", "1")
+        .with_var("COLORTERM", "truecolor");
+    init(&env);
+    assert_eq!(color_mode(), 0);
+    COLOR_MODE.store(1, Ordering::Release);
+    set_theme(ThemeDef::purple());
+}
+
+#[test]
+fn init_colorterm_truecolor_sets_mode_two() {
+    let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let _lock = TEST_MUTEX.lock().unwrap();
+    COLOR_MODE.store(1, Ordering::Release);
+    let env = crate::runtime::env::Env::for_test("/nonexistent-purple-home")
+        .with_var("COLORTERM", "truecolor");
+    init(&env);
+    assert_eq!(color_mode(), 2);
+    COLOR_MODE.store(1, Ordering::Release);
+    set_theme(ThemeDef::purple());
+}
+
+#[test]
 fn theme_no_color_mode_ignores_colors() {
     let _global_test_lock = crate::demo_flag::GLOBAL_TEST_LOCK
         .lock()

@@ -34,7 +34,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let sections = changelog::current_for_render();
     let current = semver::Version::parse(super::pkg_version()).ok();
-    let last = crate::preferences::load_last_seen_version()
+    let last = crate::preferences::load_last_seen_version(app.env().paths())
         .ok()
         .flatten()
         .and_then(|s| semver::Version::parse(&s).ok());

@@ -1263,47 +1263,17 @@ struct CacheLine {
     containers: Vec<ContainerInfo>,
 }
 
-// Test-only thread-local override for the cache file path.
-// Mirrors `preferences::set_path_override` so unit tests can write
-// to a tempdir instead of polluting the real `~/.purple/`.
-#[cfg(test)]
-thread_local! {
-    static PATH_OVERRIDE: std::cell::RefCell<Option<std::path::PathBuf>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-#[cfg(test)]
-pub fn set_path_override(path: std::path::PathBuf) {
-    PATH_OVERRIDE.with(|p| *p.borrow_mut() = Some(path));
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-pub fn clear_path_override() {
-    PATH_OVERRIDE.with(|p| *p.borrow_mut() = None);
-}
-
-fn cache_path() -> Option<std::path::PathBuf> {
-    // Tests MUST opt in via `set_path_override` before any code
-    // path that loads or saves the cache. Falling through to the
-    // production path lets a forgotten override pollute (and in
-    // the orphan-prune branch of `reload_hosts`, wipe) the user's
-    // real `~/.purple/container_cache.jsonl`.
-    #[cfg(test)]
-    {
-        PATH_OVERRIDE.with(|p| p.borrow().clone())
-    }
-    #[cfg(not(test))]
-    {
-        dirs::home_dir().map(|h| h.join(".purple").join("container_cache.jsonl"))
-    }
+fn cache_path(paths: Option<&crate::runtime::env::Paths>) -> Option<std::path::PathBuf> {
+    paths.map(crate::runtime::env::Paths::container_cache)
 }
 
 /// Load container cache from `~/.purple/container_cache.jsonl`.
 /// Malformed lines are silently ignored. Duplicate aliases: last-write-wins.
-pub fn load_container_cache() -> HashMap<String, ContainerCacheEntry> {
+pub fn load_container_cache(
+    paths: Option<&crate::runtime::env::Paths>,
+) -> HashMap<String, ContainerCacheEntry> {
     let mut map = HashMap::new();
-    let Some(path) = cache_path() else {
+    let Some(path) = cache_path(paths) else {
         return map;
     };
     let Ok(content) = std::fs::read_to_string(&path) else {
@@ -1353,11 +1323,14 @@ pub fn parse_container_cache_content(content: &str) -> HashMap<String, Container
 }
 
 /// Save container cache to `~/.purple/container_cache.jsonl` via atomic write.
-pub fn save_container_cache(cache: &HashMap<String, ContainerCacheEntry>) {
+pub fn save_container_cache(
+    paths: Option<&crate::runtime::env::Paths>,
+    cache: &HashMap<String, ContainerCacheEntry>,
+) {
     if crate::demo_flag::is_demo() {
         return;
     }
-    let Some(path) = cache_path() else {
+    let Some(path) = cache_path(paths) else {
         return;
     };
     let mut lines = Vec::with_capacity(cache.len());

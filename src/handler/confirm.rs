@@ -38,6 +38,7 @@ pub fn route_confirm_key(key: KeyEvent) -> ConfirmAction {
 pub(super) fn execute_known_hosts_import(app: &mut App) {
     let config_backup = app.hosts_state.ssh_config().clone();
     match crate::import::import_from_known_hosts(
+        app.env.paths(),
         app.hosts_state.ssh_config_mut(),
         Some("known_hosts"),
     ) {
@@ -215,7 +216,9 @@ pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
                     // eprintln, which would corrupt the ratatui screen).
                     let mut cert_cleanup_warning: Option<String> = None;
                     if !crate::demo_flag::is_demo() {
-                        if let Ok(cert_path) = crate::vault_ssh::cert_path_for(&alias) {
+                        if let Ok(cert_path) =
+                            crate::vault_ssh::cert_path_for(app.env().paths(), &alias)
+                        {
                             match std::fs::remove_file(&cert_path) {
                                 Ok(()) => {}
                                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -308,6 +311,9 @@ fn start_vault_bulk_sign(
 
     let in_flight = app.vault.sign_in_flight().clone();
     let tx = events_tx.clone();
+    // Capture the resolved environment before spawning: a worker thread does
+    // not inherit the parent's `Env`, so the PATH/paths must move in.
+    let env = std::sync::Arc::clone(&app.env);
     let spawn_result = std::thread::Builder::new()
         .name("vault-bulk-sign".into())
         .spawn(move || {
@@ -359,27 +365,28 @@ fn start_vault_bulk_sign(
                     total,
                 });
 
-                let cert_path = match crate::vault_ssh::resolve_cert_path(alias, cert_file) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        failed += 1;
-                        consecutive_failures += 1;
-                        let scrubbed = crate::vault_ssh::scrub_vault_stderr(&e.to_string());
-                        if first_error.is_none() {
-                            first_error = Some(scrubbed);
+                let cert_path =
+                    match crate::vault_ssh::resolve_cert_path(env.paths(), alias, cert_file) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            failed += 1;
+                            consecutive_failures += 1;
+                            let scrubbed = crate::vault_ssh::scrub_vault_stderr(&e.to_string());
+                            if first_error.is_none() {
+                                first_error = Some(scrubbed);
+                            }
+                            remove_in_flight(&in_flight, alias);
+                            if consecutive_failures >= 3 {
+                                aborted_message = Some(crate::messages::vault_signing_aborted(
+                                    failed,
+                                    first_error.as_deref(),
+                                ));
+                                break;
+                            }
+                            continue;
                         }
-                        remove_in_flight(&in_flight, alias);
-                        if consecutive_failures >= 3 {
-                            aborted_message = Some(crate::messages::vault_signing_aborted(
-                                failed,
-                                first_error.as_deref(),
-                            ));
-                            break;
-                        }
-                        continue;
-                    }
-                };
-                let status = crate::vault_ssh::check_cert_validity(&cert_path);
+                    };
+                let status = crate::vault_ssh::check_cert_validity(&env, &cert_path);
                 if !crate::vault_ssh::needs_renewal(&status) {
                     skipped += 1;
                     consecutive_failures = 0;
@@ -387,8 +394,13 @@ fn start_vault_bulk_sign(
                     continue;
                 }
 
-                let sign_result =
-                    crate::vault_ssh::sign_certificate(role, pubkey, alias, vault_addr.as_deref());
+                let sign_result = crate::vault_ssh::sign_certificate(
+                    &env,
+                    role,
+                    pubkey,
+                    alias,
+                    vault_addr.as_deref(),
+                );
                 // Always clean up in_flight for this alias before handling the
                 // result. Using a single cleanup point (rather than per-arm)
                 // prevents orphaned aliases when new control flow is added.
@@ -873,8 +885,6 @@ mod key_push_confirm_tests {
 
     fn make_app() -> (App, std::path::PathBuf) {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
-        crate::containers::set_path_override(scratch.join("container_cache.jsonl"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content("Host h1\n  HostName 1.1.1.1\n"),
             path: scratch.join("test_config"),
@@ -883,7 +893,7 @@ mod key_push_confirm_tests {
         };
         let mut app = App::new(config);
         // Seed a non-cert key whose .pub file lives in the scratch dir so
-        // `read_pubkey_file` succeeds via the override path.
+        // `read_pubkey_file` succeeds via the absolute display path.
         let pub_path = scratch.join("id_test.pub");
         std::fs::write(
             &pub_path,

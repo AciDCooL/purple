@@ -21,7 +21,7 @@ pub(crate) fn handle_vault_sign_result(
         // racy under concurrent renames).
         let mut host_missing = false;
         if crate::should_write_certificate_file(&existing_cert_file) {
-            if let Ok(cert_path) = vault_ssh::cert_path_for(&alias) {
+            if let Ok(cert_path) = vault_ssh::cert_path_for(app.env().paths(), &alias) {
                 let updated = app
                     .hosts_state
                     .ssh_config_mut()
@@ -138,7 +138,7 @@ pub(crate) fn handle_vault_sign_all_done(
                     if h.vault_ssh.is_some()
                         && crate::should_write_certificate_file(&h.certificate_file)
                     {
-                        vault_ssh::cert_path_for(&h.alias)
+                        vault_ssh::cert_path_for(app.env().paths(), &h.alias)
                             .ok()
                             .map(|p| (h.alias.clone(), p.to_string_lossy().into_owned()))
                     } else {

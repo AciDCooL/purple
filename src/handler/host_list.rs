@@ -303,7 +303,9 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
         KeyCode::Char('s') => {
             app.hosts_state.advance_sort_mode();
             app.apply_sort();
-            if let Err(e) = preferences::save_sort_mode(app.hosts_state.sort_mode()) {
+            if let Err(e) =
+                preferences::save_sort_mode(app.env().paths(), app.hosts_state.sort_mode())
+            {
                 app.notify_error(crate::messages::sorted_by_save_failed(
                     app.hosts_state.sort_mode().label(),
                     &e,
@@ -327,7 +329,9 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             app.hosts_state.toggle_view_mode();
             app.ui.set_detail_toggle_pending(true);
             app.ui.set_detail_scroll(0);
-            if let Err(e) = preferences::save_view_mode(app.hosts_state.view_mode()) {
+            if let Err(e) =
+                preferences::save_view_mode(app.env().paths(), app.hosts_state.view_mode())
+            {
                 log::warn!("[config] Failed to persist view mode: {e}");
             }
         }
@@ -371,7 +375,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             app.set_screen(Screen::Providers);
         }
         KeyCode::Char('I') => {
-            let count = crate::import::count_known_hosts_candidates();
+            let count = crate::import::count_known_hosts_candidates(app.env().paths());
             if count > 0 {
                 app.set_screen(Screen::ConfirmImport { count });
             } else {

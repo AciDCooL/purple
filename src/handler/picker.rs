@@ -9,7 +9,7 @@ pub(super) fn handle_password_picker(app: &mut App, key: KeyEvent) {
             if let Some(source) = crate::askpass::PASSWORD_SOURCES.get(index) {
                 let is_none = source.label == "None";
                 let value = if is_none { "" } else { source.value };
-                match crate::preferences::save_askpass_default(value) {
+                match crate::preferences::save_askpass_default(app.env().paths(), value) {
                     Ok(()) => {
                         if is_none {
                             app.notify(crate::messages::GLOBAL_DEFAULT_CLEARED);

@@ -239,8 +239,8 @@ impl App {
         }
     }
     pub fn scan_keys(&mut self) {
-        if let Some(home) = dirs::home_dir() {
-            let ssh_dir = home.join(".ssh");
+        let ssh_dir = self.env().paths().map(crate::runtime::env::Paths::ssh_dir);
+        if let Some(ssh_dir) = ssh_dir {
             self.keys.list = ssh_keys::discover_keys(Path::new(&ssh_dir), &self.hosts_state.list);
             if !self.keys.list.is_empty() && self.keys.list_state.selected().is_none() {
                 self.keys.list_state.select(Some(0));

@@ -24,14 +24,9 @@ fn make_app(content: &str) -> App {
     // share a config path when `app.hosts_state.ssh_config().write()` or preferences-write
     // runs.
     let scratch = tempfile::tempdir().expect("tempdir").keep();
-    // Set preferences override BEFORE App::new so PingState::from_preferences
-    // reads the per-test path, never the real ~/.purple/preferences.
-    crate::preferences::set_path_override(scratch.join("preferences"));
-    // Same pattern for the container cache: `App::new` calls
-    // `load_container_cache`, and `reload_hosts` writes via
-    // `save_container_cache`. Without the override both would touch
-    // the real ~/.purple/container_cache.jsonl during parallel test runs.
-    crate::containers::set_path_override(scratch.join("container_cache.jsonl"));
+    // App::new auto-sandboxes the in-test env so preferences and the
+    // container cache resolve to a self-cleaning tempdir, never the real
+    // ~/.purple/, even across parallel test threads.
     let config = SshConfigFile {
         elements: SshConfigFile::parse_content(content),
         path: scratch.join("test_config"),
@@ -2988,9 +2983,6 @@ fn test_submit_form_rename_migrates_per_host_state() {
     // `update_host`. State keyed by alias outside the SSH config does
     // not: connection history, jump-bar recents, and the collapsed-
     // fleet preference must be migrated explicitly by submit_form.
-    let _g = crate::app::jump::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let recents_dir = tempfile::tempdir().expect("recents tempdir");
     crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
 
@@ -3066,9 +3058,6 @@ fn test_submit_form_rename_migrates_per_host_state() {
 /// Rename keeps the host at its recency-based position on MostRecent
 /// and Frecency without waiting for a restart.
 fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
-    let _g = crate::app::jump::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let recents_dir = tempfile::tempdir().expect("recents tempdir");
     crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
 
@@ -3162,9 +3151,6 @@ fn test_submit_form_rename_keeps_position_on_frecency() {
 fn test_submit_form_rename_carries_ping_and_container_cache() {
     // Rename preserves alias-keyed caches (ping, container_cache,
     // in-flight dedup sets) end-to-end through submit_form.
-    let _g = crate::app::jump::tests::ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
     let recents_dir = tempfile::tempdir().expect("recents tempdir");
     crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
 
@@ -4230,7 +4216,6 @@ fn test_host_form_baseline_cleared_after_submit() {
     };
     let mut app = App::new(config);
     *app.providers.config_mut() = test_provider_config();
-    crate::preferences::set_path_override(dir.path().join("preferences"));
     *app.forms.host_mut() = crate::app::HostForm::new();
     app.forms.host_mut().alias = "newhost".to_string();
     app.forms.host_mut().hostname = "new.example.com".to_string();
@@ -8621,60 +8606,52 @@ fn bulk_editor_is_dirty_added_leave_row_still_clean() {
 
 #[test]
 fn whats_new_esc_closes_and_marks_seen() {
-    crate::preferences::tests_helpers::with_temp_prefs("whats_new_esc", |_| {
-        let mut app = make_app("");
-        app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
-        let (tx, _rx) = mpsc::channel();
-        let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-        assert!(matches!(app.screen, Screen::HostList));
-        assert_eq!(
-            crate::preferences::load_last_seen_version()
-                .unwrap()
-                .as_deref(),
-            Some(env!("CARGO_PKG_VERSION"))
-        );
-    });
+    let mut app = make_app("");
+    app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert_eq!(
+        crate::preferences::load_last_seen_version(app.env().paths())
+            .unwrap()
+            .as_deref(),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
 }
 
 #[test]
 fn whats_new_q_closes() {
-    crate::preferences::tests_helpers::with_temp_prefs("whats_new_q", |_| {
-        let mut app = make_app("");
-        app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
-        let (tx, _rx) = mpsc::channel();
-        let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
-        assert!(matches!(app.screen, Screen::HostList));
-    });
+    let mut app = make_app("");
+    app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
 }
 
 #[test]
 fn whats_new_n_toggles_closed() {
-    crate::preferences::tests_helpers::with_temp_prefs("whats_new_n", |_| {
-        let mut app = make_app("");
-        app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
-        let (tx, _rx) = mpsc::channel();
-        let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
-        assert!(matches!(app.screen, Screen::HostList));
-    });
+    let mut app = make_app("");
+    app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
 }
 
 #[test]
 fn whats_new_enter_does_nothing() {
-    crate::preferences::tests_helpers::with_temp_prefs("whats_new_enter", |_| {
-        let mut app = make_app("");
-        app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
-        let (tx, _rx) = mpsc::channel();
-        let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-        assert!(
-            matches!(app.screen, Screen::WhatsNew(_)),
-            "Enter must not close the overlay"
-        );
-        assert_eq!(
-            crate::preferences::load_last_seen_version().unwrap(),
-            None,
-            "Enter must not persist last_seen_version"
-        );
-    });
+    let mut app = make_app("");
+    app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(
+        matches!(app.screen, Screen::WhatsNew(_)),
+        "Enter must not close the overlay"
+    );
+    assert_eq!(
+        crate::preferences::load_last_seen_version(app.env().paths()).unwrap(),
+        None,
+        "Enter must not persist last_seen_version"
+    );
 }
 
 #[test]
@@ -8692,26 +8669,24 @@ fn whats_new_scroll_j_advances_state() {
 
 #[test]
 fn whats_new_close_dismisses_sticky_toast() {
-    crate::preferences::tests_helpers::with_temp_prefs("whats_new_dismiss", |_| {
-        let mut app = make_app("");
-        app.status_center
-            .set_toast_message(Some(crate::app::StatusMessage {
-                text: crate::messages::whats_new_toast::upgraded("2.42.0"),
-                class: crate::app::MessageClass::Success,
-                tick_count: 0,
-                sticky: true,
-                created_at: std::time::Instant::now(),
-            }));
-        app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
-        let (tx, _rx) = mpsc::channel();
-        let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-        let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
-        let contains_invite = app
-            .status_center
-            .toast()
-            .is_some_and(|t| t.text.contains(fragment));
-        assert!(!contains_invite, "sticky toast should be dismissed");
-    });
+    let mut app = make_app("");
+    app.status_center
+        .set_toast_message(Some(crate::app::StatusMessage {
+            text: crate::messages::whats_new_toast::upgraded("2.42.0"),
+            class: crate::app::MessageClass::Success,
+            tick_count: 0,
+            sticky: true,
+            created_at: std::time::Instant::now(),
+        }));
+    app.screen = Screen::WhatsNew(crate::app::WhatsNewState::default());
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
+    let contains_invite = app
+        .status_center
+        .toast()
+        .is_some_and(|t| t.text.contains(fragment));
+    assert!(!contains_invite, "sticky toast should be dismissed");
 }
 
 #[test]
@@ -9521,12 +9496,12 @@ fn containers_overview_s_persists_sort_mode_to_preferences() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert_eq!(
-        crate::preferences::load_containers_sort_mode(),
+        crate::preferences::load_containers_sort_mode(app.env().paths()),
         crate::app::ContainersSortMode::AlphaContainer
     );
     let _ = handle_key_event(&mut app, key(KeyCode::Char('s')), &tx);
     assert_eq!(
-        crate::preferences::load_containers_sort_mode(),
+        crate::preferences::load_containers_sort_mode(app.env().paths()),
         crate::app::ContainersSortMode::AlphaHost
     );
 }
@@ -10695,13 +10670,14 @@ fn reload_hosts_drops_orphan_collapsed_hosts_and_persists() {
     // collapsed_hosts is persisted to preferences. A delete must prune
     // the runtime set AND rewrite preferences so the orphan does not
     // come back on restart.
-    let pref_dir = tempfile::tempdir().expect("tempdir");
-    crate::preferences::set_path_override(pref_dir.path().join("preferences"));
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
     app.containers_overview.toggle_host_collapsed("alive");
     app.containers_overview.toggle_host_collapsed("ghost");
-    crate::preferences::save_containers_collapsed_hosts(app.containers_overview.collapsed_hosts())
-        .expect("seed");
+    crate::preferences::save_containers_collapsed_hosts(
+        app.env().paths(),
+        app.containers_overview.collapsed_hosts(),
+    )
+    .expect("seed");
 
     app.reload_hosts();
 
@@ -10710,7 +10686,7 @@ fn reload_hosts_drops_orphan_collapsed_hosts_and_persists() {
         !app.containers_overview.collapsed_hosts().contains("ghost"),
         "collapsed_hosts entry for a removed host must be pruned"
     );
-    let on_disk = crate::preferences::load_containers_collapsed_hosts();
+    let on_disk = crate::preferences::load_containers_collapsed_hosts(app.env().paths());
     assert!(on_disk.contains("alive"));
     assert!(
         !on_disk.contains("ghost"),
@@ -10725,8 +10701,6 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
     // ghost-free. When a contributor adds a new alias-keyed cache without
     // wiring it into reload_hosts, this test pins the omission down. To
     // add a new collection: seed it below and add a matching assertion.
-    let pref_dir = tempfile::tempdir().expect("tempdir");
-    crate::preferences::set_path_override(pref_dir.path().join("preferences"));
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
     let ghost = "ghost".to_string();
 

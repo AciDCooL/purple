@@ -13,10 +13,21 @@ impl SshConfigFile {
     /// Parse an SSH config file from the given path.
     /// Preserves all formatting, comments, and unknown directives for round-trip fidelity.
     pub fn parse(path: &Path) -> Result<Self> {
-        Self::parse_with_depth(path, 0)
+        Self::parse_with_depth(path, 0, &|n| std::env::var(n).ok())
     }
 
-    fn parse_with_depth(path: &Path, depth: usize) -> Result<Self> {
+    /// Parse with `${VAR}` expansion resolved from an injected environment
+    /// instead of the process env, so tests control Include expansion without
+    /// mutating `std::env`. Production `parse` delegates here with the real env.
+    pub fn parse_with_env(path: &Path, env: &crate::runtime::env::Env) -> Result<Self> {
+        Self::parse_with_depth(path, 0, &|n| env.var(n).map(str::to_string))
+    }
+
+    fn parse_with_depth(
+        path: &Path,
+        depth: usize,
+        lookup: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Self> {
         // Track every config file we've already opened along the include chain.
         // OpenSSH's `readconf.c` aborts with "Too many recursive configuration
         // includes" the moment it detects a cycle; without this set, purple
@@ -28,13 +39,14 @@ impl SshConfigFile {
         if let Ok(canonical) = std::fs::canonicalize(path) {
             visited.insert(canonical);
         }
-        Self::parse_with_depth_visited(path, depth, &mut visited)
+        Self::parse_with_depth_visited(path, depth, &mut visited, lookup)
     }
 
     fn parse_with_depth_visited(
         path: &Path,
         depth: usize,
         visited: &mut std::collections::HashSet<PathBuf>,
+        lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<Self> {
         let content = if path.exists() {
             std::fs::read_to_string(path)
@@ -61,6 +73,7 @@ impl SshConfigFile {
             depth,
             Some(path),
             Some(visited),
+            lookup,
         );
 
         let host_count = elements
@@ -84,8 +97,14 @@ impl SshConfigFile {
     /// Create an SshConfigFile from raw content string (for demo/test use).
     /// Uses a synthetic path; the file is never read from or written to disk.
     pub fn from_content(content: &str, synthetic_path: PathBuf) -> Self {
-        let elements =
-            Self::parse_content_with_includes(content, None, MAX_INCLUDE_DEPTH, None, None);
+        let elements = Self::parse_content_with_includes(
+            content,
+            None,
+            MAX_INCLUDE_DEPTH,
+            None,
+            None,
+            &|_: &str| None,
+        );
         SshConfigFile {
             elements,
             path: synthetic_path,
@@ -98,7 +117,14 @@ impl SshConfigFile {
     /// Used by tests to create SshConfigFile from inline strings.
     #[allow(dead_code)]
     pub fn parse_content(content: &str) -> Vec<ConfigElement> {
-        Self::parse_content_with_includes(content, None, MAX_INCLUDE_DEPTH, None, None)
+        Self::parse_content_with_includes(
+            content,
+            None,
+            MAX_INCLUDE_DEPTH,
+            None,
+            None,
+            &|_: &str| None,
+        )
     }
 
     /// Parse SSH config content, optionally resolving Include directives.
@@ -112,6 +138,7 @@ impl SshConfigFile {
         depth: usize,
         config_path: Option<&Path>,
         mut visited: Option<&mut std::collections::HashSet<PathBuf>>,
+        lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Vec<ConfigElement> {
         let mut elements = Vec::new();
         let mut current_block: Option<HostBlock> = None;
@@ -136,7 +163,13 @@ impl SshConfigFile {
                     elements.push(ConfigElement::HostBlock(block));
                 }
                 let resolved = if depth < MAX_INCLUDE_DEPTH {
-                    Self::resolve_include(pattern, config_dir, depth, visited.as_deref_mut())
+                    Self::resolve_include(
+                        pattern,
+                        config_dir,
+                        depth,
+                        visited.as_deref_mut(),
+                        lookup,
+                    )
                 } else {
                     Vec::new()
                 };
@@ -306,12 +339,13 @@ impl SshConfigFile {
         config_dir: Option<&Path>,
         depth: usize,
         mut visited: Option<&mut std::collections::HashSet<PathBuf>>,
+        lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Vec<IncludedFile> {
         let mut files = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
         for single in Self::split_include_patterns(pattern) {
-            let expanded = Self::expand_env_vars(&Self::expand_tilde(single));
+            let expanded = Self::expand_env_vars_with(&Self::expand_tilde(single), lookup);
 
             // If relative path, resolve against config dir
             let glob_pattern = if expanded.starts_with('/') {
@@ -357,6 +391,7 @@ impl SshConfigFile {
                                     depth + 1,
                                     Some(&path),
                                     visited.as_deref_mut(),
+                                    lookup,
                                 );
                                 files.push(IncludedFile {
                                     path: path.clone(),
@@ -388,9 +423,18 @@ impl SshConfigFile {
         pattern.to_string()
     }
 
-    /// Expand `${VAR}` environment variable references (matches OpenSSH behavior).
-    /// Unknown variables are preserved as-is so that SSH itself can report the error.
+    /// Expand `${VAR}` references using the real process environment. Test-only
+    /// convenience; production paths build the lookup at the edge and call
+    /// `expand_env_vars_with` so expansion stays injectable.
+    #[cfg(test)]
     pub(crate) fn expand_env_vars(s: &str) -> String {
+        Self::expand_env_vars_with(s, &|n| std::env::var(n).ok())
+    }
+
+    /// Expand `${VAR}` references via an injected lookup (matches OpenSSH behavior).
+    /// Unknown variables are preserved as-is so that SSH itself can report the error.
+    /// Tests pass a closure instead of mutating the process environment.
+    pub(crate) fn expand_env_vars_with(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
         let mut result = String::with_capacity(s.len());
         let mut chars = s.char_indices().peekable();
         while let Some((i, c)) = chars.next() {
@@ -399,7 +443,7 @@ impl SshConfigFile {
                     chars.next(); // consume '{'
                     if let Some(close) = s[i + 2..].find('}') {
                         let var_name = &s[i + 2..i + 2 + close];
-                        if let Ok(val) = std::env::var(var_name) {
+                        if let Some(val) = lookup(var_name) {
                             result.push_str(&val);
                         } else {
                             // Preserve unknown vars as-is
@@ -993,22 +1037,27 @@ Host myserver
 
     #[test]
     fn test_expand_env_vars_basic() {
-        // SAFETY: test-only, single-threaded context
-        unsafe { std::env::set_var("_PURPLE_TEST_VAR", "/custom/path") };
-        let result = SshConfigFile::expand_env_vars("${_PURPLE_TEST_VAR}/.ssh/config");
+        let result =
+            SshConfigFile::expand_env_vars_with("${_PURPLE_TEST_VAR}/.ssh/config", &|name| {
+                match name {
+                    "_PURPLE_TEST_VAR" => Some("/custom/path".to_string()),
+                    _ => None,
+                }
+            });
         assert_eq!(result, "/custom/path/.ssh/config");
-        unsafe { std::env::remove_var("_PURPLE_TEST_VAR") };
     }
 
     #[test]
     fn test_expand_env_vars_multiple() {
-        // SAFETY: test-only, single-threaded context
-        unsafe { std::env::set_var("_PURPLE_TEST_A", "hello") };
-        unsafe { std::env::set_var("_PURPLE_TEST_B", "world") };
-        let result = SshConfigFile::expand_env_vars("${_PURPLE_TEST_A}/${_PURPLE_TEST_B}");
+        let result =
+            SshConfigFile::expand_env_vars_with("${_PURPLE_TEST_A}/${_PURPLE_TEST_B}", &|name| {
+                match name {
+                    "_PURPLE_TEST_A" => Some("hello".to_string()),
+                    "_PURPLE_TEST_B" => Some("world".to_string()),
+                    _ => None,
+                }
+            });
         assert_eq!(result, "hello/world");
-        unsafe { std::env::remove_var("_PURPLE_TEST_A") };
-        unsafe { std::env::remove_var("_PURPLE_TEST_B") };
     }
 
     #[test]

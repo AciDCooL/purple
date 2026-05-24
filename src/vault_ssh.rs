@@ -164,7 +164,7 @@ pub fn scrub_vault_stderr(raw: &str) -> String {
 }
 
 /// Return the certificate path for a given alias: `~/.purple/certs/<alias>-cert.pub`
-pub fn cert_path_for(alias: &str) -> Result<PathBuf> {
+pub fn cert_path_for(paths: Option<&crate::runtime::env::Paths>, alias: &str) -> Result<PathBuf> {
     anyhow::ensure!(
         !alias.is_empty()
             && !alias.contains('/')
@@ -175,19 +175,22 @@ pub fn cert_path_for(alias: &str) -> Result<PathBuf> {
         "Invalid alias for cert path: '{}'",
         alias
     );
-    let dir = dirs::home_dir()
-        .context("Could not determine home directory")?
-        .join(".purple/certs");
-    Ok(dir.join(format!("{}-cert.pub", alias)))
+    paths
+        .map(|p| p.cert_for(alias))
+        .context("Could not determine home directory")
 }
 
 /// Resolve the actual certificate file path for a host.
 /// Priority: CertificateFile directive > purple's default cert path.
-pub fn resolve_cert_path(alias: &str, certificate_file: &str) -> Result<PathBuf> {
+pub fn resolve_cert_path(
+    paths: Option<&crate::runtime::env::Paths>,
+    alias: &str,
+    certificate_file: &str,
+) -> Result<PathBuf> {
     if !certificate_file.is_empty() {
         let expanded = if let Some(rest) = certificate_file.strip_prefix("~/") {
-            if let Some(home) = dirs::home_dir() {
-                home.join(rest)
+            if let Some(p) = paths {
+                p.home().join(rest)
             } else {
                 PathBuf::from(certificate_file)
             }
@@ -196,7 +199,7 @@ pub fn resolve_cert_path(alias: &str, certificate_file: &str) -> Result<PathBuf>
         };
         Ok(expanded)
     } else {
-        cert_path_for(alias)
+        cert_path_for(paths, alias)
     }
 }
 
@@ -210,6 +213,7 @@ pub fn resolve_cert_path(alias: &str, certificate_file: &str) -> Result<PathBuf>
 /// This lets purple users configure Vault address at the provider or host
 /// level without needing to launch purple from a pre-exported shell.
 pub fn sign_certificate(
+    env: &crate::runtime::env::Env,
     role: &str,
     pubkey_path: &Path,
     alias: &str,
@@ -226,7 +230,7 @@ pub fn sign_certificate(
         anyhow::bail!("Invalid Vault SSH role: '{}'", role);
     }
 
-    let cert_dest = cert_path_for(alias)?;
+    let cert_dest = cert_path_for(env.paths(), alias)?;
 
     if let Some(parent) = cert_dest.parent() {
         std::fs::create_dir_all(parent)
@@ -257,7 +261,7 @@ pub fn sign_certificate(
         vault_addr.unwrap_or("<env>"),
         role
     );
-    let mut cmd = Command::new("vault");
+    let mut cmd = env.command("vault");
     cmd.args(["write", "-field=signed_key", role, &pubkey_arg]);
     // Override VAULT_ADDR for this subprocess only when a value was resolved
     // from config. Otherwise leave the env untouched so `vault` keeps using
@@ -429,12 +433,13 @@ pub fn sign_certificate(
 /// be wrong in non-UTC zones), we compute the TTL from the parsed from/to difference
 /// (timezone-independent) and measure elapsed time since the cert file was written (UTC
 /// file mtime vs UTC now). This keeps both sides in the same reference frame.
-pub fn check_cert_validity(cert_path: &Path) -> CertStatus {
+pub fn check_cert_validity(env: &crate::runtime::env::Env, cert_path: &Path) -> CertStatus {
     if !cert_path.exists() {
         return CertStatus::Missing;
     }
 
-    let output = match Command::new("ssh-keygen")
+    let output = match env
+        .command("ssh-keygen")
         .args(["-L", "-f"])
         .arg(cert_path)
         .output()
@@ -601,14 +606,15 @@ pub fn needs_renewal(status: &CertStatus) -> bool {
 /// Ensure a valid certificate exists for a host. Signs a new one if needed.
 /// Checks at the CertificateFile path (or purple's default) before signing.
 pub fn ensure_cert(
+    env: &crate::runtime::env::Env,
     role: &str,
     pubkey_path: &Path,
     alias: &str,
     certificate_file: &str,
     vault_addr: Option<&str>,
 ) -> Result<PathBuf> {
-    let check_path = resolve_cert_path(alias, certificate_file)?;
-    let status = check_cert_validity(&check_path);
+    let check_path = resolve_cert_path(env.paths(), alias, certificate_file)?;
+    let status = check_cert_validity(env, &check_path);
 
     if !needs_renewal(&status) {
         info!(
@@ -626,7 +632,7 @@ pub fn ensure_cert(
         role,
         status
     );
-    let result = sign_certificate(role, pubkey_path, alias, vault_addr)?;
+    let result = sign_certificate(env, role, pubkey_path, alias, vault_addr)?;
     Ok(result.cert_path)
 }
 
@@ -636,8 +642,14 @@ pub fn ensure_cert(
 /// IdentityFile pointing outside `$HOME` is rejected and falls back to the
 /// default `~/.ssh/id_ed25519.pub` to prevent reading arbitrary filesystem
 /// locations via a crafted IdentityFile directive.
-pub fn resolve_pubkey_path(identity_file: &str) -> Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
+pub fn resolve_pubkey_path(
+    paths: Option<&crate::runtime::env::Paths>,
+    identity_file: &str,
+) -> Result<PathBuf> {
+    let home = paths
+        .context("Could not determine home directory")?
+        .home()
+        .to_path_buf();
     let fallback = home.join(".ssh/id_ed25519.pub");
 
     if identity_file.is_empty() {
@@ -962,9 +974,6 @@ pub fn format_remaining(remaining_secs: i64) -> String {
     }
 }
 
-// Visible to sibling test modules (`main_tests.rs`) so they can share
-// `ENV_LOCK` and other process-global mocking helpers without spawning
-// a second lock that would race against this one.
 #[cfg(test)]
 #[path = "vault_ssh_tests.rs"]
-pub(crate) mod tests;
+mod tests;

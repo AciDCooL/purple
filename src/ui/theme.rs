@@ -1439,28 +1439,28 @@ fn detects_colored_underline(term_program: Option<&str>) -> bool {
     !matches!(term_program, Some("Apple_Terminal"))
 }
 
-/// Read the env once and write the detected cap flags into the atomics.
-fn detect_terminal_caps() {
-    let term_program = std::env::var("TERM_PROGRAM").ok();
-    let supports = detects_colored_underline(term_program.as_deref());
+/// Write the detected cap flags into the atomics from the resolved env.
+fn detect_terminal_caps(env: &crate::runtime::env::Env) {
+    let supports = detects_colored_underline(env.term_program());
     COLORED_UNDERLINE.store(u8::from(supports), Ordering::Release);
 }
 
 /// Initialize theme settings. Call once at startup.
-pub fn init() {
-    detect_terminal_caps();
-    if std::env::var_os("NO_COLOR").is_some() {
+pub fn init(env: &crate::runtime::env::Env) {
+    detect_terminal_caps(env);
+    if env.no_color() {
         COLOR_MODE.store(0, Ordering::Release);
         set_theme(ThemeDef::no_color());
         return;
     }
-    if std::env::var("COLORTERM")
+    if env
+        .colorterm()
         .map(|v| v == "truecolor" || v == "24bit")
         .unwrap_or(false)
     {
         COLOR_MODE.store(2, Ordering::Release);
     }
-    if let Some(name) = crate::preferences::load_theme() {
+    if let Some(name) = crate::preferences::load_theme(env.paths()) {
         if let Some(theme) = ThemeDef::find_builtin(&name) {
             set_theme(theme);
         } else {

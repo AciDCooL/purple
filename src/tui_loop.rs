@@ -20,12 +20,13 @@ use crate::{
 pub fn run_tui(mut app: App) -> Result<()> {
     // First-launch welcome hint (one-shot: creates .purple/ so it won't show again)
     if app.status_center.status().is_none() && !app.demo_mode {
-        if let Some(home) = dirs::home_dir() {
-            let purple_dir = home.join(".purple");
+        let paths = app.env().paths().cloned();
+        if let Some(paths) = paths {
+            let purple_dir = paths.purple_dir();
             if let Some(has_backup) = first_launch_init(&purple_dir, app.reload.config_path()) {
                 let host_count = app.hosts_state.list().len();
                 let known_hosts_count = if host_count == 0 {
-                    import::count_known_hosts_candidates()
+                    import::count_known_hosts_candidates(Some(&paths))
                 } else {
                     0
                 };
@@ -171,8 +172,9 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
     for (alias, cert_file) in vault_aliases {
         app.vault.mark_cert_check_started(alias.clone());
         let tx = events_tx.clone();
+        let env = std::sync::Arc::clone(&app.env);
         std::thread::spawn(move || {
-            let check_path = match vault_ssh::resolve_cert_path(&alias, &cert_file) {
+            let check_path = match vault_ssh::resolve_cert_path(env.paths(), &alias, &cert_file) {
                 Ok(p) => p,
                 Err(e) => {
                     let _ = tx.send(event::AppEvent::CertCheckError {
@@ -182,7 +184,7 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
                     return;
                 }
             };
-            let status = vault_ssh::check_cert_validity(&check_path);
+            let status = vault_ssh::check_cert_validity(&env, &check_path);
             let _ = tx.send(event::AppEvent::CertCheckResult { alias, status });
         });
     }
@@ -410,11 +412,14 @@ fn lazy_cert_check(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>)
             // (CLI sign, another purple instance) within one frame. Compared
             // against the mtime recorded when the cache entry was populated;
             // any mismatch forces a re-check, no matter the TTL.
-            let current_mtime =
-                vault_ssh::resolve_cert_path(&selected.alias, &selected.certificate_file)
-                    .ok()
-                    .and_then(|p| std::fs::metadata(&p).ok())
-                    .and_then(|m| m.modified().ok());
+            let current_mtime = vault_ssh::resolve_cert_path(
+                app.env().paths(),
+                &selected.alias,
+                &selected.certificate_file,
+            )
+            .ok()
+            .and_then(|p| std::fs::metadata(&p).ok())
+            .and_then(|m| m.modified().ok());
             let cache_stale =
                 cache_entry_is_stale(app.vault.cert_entry(&selected.alias), current_mtime, |t| {
                     t.elapsed().as_secs()
@@ -432,18 +437,20 @@ fn lazy_cert_check(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>)
                 let cert_file = selected.certificate_file.clone();
                 app.vault.mark_cert_check_started(alias.clone());
                 let tx = events_tx.clone();
+                let env = std::sync::Arc::clone(&app.env);
                 std::thread::spawn(move || {
-                    let check_path = match vault_ssh::resolve_cert_path(&alias, &cert_file) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            let _ = tx.send(event::AppEvent::CertCheckError {
-                                alias,
-                                message: e.to_string(),
-                            });
-                            return;
-                        }
-                    };
-                    let status = vault_ssh::check_cert_validity(&check_path);
+                    let check_path =
+                        match vault_ssh::resolve_cert_path(env.paths(), &alias, &cert_file) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                let _ = tx.send(event::AppEvent::CertCheckError {
+                                    alias,
+                                    message: e.to_string(),
+                                });
+                                return;
+                            }
+                        };
+                    let status = vault_ssh::check_cert_validity(&env, &check_path);
                     let _ = tx.send(event::AppEvent::CertCheckResult { alias, status });
                 });
             }
@@ -470,9 +477,9 @@ fn handle_pending_connect(
         .iter()
         .find(|h| h.alias == alias)
         .cloned();
-    let askpass = host_askpass.or_else(preferences::load_askpass_default);
+    let askpass = host_askpass.or_else(|| preferences::load_askpass_default(app.env().paths()));
     let has_active_tunnel = app.tunnels.active_contains(&alias);
-    let use_tmux = connection::is_in_tmux() && askpass.is_none();
+    let use_tmux = connection::is_in_tmux(app.env()) && askpass.is_none();
 
     if use_tmux {
         // Tmux mode: open SSH in a new tmux window. TUI stays alive.
@@ -481,7 +488,9 @@ fn handle_pending_connect(
         // draw cycle). Sign the entire ProxyJump chain so the proxy hop's
         // cert is in place before ssh tries to use it.
         let vault_msg = if vault_host.is_some() {
+            let env = std::sync::Arc::clone(&app.env);
             let msg = ensure_vault_ssh_chain_if_needed(
+                &env,
                 &alias,
                 app.reload.config_path(),
                 app.providers.config(),
@@ -526,7 +535,9 @@ fn handle_pending_connect(
     events.pause();
     terminal.exit()?;
     let vault_msg = if vault_host.is_some() {
+        let env = std::sync::Arc::clone(&app.env);
         let msg = ensure_vault_ssh_chain_if_needed(
+            &env,
             &alias,
             app.reload.config_path(),
             app.providers.config(),
@@ -542,11 +553,12 @@ fn handle_pending_connect(
     } else {
         None
     };
-    ensure_proton_login(askpass.as_deref());
-    if let Some(token) = ensure_bw_session(app.bw_session.as_deref(), askpass.as_deref()) {
+    let env = std::sync::Arc::clone(&app.env);
+    ensure_proton_login(&env, askpass.as_deref());
+    if let Some(token) = ensure_bw_session(&env, app.bw_session.as_deref(), askpass.as_deref()) {
         app.bw_session = Some(token);
     }
-    ensure_keychain_password(&alias, askpass.as_deref());
+    ensure_keychain_password(&env, &alias, askpass.as_deref());
     print!("{}", crate::messages::cli::beaming_up(&alias));
     let result = connection::connect(
         &alias,
@@ -645,9 +657,11 @@ fn handle_pending_container_exec(
         return Ok(());
     }
 
-    let askpass = req.askpass.or_else(preferences::load_askpass_default);
+    let askpass = req
+        .askpass
+        .or_else(|| preferences::load_askpass_default(app.env().paths()));
     let has_active_tunnel = app.tunnels.active_contains(&req.alias);
-    let use_tmux = connection::is_in_tmux() && askpass.is_none();
+    let use_tmux = connection::is_in_tmux(app.env()) && askpass.is_none();
 
     let remote_cmd = if let Some(ref user_cmd) = req.command {
         // User-typed exec command from the `e` prompt. The remote runs
@@ -767,7 +781,9 @@ fn handle_pending_container_logs(app: &mut App, events_tx: &std::sync::mpsc::Sen
     let Some(req) = app.container_state.take_pending_logs() else {
         return;
     };
-    let askpass = req.askpass.or_else(preferences::load_askpass_default);
+    let askpass = req
+        .askpass
+        .or_else(|| preferences::load_askpass_default(app.env().paths()));
     let has_tunnel = app.tunnels.active_contains(&req.alias);
     let ctx = crate::ssh_context::OwnedSshContext {
         alias: req.alias,
@@ -812,7 +828,9 @@ fn handle_pending_container_action(app: &mut App, events_tx: &std::sync::mpsc::S
     let Some(req) = app.container_state.pop_next_action() else {
         return;
     };
-    let askpass = req.askpass.or_else(preferences::load_askpass_default);
+    let askpass = req
+        .askpass
+        .or_else(|| preferences::load_askpass_default(app.env().paths()));
     let has_tunnel = app.tunnels.active_contains(&req.alias);
     let ctx = crate::ssh_context::OwnedSshContext {
         alias: req.alias.clone(),
@@ -867,12 +885,14 @@ fn handle_pending_snippet(
             .iter()
             .find(|h| h.alias == *alias)
             .and_then(|h| h.askpass.clone())
-            .or_else(preferences::load_askpass_default);
-        ensure_proton_login(askpass.as_deref());
-        if let Some(token) = ensure_bw_session(app.bw_session.as_deref(), askpass.as_deref()) {
+            .or_else(|| preferences::load_askpass_default(app.env().paths()));
+        let env = std::sync::Arc::clone(&app.env);
+        ensure_proton_login(&env, askpass.as_deref());
+        if let Some(token) = ensure_bw_session(&env, app.bw_session.as_deref(), askpass.as_deref())
+        {
             app.bw_session = Some(token);
         }
-        ensure_keychain_password(alias, askpass.as_deref());
+        ensure_keychain_password(&env, alias, askpass.as_deref());
 
         if multi {
             println!("{}", crate::messages::cli::host_separator(alias));
@@ -957,7 +977,8 @@ fn tui_teardown(app: &mut App, terminal: &mut tui::Tui) -> Result<()> {
 
 pub(crate) fn current_cert_mtime(alias: &str, app: &app::App) -> Option<std::time::SystemTime> {
     let host = app.hosts_state.list().iter().find(|h| h.alias == alias)?;
-    let cert_path = vault_ssh::resolve_cert_path(alias, &host.certificate_file).ok()?;
+    let cert_path =
+        vault_ssh::resolve_cert_path(app.env().paths(), alias, &host.certificate_file).ok()?;
     std::fs::metadata(&cert_path)
         .ok()
         .and_then(|m| m.modified().ok())

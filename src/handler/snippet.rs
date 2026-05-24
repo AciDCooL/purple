@@ -190,7 +190,7 @@ fn start_snippet_output(
                 .iter()
                 .find(|h| h.alias == *alias)
                 .and_then(|h| h.askpass.clone())
-                .or_else(preferences::load_askpass_default);
+                .or_else(|| preferences::load_askpass_default(app.env().paths()));
             (alias.clone(), askpass)
         })
         .collect();
@@ -696,7 +696,6 @@ mod param_form_tests {
 
     fn make_app() -> App {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(""),
             path: scratch.join("test_config"),
@@ -835,7 +834,6 @@ mod output_tests {
 
     fn make_app_on_output(line_count: usize) -> App {
         let scratch = tempfile::tempdir().expect("tempdir").keep();
-        crate::preferences::set_path_override(scratch.join("preferences"));
         let config = SshConfigFile {
             elements: SshConfigFile::parse_content(""),
             path: scratch.join("test_config"),
