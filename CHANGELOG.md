@@ -1,3 +1,9 @@
+## 3.18.1 - 2026-05-24
+
+- change: Sturdier internals across host rename and removal.
+- change: Each kind of per-host state (containers, ping, vault, tunnels, last-visited paths) now owns its own cleanup when a host disappears or gets renamed, so future features plug into the same contract instead of being touched from a central place.
+- change: New tests pin down both halves of the cleanup, including the inspect and logs caches, so a future refactor cannot drop part of the orphan sweep silently.
+
 ## 3.18.0 - 2026-05-24
 
 - feat: Pick files with plain Space and a in the file explorer.

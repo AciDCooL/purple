@@ -10627,6 +10627,55 @@ fn reload_hosts_drops_orphan_container_cache_entries() {
 }
 
 #[test]
+fn reload_hosts_drops_orphan_logs_cache_entries() {
+    // Mirrors reload_hosts_drops_orphan_inspect_cache_entries for the
+    // sibling logs cache. Logs entries key on full container ID just
+    // like inspect entries; an entry whose container disappeared
+    // (host removed externally) must be pruned together.
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    app.container_state.clear_cache();
+    app.container_state.insert_cache_entry(
+        "alive".to_string(),
+        crate::containers::ContainerCacheEntry {
+            timestamp: 100,
+            runtime: crate::containers::ContainerRuntime::Docker,
+            engine_version: None,
+            containers: vec![make_container("alive-c1", "nginx", "running")],
+        },
+    );
+    app.containers_overview.logs_cache_mut().entries.insert(
+        "alive-c1".to_string(),
+        crate::app::LogsCacheEntry {
+            timestamp: 0,
+            result: Ok(vec!["alive line".to_string()]),
+        },
+    );
+    app.containers_overview.logs_cache_mut().entries.insert(
+        "ghost-c1".to_string(),
+        crate::app::LogsCacheEntry {
+            timestamp: 0,
+            result: Ok(vec!["ghost line".to_string()]),
+        },
+    );
+
+    app.reload_hosts();
+
+    assert!(
+        app.containers_overview
+            .logs_cache()
+            .entries
+            .contains_key("alive-c1")
+    );
+    assert!(
+        !app.containers_overview
+            .logs_cache()
+            .entries
+            .contains_key("ghost-c1"),
+        "logs entries with no container in the host cache must be pruned"
+    );
+}
+
+#[test]
 fn reload_hosts_drops_orphan_inspect_cache_entries() {
     let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
     app.container_state.clear_cache();

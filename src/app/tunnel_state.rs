@@ -491,6 +491,36 @@ impl TunnelState {
         self.peer_viz_prev_push = self.peer_viz_last_push;
         self.peer_viz_last_push = Some(now);
     }
+
+    /// Drop demo-mode tunnel snapshots whose alias is no longer in
+    /// `valid_aliases`. Called from `App::reload_hosts`. Outside demo
+    /// the map stays empty so this is a no-op, but a demo workflow that
+    /// renames or deletes a host should not leak the old snapshot.
+    pub fn prune_orphans(&mut self, valid_aliases: &HashSet<&str>) {
+        let pre = self.demo_live_snapshots.len();
+        self.demo_live_snapshots
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        let dropped = pre.saturating_sub(self.demo_live_snapshots.len());
+        if dropped > 0 {
+            log::debug!(
+                "[purple] reload_hosts: dropped {dropped} orphan demo_live_snapshots entrie(s)"
+            );
+        }
+    }
+
+    /// Move the active-tunnel handle from `old` to `new` on host
+    /// rename. Called from `App::migrate_alias_keyed_caches` before
+    /// `reload_hosts`, whose prune step would otherwise drop entries
+    /// still under the old alias. No-op when `old == new` or no
+    /// active tunnel exists under `old`.
+    pub fn migrate_alias(&mut self, old: &str, new: &str) {
+        if old == new {
+            return;
+        }
+        if let Some(t) = self.active.remove(old) {
+            self.active.insert(new.to_string(), t);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -618,5 +648,56 @@ mod tests {
         s.cancel_delete();
         s.cancel_delete();
         assert!(s.pending_delete.is_none());
+    }
+
+    fn empty_snapshot() -> crate::tunnel_live::TunnelLiveSnapshot {
+        crate::tunnel_live::TunnelLiveSnapshot {
+            uptime_secs: 0,
+            active_channels: 0,
+            peak_concurrent: 0,
+            total_opens: 0,
+            idle_secs: 0,
+            rx_history: [0; crate::tunnel_live::HISTORY_BUCKETS],
+            tx_history: [0; crate::tunnel_live::HISTORY_BUCKETS],
+            current_rx_bps: 0,
+            current_tx_bps: 0,
+            peak_rx_bps: 0,
+            peak_tx_bps: 0,
+            throughput_ready: false,
+            clients: vec![],
+            events: vec![],
+            currently_open: vec![],
+            conflict: None,
+            last_exit: None,
+        }
+    }
+
+    #[test]
+    fn prune_orphans_drops_unknown_demo_snapshots() {
+        let mut s = TunnelState::default();
+        s.demo_live_snapshots
+            .insert("keep".to_string(), empty_snapshot());
+        s.demo_live_snapshots
+            .insert("drop".to_string(), empty_snapshot());
+
+        let valid: HashSet<&str> = ["keep"].into_iter().collect();
+        s.prune_orphans(&valid);
+
+        assert!(s.demo_live_snapshots.contains_key("keep"));
+        assert!(!s.demo_live_snapshots.contains_key("drop"));
+    }
+
+    #[test]
+    fn migrate_alias_is_noop_on_empty_active_map() {
+        // Constructing a real ActiveTunnel requires a spawned child
+        // process; the active-map rename is covered by the
+        // `migrate_alias_keyed_caches_*` integration tests, which build
+        // a full App. Here we just verify the no-op contract on absent
+        // and self-rename inputs.
+        let mut s = TunnelState::default();
+        s.migrate_alias("missing", "new");
+        assert!(s.active.is_empty());
+        s.migrate_alias("same", "same");
+        assert!(s.active.is_empty());
     }
 }

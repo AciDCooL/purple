@@ -155,6 +155,43 @@ impl PingState {
             None => !self.status.contains_key(alias),
         }
     }
+
+    /// Drop `status` and `last_checked` entries whose alias is no longer
+    /// in `valid_aliases`. Called from `App::reload_hosts` after the new
+    /// host list lands so stale ping entries cannot outlive their host.
+    pub fn prune_orphans(&mut self, valid_aliases: &std::collections::HashSet<&str>) {
+        let pre_status = self.status.len();
+        let pre_checked = self.last_checked.len();
+        self.status
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        self.last_checked
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        let dropped = pre_status.saturating_sub(self.status.len())
+            + pre_checked.saturating_sub(self.last_checked.len());
+        if dropped > 0 {
+            log::debug!(
+                "[purple] reload_hosts: pruned {} orphan ping entrie(s); {} aliases remain",
+                dropped,
+                valid_aliases.len()
+            );
+        }
+    }
+
+    /// Move `status` and `last_checked` entries from `old` to `new`.
+    /// Called from `App::migrate_alias_keyed_caches` before
+    /// `reload_hosts`, whose prune step would otherwise drop entries
+    /// still under the old alias. No-op when `old == new`.
+    pub fn migrate_alias(&mut self, old: &str, new: &str) {
+        if old == new {
+            return;
+        }
+        if let Some(v) = self.status.remove(old) {
+            self.status.insert(new.to_string(), v);
+        }
+        if let Some(v) = self.last_checked.remove(old) {
+            self.last_checked.insert(new.to_string(), v);
+        }
+    }
 }
 
 /// Ping status for a host.
@@ -314,5 +351,42 @@ mod tests {
         assert!(!state.filter_down_only);
         assert!(state.checked_at.is_none());
         assert_eq!(state.generation, 2);
+    }
+
+    #[test]
+    fn prune_orphans_drops_only_unknown_aliases() {
+        let mut s = PingState::default();
+        s.status
+            .insert("keep".to_string(), PingStatus::Reachable { rtt_ms: 12 });
+        s.status.insert("drop".to_string(), PingStatus::Unreachable);
+        s.last_checked.insert("keep".to_string(), Instant::now());
+        s.last_checked.insert("drop".to_string(), Instant::now());
+
+        let valid: std::collections::HashSet<&str> = ["keep"].into_iter().collect();
+        s.prune_orphans(&valid);
+
+        assert!(s.status.contains_key("keep"));
+        assert!(!s.status.contains_key("drop"));
+        assert!(s.last_checked.contains_key("keep"));
+        assert!(!s.last_checked.contains_key("drop"));
+    }
+
+    #[test]
+    fn migrate_alias_moves_status_and_last_checked() {
+        let mut s = PingState::default();
+        let now = Instant::now();
+        s.status
+            .insert("old".to_string(), PingStatus::Reachable { rtt_ms: 7 });
+        s.last_checked.insert("old".to_string(), now);
+
+        s.migrate_alias("old", "new");
+
+        assert!(!s.status.contains_key("old"));
+        assert!(!s.last_checked.contains_key("old"));
+        assert!(matches!(
+            s.status.get("new"),
+            Some(PingStatus::Reachable { rtt_ms: 7 })
+        ));
+        assert_eq!(s.last_checked.get("new"), Some(&now));
     }
 }

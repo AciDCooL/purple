@@ -169,6 +169,24 @@ impl ContainerState {
         std::mem::take(&mut self.pending_fetch_aliases)
     }
 
+    /// Drop cache entries whose host alias is no longer in
+    /// `valid_aliases`. Returns `true` when anything was dropped so the
+    /// caller can persist the trimmed cache via
+    /// `containers::save_container_cache`. The cache is also the source
+    /// of valid container IDs for downstream inspect/logs pruning.
+    pub fn prune_orphans(&mut self, valid_aliases: &std::collections::HashSet<&str>) -> bool {
+        let pre = self.cache.len();
+        self.cache
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        let dropped = pre.saturating_sub(self.cache.len());
+        if dropped > 0 {
+            log::debug!("[purple] reload_hosts: dropped {dropped} orphan container_cache host(s)");
+            true
+        } else {
+            false
+        }
+    }
+
     /// Move a cache entry from `old` to `new` on host rename. Returns
     /// `true` when the cache changed so the caller can persist. No-op
     /// (returns `false`) when `old == new` or no entry exists under `old`.
@@ -316,5 +334,28 @@ mod tests {
             .map(|r| r.container_id.clone())
             .collect();
         assert_eq!(ids, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn prune_orphans_drops_unknown_aliases_and_signals_persist() {
+        let mut state = ContainerState::default();
+        state.cache.insert("keep".to_string(), make_cache_entry());
+        state.cache.insert("drop".to_string(), make_cache_entry());
+
+        let valid: std::collections::HashSet<&str> = ["keep"].into_iter().collect();
+        let changed = state.prune_orphans(&valid);
+
+        assert!(changed, "returns true so caller persists the trimmed cache");
+        assert!(state.cache.contains_key("keep"));
+        assert!(!state.cache.contains_key("drop"));
+    }
+
+    #[test]
+    fn prune_orphans_returns_false_when_nothing_dropped() {
+        let mut state = ContainerState::default();
+        state.cache.insert("keep".to_string(), make_cache_entry());
+
+        let valid: std::collections::HashSet<&str> = ["keep"].into_iter().collect();
+        assert!(!state.prune_orphans(&valid));
     }
 }

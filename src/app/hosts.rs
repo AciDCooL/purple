@@ -404,12 +404,7 @@ impl App {
                 continue;
             }
             log::debug!("[purple] migrate_alias_keyed_caches: {old_alias} -> {new_alias}");
-            if let Some(v) = self.ping.status.remove(old_alias) {
-                self.ping.status.insert(new_alias.clone(), v);
-            }
-            if let Some(v) = self.ping.last_checked.remove(old_alias) {
-                self.ping.last_checked.insert(new_alias.clone(), v);
-            }
+            self.ping.migrate_alias(old_alias, new_alias);
             if self.container_state.migrate_alias(old_alias, new_alias) {
                 container_cache_changed = true;
             }
@@ -420,41 +415,24 @@ impl App {
             if self.containers_overview.migrate_alias(old_alias, new_alias) {
                 collapsed_hosts_changed = true;
             }
-            if self.vault.cert_checks_in_flight.remove(old_alias) {
-                self.vault.cert_checks_in_flight.insert(new_alias.clone());
-            }
-            if let Some(t) = self.tunnels.active.remove(old_alias) {
-                self.tunnels.active.insert(new_alias.clone(), t);
-            }
-            if let Some(v) = self.file_browser_state.host_paths.remove(old_alias) {
-                self.file_browser_state
-                    .host_paths
-                    .insert(new_alias.clone(), v);
-            }
-            // Sign worker holds the same Arc<Mutex<...>>. Recover on poison
-            // so a panicked worker does not block migration. Migration only
-            // moves the alias key; the worker's per-iteration state is in
-            // its own captured `signable` slice and is unaffected.
-            {
-                let mut sign = match self.vault.sign_in_flight.lock() {
-                    Ok(g) => g,
-                    Err(p) => p.into_inner(),
-                };
-                if sign.remove(old_alias) {
-                    sign.insert(new_alias.clone());
-                }
-            }
+            // Vault: cert_checks_in_flight and sign_in_flight move with
+            // the rename. cert_cache is intentionally excluded by
+            // `VaultState::migrate_alias` because the rename invalidates
+            // the prior cert path; the caller refreshes instead.
+            self.vault.migrate_alias(old_alias, new_alias);
+            self.tunnels.migrate_alias(old_alias, new_alias);
+            self.file_browser_state.migrate_alias(old_alias, new_alias);
         }
         if container_cache_changed {
             crate::containers::save_container_cache(
                 self.env().paths(),
-                &self.container_state.cache,
+                self.container_state.cache(),
             );
         }
         if collapsed_hosts_changed {
             if let Err(e) = crate::preferences::save_containers_collapsed_hosts(
                 self.env().paths(),
-                &self.containers_overview.collapsed_hosts,
+                self.containers_overview.collapsed_hosts(),
             ) {
                 log::warn!("[config] failed to save collapsed_hosts after rename: {e}");
             }

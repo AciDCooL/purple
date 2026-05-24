@@ -157,6 +157,65 @@ impl VaultState {
         self.signing_cancel = None;
         self.sign_thread.take()
     }
+
+    /// Drop cert-cache, in-flight check, and bulk-sign in-flight entries
+    /// whose alias is no longer in `valid_aliases`. Called from
+    /// `App::reload_hosts` after the new host list lands. Recovers from a
+    /// poisoned `sign_in_flight` mutex by reading the inner set: a
+    /// poisoned worker still owns live aliases that must not be wiped.
+    pub fn prune_orphans(&mut self, valid_aliases: &HashSet<&str>) {
+        let pre_cert = self.cert_cache.len();
+        let pre_checks = self.cert_checks_in_flight.len();
+        self.cert_cache
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
+        self.cert_checks_in_flight
+            .retain(|alias| valid_aliases.contains(alias.as_str()));
+        let dropped_cert = pre_cert.saturating_sub(self.cert_cache.len());
+        if dropped_cert > 0 {
+            log::debug!(
+                "[purple] reload_hosts: dropped {dropped_cert} orphan cert_cache entrie(s)"
+            );
+        }
+        let dropped_checks = pre_checks.saturating_sub(self.cert_checks_in_flight.len());
+        if dropped_checks > 0 {
+            log::debug!(
+                "[purple] reload_hosts: dropped {dropped_checks} orphan cert_checks_in_flight alias(es)"
+            );
+        }
+
+        let mut sign = match self.sign_in_flight.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let pre = sign.len();
+        sign.retain(|alias| valid_aliases.contains(alias.as_str()));
+        let dropped = pre.saturating_sub(sign.len());
+        if dropped > 0 {
+            log::debug!("[purple] reload_hosts: dropped {dropped} orphan sign_in_flight alias(es)");
+        }
+    }
+
+    /// Move `cert_checks_in_flight` and `sign_in_flight` entries from
+    /// `old` to `new`. `cert_cache` is excluded by design: a host
+    /// rename invalidates the prior cert path, so the caller is
+    /// expected to refresh the cache rather than migrate the entry.
+    /// Recovers from a poisoned `sign_in_flight` mutex. No-op when
+    /// `old == new`.
+    pub fn migrate_alias(&mut self, old: &str, new: &str) {
+        if old == new {
+            return;
+        }
+        if self.cert_checks_in_flight.remove(old) {
+            self.cert_checks_in_flight.insert(new.to_string());
+        }
+        let mut sign = match self.sign_in_flight.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if sign.remove(old) {
+            sign.insert(new.to_string());
+        }
+    }
 }
 
 #[cfg(test)]
@@ -286,5 +345,70 @@ mod tests {
         assert!(handle.is_none());
         assert!(v.signing_cancel.is_none());
         assert!(!cancel.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn prune_orphans_drops_unknown_aliases_across_cert_and_sign_state() {
+        let mut v = VaultState::default();
+        v.cert_cache.insert(
+            "keep".to_string(),
+            (
+                std::time::Instant::now(),
+                crate::vault_ssh::CertStatus::Missing,
+                None,
+            ),
+        );
+        v.cert_cache.insert(
+            "drop".to_string(),
+            (
+                std::time::Instant::now(),
+                crate::vault_ssh::CertStatus::Missing,
+                None,
+            ),
+        );
+        v.cert_checks_in_flight.insert("keep".to_string());
+        v.cert_checks_in_flight.insert("drop".to_string());
+        v.sign_in_flight.lock().unwrap().insert("keep".to_string());
+        v.sign_in_flight.lock().unwrap().insert("drop".to_string());
+
+        let valid: HashSet<&str> = ["keep"].into_iter().collect();
+        v.prune_orphans(&valid);
+
+        assert!(v.cert_cache.contains_key("keep"));
+        assert!(!v.cert_cache.contains_key("drop"));
+        assert!(v.cert_checks_in_flight.contains("keep"));
+        assert!(!v.cert_checks_in_flight.contains("drop"));
+        let sign = v.sign_in_flight.lock().unwrap();
+        assert!(sign.contains("keep"));
+        assert!(!sign.contains("drop"));
+    }
+
+    #[test]
+    fn migrate_alias_moves_checks_and_sign_but_not_cert_cache() {
+        let mut v = VaultState::default();
+        v.cert_cache.insert(
+            "old".to_string(),
+            (
+                std::time::Instant::now(),
+                crate::vault_ssh::CertStatus::Missing,
+                None,
+            ),
+        );
+        v.cert_checks_in_flight.insert("old".to_string());
+        v.sign_in_flight.lock().unwrap().insert("old".to_string());
+
+        v.migrate_alias("old", "new");
+
+        // cert_cache is intentionally left untouched: rename invalidates
+        // the cert path so the caller refreshes rather than migrating.
+        assert!(v.cert_cache.contains_key("old"));
+        assert!(!v.cert_cache.contains_key("new"));
+
+        assert!(!v.cert_checks_in_flight.contains("old"));
+        assert!(v.cert_checks_in_flight.contains("new"));
+
+        let sign = v.sign_in_flight.lock().unwrap();
+        assert!(!sign.contains("old"));
+        assert!(sign.contains("new"));
     }
 }

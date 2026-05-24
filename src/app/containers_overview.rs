@@ -423,6 +423,78 @@ impl ContainersOverviewState {
             false
         }
     }
+
+    /// Drop inspect-cache and logs-cache entries whose container ID is
+    /// not in `valid_container_ids`. Called from `App::reload_hosts`
+    /// after the per-host container cache has been pruned: container
+    /// IDs come from the just-pruned cache, so this keeps inspect/logs
+    /// aligned with the surviving hosts.
+    pub fn prune_by_container_ids(&mut self, valid_container_ids: &HashSet<String>) {
+        let pre_inspect = self.inspect_cache.entries.len();
+        self.inspect_cache
+            .entries
+            .retain(|id, _| valid_container_ids.contains(id));
+        self.inspect_cache
+            .in_flight
+            .retain(|id| valid_container_ids.contains(id));
+        self.logs_cache
+            .entries
+            .retain(|id, _| valid_container_ids.contains(id));
+        self.logs_cache
+            .in_flight
+            .retain(|id| valid_container_ids.contains(id));
+        let dropped = pre_inspect.saturating_sub(self.inspect_cache.entries.len());
+        if dropped > 0 {
+            log::debug!("[purple] reload_hosts: dropped {dropped} orphan inspect_cache entrie(s)");
+        }
+    }
+
+    /// Drop per-alias overview state (auto-list in-flight, refresh batch
+    /// in-flight aliases, collapsed-hosts) whose alias is no longer in
+    /// `valid_aliases`. Returns `true` when `collapsed_hosts` shrank, so
+    /// the caller can persist the trimmed set via
+    /// `preferences::save_containers_collapsed_hosts`.
+    pub fn prune_orphans(&mut self, valid_aliases: &HashSet<&str>) -> bool {
+        // Auto-list in-flight markers for deleted hosts. The listing
+        // thread still posts a result and the race guard in
+        // `handle_container_listing` removes it; pruning here keeps
+        // debug state clean and avoids a false-positive dedup hit if
+        // the same alias is re-added before the stray listing returns.
+        self.auto_list_in_flight
+            .retain(|alias| valid_aliases.contains(alias.as_str()));
+
+        // Container-overview refresh batch (R). Tracks in-flight aliases
+        // to gate counter updates against non-batch listings; prune so a
+        // host removed mid-batch cannot linger.
+        if let Some(batch) = self.refresh_batch.as_mut() {
+            let pre = batch.in_flight_aliases.len();
+            batch
+                .in_flight_aliases
+                .retain(|alias| valid_aliases.contains(alias.as_str()));
+            let dropped = pre.saturating_sub(batch.in_flight_aliases.len());
+            if dropped > 0 {
+                log::debug!(
+                    "[purple] reload_hosts: dropped {dropped} orphan refresh_batch in_flight alias(es)"
+                );
+            }
+        }
+
+        // Containers-overview collapsed groups are persisted to disk via
+        // preferences, so leftover aliases survive restart. Rename is
+        // already handled by `apply_alias_renames`; this covers delete.
+        let pre_collapsed = self.collapsed_hosts.len();
+        self.collapsed_hosts
+            .retain(|alias| valid_aliases.contains(alias.as_str()));
+        let dropped_collapsed = pre_collapsed.saturating_sub(self.collapsed_hosts.len());
+        if dropped_collapsed > 0 {
+            log::debug!(
+                "[purple] reload_hosts: dropped {dropped_collapsed} orphan collapsed_hosts entrie(s)"
+            );
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl InspectCache {
@@ -585,5 +657,95 @@ mod tests {
     fn migrate_alias_is_noop_when_nothing_matches() {
         let mut state = ContainersOverviewState::default();
         assert!(!state.migrate_alias("missing", "new"));
+    }
+
+    #[test]
+    fn prune_by_container_ids_drops_unknown_id_from_in_flight_sets() {
+        let mut state = ContainersOverviewState::default();
+        state.inspect_cache.in_flight.insert("id-keep".to_string());
+        state.inspect_cache.in_flight.insert("id-drop".to_string());
+        state.logs_cache.in_flight.insert("id-keep".to_string());
+        state.logs_cache.in_flight.insert("id-drop".to_string());
+
+        let valid: HashSet<String> = ["id-keep".to_string()].into_iter().collect();
+        state.prune_by_container_ids(&valid);
+
+        assert!(state.inspect_cache.in_flight.contains("id-keep"));
+        assert!(!state.inspect_cache.in_flight.contains("id-drop"));
+        assert!(state.logs_cache.in_flight.contains("id-keep"));
+        assert!(!state.logs_cache.in_flight.contains("id-drop"));
+    }
+
+    #[test]
+    fn prune_by_container_ids_drops_unknown_id_from_entries_maps() {
+        // Distinct from the in_flight test: this one populates the
+        // `.entries` HashMaps so the retain() calls covering them
+        // cannot be removed without a test failure.
+        let mut state = ContainersOverviewState::default();
+        state.inspect_cache.entries.insert(
+            "id-keep".to_string(),
+            InspectCacheEntry {
+                timestamp: 0,
+                result: Err("placeholder".to_string()),
+            },
+        );
+        state.inspect_cache.entries.insert(
+            "id-drop".to_string(),
+            InspectCacheEntry {
+                timestamp: 0,
+                result: Err("placeholder".to_string()),
+            },
+        );
+        state.logs_cache.entries.insert(
+            "id-keep".to_string(),
+            LogsCacheEntry {
+                timestamp: 0,
+                result: Ok(vec!["line".to_string()]),
+            },
+        );
+        state.logs_cache.entries.insert(
+            "id-drop".to_string(),
+            LogsCacheEntry {
+                timestamp: 0,
+                result: Ok(vec!["line".to_string()]),
+            },
+        );
+
+        let valid: HashSet<String> = ["id-keep".to_string()].into_iter().collect();
+        state.prune_by_container_ids(&valid);
+
+        assert!(state.inspect_cache.entries.contains_key("id-keep"));
+        assert!(!state.inspect_cache.entries.contains_key("id-drop"));
+        assert!(state.logs_cache.entries.contains_key("id-keep"));
+        assert!(!state.logs_cache.entries.contains_key("id-drop"));
+    }
+
+    #[test]
+    fn prune_orphans_drops_unknown_and_signals_collapsed_change() {
+        let mut state = ContainersOverviewState::default();
+        state.auto_list_in_flight.insert("keep".to_string());
+        state.auto_list_in_flight.insert("drop".to_string());
+        state.collapsed_hosts.insert("keep".to_string());
+        state.collapsed_hosts.insert("drop".to_string());
+
+        let valid: HashSet<&str> = ["keep"].into_iter().collect();
+        let collapsed_changed = state.prune_orphans(&valid);
+
+        assert!(
+            collapsed_changed,
+            "returns true so caller persists collapsed_hosts"
+        );
+        assert!(state.auto_list_in_flight.contains("keep"));
+        assert!(!state.auto_list_in_flight.contains("drop"));
+        assert!(state.collapsed_hosts.contains("keep"));
+        assert!(!state.collapsed_hosts.contains("drop"));
+    }
+
+    #[test]
+    fn prune_orphans_returns_false_when_collapsed_unchanged() {
+        let mut state = ContainersOverviewState::default();
+        state.auto_list_in_flight.insert("only".to_string());
+        let valid: HashSet<&str> = ["only"].into_iter().collect();
+        assert!(!state.prune_orphans(&valid));
     }
 }

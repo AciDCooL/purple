@@ -323,6 +323,16 @@ impl App {
     }
 
     /// Reload hosts from config.
+    ///
+    /// Flushes any deferred vault config write, rebuilds the host list
+    /// from `ssh_config`, then orchestrates orphan pruning across every
+    /// sub-state that keys on host alias or container ID. Each sub-state
+    /// owns the prune mechanics via `prune_orphans` (or
+    /// `prune_by_container_ids` for the inspect/logs caches). This
+    /// function still owns sequencing (container_id derivation requires
+    /// the container_cache to be pruned first) and post-prune
+    /// persistence (`save_container_cache`,
+    /// `save_containers_collapsed_hosts`).
     pub fn reload_hosts(&mut self) {
         let had_pending_vault_write = self.vault.pending_config_write;
         // Synchronously flush any deferred vault config write before reloading,
@@ -335,7 +345,7 @@ impl App {
         // those external edits silently. Surface a notification and skip the
         // flush; the user can re-trigger vault sign after reviewing their
         // changes. The cert files themselves were already written by the bulk
-        // sign worker — only the config-side `CertificateFile` directives are
+        // sign worker. Only the config-side `CertificateFile` directives are
         // skipped, which the user can wire up via a fresh sign.
         let mut flushed_vault_write = false;
         if self.vault.pending_config_write && !self.is_form_open() {
@@ -344,7 +354,7 @@ impl App {
                     crate::messages::vault_config_skipped_external_change().to_string(),
                 );
                 log::warn!(
-                    "[config] reload_hosts: skipping deferred vault write — external config changed"
+                    "[config] reload_hosts: skipping deferred vault write. external config changed"
                 );
             } else {
                 match self.hosts_state.ssh_config.write() {
@@ -369,20 +379,61 @@ impl App {
         self.hosts_state.render_cache.invalidate();
         self.hosts_state.list = self.hosts_state.ssh_config.host_entries();
         self.hosts_state.patterns = self.hosts_state.ssh_config.pattern_entries();
-        // Prune cert status cache and in-flight set: retain only entries whose
-        // host alias still exists after the reload.
-        let valid_for_certs: std::collections::HashSet<&str> = self
-            .hosts_state
-            .list
-            .iter()
-            .map(|h| h.alias.as_str())
-            .collect();
-        self.vault
-            .cert_cache
-            .retain(|alias, _| valid_for_certs.contains(alias.as_str()));
-        self.vault
-            .cert_checks_in_flight
-            .retain(|alias| valid_for_certs.contains(alias.as_str()));
+
+        // Orphan-prune every per-host sub-state in one scoped block.
+        // `valid_aliases` borrows from `self.hosts_state.list`, so the
+        // scope ends before any `&mut self` call (apply_sort, set_screen)
+        // can run. Within the scope only field-method calls are allowed.
+        {
+            let valid_aliases: std::collections::HashSet<&str> = self
+                .hosts_state
+                .list
+                .iter()
+                .map(|h| h.alias.as_str())
+                .collect();
+
+            self.vault.prune_orphans(&valid_aliases);
+
+            // Per-host container cache; persist the trimmed cache when
+            // anything dropped so `~/.purple/container_cache.jsonl` does
+            // not keep serving orphan entries on the next purple start.
+            // Demo mode skips disk writes via `save_container_cache` itself.
+            if self.container_state.prune_orphans(&valid_aliases) {
+                crate::containers::save_container_cache(
+                    self.env().paths(),
+                    self.container_state.cache(),
+                );
+            }
+
+            // Inspect / logs caches key on container ID. Build the
+            // valid-id set from the (just-pruned) container_cache and
+            // prune both caches in one pass.
+            let valid_container_ids: std::collections::HashSet<String> = self
+                .container_state
+                .cache()
+                .values()
+                .flat_map(|e| e.containers.iter().map(|c| c.id.clone()))
+                .collect();
+            self.containers_overview
+                .prune_by_container_ids(&valid_container_ids);
+
+            // Per-alias overview state (auto-list in-flight, refresh
+            // batch, collapsed-hosts). Persist collapsed_hosts when it
+            // shrank.
+            if self.containers_overview.prune_orphans(&valid_aliases) {
+                if let Err(e) = crate::preferences::save_containers_collapsed_hosts(
+                    self.env().paths(),
+                    self.containers_overview.collapsed_hosts(),
+                ) {
+                    log::warn!("[config] failed to save collapsed_hosts after prune: {e}");
+                }
+            }
+
+            self.file_browser_state.prune_orphans(&valid_aliases);
+            self.tunnels.prune_orphans(&valid_aliases);
+            self.ping.prune_orphans(&valid_aliases);
+        }
+
         if self.hosts_state.sort_mode == SortMode::Original
             && matches!(self.hosts_state.group_by, GroupBy::None)
         {
@@ -403,184 +454,6 @@ impl App {
 
         // Multi-select stores indices into hosts; clear to avoid stale refs
         self.hosts_state.multi_select.clear();
-
-        // Prune ping status for hosts that no longer exist
-        let valid_aliases: std::collections::HashSet<&str> = self
-            .hosts_state
-            .list
-            .iter()
-            .map(|h| h.alias.as_str())
-            .collect();
-
-        // Drop container-cache entries for hosts that disappeared
-        // since the last reload (manual delete, stale purge, or an
-        // external `~/.ssh/config` edit). Persist the trimmed cache
-        // so `~/.purple/container_cache.jsonl` does not keep
-        // serving orphan entries on the next purple start. Demo
-        // mode skips disk writes via `save_container_cache` itself.
-        let pre_container_cache = self.container_state.cache.len();
-        self.container_state
-            .cache
-            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
-        let dropped_container_hosts =
-            pre_container_cache.saturating_sub(self.container_state.cache.len());
-        if dropped_container_hosts > 0 {
-            log::debug!(
-                "[purple] reload_hosts: dropped {} orphan container_cache host(s)",
-                dropped_container_hosts
-            );
-            crate::containers::save_container_cache(
-                self.env().paths(),
-                &self.container_state.cache,
-            );
-        }
-
-        // Inspect cache is keyed on full container ID. Any ID whose
-        // host just got dropped is by definition orphan; build the
-        // valid-id set from the (just-pruned) container_cache.
-        let valid_container_ids: std::collections::HashSet<String> = self
-            .container_state
-            .cache
-            .values()
-            .flat_map(|e| e.containers.iter().map(|c| c.id.clone()))
-            .collect();
-        let pre_inspect = self.containers_overview.inspect_cache.entries.len();
-        self.containers_overview
-            .inspect_cache
-            .entries
-            .retain(|id, _| valid_container_ids.contains(id));
-        self.containers_overview
-            .inspect_cache
-            .in_flight
-            .retain(|id| valid_container_ids.contains(id));
-        // Logs cache shares the inspect-cache lifetime: orphan entries
-        // (containers whose host was just removed) are dropped together.
-        self.containers_overview
-            .logs_cache
-            .entries
-            .retain(|id, _| valid_container_ids.contains(id));
-        self.containers_overview
-            .logs_cache
-            .in_flight
-            .retain(|id| valid_container_ids.contains(id));
-        // Prune auto-list in-flight markers for deleted hosts. The
-        // listing thread still posts a result that hits the race
-        // guard in `handle_container_listing` and removes it there,
-        // but pruning here keeps debug state clean and avoids a
-        // false-positive dedup hit if the same alias is re-added
-        // before the stray listing returns.
-        self.containers_overview
-            .auto_list_in_flight
-            .retain(|alias| valid_aliases.contains(alias.as_str()));
-        // Container-overview refresh batch (R). Tracks in-flight aliases to
-        // gate counter updates against non-batch listings. Prune so that a
-        // host removed mid-batch cannot linger.
-        if let Some(batch) = self.containers_overview.refresh_batch.as_mut() {
-            let pre = batch.in_flight_aliases.len();
-            batch
-                .in_flight_aliases
-                .retain(|alias| valid_aliases.contains(alias.as_str()));
-            let dropped = pre.saturating_sub(batch.in_flight_aliases.len());
-            if dropped > 0 {
-                log::debug!(
-                    "[purple] reload_hosts: dropped {} orphan refresh_batch in_flight alias(es)",
-                    dropped
-                );
-            }
-        }
-        // Bulk vault-sign tracker. Worker self-prunes its own entries via
-        // `remove_in_flight`, but a host removed mid-sign would linger. On
-        // poison recover via `into_inner` instead of dropping the work. A
-        // poisoned worker still owns live aliases that must not be cleared.
-        {
-            let mut sign = match self.vault.sign_in_flight.lock() {
-                Ok(g) => g,
-                Err(p) => p.into_inner(),
-            };
-            let pre = sign.len();
-            sign.retain(|alias| valid_aliases.contains(alias.as_str()));
-            let dropped = pre.saturating_sub(sign.len());
-            if dropped > 0 {
-                log::debug!(
-                    "[purple] reload_hosts: dropped {} orphan sign_in_flight alias(es)",
-                    dropped
-                );
-            }
-        }
-        // Per-host last-visited file-browser path. Pure host-keyed state
-        // with no self-pruning, so a rename leaves the old alias behind.
-        let pre_paths = self.file_browser_state.host_paths.len();
-        self.file_browser_state
-            .host_paths
-            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
-        let dropped_paths = pre_paths.saturating_sub(self.file_browser_state.host_paths.len());
-        if dropped_paths > 0 {
-            log::debug!(
-                "[purple] reload_hosts: dropped {} orphan file_browser host_paths entrie(s)",
-                dropped_paths
-            );
-        }
-        // Demo-mode tunnel snapshot seed. The detail panel reads from this
-        // map when `demo_mode == true`. Outside demo it stays empty, but a
-        // demo workflow that renames or deletes a host should not leak.
-        let pre_demo = self.tunnels.demo_live_snapshots.len();
-        self.tunnels
-            .demo_live_snapshots
-            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
-        let dropped_demo = pre_demo.saturating_sub(self.tunnels.demo_live_snapshots.len());
-        if dropped_demo > 0 {
-            log::debug!(
-                "[purple] reload_hosts: dropped {} orphan demo_live_snapshots entrie(s)",
-                dropped_demo
-            );
-        }
-        // Containers-overview collapsed groups. Persisted to disk via
-        // preferences, so leftover aliases survive restart. Rename is
-        // already handled by `apply_alias_renames`; this covers delete.
-        let pre_collapsed = self.containers_overview.collapsed_hosts.len();
-        self.containers_overview
-            .collapsed_hosts
-            .retain(|alias| valid_aliases.contains(alias.as_str()));
-        let dropped_collapsed =
-            pre_collapsed.saturating_sub(self.containers_overview.collapsed_hosts.len());
-        if dropped_collapsed > 0 {
-            log::debug!(
-                "[purple] reload_hosts: dropped {} orphan collapsed_hosts entrie(s)",
-                dropped_collapsed
-            );
-            if let Err(e) = crate::preferences::save_containers_collapsed_hosts(
-                self.env().paths(),
-                &self.containers_overview.collapsed_hosts,
-            ) {
-                log::warn!("[config] failed to save collapsed_hosts after prune: {e}");
-            }
-        }
-        let dropped_inspect =
-            pre_inspect.saturating_sub(self.containers_overview.inspect_cache.entries.len());
-        if dropped_inspect > 0 {
-            log::debug!(
-                "[purple] reload_hosts: dropped {} orphan inspect_cache entrie(s)",
-                dropped_inspect
-            );
-        }
-
-        let pre_status = self.ping.status.len();
-        let pre_checked = self.ping.last_checked.len();
-        self.ping
-            .status
-            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
-        self.ping
-            .last_checked
-            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
-        let dropped = pre_status.saturating_sub(self.ping.status.len())
-            + pre_checked.saturating_sub(self.ping.last_checked.len());
-        if dropped > 0 {
-            log::debug!(
-                "[purple] reload_hosts: pruned {} orphan ping entrie(s); {} aliases remain",
-                dropped,
-                valid_aliases.len()
-            );
-        }
 
         // Restore search if it was active, otherwise reset
         if let Some(query) = had_search {
