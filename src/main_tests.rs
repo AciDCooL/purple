@@ -1576,6 +1576,130 @@ fn ensure_vault_ssh_chain_signs_proxy_before_target() {
     }
 }
 
+/// `ensure_vault_cert_for_alias` is the worker-thread entry point used by
+/// the SSH chokepoints (container listing/exec/logs, file browser). Unlike
+/// the connect path it has no main-thread App state, so it must load both
+/// the provider config and the SSH config from disk itself and still renew
+/// the cert for a Vault SSH host. Drives it end-to-end with a mock vault.
+#[cfg(unix)]
+#[test]
+fn ensure_vault_cert_for_alias_signs_vault_host() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _guard = crate::vault_ssh::tests::ENV_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+
+    let dir = tempfile::tempdir().unwrap();
+    let mock_dir = dir.path().join("bin");
+    std::fs::create_dir_all(&mock_dir).unwrap();
+    let log_path = dir.path().join("vault_calls.log");
+
+    let script = mock_dir.join("vault");
+    let body = format!(
+        "#!/bin/sh\n\
+         echo \"$3\" >> \"{log}\"\n\
+         printf 'ssh-ed25519-cert-v01@openssh.com AAAAFAKECERT mock\\n'\n\
+         exit 0\n",
+        log = log_path.display()
+    );
+    std::fs::write(&script, body).unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(home.join(".ssh")).unwrap();
+    std::fs::create_dir_all(home.join(".purple/certs")).unwrap();
+    std::fs::write(
+        home.join(".ssh/id_ed25519.pub"),
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI test@test\n",
+    )
+    .unwrap();
+
+    let old_path = std::env::var("PATH").unwrap_or_default();
+    let old_home = std::env::var("HOME").ok();
+    let new_path = format!("{}:{}", mock_dir.display(), old_path);
+
+    // SAFETY: ENV_LOCK held above serializes all env mutations in this
+    // binary. PATH and HOME are restored before the lock releases.
+    unsafe { std::env::set_var("PATH", &new_path) };
+    unsafe { std::env::set_var("HOME", &home) };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let config_path = dir.path().join("ssh_config");
+        std::fs::write(
+            &config_path,
+            "Host target\n  \
+              HostName 1.2.3.4\n  \
+              IdentityFile ~/.ssh/id_ed25519\n  \
+              # purple:vault-ssh ssh/sign/target\n",
+        )
+        .unwrap();
+
+        let result = ensure_vault_cert_for_alias("target", &config_path);
+        assert!(
+            result.is_some(),
+            "expected renewal to report a signing action for the vault host"
+        );
+        let (msg, is_error) = result.unwrap();
+        assert!(!is_error, "unexpected error path: {}", msg);
+
+        let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+        let lines: Vec<&str> = log.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(
+            lines,
+            vec!["ssh/sign/target"],
+            "expected exactly one sign call for the target role, got {:?}",
+            lines
+        );
+    }));
+
+    unsafe { std::env::set_var("PATH", &old_path) };
+    match old_home {
+        Some(h) => unsafe { std::env::set_var("HOME", h) },
+        None => unsafe { std::env::remove_var("HOME") },
+    }
+
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// The per-alias lock must hand the same lock to every caller for a given
+/// alias (so concurrent container fetches serialize) but distinct locks for
+/// distinct aliases (so unrelated hosts renew in parallel).
+#[test]
+fn renewal_lock_is_per_alias() {
+    let a1 = renewal_lock("host-a");
+    let a2 = renewal_lock("host-a");
+    let b = renewal_lock("host-b");
+    assert!(
+        std::sync::Arc::ptr_eq(&a1, &a2),
+        "same alias must share one lock"
+    );
+    assert!(
+        !std::sync::Arc::ptr_eq(&a1, &b),
+        "different aliases must get distinct locks"
+    );
+}
+
+/// A host without any Vault SSH role must be a silent no-op: no signing,
+/// no error. This guards the chokepoint fast path so non-vault hosts (the
+/// overwhelming majority) never spawn a vault subprocess on every SSH call.
+#[test]
+fn ensure_vault_cert_for_alias_noop_for_non_vault_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let config_path = dir.path().join("config");
+    std::fs::write(&config_path, "Host plain\n  HostName 1.2.3.4\n").unwrap();
+    let result = ensure_vault_cert_for_alias("plain", &config_path);
+    assert!(
+        result.is_none(),
+        "non-vault host must be a no-op, got {:?}",
+        result
+    );
+}
+
 #[test]
 fn cli_legacy_vault_sign_flat_form_rejected() {
     // The old flat `purple vault-sign` subcommand was removed. Ensure it

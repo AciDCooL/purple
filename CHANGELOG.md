@@ -1,3 +1,10 @@
+## 3.17.0 - 2026-05-24
+
+- feat: Vault SSH certs stay fresh for files and containers.
+- feat: Opening the file browser, transferring files or working with containers on a host that uses the Vault SSH secrets engine now signs a fresh short-lived certificate first, just like connecting already did.
+- feat: This covers the file browser, file transfers, the per-host container view and the Containers tab, including listing, logs, inspect, start, stop, restart and exec.
+- change: It all happens automatically in the background, so an expired certificate no longer blocks you mid-task.
+
 ## 3.16.0 - 2026-05-24
 
 - feat: Search your hosts by several words at once.

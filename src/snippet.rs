@@ -804,6 +804,11 @@ pub fn run_snippet(
     capture: bool,
     has_active_tunnel: bool,
 ) -> anyhow::Result<SnippetResult> {
+    // Renew the Vault SSH cert before connecting so container listing,
+    // inspect, logs, actions and file-browser operations get a fresh cert
+    // just like the interactive connect path does. No-op for non-vault hosts.
+    crate::runtime::helpers::ensure_vault_cert_for_alias(alias, config_path);
+
     let mut cmd = base_ssh_command(
         alias,
         config_path,

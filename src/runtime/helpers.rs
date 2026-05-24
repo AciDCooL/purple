@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use anyhow::{Context, Result};
 use log::{debug, warn};
@@ -301,6 +303,53 @@ pub fn ensure_vault_ssh_chain_if_needed(
         crate::messages::vault_signed_pre_connect_chain(target_alias, signed_count),
         false,
     ))
+}
+
+/// Per-alias locks serializing concurrent Vault SSH renewals. Container
+/// listing, inspect, logs and action fetches run on separate worker threads
+/// and can target the same host at once. Without this, two threads would
+/// sign the same cert in parallel and both rewrite the sacred ~/.ssh/config.
+static RENEWAL_LOCKS: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+
+fn renewal_lock(alias: &str) -> Arc<Mutex<()>> {
+    RENEWAL_LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .entry(alias.to_string())
+        .or_default()
+        .clone()
+}
+
+/// Worker-thread-safe Vault SSH renewal for a single host alias.
+///
+/// The connect path renews via `ensure_vault_ssh_chain_if_needed` with the
+/// main-thread App config in hand. The SSH chokepoints (container listing,
+/// exec, logs, actions and the file browser) run on worker threads with no
+/// App access, so this loads the provider and SSH config from disk itself.
+/// Serialized per alias so concurrent fetches never sign the same cert twice.
+/// Returns the same `(message, is_error)` summary as the chain helper;
+/// chokepoints log it and continue, the SSH call surfaces any real failure.
+pub fn ensure_vault_cert_for_alias(alias: &str, config_path: &Path) -> Option<(String, bool)> {
+    let lock = renewal_lock(alias);
+    let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
+
+    let mut config = match ssh_config::model::SshConfigFile::parse(config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("[config] Vault SSH renewal skipped for '{alias}': {e}");
+            return None;
+        }
+    };
+    let provider_config = providers::config::ProviderConfig::load();
+    let result =
+        ensure_vault_ssh_chain_if_needed(alias, config_path, &provider_config, &mut config);
+    match &result {
+        Some((msg, true)) => warn!("[external] Vault SSH renewal for '{alias}': {msg}"),
+        Some((msg, false)) => debug!("Vault SSH renewal for '{alias}': {msg}"),
+        None => {}
+    }
+    result
 }
 
 /// Decide whether to write a `CertificateFile` directive after a successful
