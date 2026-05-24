@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent};
 use log::{debug, error, info};
 
 use crate::app::{App, Screen};
@@ -257,8 +257,11 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 }
             }
         }
-        KeyCode::Char(' ') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            // Toggle multi-select
+        KeyCode::Char(' ') => {
+            // Toggle multi-select. Plain Space and Ctrl+Space both trigger
+            // the same toggle: macOS reserves Ctrl+Space for the input
+            // source switcher and tmux often binds Ctrl+Space, so the
+            // bare key has to work too. Ctrl+Space stays for muscle memory.
             match fb.active_pane {
                 BrowserPane::Local => {
                     let idx = fb.local_list_state.selected().unwrap_or(0);
@@ -288,8 +291,11 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 }
             }
         }
-        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            // Select all / deselect all (toggle)
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            // Select all / deselect all (toggle). Plain `a`/`A` and
+            // Ctrl+A all trigger the same toggle: tmux binds Ctrl+A as
+            // the prefix by default, so the bare key has to work too.
+            // Ctrl+A keeps working for users who never hit that conflict.
             match fb.active_pane {
                 BrowserPane::Local => {
                     if fb.local_selected.len() == fb.local_entries.len()

@@ -1,3 +1,11 @@
+## 3.18.0 - 2026-05-24
+
+- feat: Pick files with plain Space and a in the file explorer.
+- feat: Plain Space toggles the file under the cursor and plain a toggles every visible entry, no modifier keys needed.
+- feat: The file explorer works cleanly inside tmux and on macOS keyboard-switching setups where Ctrl chords get intercepted before reaching purple.
+- change: Ctrl+Space and Ctrl+A still toggle the same selection for users with the old muscle memory.
+- Thanks to @muhlymak for raising this in #82
+
 ## 3.17.1 - 2026-05-24
 
 - change: Safer, more reliable releases.

@@ -5497,6 +5497,138 @@ fn file_browser_enter_on_local_file_stages_copy() {
     assert!(!req.has_dirs);
 }
 
+fn make_file_browser_session_with_entries() -> crate::file_browser::FileBrowserSession {
+    let mut local_list_state = ratatui::widgets::ListState::default();
+    local_list_state.select(Some(1));
+    crate::file_browser::FileBrowserSession {
+        alias: "web".to_string(),
+        askpass: None,
+        active_pane: crate::file_browser::BrowserPane::Local,
+        local_path: std::path::PathBuf::from("/tmp"),
+        local_entries: vec![
+            crate::file_browser::FileEntry {
+                name: "a.txt".to_string(),
+                is_dir: false,
+                size: Some(1),
+                modified: None,
+            },
+            crate::file_browser::FileEntry {
+                name: "b.txt".to_string(),
+                is_dir: false,
+                size: Some(2),
+                modified: None,
+            },
+        ],
+        local_list_state,
+        local_selected: std::collections::HashSet::new(),
+        local_error: None,
+        remote_path: "/home".to_string(),
+        remote_entries: Vec::new(),
+        remote_list_state: ratatui::widgets::ListState::default(),
+        remote_selected: std::collections::HashSet::new(),
+        remote_error: None,
+        remote_loading: false,
+        show_hidden: false,
+        sort: crate::file_browser::BrowserSort::Name,
+        confirm_copy: None,
+        transferring: None,
+        transfer_error: None,
+        connection_recorded: false,
+    }
+}
+
+#[test]
+fn file_browser_plain_space_toggles_selection() {
+    // Issue #82: macOS reserves Ctrl+Space for the input source switcher,
+    // so plain Space must toggle the file selection in the active pane.
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::FileBrowser {
+        alias: "web".to_string(),
+    };
+    app.file_browser_session = Some(make_file_browser_session_with_entries());
+    let (tx, _rx) = mpsc::channel();
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    assert!(
+        fb.local_selected.contains("a.txt"),
+        "plain Space must select the entry under the cursor"
+    );
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char(' ')), &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    assert!(
+        !fb.local_selected.contains("a.txt"),
+        "plain Space on a selected entry must deselect it"
+    );
+}
+
+#[test]
+fn file_browser_ctrl_space_still_toggles_selection() {
+    // Backwards compat: users with muscle memory for Ctrl+Space outside
+    // tmux/macOS-IME contexts keep the old binding.
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::FileBrowser {
+        alias: "web".to_string(),
+    };
+    app.file_browser_session = Some(make_file_browser_session_with_entries());
+    let (tx, _rx) = mpsc::channel();
+
+    let ctrl_space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL);
+    let _ = handle_key_event(&mut app, ctrl_space, &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    assert!(
+        fb.local_selected.contains("a.txt"),
+        "Ctrl+Space must keep working as a selection toggle"
+    );
+}
+
+#[test]
+fn file_browser_plain_a_toggles_select_all() {
+    // Issue #82: tmux binds Ctrl+A as the prefix, so plain `a` must
+    // toggle select-all in the active pane.
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::FileBrowser {
+        alias: "web".to_string(),
+    };
+    app.file_browser_session = Some(make_file_browser_session_with_entries());
+    let (tx, _rx) = mpsc::channel();
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    assert_eq!(
+        fb.local_selected.len(),
+        2,
+        "plain `a` must select every visible entry"
+    );
+
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    assert!(
+        fb.local_selected.is_empty(),
+        "plain `a` on a fully-selected pane must deselect everything"
+    );
+}
+
+#[test]
+fn file_browser_ctrl_a_still_toggles_select_all() {
+    let mut app = make_app("Host web\n  HostName 1.2.3.4\n");
+    app.screen = Screen::FileBrowser {
+        alias: "web".to_string(),
+    };
+    app.file_browser_session = Some(make_file_browser_session_with_entries());
+    let (tx, _rx) = mpsc::channel();
+
+    let ctrl_a = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+    let _ = handle_key_event(&mut app, ctrl_a, &tx);
+    let fb = app.file_browser_session.as_ref().unwrap();
+    assert_eq!(
+        fb.local_selected.len(),
+        2,
+        "Ctrl+A must keep working as select-all"
+    );
+}
+
 #[test]
 fn test_snippet_picker_question_opens_help() {
     let mut app = make_snippet_app();

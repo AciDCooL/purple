@@ -296,7 +296,7 @@ fn help_line(key: &str, desc: &str) -> Line<'static> {
 
 fn help_line_short(key: &str, desc: &str) -> Line<'static> {
     // Narrower key column for columns that hold short keys only
-    // (`^Space`, `q/Esc`, `r`, `R`, `^A`, `p/P`, single-letter shortcuts).
+    // (`Space`, `q/Esc`, `r`, `R`, `a`, `p/P`, single-letter shortcuts).
     // Reclaims horizontal room for the description text.
     help_line_w(key, desc, 6)
 }
@@ -384,8 +384,8 @@ fn file_browser_lines() -> Vec<Line<'static>> {
     lines.push(help_line("j/k ↑↓", "up / down"));
     lines.push(help_line("Enter", "open dir / copy"));
     lines.push(help_line("Backspace", "go up"));
-    lines.push(help_line("^Space", "select / deselect"));
-    lines.push(help_line("^A", "select all / none"));
+    lines.push(help_line("Space", "select / deselect"));
+    lines.push(help_line("a", "select all / none"));
     lines.push(help_line(".", "toggle hidden"));
     lines.push(help_line("s", "cycle sort"));
     lines.push(help_line("R", "refresh"));
