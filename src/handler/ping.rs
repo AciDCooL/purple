@@ -1,8 +1,27 @@
 use std::sync::mpsc;
 
-use crate::app::App;
+use super::ctx::Notify;
+use crate::app::{App, HostState, PingState, StatusCenter};
 use crate::event::AppEvent;
 use crate::ping;
+
+/// The slice of App the ping handlers touch: the per-host ping state, the host
+/// list (read-only, for the ProxyJump bastion lookup) and the status center
+/// (for the "pinging…" / bastion-not-found toasts). The currently selected
+/// host is resolved in the thin wrapper while it still holds `&App`, because
+/// `App::selected_host` reads search, ui and hosts together; the slice never
+/// reaches into search, ui or any other domain.
+struct PingCtx<'a> {
+    ping: &'a mut PingState,
+    hosts: &'a HostState,
+    status: &'a mut StatusCenter,
+}
+
+impl Notify for PingCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
 
 /// Re-ping the selected host in the background when its last result is older
 /// than `STALE_REFRESH_AFTER` (or never recorded). No toast, just sets the
@@ -12,21 +31,29 @@ pub(crate) fn refresh_selected_if_stale(app: &mut App, events_tx: &mpsc::Sender<
     if !app.ping.auto_ping() {
         return;
     }
-    let Some(host) = app.selected_host() else {
+    let Some(host) = app.selected_host().cloned() else {
         return;
     };
+    let mut ctx = PingCtx {
+        ping: &mut app.ping,
+        hosts: &app.hosts_state,
+        status: &mut app.status_center,
+    };
+    refresh_stale(&mut ctx, &host, events_tx);
+}
+
+fn refresh_stale(
+    ctx: &mut PingCtx,
+    host: &crate::ssh_config::model::HostEntry,
+    events_tx: &mpsc::Sender<AppEvent>,
+) {
     let alias = host.alias.clone();
-    if !app.ping.is_stale(&alias) {
+    if !ctx.ping.is_stale(&alias) {
         return;
     }
     let (ping_alias, hostname, port) = if !host.proxy_jump.is_empty() {
         let bastion_alias = host.proxy_jump.clone();
-        match app
-            .hosts_state
-            .list()
-            .iter()
-            .find(|h| h.alias == bastion_alias)
-        {
+        match ctx.hosts.list().iter().find(|h| h.alias == bastion_alias) {
             Some(b) if !b.hostname.is_empty() => (b.alias.clone(), b.hostname.clone(), b.port),
             _ => return,
         }
@@ -36,7 +63,7 @@ pub(crate) fn refresh_selected_if_stale(app: &mut App, events_tx: &mpsc::Sender<
         (alias, host.hostname.clone(), host.port)
     };
     if matches!(
-        app.ping.status_of(&ping_alias),
+        ctx.ping.status_of(&ping_alias),
         Some(crate::app::PingStatus::Checking)
     ) {
         return;
@@ -47,14 +74,14 @@ pub(crate) fn refresh_selected_if_stale(app: &mut App, events_tx: &mpsc::Sender<
         hostname,
         port
     );
-    app.ping
+    ctx.ping
         .insert_status(ping_alias.clone(), crate::app::PingStatus::Checking);
     ping::ping_host(
         ping_alias,
         hostname,
         port,
         events_tx.clone(),
-        app.ping.generation(),
+        ctx.ping.generation(),
     );
 }
 
@@ -64,46 +91,56 @@ pub(super) fn ping_selected_host(
     events_tx: &mpsc::Sender<AppEvent>,
     show_hint: bool,
 ) {
-    if let Some(host) = app.selected_host() {
-        let alias = host.alias.clone();
-        // For ProxyJump hosts, ping the bastion instead and propagate the
-        // result to all dependents (handled in main.rs PingResult handler).
-        let (ping_alias, hostname, port) = if !host.proxy_jump.is_empty() {
-            let bastion_alias = host.proxy_jump.clone();
-            if let Some(bastion) = app
-                .hosts_state
-                .list()
-                .iter()
-                .find(|h| h.alias == bastion_alias)
-            {
-                app.ping
-                    .insert_status(alias.clone(), crate::app::PingStatus::Checking);
-                (
-                    bastion.alias.clone(),
-                    bastion.hostname.clone(),
-                    bastion.port,
-                )
-            } else {
-                app.notify_warning(crate::messages::bastion_not_found(&bastion_alias));
-                return;
-            }
+    let Some(host) = app.selected_host().cloned() else {
+        return;
+    };
+    let mut ctx = PingCtx {
+        ping: &mut app.ping,
+        hosts: &app.hosts_state,
+        status: &mut app.status_center,
+    };
+    ping_host_now(&mut ctx, &host, events_tx, show_hint);
+}
+
+fn ping_host_now(
+    ctx: &mut PingCtx,
+    host: &crate::ssh_config::model::HostEntry,
+    events_tx: &mpsc::Sender<AppEvent>,
+    show_hint: bool,
+) {
+    let alias = host.alias.clone();
+    // For ProxyJump hosts, ping the bastion instead and propagate the
+    // result to all dependents (handled in main.rs PingResult handler).
+    let (ping_alias, hostname, port) = if !host.proxy_jump.is_empty() {
+        let bastion_alias = host.proxy_jump.clone();
+        if let Some(bastion) = ctx.hosts.list().iter().find(|h| h.alias == bastion_alias) {
+            ctx.ping
+                .insert_status(alias.clone(), crate::app::PingStatus::Checking);
+            (
+                bastion.alias.clone(),
+                bastion.hostname.clone(),
+                bastion.port,
+            )
         } else {
-            (alias.clone(), host.hostname.clone(), host.port)
-        };
-        app.ping
-            .insert_status(ping_alias.clone(), crate::app::PingStatus::Checking);
-        if show_hint && !app.ping.has_pinged() {
-            app.notify(crate::messages::pinging_host(&ping_alias, true));
-            app.ping.set_has_pinged(true);
-        } else {
-            app.notify(crate::messages::pinging_host(&ping_alias, false));
+            ctx.notify_warning(crate::messages::bastion_not_found(&bastion_alias));
+            return;
         }
-        ping::ping_host(
-            ping_alias,
-            hostname,
-            port,
-            events_tx.clone(),
-            app.ping.generation(),
-        );
+    } else {
+        (alias.clone(), host.hostname.clone(), host.port)
+    };
+    ctx.ping
+        .insert_status(ping_alias.clone(), crate::app::PingStatus::Checking);
+    if show_hint && !ctx.ping.has_pinged() {
+        ctx.notify(crate::messages::pinging_host(&ping_alias, true));
+        ctx.ping.set_has_pinged(true);
+    } else {
+        ctx.notify(crate::messages::pinging_host(&ping_alias, false));
     }
+    ping::ping_host(
+        ping_alias,
+        hostname,
+        port,
+        events_tx.clone(),
+        ctx.ping.generation(),
+    );
 }

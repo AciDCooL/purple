@@ -18,10 +18,370 @@ use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, JumpMode, Screen, ViewMode};
+use super::ctx::{Nav, Notify};
+use crate::app::{
+    App, ContainerState, ContainersOverviewState, HostState, JumpMode, Screen, StatusCenter,
+    ViewMode,
+};
 use crate::containers::ContainerRuntime;
 use crate::event::AppEvent;
 use crate::preferences;
+
+/// The slice of App every Containers-tab ACTION (exec, logs, restart/stop
+/// confirms, host bulk restart/stop, stack restart) touches: the container
+/// cache and pending exec/logs queues (`container_state`), the overview's
+/// inspect cache (`containers_overview`, read to resolve a container's
+/// compose project for the stack-restart member set), the host list
+/// (read-only, to resolve each target's askpass and stale-host hint), the
+/// status center, the screen and the demo flag. Queuing exec/logs or opening
+/// a confirm screen runs entirely on the slice. the drain loop and the confirm
+/// handlers spawn the SSH threads later, so no whole-App effect is deferred.
+/// Navigation, search, sort and the `visible_items(app)` cursor resolution
+/// legitimately stay on `&mut App` (they span ui + search + container_state +
+/// hosts and use a whole-App render helper), exactly like the Tunnels tab.
+struct ContainersActionCtx<'a> {
+    container_state: &'a mut ContainerState,
+    containers_overview: &'a mut ContainersOverviewState,
+    hosts: &'a HostState,
+    status: &'a mut StatusCenter,
+    screen: &'a mut Screen,
+    demo_mode: bool,
+}
+
+impl Nav for ContainersActionCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Notify for ContainersActionCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
+
+impl ContainersActionCtx<'_> {
+    fn ctx_from_app(app: &mut App) -> ContainersActionCtx<'_> {
+        ContainersActionCtx {
+            container_state: &mut app.container_state,
+            containers_overview: &mut app.containers_overview,
+            hosts: &app.hosts_state,
+            status: &mut app.status_center,
+            screen: &mut app.screen,
+            demo_mode: app.demo_mode,
+        }
+    }
+
+    /// Build a `Vec<StackMember>` of every running container on `alias`.
+    /// Used to seed the bulk-action confirm dialogs the user opens with K
+    /// or S while the cursor is on a host-divider row.
+    fn host_running_members(&self, alias: &str) -> Vec<crate::app::StackMember> {
+        self.container_state
+            .cache_entry(alias)
+            .into_iter()
+            .flat_map(|entry| entry.containers.iter())
+            .filter(|c| c.state.eq_ignore_ascii_case("running"))
+            .map(|c| crate::app::StackMember {
+                container_id: c.id.clone(),
+                container_name: c.names.trim_start_matches('/').to_string(),
+                uptime: crate::containers::parse_uptime_from_status(&c.status),
+            })
+            .collect()
+    }
+
+    /// Validate a cursor-resolved row and resolve runtime + askpass +
+    /// stale-host hint. The cursor itself is resolved on `&App` before the
+    /// slice is built (it needs the whole-App `visible_items` render helper);
+    /// this method runs the running-state check, the id validation, the cache
+    /// runtime lookup, the askpass/stale-hint resolution and any toast on the
+    /// slice. Returns `None` (with a toast already emitted) when any
+    /// precondition fails. Demo guards live on the individual callers.
+    fn validate_running_row(
+        &mut self,
+        row: crate::ui::containers_overview::ContainerRow,
+    ) -> Option<(
+        crate::ui::containers_overview::ContainerRow,
+        crate::containers::ContainerRuntime,
+        Option<String>,
+    )> {
+        if !row.state.eq_ignore_ascii_case("running") {
+            self.notify_warning(crate::messages::container_not_running(&row.name));
+            return None;
+        }
+        if let Err(e) = crate::containers::validate_container_id(&row.id) {
+            self.notify_error(e);
+            return None;
+        }
+        let entry = self.container_state.cache_entry(&row.alias)?;
+        let runtime = entry.runtime;
+        let (askpass, stale_hint) = self
+            .hosts
+            .list()
+            .iter()
+            .find(|h| h.alias == row.alias)
+            .map(|h| {
+                let hint = super::host_form::stale_hint_for(h);
+                (h.askpass.clone(), hint)
+            })
+            .unwrap_or((None, None));
+        if let Some(hint) = stale_hint {
+            self.notify_warning(crate::messages::stale_host(&hint));
+        }
+        Some((row, runtime, askpass))
+    }
+
+    /// Compose-project label of `container_id` from the inspect cache, when a
+    /// fresh inspect result exists. Used to seed the single-container
+    /// restart/stop confirm dialogs.
+    fn project_for(&self, container_id: &str) -> Option<String> {
+        self.containers_overview
+            .inspect_cache()
+            .entries
+            .get(container_id)
+            .and_then(|e| e.result.as_ref().ok())
+            .and_then(|i| i.compose_project.clone())
+    }
+
+    /// Queue an interactive container shell session for `row`. The main loop
+    /// drains `pending_container_exec` on the next tick. Skips with a toast
+    /// when the container is not running, the host has no cached runtime, or
+    /// demo mode is active.
+    fn queue_shell_into(&mut self, row: crate::ui::containers_overview::ContainerRow) {
+        if self.demo_mode {
+            self.notify_warning(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
+            return;
+        }
+        let Some((row, runtime, askpass)) = self.validate_running_row(row) else {
+            return;
+        };
+        log::info!(
+            "[purple] container exec queued: alias={} container={} id={}",
+            row.alias,
+            row.name,
+            row.id
+        );
+        self.container_state
+            .queue_exec(crate::app::ContainerExecRequest {
+                alias: row.alias,
+                askpass,
+                runtime,
+                container_id: row.id,
+                container_name: row.name,
+                command: None,
+            });
+    }
+
+    /// Queue a logs fetch for `row` and open the logs overlay with an empty
+    /// placeholder body so the user sees a loading state while the SSH call
+    /// runs. The result event populates the body and clears the placeholder.
+    fn queue_logs_fetch(&mut self, row: crate::ui::containers_overview::ContainerRow) {
+        let Some((row, runtime, askpass)) = self.validate_running_row(row) else {
+            return;
+        };
+        log::info!(
+            "[purple] container_logs queued: alias={} container={} id={}",
+            row.alias,
+            row.name,
+            row.id
+        );
+        self.container_state
+            .queue_logs(crate::app::ContainerLogsRequest {
+                alias: row.alias.clone(),
+                askpass,
+                runtime,
+                container_id: row.id.clone(),
+                container_name: row.name.clone(),
+            });
+        self.set_screen(Screen::ContainerLogs {
+            alias: row.alias,
+            container_id: row.id,
+            container_name: row.name,
+            body: Vec::new(),
+            fetched_at: 0,
+            error: None,
+            scroll: 0,
+            last_render_height: 0,
+            search: None,
+        });
+    }
+
+    /// Demo-guard + validate `row`, then open the restart confirm dialog.
+    fn open_restart_confirm(&mut self, row: crate::ui::containers_overview::ContainerRow) {
+        if self.demo_mode {
+            self.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+            return;
+        }
+        let Some((row, _runtime, _askpass)) = self.validate_running_row(row) else {
+            return;
+        };
+        let project = self.project_for(&row.id);
+        log::debug!(
+            "[purple] container_restart: confirm opened alias={} id={}",
+            row.alias,
+            row.id
+        );
+        self.set_screen(Screen::ConfirmContainerRestart {
+            alias: row.alias,
+            container_id: row.id,
+            container_name: row.name,
+            project,
+            uptime: row.uptime,
+        });
+    }
+
+    /// Demo-guard + validate `row`, then open the stop confirm dialog.
+    fn open_stop_confirm(&mut self, row: crate::ui::containers_overview::ContainerRow) {
+        if self.demo_mode {
+            self.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+            return;
+        }
+        let Some((row, _runtime, _askpass)) = self.validate_running_row(row) else {
+            return;
+        };
+        let project = self.project_for(&row.id);
+        log::debug!(
+            "[purple] container_stop: confirm opened alias={} id={}",
+            row.alias,
+            row.id
+        );
+        self.set_screen(Screen::ConfirmContainerStop {
+            alias: row.alias,
+            container_id: row.id,
+            container_name: row.name,
+            project,
+            uptime: row.uptime,
+        });
+    }
+
+    /// `K` on a host-divider row: confirm-then-queue a Restart for every
+    /// running container on the host. Aborts with a toast when the host has
+    /// nothing to restart. Demo mode short-circuits.
+    fn open_host_restart_all_confirm(&mut self, alias: &str) {
+        if self.demo_mode {
+            self.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+            return;
+        }
+        let members = self.host_running_members(alias);
+        if members.is_empty() {
+            self.notify_warning(crate::messages::container_host_no_running(alias));
+            return;
+        }
+        log::debug!(
+            "[purple] container_restart_all: confirm opened alias={} members={}",
+            alias,
+            members.len()
+        );
+        self.set_screen(Screen::ConfirmHostRestartAll {
+            alias: alias.to_string(),
+            members,
+        });
+    }
+
+    /// `S` on a host-divider row: confirm-then-queue a Stop for every running
+    /// container on the host.
+    fn open_host_stop_all_confirm(&mut self, alias: &str) {
+        if self.demo_mode {
+            self.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
+            return;
+        }
+        let members = self.host_running_members(alias);
+        if members.is_empty() {
+            self.notify_warning(crate::messages::container_host_no_running(alias));
+            return;
+        }
+        log::debug!(
+            "[purple] container_stop_all: confirm opened alias={} members={}",
+            alias,
+            members.len()
+        );
+        self.set_screen(Screen::ConfirmHostStopAll {
+            alias: alias.to_string(),
+            members,
+        });
+    }
+
+    /// `Ctrl-K` on a container row: confirm-then-queue a Restart for every
+    /// running member of the selected container's compose stack. Degrades to a
+    /// toast when the inspect entry (and thus the project label) is missing.
+    /// The demo guard runs in the caller (Ctrl-K is dispatched even on a
+    /// host-divider row, so the toast must fire before the row is resolved).
+    fn open_stack_restart_confirm(&mut self, row: crate::ui::containers_overview::ContainerRow) {
+        // Resolve the compose-project label from the inspect cache. The entry
+        // exists when the user has the detail panel open on the selected row
+        // (the auto-fetch ensures one is in flight). When it is missing the
+        // user typed Ctrl-K too soon. degrade to a toast rather than guessing
+        // a project name.
+        let Some(project) = self.project_for(&row.id) else {
+            self.notify_warning(crate::messages::container_stack_unknown(&row.name));
+            return;
+        };
+        // Walk every container of this host and pick the running members that
+        // share the same compose_project. Rows with no inspect entry (cache
+        // TTL race) are excluded; the user can re-trigger after a refresh.
+        let members: Vec<crate::app::StackMember> = self
+            .container_state
+            .cache_entry(&row.alias)
+            .into_iter()
+            .flat_map(|entry| entry.containers.iter())
+            .filter(|c| c.state.eq_ignore_ascii_case("running"))
+            .filter_map(|c| {
+                let inspect = self
+                    .containers_overview
+                    .inspect_cache()
+                    .entries
+                    .get(&c.id)?
+                    .result
+                    .as_ref()
+                    .ok()?;
+                if inspect.compose_project.as_deref() != Some(project.as_str()) {
+                    return None;
+                }
+                Some(crate::app::StackMember {
+                    container_id: c.id.clone(),
+                    container_name: c.names.trim_start_matches('/').to_string(),
+                    uptime: crate::containers::parse_uptime_from_status(&c.status),
+                })
+            })
+            .collect();
+        if members.is_empty() {
+            self.notify_warning(crate::messages::container_stack_no_running(&project));
+            return;
+        }
+        log::debug!(
+            "[purple] stack_restart: confirm opened alias={} project={} members={}",
+            row.alias,
+            project,
+            members.len()
+        );
+        self.set_screen(Screen::ConfirmStackRestart {
+            alias: row.alias,
+            project,
+            members,
+        });
+    }
+
+    /// Demo-guard + validate `row`, then open the exec command prompt.
+    fn open_exec_prompt(&mut self, row: crate::ui::containers_overview::ContainerRow) {
+        if self.demo_mode {
+            self.notify_warning(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
+            return;
+        }
+        let Some((row, _runtime, _askpass)) = self.validate_running_row(row) else {
+            return;
+        };
+        log::debug!(
+            "[purple] container_exec_prompt: opened alias={} id={}",
+            row.alias,
+            row.id
+        );
+        self.set_screen(Screen::ContainerExecPrompt {
+            alias: row.alias,
+            container_id: row.id,
+            container_name: row.name,
+            query: String::new(),
+        });
+    }
+}
 
 /// Alias of the container under the cursor, or `None` when the
 /// cursor lands on a host-divider row. Pair with `selected_header_alias`
@@ -103,23 +463,6 @@ fn toggle_collapse_for_selected_host(app: &mut App) {
     ) {
         log::warn!("[config] Failed to persist containers collapsed hosts: {e}");
     }
-}
-
-/// Build a `Vec<StackMember>` of every running container on `alias`.
-/// Used to seed the bulk-action confirm dialogs the user opens with K
-/// or S while the cursor is on a host-divider row.
-fn host_running_members(app: &App, alias: &str) -> Vec<crate::app::StackMember> {
-    app.container_state
-        .cache_entry(alias)
-        .into_iter()
-        .flat_map(|entry| entry.containers.iter())
-        .filter(|c| c.state.eq_ignore_ascii_case("running"))
-        .map(|c| crate::app::StackMember {
-            container_id: c.id.clone(),
-            container_name: c.names.trim_start_matches('/').to_string(),
-            uptime: crate::containers::parse_uptime_from_status(&c.status),
-        })
-        .collect()
 }
 
 /// The container under the cursor, or `None` when the cursor lands
@@ -413,172 +756,36 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     }
 }
 
-/// Queue an `ssh -t <alias> docker exec -it <id> sh -c 'bash || sh'`
-/// session for the row under the cursor. The main loop drains
-/// `pending_container_exec` on the next tick. same pattern as the
-/// host-list Enter → `pending_connect` flow.
-///
-/// Skips with a toast when:
-/// - the container is not running (`docker exec` would fail),
-/// - the cache has no runtime for the host (we cannot pick docker vs
-///   podman),
-/// - demo mode is active.
+/// Queue an interactive container shell session for the row under the
+/// cursor. Same pattern as the host-list Enter → `pending_connect` flow.
+/// The cursor row is resolved on `&App` (it needs the whole-App
+/// `visible_items` render helper); queuing then runs on the action slice.
 fn exec_into_selected_container(app: &mut App) {
-    if app.demo_mode {
-        app.notify_warning(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
-        return;
-    }
-    let Some((row, runtime, askpass)) = selected_running_row_with_runtime(app) else {
+    let Some(row) = selected_container_row(app) else {
         return;
     };
-    log::info!(
-        "[purple] container exec queued: alias={} container={} id={}",
-        row.alias,
-        row.name,
-        row.id
-    );
-    app.container_state
-        .queue_exec(crate::app::ContainerExecRequest {
-            alias: row.alias,
-            askpass,
-            runtime,
-            container_id: row.id,
-            container_name: row.name,
-            command: None,
-        });
-}
-
-/// Resolve the cursor to a row, validate that it is running, and
-/// resolve runtime + askpass + stale-host hint. Used as the prelude
-/// for `l`, `K`, `S`, `e` and `E`. Returns `None` (with a toast
-/// already emitted by the called helpers) when any precondition
-/// fails. Demo guards live on the individual callers because `l`
-/// has a demo short-circuit in `spawn_container_logs_fetch` and
-/// must reach this prelude even in demo mode.
-fn selected_running_row_with_runtime(
-    app: &mut App,
-) -> Option<(
-    crate::ui::containers_overview::ContainerRow,
-    crate::containers::ContainerRuntime,
-    Option<String>,
-)> {
-    let row = selected_container_row(app)?;
-    if !row.state.eq_ignore_ascii_case("running") {
-        app.notify_warning(crate::messages::container_not_running(&row.name));
-        return None;
-    }
-    if let Err(e) = crate::containers::validate_container_id(&row.id) {
-        app.notify_error(e);
-        return None;
-    }
-    let entry = app.container_state.cache_entry(&row.alias)?;
-    let runtime = entry.runtime;
-    let (askpass, stale_hint) = app
-        .hosts_state
-        .list()
-        .iter()
-        .find(|h| h.alias == row.alias)
-        .map(|h| {
-            let hint = super::host_form::stale_hint_for(h);
-            (h.askpass.clone(), hint)
-        })
-        .unwrap_or((None, None));
-    if let Some(hint) = stale_hint {
-        app.notify_warning(crate::messages::stale_host(&hint));
-    }
-    Some((row, runtime, askpass))
+    ContainersActionCtx::ctx_from_app(app).queue_shell_into(row);
 }
 
 fn queue_logs_fetch_for_selected(app: &mut App) {
-    let Some((row, runtime, askpass)) = selected_running_row_with_runtime(app) else {
+    let Some(row) = selected_container_row(app) else {
         return;
     };
-    log::info!(
-        "[purple] container_logs queued: alias={} container={} id={}",
-        row.alias,
-        row.name,
-        row.id
-    );
-    app.container_state
-        .queue_logs(crate::app::ContainerLogsRequest {
-            alias: row.alias.clone(),
-            askpass,
-            runtime,
-            container_id: row.id.clone(),
-            container_name: row.name.clone(),
-        });
-    // Open the overlay immediately with an empty body so the user
-    // sees a loading placeholder while the SSH call runs. The result
-    // event populates `body` and clears the placeholder.
-    app.set_screen(Screen::ContainerLogs {
-        alias: row.alias,
-        container_id: row.id,
-        container_name: row.name,
-        body: Vec::new(),
-        fetched_at: 0,
-        error: None,
-        scroll: 0,
-        last_render_height: 0,
-        search: None,
-    });
+    ContainersActionCtx::ctx_from_app(app).queue_logs_fetch(row);
 }
 
 fn open_restart_confirm(app: &mut App) {
-    if app.demo_mode {
-        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
-        return;
-    }
-    let Some((row, _runtime, _askpass)) = selected_running_row_with_runtime(app) else {
+    let Some(row) = selected_container_row(app) else {
         return;
     };
-    let project = app
-        .containers_overview
-        .inspect_cache()
-        .entries
-        .get(&row.id)
-        .and_then(|e| e.result.as_ref().ok())
-        .and_then(|i| i.compose_project.clone());
-    log::debug!(
-        "[purple] container_restart: confirm opened alias={} id={}",
-        row.alias,
-        row.id
-    );
-    app.set_screen(Screen::ConfirmContainerRestart {
-        alias: row.alias,
-        container_id: row.id,
-        container_name: row.name,
-        project,
-        uptime: row.uptime,
-    });
+    ContainersActionCtx::ctx_from_app(app).open_restart_confirm(row);
 }
 
 fn open_stop_confirm(app: &mut App) {
-    if app.demo_mode {
-        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
-        return;
-    }
-    let Some((row, _runtime, _askpass)) = selected_running_row_with_runtime(app) else {
+    let Some(row) = selected_container_row(app) else {
         return;
     };
-    let project = app
-        .containers_overview
-        .inspect_cache()
-        .entries
-        .get(&row.id)
-        .and_then(|e| e.result.as_ref().ok())
-        .and_then(|i| i.compose_project.clone());
-    log::debug!(
-        "[purple] container_stop: confirm opened alias={} id={}",
-        row.alias,
-        row.id
-    );
-    app.set_screen(Screen::ConfirmContainerStop {
-        alias: row.alias,
-        container_id: row.id,
-        container_name: row.name,
-        project,
-        uptime: row.uptime,
-    });
+    ContainersActionCtx::ctx_from_app(app).open_stop_confirm(row);
 }
 
 /// `K` on a host-divider row: confirm-then-queue a Restart for every
@@ -587,50 +794,20 @@ fn open_stop_confirm(app: &mut App) {
 /// confirm dialog. Demo mode short-circuits with the standard
 /// "actions disabled" toast.
 fn open_host_restart_all_confirm(app: &mut App, alias: &str) {
-    if app.demo_mode {
-        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
-        return;
-    }
-    let members = host_running_members(app, alias);
-    if members.is_empty() {
-        app.notify_warning(crate::messages::container_host_no_running(alias));
-        return;
-    }
-    log::debug!(
-        "[purple] container_restart_all: confirm opened alias={} members={}",
-        alias,
-        members.len()
-    );
-    app.set_screen(Screen::ConfirmHostRestartAll {
-        alias: alias.to_string(),
-        members,
-    });
+    ContainersActionCtx::ctx_from_app(app).open_host_restart_all_confirm(alias);
 }
 
 /// `S` on a host-divider row: confirm-then-queue a Stop for every
 /// running container on the host.
 fn open_host_stop_all_confirm(app: &mut App, alias: &str) {
-    if app.demo_mode {
-        app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
-        return;
-    }
-    let members = host_running_members(app, alias);
-    if members.is_empty() {
-        app.notify_warning(crate::messages::container_host_no_running(alias));
-        return;
-    }
-    log::debug!(
-        "[purple] container_stop_all: confirm opened alias={} members={}",
-        alias,
-        members.len()
-    );
-    app.set_screen(Screen::ConfirmHostStopAll {
-        alias: alias.to_string(),
-        members,
-    });
+    ContainersActionCtx::ctx_from_app(app).open_host_stop_all_confirm(alias);
 }
 
 fn open_stack_restart_confirm(app: &mut App) {
+    // Demo guard precedes the cursor resolution to match the original
+    // order: Ctrl-K is dispatched unconditionally (not gated on a
+    // container row), so the demo toast must fire even when the cursor
+    // sits on a host-divider row.
     if app.demo_mode {
         app.notify_warning(crate::messages::DEMO_CONTAINER_ACTIONS_DISABLED);
         return;
@@ -638,87 +815,14 @@ fn open_stack_restart_confirm(app: &mut App) {
     let Some(row) = selected_container_row(app) else {
         return;
     };
-    // Resolve the compose-project label from the inspect cache. The
-    // entry exists when the user has the detail panel open on the
-    // selected row (the auto-fetch ensures one is in flight). When
-    // it is missing the user typed Ctrl-K too soon. degrade to a
-    // toast rather than guessing a project name.
-    let Some(project) = app
-        .containers_overview
-        .inspect_cache()
-        .entries
-        .get(&row.id)
-        .and_then(|e| e.result.as_ref().ok())
-        .and_then(|i| i.compose_project.clone())
-    else {
-        app.notify_warning(crate::messages::container_stack_unknown(&row.name));
-        return;
-    };
-    // Walk every container of this host and pick the running members
-    // that share the same compose_project. Rows with no inspect entry
-    // (cache TTL race) are excluded; the user can re-trigger after a
-    // refresh.
-    let members: Vec<crate::app::StackMember> = app
-        .container_state
-        .cache_entry(&row.alias)
-        .into_iter()
-        .flat_map(|entry| entry.containers.iter())
-        .filter(|c| c.state.eq_ignore_ascii_case("running"))
-        .filter_map(|c| {
-            let inspect = app
-                .containers_overview
-                .inspect_cache()
-                .entries
-                .get(&c.id)?
-                .result
-                .as_ref()
-                .ok()?;
-            if inspect.compose_project.as_deref() != Some(project.as_str()) {
-                return None;
-            }
-            Some(crate::app::StackMember {
-                container_id: c.id.clone(),
-                container_name: c.names.trim_start_matches('/').to_string(),
-                uptime: crate::containers::parse_uptime_from_status(&c.status),
-            })
-        })
-        .collect();
-    if members.is_empty() {
-        app.notify_warning(crate::messages::container_stack_no_running(&project));
-        return;
-    }
-    log::debug!(
-        "[purple] stack_restart: confirm opened alias={} project={} members={}",
-        row.alias,
-        project,
-        members.len()
-    );
-    app.set_screen(Screen::ConfirmStackRestart {
-        alias: row.alias,
-        project,
-        members,
-    });
+    ContainersActionCtx::ctx_from_app(app).open_stack_restart_confirm(row);
 }
 
 fn open_exec_prompt(app: &mut App) {
-    if app.demo_mode {
-        app.notify_warning(crate::messages::DEMO_CONTAINER_EXEC_DISABLED);
-        return;
-    }
-    let Some((row, _runtime, _askpass)) = selected_running_row_with_runtime(app) else {
+    let Some(row) = selected_container_row(app) else {
         return;
     };
-    log::debug!(
-        "[purple] container_exec_prompt: opened alias={} id={}",
-        row.alias,
-        row.id
-    );
-    app.set_screen(Screen::ContainerExecPrompt {
-        alias: row.alias,
-        container_id: row.id,
-        container_name: row.name,
-        query: String::new(),
-    });
+    ContainersActionCtx::ctx_from_app(app).open_exec_prompt(row);
 }
 
 /// Handle a key event while the user is on the Containers tab. The

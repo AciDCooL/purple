@@ -14,6 +14,7 @@ pub(crate) mod container_host_picker;
 pub(crate) mod container_logs;
 mod containers;
 pub(crate) mod containers_overview;
+mod ctx;
 pub(crate) mod event_loop;
 mod file_browser;
 mod help;

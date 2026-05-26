@@ -6,15 +6,49 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, ContainerExecRequest, Screen};
+use super::ctx::{Nav, Notify};
+use crate::app::{App, ContainerExecRequest, ContainerState, HostState, Screen, StatusCenter};
+
+/// The slice of App the container exec prompt touches: the screen (which holds
+/// the typed command buffer), the container cache / submit queue and the host
+/// list (for the host's askpass). It navigates and notifies; no whole-App
+/// effects are deferred.
+struct ExecPromptCtx<'a> {
+    screen: &'a mut Screen,
+    container_state: &'a mut ContainerState,
+    hosts: &'a HostState,
+    status: &'a mut StatusCenter,
+}
+
+impl Nav for ExecPromptCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Notify for ExecPromptCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
 
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
+    let mut ctx = ExecPromptCtx {
+        screen: &mut app.screen,
+        container_state: &mut app.container_state,
+        hosts: &app.hosts_state,
+        status: &mut app.status_center,
+    };
+    exec_prompt_key(&mut ctx, key);
+}
+
+fn exec_prompt_key(ctx: &mut ExecPromptCtx, key: KeyEvent) {
     let Screen::ContainerExecPrompt {
         alias,
         container_id,
         container_name,
         query,
-    } = &mut app.screen
+    } = &mut *ctx.screen
     else {
         return;
     };
@@ -22,7 +56,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => {
             log::debug!("[purple] container_exec_prompt: cancelled");
-            app.set_screen(Screen::HostList);
+            ctx.set_screen(Screen::HostList);
         }
         KeyCode::Enter => {
             let cmd = query.trim().to_string();
@@ -35,13 +69,13 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             // newlines or escapes cannot smuggle a multi-line command
             // past the single-line prompt.
             if cmd.chars().any(|c| c.is_control()) {
-                app.notify_error(crate::messages::CONTAINER_EXEC_INVALID_COMMAND.to_string());
+                ctx.notify_error(crate::messages::CONTAINER_EXEC_INVALID_COMMAND.to_string());
                 return;
             }
             let alias = alias.clone();
             let container_id = container_id.clone();
             let container_name = container_name.clone();
-            queue_exec_with_command(app, alias, container_id, container_name, cmd);
+            queue_exec_with_command(ctx, alias, container_id, container_name, cmd);
         }
         KeyCode::Backspace => {
             query.pop();
@@ -57,23 +91,23 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 }
 
 fn queue_exec_with_command(
-    app: &mut App,
+    ctx: &mut ExecPromptCtx,
     alias: String,
     container_id: String,
     container_name: String,
     command: String,
 ) {
-    let Some(entry) = app.container_state.cache_entry(&alias) else {
+    let Some(entry) = ctx.container_state.cache_entry(&alias) else {
         log::debug!(
             "[purple] container_exec_prompt: submit aborted, no cache for alias={}",
             alias
         );
-        app.set_screen(Screen::HostList);
+        ctx.set_screen(Screen::HostList);
         return;
     };
     let runtime = entry.runtime;
-    let askpass = app
-        .hosts_state
+    let askpass = ctx
+        .hosts
         .list()
         .iter()
         .find(|h| h.alias == alias)
@@ -85,7 +119,7 @@ fn queue_exec_with_command(
         container_id,
         command.len()
     );
-    app.container_state.queue_exec(ContainerExecRequest {
+    ctx.container_state.queue_exec(ContainerExecRequest {
         alias,
         askpass,
         runtime,
@@ -93,5 +127,5 @@ fn queue_exec_with_command(
         container_name,
         command: Some(command),
     });
-    app.set_screen(Screen::HostList);
+    ctx.set_screen(Screen::HostList);
 }

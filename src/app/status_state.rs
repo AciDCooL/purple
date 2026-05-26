@@ -51,6 +51,17 @@ impl StatusCenter {
         self.toast_queue.retain(|t| !matches(t));
     }
 
+    /// Success toast / footer. Canonical entry mirroring `App::notify` for
+    /// callers that hold a bare `StatusCenter` (slice handlers, dispatch shims).
+    pub(crate) fn notify(&mut self, text: impl Into<String>) {
+        self.set_status(text, false);
+    }
+
+    /// Error toast (sticky by default). Mirrors `App::notify_error`.
+    pub(crate) fn notify_error(&mut self, text: impl Into<String>) {
+        self.set_status(text, true);
+    }
+
     pub fn set_status(&mut self, text: impl Into<String>, is_error: bool) {
         let class = if is_error {
             MessageClass::Error

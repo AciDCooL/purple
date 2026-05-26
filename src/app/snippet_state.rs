@@ -109,6 +109,18 @@ impl SnippetState {
         self.form_baseline.as_ref()
     }
 
+    /// True if the snippet form differs from its captured baseline.
+    pub fn form_is_dirty(&self) -> bool {
+        match &self.form_baseline {
+            Some(b) => {
+                self.form.name != b.name
+                    || self.form.command != b.command
+                    || self.form.description != b.description
+            }
+            None => false,
+        }
+    }
+
     pub fn set_form_baseline(&mut self, baseline: Option<SnippetFormBaseline>) {
         self.form_baseline = baseline;
     }
@@ -229,5 +241,43 @@ mod tests {
         s.close_param_form();
         assert!(s.param_form.is_none());
         assert!(!s.pending_terminal);
+    }
+
+    fn state_matching_baseline() -> SnippetState {
+        let mut s = SnippetState::default();
+        s.form.name = "deploy".into();
+        s.form.command = "make deploy".into();
+        s.form.description = "ship it".into();
+        s.set_form_baseline(Some(SnippetFormBaseline {
+            name: "deploy".into(),
+            command: "make deploy".into(),
+            description: "ship it".into(),
+        }));
+        s
+    }
+
+    #[test]
+    fn form_is_dirty_is_false_without_a_baseline() {
+        let mut s = SnippetState::default();
+        s.form.name = "edited".into();
+        assert!(!s.form_is_dirty());
+    }
+
+    #[test]
+    fn form_is_dirty_is_false_when_form_equals_baseline() {
+        assert!(!state_matching_baseline().form_is_dirty());
+    }
+
+    fn assert_field_change_is_dirty(field: &str, mutate: impl FnOnce(&mut SnippetForm)) {
+        let mut s = state_matching_baseline();
+        mutate(&mut s.form);
+        assert!(s.form_is_dirty(), "a change in {field} must read dirty");
+    }
+
+    #[test]
+    fn form_is_dirty_detects_a_change_in_each_field() {
+        assert_field_change_is_dirty("name", |f| f.name.push('x'));
+        assert_field_change_is_dirty("command", |f| f.command.push('x'));
+        assert_field_change_is_dirty("description", |f| f.description.push('x'));
     }
 }

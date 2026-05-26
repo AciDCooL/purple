@@ -1,38 +1,66 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use log::debug;
 
-use crate::app::{App, Screen};
+use super::ctx::Nav;
+use crate::app::{App, Screen, StatusCenter};
+use crate::runtime::env::Env;
+
+/// The slice of App the What's New overlay touches: the screen (scroll state
+/// lives inside `Screen::WhatsNew`, plus the return-to-host-list transition),
+/// the status center (to drop the "what's new" invite toast on close) and the
+/// resolved environment (for the preferences path used to persist the last
+/// seen version). It never reaches into hosts, tunnels or any other domain.
+struct WhatsNewCtx<'a> {
+    screen: &'a mut Screen,
+    status: &'a mut StatusCenter,
+    env: &'a Env,
+}
+
+impl Nav for WhatsNewCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
 
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
+    let mut ctx = WhatsNewCtx {
+        screen: &mut app.screen,
+        status: &mut app.status_center,
+        env: app.env.as_ref(),
+    };
+    whats_new_key(&mut ctx, key);
+}
+
+fn whats_new_key(ctx: &mut WhatsNewCtx, key: KeyEvent) {
     match key.code {
-        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('n') => close_and_mark_seen(app),
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('n') => close_and_mark_seen(ctx),
         KeyCode::Char('j') | KeyCode::Down => {
-            if let Screen::WhatsNew(ref mut state) = app.screen {
+            if let Screen::WhatsNew(ref mut state) = *ctx.screen {
                 state.scroll = state.scroll.saturating_add(1);
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            if let Screen::WhatsNew(ref mut state) = app.screen {
+            if let Screen::WhatsNew(ref mut state) = *ctx.screen {
                 state.scroll = state.scroll.saturating_sub(1);
             }
         }
         KeyCode::PageDown => {
-            if let Screen::WhatsNew(ref mut state) = app.screen {
+            if let Screen::WhatsNew(ref mut state) = *ctx.screen {
                 state.scroll = state.scroll.saturating_add(10);
             }
         }
         KeyCode::PageUp => {
-            if let Screen::WhatsNew(ref mut state) = app.screen {
+            if let Screen::WhatsNew(ref mut state) = *ctx.screen {
                 state.scroll = state.scroll.saturating_sub(10);
             }
         }
         KeyCode::Char('g') | KeyCode::Home => {
-            if let Screen::WhatsNew(ref mut state) = app.screen {
+            if let Screen::WhatsNew(ref mut state) = *ctx.screen {
                 state.scroll = 0;
             }
         }
         KeyCode::Char('G') | KeyCode::End => {
-            if let Screen::WhatsNew(ref mut state) = app.screen {
+            if let Screen::WhatsNew(ref mut state) = *ctx.screen {
                 state.scroll = u16::MAX;
             }
         }
@@ -40,14 +68,15 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-fn close_and_mark_seen(app: &mut App) {
+fn close_and_mark_seen(ctx: &mut WhatsNewCtx) {
     let version = env!("CARGO_PKG_VERSION");
-    if let Err(e) = crate::preferences::save_last_seen_version(app.env().paths(), version) {
+    if let Err(e) = crate::preferences::save_last_seen_version(ctx.env.paths(), version) {
         log::warn!("[purple] failed to persist last_seen_version: {}", e);
     }
-    dismiss_whats_new_toast(app);
+    let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
+    ctx.status.drop_toasts_where(|t| t.text.contains(fragment));
     debug!("[purple] whats-new closed, marked seen={}", version);
-    app.set_screen(Screen::HostList);
+    ctx.set_screen(Screen::HostList);
 }
 
 pub(super) fn dismiss_whats_new_toast(app: &mut App) {

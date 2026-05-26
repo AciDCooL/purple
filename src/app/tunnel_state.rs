@@ -153,6 +153,29 @@ impl TunnelState {
         self.form = TunnelForm::new();
     }
 
+    /// Load this host's tunnel directives from the SSH config into `list`.
+    pub fn load_directives(
+        &mut self,
+        config: &crate::ssh_config::model::SshConfigFile,
+        alias: &str,
+    ) {
+        self.list = config.find_tunnel_directives(alias);
+    }
+
+    /// True if the tunnel form differs from its captured baseline.
+    pub fn form_is_dirty(&self) -> bool {
+        match &self.form_baseline {
+            Some(b) => {
+                self.form.tunnel_type != b.tunnel_type
+                    || self.form.bind_port != b.bind_port
+                    || self.form.remote_host != b.remote_host
+                    || self.form.remote_port != b.remote_port
+                    || self.form.bind_address != b.bind_address
+            }
+            None => false,
+        }
+    }
+
     pub fn active(&self) -> &HashMap<String, ActiveTunnel> {
         &self.active
     }
@@ -699,5 +722,51 @@ mod tests {
         assert!(s.active.is_empty());
         s.migrate_alias("same", "same");
         assert!(s.active.is_empty());
+    }
+
+    fn state_matching_baseline() -> TunnelState {
+        let mut s = TunnelState::default();
+        s.form.tunnel_type = crate::tunnel::TunnelType::Local;
+        s.form.bind_port = "8080".into();
+        s.form.remote_host = "db.internal".into();
+        s.form.remote_port = "5432".into();
+        s.form.bind_address = "127.0.0.1".into();
+        s.set_form_baseline(Some(TunnelFormBaseline {
+            tunnel_type: crate::tunnel::TunnelType::Local,
+            bind_port: "8080".into(),
+            remote_host: "db.internal".into(),
+            remote_port: "5432".into(),
+            bind_address: "127.0.0.1".into(),
+        }));
+        s
+    }
+
+    #[test]
+    fn form_is_dirty_is_false_without_a_baseline() {
+        let mut s = TunnelState::default();
+        s.form.bind_port = "9000".into();
+        assert!(!s.form_is_dirty());
+    }
+
+    #[test]
+    fn form_is_dirty_is_false_when_form_equals_baseline() {
+        assert!(!state_matching_baseline().form_is_dirty());
+    }
+
+    fn assert_field_change_is_dirty(field: &str, mutate: impl FnOnce(&mut TunnelForm)) {
+        let mut s = state_matching_baseline();
+        mutate(&mut s.form);
+        assert!(s.form_is_dirty(), "a change in {field} must read dirty");
+    }
+
+    #[test]
+    fn form_is_dirty_detects_a_change_in_each_field() {
+        assert_field_change_is_dirty("tunnel_type", |f| {
+            f.tunnel_type = crate::tunnel::TunnelType::Remote;
+        });
+        assert_field_change_is_dirty("bind_port", |f| f.bind_port.push('1'));
+        assert_field_change_is_dirty("remote_host", |f| f.remote_host.push('x'));
+        assert_field_change_is_dirty("remote_port", |f| f.remote_port.push('1'));
+        assert_field_change_is_dirty("bind_address", |f| f.bind_address.push('9'));
     }
 }

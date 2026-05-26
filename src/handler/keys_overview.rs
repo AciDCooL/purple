@@ -13,98 +13,171 @@ use std::sync::atomic::Ordering;
 use crossterm::event::{KeyCode, KeyEvent};
 use log::debug;
 
-use crate::app::{App, Screen};
+use super::ctx::{Effectful, Effects, Nav, Notify};
+use crate::app::{App, KeysState, Screen, SearchState, StatusCenter, UiSelection};
+use crate::runtime::env::Env;
+
+/// A narrow, explicit borrow of the App state the Keys-tab handlers touch. The
+/// handlers operate on this slice instead of `&mut App`, so the compiler
+/// rejects any reach into unrelated state (vault, containers, providers, ...).
+/// Whole-App operations that cannot run on a slice (top-page cycling, the jump
+/// overlay, the bulk Vault SSH sign, the push picker open whose unit tests
+/// drive it on `&mut App`) are deferred as effects and applied to the full
+/// `App` after the handler returns. Key pushes run on background threads that
+/// own their inputs, so they need no deferred effect.
+struct KeysCtx<'a> {
+    keys: &'a mut KeysState,
+    search: &'a mut SearchState,
+    ui: &'a mut UiSelection,
+    status: &'a mut StatusCenter,
+    screen: &'a mut Screen,
+    running: &'a mut bool,
+    env: &'a Env,
+    effects: Effects,
+}
+
+impl Nav for KeysCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Notify for KeysCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
+
+impl Effectful for KeysCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
+
+/// Borrow the disjoint App fields the Keys-tab handlers need into one slice.
+fn ctx_from_app(app: &mut App) -> KeysCtx<'_> {
+    KeysCtx {
+        keys: &mut app.keys,
+        search: &mut app.search,
+        ui: &mut app.ui,
+        status: &mut app.status_center,
+        screen: &mut app.screen,
+        running: &mut app.running,
+        env: app.env.as_ref(),
+        effects: Effects::default(),
+    }
+}
 
 /// Dispatch a key event for the Keys overview tab. Routes to a dedicated
 /// search sub-handler while a query is active so typing characters edits
 /// the query instead of triggering the normal-mode shortcuts.
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
-    if app.search.query().is_some() {
-        handle_search_keys(app, key);
+    // The in-flight push read is resolved here while we still hold `&App`, so
+    // the Esc-cancel guard inside the slice handler is a plain bool.
+    let in_flight = push_in_flight(app);
+    let effects = {
+        let mut ctx = ctx_from_app(app);
+        keys_key(&mut ctx, key, in_flight);
+        ctx.effects
+    };
+    effects.apply(app);
+}
+
+fn keys_key(ctx: &mut KeysCtx, key: KeyEvent, push_in_flight: bool) {
+    if ctx.search.query().is_some() {
+        handle_search_keys(ctx, key);
         return;
     }
     match key.code {
         KeyCode::Tab => {
-            app.cycle_top_page_next();
-            app.search.set_query(None);
+            ctx.defer(App::cycle_top_page_next);
+            ctx.search.set_query(None);
         }
         KeyCode::BackTab => {
-            app.cycle_top_page_prev();
-            app.search.set_query(None);
+            ctx.defer(App::cycle_top_page_prev);
+            ctx.search.set_query(None);
         }
         KeyCode::Char('j') | KeyCode::Down | KeyCode::Right => {
-            app.select_next_key();
+            let len = ctx.keys.list().len();
+            crate::app::cycle_selection(ctx.keys.list_state_mut(), len, true);
         }
         KeyCode::Char('k') | KeyCode::Up | KeyCode::Left => {
-            app.select_prev_key();
+            let len = ctx.keys.list().len();
+            crate::app::cycle_selection(ctx.keys.list_state_mut(), len, false);
         }
         KeyCode::PageDown => {
-            let len = app.keys.list().len();
-            crate::app::page_down(app.keys.list_state_mut(), len, 10);
+            let len = ctx.keys.list().len();
+            crate::app::page_down(ctx.keys.list_state_mut(), len, 10);
         }
         KeyCode::PageUp => {
-            let len = app.keys.list().len();
-            crate::app::page_up(app.keys.list_state_mut(), len, 10);
+            let len = ctx.keys.list().len();
+            crate::app::page_up(ctx.keys.list_state_mut(), len, 10);
         }
-        KeyCode::Home | KeyCode::Char('g') if !app.keys.list().is_empty() => {
-            app.keys.list_state_mut().select(Some(0));
+        KeyCode::Home | KeyCode::Char('g') if !ctx.keys.list().is_empty() => {
+            ctx.keys.list_state_mut().select(Some(0));
         }
-        KeyCode::End | KeyCode::Char('G') if !app.keys.list().is_empty() => {
-            let last = app.keys.list().len() - 1;
-            app.keys.list_state_mut().select(Some(last));
+        KeyCode::End | KeyCode::Char('G') if !ctx.keys.list().is_empty() => {
+            let last = ctx.keys.list().len() - 1;
+            ctx.keys.list_state_mut().select(Some(last));
         }
         // Enter and `c` both copy the selected pubkey. Enter is the
         // advertised primary in the footer; `c` is the muscle-memory
         // shortcut from picker overlays and the broader CLI ecosystem.
         KeyCode::Enter | KeyCode::Char('c') => {
-            copy_selected_pubkey(app);
+            copy_selected_pubkey(ctx);
         }
         KeyCode::Char('p') => {
-            open_push_picker(app);
+            // The picker open reads the selected key + host list and sets the
+            // screen, all slice-local, but the unit tests drive it directly on
+            // `&mut App`, so it keeps the whole-App signature and is deferred.
+            // It is the only action in this arm, so running after the slice
+            // borrow ends observes the same state as running inline.
+            ctx.defer(open_push_picker);
         }
         // Bulk Vault SSH sign: same entry point the host list uses,
         // shared so the action stays consistent between tabs. Becomes a
         // no-op with a friendly notify when no host has a vault-ssh
         // role configured.
         KeyCode::Char('V') => {
-            super::host_list::actions::initiate_bulk_vault_sign(app);
+            ctx.defer(super::host_list::actions::initiate_bulk_vault_sign);
         }
         KeyCode::Char('/') => {
             // Enter search mode. We deliberately do not reuse
             // `App::start_search()` because that helper drives the
             // hosts-specific `filtered_indices` state machine; the Keys
             // tab filters at render time and only needs the query string.
-            app.search.set_query(Some(String::new()));
+            ctx.search.set_query(Some(String::new()));
             // Reset selection so we always land on the first match.
-            if !app.keys.list().is_empty() {
-                app.keys.list_state_mut().select(Some(0));
+            if !ctx.keys.list().is_empty() {
+                ctx.keys.list_state_mut().select(Some(0));
             }
             log::debug!("[purple] keys: opened search");
         }
         KeyCode::Char(':') => {
             log::debug!("jump: opened from keys overview");
-            app.open_jump(crate::app::JumpMode::Keys);
+            ctx.defer(|app| app.open_jump(crate::app::JumpMode::Keys));
         }
         KeyCode::Char('n') => {
             // Match host-list and tunnels: dismiss the upgrade toast and
             // open the What's New overlay so release notes are reachable
             // from any main tab.
-            super::whats_new::dismiss_whats_new_toast(app);
-            app.set_screen(Screen::WhatsNew(crate::app::WhatsNewState::default()));
+            let fragment = crate::messages::whats_new_toast::INVITE_FRAGMENT;
+            ctx.status.drop_toasts_where(|t| t.text.contains(fragment));
+            ctx.set_screen(Screen::WhatsNew(crate::app::WhatsNewState::default()));
         }
         KeyCode::Char('?') => {
-            app.set_screen(Screen::Help {
+            ctx.set_screen(Screen::Help {
                 return_screen: Box::new(Screen::HostList),
             });
         }
         KeyCode::Char('q') => {
-            app.running = false;
+            *ctx.running = false;
         }
         // Esc while a push is in flight cancels the run. Higher priority
         // than the q-hint toast because cancelling is the only Esc-shaped
         // affordance the user has during a long push.
-        KeyCode::Esc if push_in_flight(app) => {
-            cancel_push_if_running(app);
+        KeyCode::Esc if push_in_flight => {
+            cancel_push_if_running(ctx);
         }
         // Mirrors host-list / tunnels-overview policy: idle Esc never quits.
         // The first idle press surfaces a one-shot toast pointing to `q`;
@@ -112,12 +185,11 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         // session. The sticky-toast guard skips the hint when a sticky toast
         // is active so an informational nudge cannot displace a sticky error.
         KeyCode::Esc
-            if !app.ui.esc_quit_hint_shown()
-                && !app.status_center.toast().is_some_and(|t| t.sticky) =>
+            if !ctx.ui.esc_quit_hint_shown() && !ctx.status.toast().is_some_and(|t| t.sticky) =>
         {
             log::debug!("[purple] esc on idle keys overview, showing quit hint toast");
-            app.notify(crate::messages::ESC_QUIT_HINT);
-            app.ui.set_esc_quit_hint_shown(true);
+            ctx.notify(crate::messages::ESC_QUIT_HINT);
+            ctx.ui.set_esc_quit_hint_shown(true);
         }
         _ => {}
     }
@@ -140,10 +212,10 @@ pub(super) fn push_in_flight(app: &App) -> bool {
 /// by `ServerAliveInterval × CountMax = 30s`). `start_key_push` refuses
 /// to launch a second worker until `worker.is_finished()`; `App::drop`
 /// joins on exit.
-fn cancel_push_if_running(app: &mut App) {
-    let done = app.keys.push().results.len();
-    let total = app.keys.push().expected_count;
-    if let Some(ref cancel) = app.keys.push().cancel {
+fn cancel_push_if_running(ctx: &mut KeysCtx) {
+    let done = ctx.keys.push().results.len();
+    let total = ctx.keys.push().expected_count;
+    if let Some(ref cancel) = ctx.keys.push().cancel {
         cancel.store(true, Ordering::Relaxed);
     }
     log::debug!(
@@ -153,81 +225,81 @@ fn cancel_push_if_running(app: &mut App) {
     );
     // Clear accumulators and bump run_id so any KeyPushResult event still
     // in flight from the cancelled worker is dropped on arrival.
-    app.keys.push_mut().cancel_run();
+    ctx.keys.push_mut().cancel_run();
     // Drop the progress toast through the status-center invariant so the
     // cancel message is unambiguously the latest status.
-    app.status_center.clear_sticky_status();
-    app.notify(crate::messages::key_push_cancelled(done, total));
+    ctx.status.clear_sticky_status();
+    ctx.notify(crate::messages::key_push_cancelled(done, total));
 }
 
 /// Search-mode sub-handler. Typing edits the query, navigation keys move
 /// through the filtered list, Esc cancels (clears query), Enter commits
 /// (copies the highlighted match and clears the query). Tab/BackTab also
 /// exit search-mode before cycling tabs.
-fn handle_search_keys(app: &mut App, key: KeyEvent) {
-    let filtered = crate::ssh_keys::filtered_key_indices(app.keys.list(), app.search.query());
+fn handle_search_keys(ctx: &mut KeysCtx, key: KeyEvent) {
+    let filtered = crate::ssh_keys::filtered_key_indices(ctx.keys.list(), ctx.search.query());
     let count = filtered.len();
     match key.code {
         KeyCode::Esc => {
-            app.search.set_query(None);
+            ctx.search.set_query(None);
             // Restore selection to first key so navigation feels stable
             // when the user re-opens the same view.
-            if !app.keys.list().is_empty() {
-                app.keys.list_state_mut().select(Some(0));
+            if !ctx.keys.list().is_empty() {
+                ctx.keys.list_state_mut().select(Some(0));
             } else {
-                app.keys.list_state_mut().select(None);
+                ctx.keys.list_state_mut().select(None);
             }
         }
         KeyCode::Enter => {
             // Copy the currently highlighted match, then exit search.
-            copy_selected_pubkey(app);
-            app.search.set_query(None);
+            copy_selected_pubkey(ctx);
+            ctx.search.set_query(None);
         }
         KeyCode::Tab => {
-            app.search.set_query(None);
-            app.cycle_top_page_next();
+            ctx.search.set_query(None);
+            ctx.defer(App::cycle_top_page_next);
         }
         KeyCode::BackTab => {
-            app.search.set_query(None);
-            app.cycle_top_page_prev();
+            ctx.search.set_query(None);
+            ctx.defer(App::cycle_top_page_prev);
         }
         KeyCode::Down | KeyCode::Right if count > 0 => {
-            let cur = app.keys.list_state().selected().unwrap_or(0);
-            app.keys
+            let cur = ctx.keys.list_state().selected().unwrap_or(0);
+            ctx.keys
                 .list_state_mut()
                 .select(Some((cur + 1).min(count - 1)));
         }
         KeyCode::Up | KeyCode::Left if count > 0 => {
-            let cur = app.keys.list_state().selected().unwrap_or(0);
-            app.keys
+            let cur = ctx.keys.list_state().selected().unwrap_or(0);
+            ctx.keys
                 .list_state_mut()
                 .select(Some(cur.saturating_sub(1)));
         }
         KeyCode::PageDown => {
-            crate::app::page_down(app.keys.list_state_mut(), count, 10);
+            crate::app::page_down(ctx.keys.list_state_mut(), count, 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(app.keys.list_state_mut(), count, 10);
+            crate::app::page_up(ctx.keys.list_state_mut(), count, 10);
         }
         KeyCode::Backspace => {
-            app.search.pop_query_char();
+            ctx.search.pop_query_char();
             // Re-anchor selection to the first match after the query shrinks.
             let new_count =
-                crate::ssh_keys::filtered_key_indices(app.keys.list(), app.search.query()).len();
+                crate::ssh_keys::filtered_key_indices(ctx.keys.list(), ctx.search.query()).len();
             if new_count == 0 {
-                app.keys.list_state_mut().select(None);
+                ctx.keys.list_state_mut().select(None);
             } else {
-                app.keys.list_state_mut().select(Some(0));
+                ctx.keys.list_state_mut().select(Some(0));
             }
         }
         KeyCode::Char(c) => {
-            app.search.push_query_char(c);
+            ctx.search.push_query_char(c);
             let new_count =
-                crate::ssh_keys::filtered_key_indices(app.keys.list(), app.search.query()).len();
+                crate::ssh_keys::filtered_key_indices(ctx.keys.list(), ctx.search.query()).len();
             if new_count == 0 {
-                app.keys.list_state_mut().select(None);
+                ctx.keys.list_state_mut().select(None);
             } else {
-                app.keys.list_state_mut().select(Some(0));
+                ctx.keys.list_state_mut().select(Some(0));
             }
         }
         _ => {}
@@ -240,19 +312,19 @@ fn handle_search_keys(app: &mut App, key: KeyEvent) {
 /// When search is active, `key_list_state.selected()` is an index into the
 /// filtered list, so we translate back through `filtered_key_indices`
 /// before looking up the underlying `SshKeyInfo`.
-fn copy_selected_pubkey(app: &mut App) {
-    let Some(sel) = app.keys.list_state().selected() else {
+fn copy_selected_pubkey(ctx: &mut KeysCtx) {
+    let Some(sel) = ctx.keys.list_state().selected() else {
         return;
     };
-    let Some(idx) = crate::ssh_keys::resolve_selection(app.keys.list(), app.search.query(), sel)
+    let Some(idx) = crate::ssh_keys::resolve_selection(ctx.keys.list(), ctx.search.query(), sel)
     else {
         return;
     };
-    let Some(key_info) = app.keys.list().get(idx) else {
+    let Some(key_info) = ctx.keys.list().get(idx) else {
         return;
     };
     let pub_path = format!("{}.pub", key_info.display_path);
-    let expanded = expand_tilde(app.env().paths(), &pub_path);
+    let expanded = expand_tilde(ctx.env.paths(), &pub_path);
     let body = match std::fs::read_to_string(&expanded) {
         Ok(s) => s,
         Err(e) => {
@@ -260,18 +332,19 @@ fn copy_selected_pubkey(app: &mut App) {
                 "[purple] keys: read pubkey failed path={} err={}",
                 expanded, e
             );
-            app.notify_error(crate::messages::keys_copy_read_failed(&key_info.name));
+            ctx.notify_error(crate::messages::keys_copy_read_failed(&key_info.name));
             return;
         }
     };
+    let name = key_info.name.clone();
     match crate::clipboard::copy_to_clipboard(body.trim_end()) {
         Ok(()) => {
-            debug!("[purple] keys: copied pubkey for {}", key_info.name);
-            app.notify(crate::messages::keys_copy_success(&key_info.name));
+            debug!("[purple] keys: copied pubkey for {}", name);
+            ctx.notify(crate::messages::keys_copy_success(&name));
         }
         Err(e) => {
             debug!("[purple] keys: clipboard copy failed: {}", e);
-            app.notify_error(e);
+            ctx.notify_error(e);
         }
     }
 }

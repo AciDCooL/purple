@@ -1,12 +1,38 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, Screen};
+use super::ctx::Nav;
+use crate::app::{App, Screen, UiSelection};
+use crate::runtime::env::Env;
+
+/// The slice of App the theme picker touches: the picker selection state, the
+/// screen, and the resolved environment (for the preferences path). It never
+/// reaches into hosts, tunnels or any other domain.
+struct ThemeCtx<'a> {
+    ui: &'a mut UiSelection,
+    screen: &'a mut Screen,
+    env: &'a Env,
+}
+
+impl Nav for ThemeCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
 
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
-    // Clone the catalogue so the rest of the handler can take `&mut app.ui`
+    let mut ctx = ThemeCtx {
+        ui: &mut app.ui,
+        screen: &mut app.screen,
+        env: app.env.as_ref(),
+    };
+    theme_key(&mut ctx, key);
+}
+
+fn theme_key(ctx: &mut ThemeCtx, key: KeyEvent) {
+    // Clone the catalogue so the rest of the handler can take `&mut ctx.ui`
     // for cursor moves without holding an immutable borrow across them.
-    let builtins_owned = app.ui.theme_picker().builtins.clone();
-    let custom_owned = app.ui.theme_picker().custom.clone();
+    let builtins_owned = ctx.ui.theme_picker().builtins.clone();
+    let custom_owned = ctx.ui.theme_picker().custom.clone();
     let builtins = builtins_owned.as_slice();
     let custom = custom_owned.as_slice();
     let has_custom = !custom.is_empty();
@@ -18,27 +44,27 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     let total = builtins.len() + if has_custom { 1 + custom.len() } else { 0 };
 
     if total == 0 {
-        app.set_screen(Screen::HostList);
+        ctx.set_screen(Screen::HostList);
         return;
     }
 
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             // Restore the theme that was active when the picker opened
-            if let Some(original) = app.ui.theme_picker_mut().original.take() {
+            if let Some(original) = ctx.ui.theme_picker_mut().original.take() {
                 crate::ui::theme::set_theme(original);
             }
-            app.ui.theme_picker_mut().reset();
-            app.set_screen(Screen::HostList);
+            ctx.ui.theme_picker_mut().reset();
+            ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut app.screen, Screen::HostList);
-            app.set_screen(Screen::Help {
+            let old = std::mem::replace(&mut *ctx.screen, Screen::HostList);
+            ctx.set_screen(Screen::Help {
                 return_screen: Box::new(old),
             });
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            let current = app.ui.theme_picker().list.selected().unwrap_or(0);
+            let current = ctx.ui.theme_picker().list.selected().unwrap_or(0);
             let mut next = current + 1;
             if next >= total {
                 next = 0;
@@ -49,33 +75,33 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
                     next = 0;
                 }
             }
-            app.ui.theme_picker_mut().list.select(Some(next));
+            ctx.ui.theme_picker_mut().list.select(Some(next));
             preview_theme_at_index(next, builtins, custom, divider_idx);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            let current = app.ui.theme_picker().list.selected().unwrap_or(0);
+            let current = ctx.ui.theme_picker().list.selected().unwrap_or(0);
             let mut next = if current == 0 { total - 1 } else { current - 1 };
             if divider_idx == Some(next) {
                 next = if next == 0 { total - 1 } else { next - 1 };
             }
-            app.ui.theme_picker_mut().list.select(Some(next));
+            ctx.ui.theme_picker_mut().list.select(Some(next));
             preview_theme_at_index(next, builtins, custom, divider_idx);
         }
         KeyCode::Enter => {
             if let Some(theme) = theme_at_index(
-                app.ui.theme_picker().list.selected().unwrap_or(0),
+                ctx.ui.theme_picker().list.selected().unwrap_or(0),
                 builtins,
                 custom,
                 divider_idx,
             ) {
                 if !crate::demo_flag::is_demo() {
-                    let _ = crate::preferences::save_theme(app.env().paths(), &theme.name);
+                    let _ = crate::preferences::save_theme(ctx.env.paths(), &theme.name);
                 }
                 crate::ui::theme::set_theme(theme);
             }
-            app.ui.theme_picker_mut().reset();
-            app.ui.theme_picker_mut().original = None;
-            app.set_screen(Screen::HostList);
+            ctx.ui.theme_picker_mut().reset();
+            ctx.ui.theme_picker_mut().original = None;
+            ctx.set_screen(Screen::HostList);
         }
         _ => {}
     }

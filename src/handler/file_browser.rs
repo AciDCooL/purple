@@ -3,13 +3,60 @@ use std::sync::mpsc;
 use crossterm::event::{KeyCode, KeyEvent};
 use log::{debug, error, info};
 
-use crate::app::{App, Screen};
+use super::ctx::{Effectful, Effects, Nav};
+use crate::app::{App, Screen, TunnelState};
 use crate::event::AppEvent;
 
+/// The slice of App the file-browser handler touches: the active browser
+/// session (`session`), the active-tunnel set (read-only, to decide whether
+/// scp reuses an existing tunnel) and the screen. The scp transfer and
+/// remote-listing threads own their inputs (built from the config path,
+/// askpass and bw session), so the only whole-App operation is closing the
+/// browser. Closing saves the session's paths into `file_browser_state` and
+/// flips the screen; that touches a field outside the slice, so it is deferred
+/// as an effect after the slice borrow ends. The slice never reaches into
+/// hosts, providers or any other domain.
+struct FileBrowserCtx<'a> {
+    session: &'a mut Option<crate::file_browser::FileBrowserSession>,
+    tunnels: &'a TunnelState,
+    screen: &'a mut Screen,
+    bw_session: Option<&'a str>,
+    config_path: &'a std::path::Path,
+    effects: Effects,
+}
+
+impl Nav for FileBrowserCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Effectful for FileBrowserCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
+
 pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
+    let effects = {
+        let mut ctx = FileBrowserCtx {
+            session: &mut app.file_browser_session,
+            tunnels: &app.tunnels,
+            screen: &mut app.screen,
+            bw_session: app.bw_session.as_deref(),
+            config_path: app.reload.config_path(),
+            effects: Effects::default(),
+        };
+        file_browser_key(&mut ctx, key, events_tx);
+        ctx.effects
+    };
+    effects.apply(app);
+}
+
+fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
     use crate::file_browser::BrowserPane;
 
-    let fb = match app.file_browser_session.as_mut() {
+    let fb = match ctx.session.as_mut() {
         Some(fb) => fb,
         None => return,
     };
@@ -42,7 +89,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 };
                 let alias = fb.alias.clone();
                 let askpass = fb.askpass.clone();
-                let has_active_tunnel = app.tunnels.active_contains(&alias);
+                let has_active_tunnel = ctx.tunnels.active_contains(&alias);
                 let local_path = fb.local_path.clone();
                 let remote_path = if fb.remote_path.ends_with('/') {
                     fb.remote_path.clone()
@@ -76,8 +123,8 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                     local_path.display(),
                     remote_path
                 );
-                let config_path = app.reload.config_path().to_path_buf();
-                let bw = app.bw_session.clone();
+                let config_path = ctx.config_path.to_path_buf();
+                let bw = ctx.bw_session.map(str::to_string);
                 let tx = events_tx.clone();
                 let direction_str = direction.to_string();
                 std::thread::spawn(move || {
@@ -127,7 +174,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
 
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
-            app.close_file_browser();
+            ctx.defer(App::close_file_browser);
         }
         KeyCode::Tab => {
             fb.active_pane = match fb.active_pane {
@@ -182,9 +229,9 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             }
         },
         KeyCode::Enter => {
-            let config_path = app.reload.config_path().to_path_buf();
-            let bw_session = app.bw_session.clone();
-            let has_tunnel = app.tunnels.active_contains(&fb.alias);
+            let config_path = ctx.config_path.to_path_buf();
+            let bw_session = ctx.bw_session.map(str::to_string);
+            let has_tunnel = ctx.tunnels.active_contains(&fb.alias);
             fb_enter(
                 fb,
                 &config_path,
@@ -237,17 +284,17 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                         fb.remote_error = None;
                         fb.remote_list_state = ratatui::widgets::ListState::default();
                         let alias = fb.alias.clone();
-                        let ctx = crate::ssh_context::OwnedSshContext {
+                        let ssh_ctx = crate::ssh_context::OwnedSshContext {
                             alias,
-                            config_path: app.reload.config_path().to_path_buf(),
+                            config_path: ctx.config_path.to_path_buf(),
                             askpass: fb.askpass.clone(),
-                            bw_session: app.bw_session.clone(),
-                            has_tunnel: app.tunnels.active_contains(&fb.alias),
+                            bw_session: ctx.bw_session.map(str::to_string),
+                            has_tunnel: ctx.tunnels.active_contains(&fb.alias),
                         };
                         let show_hidden = fb.show_hidden;
                         let sort = fb.sort;
                         crate::file_browser::spawn_remote_listing(
-                            ctx,
+                            ssh_ctx,
                             parent,
                             show_hidden,
                             sort,
@@ -342,18 +389,18 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 fb.remote_error = None;
                 fb.remote_list_state = ratatui::widgets::ListState::default();
                 let alias = fb.alias.clone();
-                let ctx = crate::ssh_context::OwnedSshContext {
+                let ssh_ctx = crate::ssh_context::OwnedSshContext {
                     alias,
-                    config_path: app.reload.config_path().to_path_buf(),
+                    config_path: ctx.config_path.to_path_buf(),
                     askpass: fb.askpass.clone(),
-                    bw_session: app.bw_session.clone(),
-                    has_tunnel: app.tunnels.active_contains(&fb.alias),
+                    bw_session: ctx.bw_session.map(str::to_string),
+                    has_tunnel: ctx.tunnels.active_contains(&fb.alias),
                 };
                 let path = fb.remote_path.clone();
                 let show_hidden = fb.show_hidden;
                 let sort = fb.sort;
                 crate::file_browser::spawn_remote_listing(
-                    ctx,
+                    ssh_ctx,
                     path,
                     show_hidden,
                     sort,
@@ -382,18 +429,18 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 fb.remote_error = None;
                 fb.remote_list_state = ratatui::widgets::ListState::default();
                 let alias = fb.alias.clone();
-                let ctx = crate::ssh_context::OwnedSshContext {
+                let ssh_ctx = crate::ssh_context::OwnedSshContext {
                     alias,
-                    config_path: app.reload.config_path().to_path_buf(),
+                    config_path: ctx.config_path.to_path_buf(),
                     askpass: fb.askpass.clone(),
-                    bw_session: app.bw_session.clone(),
-                    has_tunnel: app.tunnels.active_contains(&fb.alias),
+                    bw_session: ctx.bw_session.map(str::to_string),
+                    has_tunnel: ctx.tunnels.active_contains(&fb.alias),
                 };
                 let path = fb.remote_path.clone();
                 let show_hidden = fb.show_hidden;
                 let sort = fb.sort;
                 crate::file_browser::spawn_remote_listing(
-                    ctx,
+                    ssh_ctx,
                     path,
                     show_hidden,
                     sort,
@@ -415,8 +462,8 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             fb.remote_list_state.select(Some(0));
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut app.screen, Screen::HostList);
-            app.set_screen(Screen::Help {
+            let old = (*ctx.screen).clone();
+            ctx.set_screen(Screen::Help {
                 return_screen: Box::new(old),
             });
         }

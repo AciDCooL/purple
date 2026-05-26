@@ -56,6 +56,25 @@ impl FormState {
         self.host_baseline = baseline;
     }
 
+    /// True if the host form differs from its captured baseline.
+    pub fn host_form_is_dirty(&self) -> bool {
+        match &self.host_baseline {
+            Some(b) => {
+                self.host.alias != b.alias
+                    || self.host.hostname != b.hostname
+                    || self.host.user != b.user
+                    || self.host.port != b.port
+                    || self.host.identity_file != b.identity_file
+                    || self.host.proxy_jump != b.proxy_jump
+                    || self.host.askpass != b.askpass
+                    || self.host.vault_ssh != b.vault_ssh
+                    || self.host.vault_addr != b.vault_addr
+                    || self.host.tags != b.tags
+            }
+            None => false,
+        }
+    }
+
     pub fn take_host_baseline(&mut self) -> Option<FormBaseline> {
         self.host_baseline.take()
     }

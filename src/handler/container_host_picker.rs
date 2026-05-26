@@ -10,7 +10,8 @@ use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, Screen};
+use super::ctx::{Effectful, Effects, Nav};
+use crate::app::{App, ContainerState, HostState, Screen, UiSelection};
 use crate::event::AppEvent;
 
 /// Aliases of every host that has no cache entry yet, in display
@@ -29,11 +30,25 @@ pub(crate) fn uncached_aliases(app: &App) -> Vec<String> {
 /// for display. Same case-insensitive substring match the tunnel host
 /// picker uses.
 pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
-    let query = app.ui.container_host_picker_query().to_lowercase();
-    app.hosts_state
+    filter_hosts(
+        app.ui.container_host_picker_query(),
+        &app.hosts_state,
+        &app.container_state,
+    )
+}
+
+/// Shared filter used by both the public `filtered_hosts(&App)` (render side)
+/// and the picker slice. Single source of truth for the uncached-host match.
+fn filter_hosts(
+    query: &str,
+    hosts: &HostState,
+    container_state: &ContainerState,
+) -> Vec<(String, String)> {
+    let query = query.to_lowercase();
+    hosts
         .list()
         .iter()
-        .filter(|h| !app.container_state.cache_contains(&h.alias))
+        .filter(|h| !container_state.cache_contains(&h.alias))
         .filter(|h| {
             if query.is_empty() {
                 return true;
@@ -44,62 +59,114 @@ pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The slice of App the container host picker touches: the picker selection and
+/// query (`ui`), the host list and container cache (read-only, for the
+/// uncached-host filter) and the screen. Firing the initial `docker ps` reaches
+/// across many domains (askpass, tunnels, the overview cache, bw session), so
+/// it runs as a deferred effect after the slice borrow ends.
+struct ContainerHostPickerCtx<'a> {
+    ui: &'a mut UiSelection,
+    hosts: &'a HostState,
+    container_state: &'a ContainerState,
+    screen: &'a mut Screen,
+    effects: Effects,
+}
+
+impl Nav for ContainerHostPickerCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Effectful for ContainerHostPickerCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
+
+impl ContainerHostPickerCtx<'_> {
+    /// Hosts matching the live query, mirroring the public `filtered_hosts`.
+    fn filtered_hosts(&self) -> Vec<(String, String)> {
+        filter_hosts(
+            self.ui.container_host_picker_query(),
+            self.hosts,
+            self.container_state,
+        )
+    }
+}
+
 pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
-    let total = filtered_hosts(app).len();
+    let effects = {
+        let mut ctx = ContainerHostPickerCtx {
+            ui: &mut app.ui,
+            hosts: &app.hosts_state,
+            container_state: &app.container_state,
+            screen: &mut app.screen,
+            effects: Effects::default(),
+        };
+        picker_key(&mut ctx, key, events_tx);
+        ctx.effects
+    };
+    effects.apply(app);
+}
+
+fn picker_key(ctx: &mut ContainerHostPickerCtx, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
+    let total = ctx.filtered_hosts().len();
     match key.code {
-        KeyCode::Esc => close(app),
+        KeyCode::Esc => close(ctx),
         KeyCode::Down if total > 0 => {
-            let cur = app.ui.container_host_picker_state().selected().unwrap_or(0);
+            let cur = ctx.ui.container_host_picker_state().selected().unwrap_or(0);
             let next = (cur + 1).min(total - 1);
-            app.ui.container_host_picker_state_mut().select(Some(next));
+            ctx.ui.container_host_picker_state_mut().select(Some(next));
         }
         KeyCode::Up => {
-            let cur = app.ui.container_host_picker_state().selected().unwrap_or(0);
-            app.ui
+            let cur = ctx.ui.container_host_picker_state().selected().unwrap_or(0);
+            ctx.ui
                 .container_host_picker_state_mut()
                 .select(Some(cur.saturating_sub(1)));
         }
         KeyCode::Enter => {
-            let Some(idx) = app.ui.container_host_picker_state().selected() else {
+            let Some(idx) = ctx.ui.container_host_picker_state().selected() else {
                 return;
             };
-            let Some((alias, _)) = filtered_hosts(app).into_iter().nth(idx) else {
+            let Some((alias, _)) = ctx.filtered_hosts().into_iter().nth(idx) else {
                 return;
             };
-            close(app);
-            spawn_initial_listing(app, alias, events_tx);
+            close(ctx);
+            let tx = events_tx.clone();
+            ctx.defer(move |app| spawn_initial_listing(app, alias, &tx));
         }
         KeyCode::Backspace => {
-            if app.ui.container_host_picker_query().is_empty() {
-                close(app);
+            if ctx.ui.container_host_picker_query().is_empty() {
+                close(ctx);
             } else {
-                app.ui.container_host_picker_query_mut().pop();
-                reset_cursor_after_query_change(app);
+                ctx.ui.container_host_picker_query_mut().pop();
+                reset_cursor_after_query_change(ctx);
             }
         }
         KeyCode::Char(c)
             if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && app.ui.container_host_picker_query().len() < 64 =>
+                && ctx.ui.container_host_picker_query().len() < 64 =>
         {
-            app.ui.container_host_picker_query_mut().push(c);
-            reset_cursor_after_query_change(app);
+            ctx.ui.container_host_picker_query_mut().push(c);
+            reset_cursor_after_query_change(ctx);
         }
         _ => {}
     }
 }
 
-fn close(app: &mut App) {
-    app.ui.container_host_picker_state_mut().select(None);
-    app.ui.container_host_picker_query_mut().clear();
-    app.set_screen(Screen::HostList);
+fn close(ctx: &mut ContainerHostPickerCtx) {
+    ctx.ui.container_host_picker_state_mut().select(None);
+    ctx.ui.container_host_picker_query_mut().clear();
+    ctx.set_screen(Screen::HostList);
 }
 
-fn reset_cursor_after_query_change(app: &mut App) {
-    let total = filtered_hosts(app).len();
+fn reset_cursor_after_query_change(ctx: &mut ContainerHostPickerCtx) {
+    let total = ctx.filtered_hosts().len();
     if total == 0 {
-        app.ui.container_host_picker_state_mut().select(None);
+        ctx.ui.container_host_picker_state_mut().select(None);
     } else {
-        app.ui.container_host_picker_state_mut().select(Some(0));
+        ctx.ui.container_host_picker_state_mut().select(Some(0));
     }
 }
 

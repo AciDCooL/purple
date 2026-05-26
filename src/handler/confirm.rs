@@ -4,8 +4,102 @@ use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, Screen};
+use super::ctx::{Effectful, Effects, Nav, Notify};
+use crate::app::{App, ContainerState, HostState, KeysState, Screen, StatusCenter, UiSelection};
 use crate::event::AppEvent;
+
+/// The slice of App a single-domain confirm dialog touches: the screen (read to
+/// extract the confirm payload, written to transition out) and the deferred
+/// effect queue. The confirmed Yes-action of these dialogs is a terminal
+/// whole-App operation (run the known-hosts import, purge stale hosts, kick off
+/// the vault bulk-sign), so it runs as a deferred effect after the slice borrow
+/// ends. The slice never reaches into hosts, vault, containers or any other
+/// domain directly.
+struct ConfirmCtx<'a> {
+    screen: &'a mut Screen,
+    effects: Effects,
+}
+
+impl Nav for ConfirmCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Effectful for ConfirmCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
+
+/// The slice of App the key-push confirm touches: the Keys-tab push state
+/// (the frozen alias selection) and the screen. Confirming kicks off the
+/// background push worker, a terminal whole-App op (reads the key list and
+/// config path, spawns a thread), so it runs deferred after the screen
+/// transition. Declining clears the frozen selection on the slice and returns
+/// to the picker. The slice never reaches into hosts, vault or any other
+/// domain directly.
+struct KeyPushConfirmCtx<'a> {
+    keys: &'a mut KeysState,
+    screen: &'a mut Screen,
+    effects: Effects,
+}
+
+impl Nav for KeyPushConfirmCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Effectful for KeyPushConfirmCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
+
+/// The slice of App the host-key-reset confirm touches: the connect queue and
+/// known-hosts count on `ui`, the status center, the screen and the demo flag.
+/// The `ssh-keygen -R` subprocess runs inline (it owns its arguments and reads
+/// no App state) and its result drives only slice-local notifications and the
+/// queued connect, so nothing is deferred. The slice never reaches into hosts,
+/// vault or any other domain directly.
+struct HostKeyResetCtx<'a> {
+    ui: &'a mut UiSelection,
+    status: &'a mut StatusCenter,
+    screen: &'a mut Screen,
+    demo_mode: bool,
+}
+
+impl Nav for HostKeyResetCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Notify for HostKeyResetCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
+
+/// The slice of App every container-action confirm touches: the container cache
+/// and pending-action queue (`container_state`), the host list (read-only, to
+/// resolve each target's askpass), and the screen. Confirming queues one
+/// `ContainerActionRequest` per target. the drain loop later spawns the SSH
+/// thread, so the confirm itself runs entirely on the slice with no deferred
+/// whole-App effect. The slice never reaches into vault, providers or any other
+/// domain directly.
+struct ContainerConfirmCtx<'a> {
+    container_state: &'a mut ContainerState,
+    hosts: &'a HostState,
+    screen: &'a mut Screen,
+}
+
+impl Nav for ContainerConfirmCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
 
 /// Result of routing a confirm-dialog key event.
 ///
@@ -63,38 +157,58 @@ pub(super) fn execute_known_hosts_import(app: &mut App) {
 }
 
 pub(super) fn handle_import_key(app: &mut App, key: KeyEvent) {
-    match route_confirm_key(key) {
-        ConfirmAction::Yes => {
-            app.set_screen(Screen::HostList);
-            execute_known_hosts_import(app);
+    let effects = {
+        let mut ctx = ConfirmCtx {
+            screen: &mut app.screen,
+            effects: Effects::default(),
+        };
+        match route_confirm_key(key) {
+            ConfirmAction::Yes => {
+                ctx.set_screen(Screen::HostList);
+                ctx.defer(execute_known_hosts_import);
+            }
+            ConfirmAction::No => {
+                ctx.set_screen(Screen::HostList);
+            }
+            ConfirmAction::Ignored => {}
         }
-        ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::Ignored => {}
-    }
+        ctx.effects
+    };
+    effects.apply(app);
 }
 
 pub(super) fn handle_purge_stale_key(app: &mut App, key: KeyEvent) {
-    let Screen::ConfirmPurgeStale { provider: p, .. } = &app.screen else {
-        return;
-    };
-    let provider = p.clone();
-    let return_screen = if provider.is_some() {
-        Screen::Providers
-    } else {
-        Screen::HostList
-    };
-    match route_confirm_key(key) {
-        ConfirmAction::Yes => {
-            execute_purge_stale(app, provider.as_deref());
-            app.screen = return_screen;
+    let effects = {
+        let mut ctx = ConfirmCtx {
+            screen: &mut app.screen,
+            effects: Effects::default(),
+        };
+        let Screen::ConfirmPurgeStale { provider: p, .. } = &*ctx.screen else {
+            return;
+        };
+        let provider = p.clone();
+        let return_screen = if provider.is_some() {
+            Screen::Providers
+        } else {
+            Screen::HostList
+        };
+        match route_confirm_key(key) {
+            ConfirmAction::Yes => {
+                // Defer the purge (a whole-App op: deletes hosts, kills tunnels,
+                // reloads). It is the terminal action. moving it past the screen
+                // assignment is safe because it reads no screen state and emits
+                // the only toast either way.
+                ctx.defer(move |app| execute_purge_stale(app, provider.as_deref()));
+                ctx.set_screen(return_screen);
+            }
+            ConfirmAction::No => {
+                ctx.set_screen(return_screen);
+            }
+            ConfirmAction::Ignored => {}
         }
-        ConfirmAction::No => {
-            app.screen = return_screen;
-        }
-        ConfirmAction::Ignored => {}
-    }
+        ctx.effects
+    };
+    effects.apply(app);
 }
 
 fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
@@ -158,6 +272,13 @@ fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
     app.notify(msg);
 }
 
+// Stays on `&mut App` (not a context slice). The delete path is cross-cutting
+// and result-driven: it reads `delete_host_undoable`'s Option to branch, then
+// touches hosts_state (undo stack + ssh_config), tunnels, vault cert cleanup,
+// ui and status, and interleaves `update_last_modified`/`reload_hosts` with
+// the subsequent notify/set_screen. Deferring the reload past the success
+// toast could reorder reload's vault-flush error against it, so a slice here
+// would add risk with no clean win.
 pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
     let Screen::ConfirmDelete { alias } = &app.screen else {
         return;
@@ -269,23 +390,35 @@ pub(super) fn handle_vault_sign_key(
     // History: an earlier `_ => app.screen = Screen::HostList` catch-all
     // could be triggered by any keypress next to `y` (e.g. fat-fingered
     // `t` or `u`), silently aborting a bulk sign.
-    match route_confirm_key(key) {
-        ConfirmAction::Yes => {
-            // Extract the precomputed signable list, then transition back to
-            // the host list and kick off the background signing loop.
-            let signable = if let Screen::ConfirmVaultSign { signable } = &app.screen {
-                signable.clone()
-            } else {
-                return;
-            };
-            app.set_screen(Screen::HostList);
-            start_vault_bulk_sign(app, signable, events_tx);
+    let effects = {
+        let mut ctx = ConfirmCtx {
+            screen: &mut app.screen,
+            effects: Effects::default(),
+        };
+        match route_confirm_key(key) {
+            ConfirmAction::Yes => {
+                // Extract the precomputed signable list, then transition back to
+                // the host list and kick off the background signing loop. The
+                // signing loop is the terminal whole-App op (touches vault, env,
+                // status), so it runs deferred after the screen transition. its
+                // first action is the progress toast, with no intervening toast.
+                let signable = if let Screen::ConfirmVaultSign { signable } = &*ctx.screen {
+                    signable.clone()
+                } else {
+                    return;
+                };
+                ctx.set_screen(Screen::HostList);
+                let tx = events_tx.clone();
+                ctx.defer(move |app| start_vault_bulk_sign(app, signable, &tx));
+            }
+            ConfirmAction::No => {
+                ctx.set_screen(Screen::HostList);
+            }
+            ConfirmAction::Ignored => {}
         }
-        ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
-        }
-        ConfirmAction::Ignored => {}
-    }
+        ctx.effects
+    };
+    effects.apply(app);
 }
 
 /// Start the background vault bulk sign loop with fast-fail, progress, TOCTOU
@@ -482,12 +615,18 @@ pub(super) fn remove_in_flight(
 }
 
 pub(super) fn handle_host_key_reset_key(app: &mut App, key: KeyEvent) {
+    let mut ctx = HostKeyResetCtx {
+        ui: &mut app.ui,
+        status: &mut app.status_center,
+        screen: &mut app.screen,
+        demo_mode: app.demo_mode,
+    };
     let Screen::ConfirmHostKeyReset {
         alias,
         hostname,
         known_hosts_path,
         askpass,
-    } = &app.screen
+    } = &*ctx.screen
     else {
         return;
     };
@@ -508,25 +647,25 @@ pub(super) fn handle_host_key_reset_key(app: &mut App, key: KeyEvent) {
 
             match output {
                 Ok(result) if result.status.success() => {
-                    app.notify(crate::messages::removed_host_key(&hostname));
-                    if app.demo_mode {
-                        app.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
+                    ctx.notify(crate::messages::removed_host_key(&hostname));
+                    if ctx.demo_mode {
+                        ctx.notify_warning(crate::messages::DEMO_CONNECTION_DISABLED);
                     } else {
-                        app.ui.queue_connect(alias, askpass);
+                        ctx.ui.queue_connect(alias, askpass);
                     }
                 }
                 Ok(result) => {
                     let stderr = String::from_utf8_lossy(&result.stderr);
-                    app.notify_error(crate::messages::host_key_remove_failed(stderr.trim()));
+                    ctx.notify_error(crate::messages::host_key_remove_failed(stderr.trim()));
                 }
                 Err(e) => {
-                    app.notify_error(crate::messages::ssh_keygen_failed(&e));
+                    ctx.notify_error(crate::messages::ssh_keygen_failed(&e));
                 }
             }
-            app.set_screen(Screen::HostList);
+            ctx.set_screen(Screen::HostList);
         }
         ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
+            ctx.set_screen(Screen::HostList);
         }
         ConfirmAction::Ignored => {}
     }
@@ -543,35 +682,49 @@ struct ContainerConfirm {
 /// Shared y/n/Esc routing for every container action confirm. Yes
 /// queues the action for each target then drops to the host list; No
 /// and Esc drop without side effects; anything else is ignored.
-fn apply_container_confirm(app: &mut App, key: KeyEvent, confirm: ContainerConfirm) {
+fn apply_container_confirm(
+    ctx: &mut ContainerConfirmCtx,
+    key: KeyEvent,
+    confirm: ContainerConfirm,
+) {
     match route_confirm_key(key) {
         ConfirmAction::Yes => {
             for (container_id, container_name) in confirm.targets {
                 queue_container_action(
-                    app,
+                    ctx,
                     confirm.alias.clone(),
                     container_id,
                     container_name,
                     confirm.action,
                 );
             }
-            app.set_screen(Screen::HostList);
+            ctx.set_screen(Screen::HostList);
         }
         ConfirmAction::No => {
-            app.set_screen(Screen::HostList);
+            ctx.set_screen(Screen::HostList);
         }
         ConfirmAction::Ignored => {}
     }
 }
 
+/// Borrow the disjoint App fields every container-action confirm needs.
+fn container_confirm_ctx(app: &mut App) -> ContainerConfirmCtx<'_> {
+    ContainerConfirmCtx {
+        container_state: &mut app.container_state,
+        hosts: &app.hosts_state,
+        screen: &mut app.screen,
+    }
+}
+
 /// Confirm handler for `K` (kick = restart): restart a single container.
 pub(super) fn handle_container_restart_key(app: &mut App, key: KeyEvent) {
+    let mut ctx = container_confirm_ctx(app);
     let Screen::ConfirmContainerRestart {
         alias,
         container_id,
         container_name,
         ..
-    } = &app.screen
+    } = &*ctx.screen
     else {
         return;
     };
@@ -580,17 +733,18 @@ pub(super) fn handle_container_restart_key(app: &mut App, key: KeyEvent) {
         targets: vec![(container_id.clone(), container_name.clone())],
         action: crate::containers::ContainerAction::Restart,
     };
-    apply_container_confirm(app, key, confirm);
+    apply_container_confirm(&mut ctx, key, confirm);
 }
 
 /// Confirm handler for `S` (stop): stop a single container.
 pub(super) fn handle_container_stop_key(app: &mut App, key: KeyEvent) {
+    let mut ctx = container_confirm_ctx(app);
     let Screen::ConfirmContainerStop {
         alias,
         container_id,
         container_name,
         ..
-    } = &app.screen
+    } = &*ctx.screen
     else {
         return;
     };
@@ -599,14 +753,15 @@ pub(super) fn handle_container_stop_key(app: &mut App, key: KeyEvent) {
         targets: vec![(container_id.clone(), container_name.clone())],
         action: crate::containers::ContainerAction::Stop,
     };
-    apply_container_confirm(app, key, confirm);
+    apply_container_confirm(&mut ctx, key, confirm);
 }
 
 /// Confirm handler for `Ctrl-K` (stack kick): restart every member of a
 /// compose stack. The drain queue processes one request per tick, so the
 /// restarts run sequentially.
 pub(super) fn handle_stack_restart_key(app: &mut App, key: KeyEvent) {
-    let Screen::ConfirmStackRestart { alias, members, .. } = &app.screen else {
+    let mut ctx = container_confirm_ctx(app);
+    let Screen::ConfirmStackRestart { alias, members, .. } = &*ctx.screen else {
         return;
     };
     let confirm = ContainerConfirm {
@@ -617,13 +772,14 @@ pub(super) fn handle_stack_restart_key(app: &mut App, key: KeyEvent) {
             .collect(),
         action: crate::containers::ContainerAction::Restart,
     };
-    apply_container_confirm(app, key, confirm);
+    apply_container_confirm(&mut ctx, key, confirm);
 }
 
 /// Confirm handler for `K` on a host-divider row: restart every running
 /// container on the host, ignoring compose-project boundaries.
 pub(super) fn handle_host_restart_all_key(app: &mut App, key: KeyEvent) {
-    let Screen::ConfirmHostRestartAll { alias, members } = &app.screen else {
+    let mut ctx = container_confirm_ctx(app);
+    let Screen::ConfirmHostRestartAll { alias, members } = &*ctx.screen else {
         return;
     };
     let confirm = ContainerConfirm {
@@ -634,13 +790,14 @@ pub(super) fn handle_host_restart_all_key(app: &mut App, key: KeyEvent) {
             .collect(),
         action: crate::containers::ContainerAction::Restart,
     };
-    apply_container_confirm(app, key, confirm);
+    apply_container_confirm(&mut ctx, key, confirm);
 }
 
 /// Confirm handler for `S` on a host-divider row: stop every running
 /// container on the host.
 pub(super) fn handle_host_stop_all_key(app: &mut App, key: KeyEvent) {
-    let Screen::ConfirmHostStopAll { alias, members } = &app.screen else {
+    let mut ctx = container_confirm_ctx(app);
+    let Screen::ConfirmHostStopAll { alias, members } = &*ctx.screen else {
         return;
     };
     let confirm = ContainerConfirm {
@@ -651,17 +808,17 @@ pub(super) fn handle_host_stop_all_key(app: &mut App, key: KeyEvent) {
             .collect(),
         action: crate::containers::ContainerAction::Stop,
     };
-    apply_container_confirm(app, key, confirm);
+    apply_container_confirm(&mut ctx, key, confirm);
 }
 
 fn queue_container_action(
-    app: &mut App,
+    ctx: &mut ContainerConfirmCtx,
     alias: String,
     container_id: String,
     container_name: String,
     action: crate::containers::ContainerAction,
 ) {
-    let Some(entry) = app.container_state.cache_entry(&alias) else {
+    let Some(entry) = ctx.container_state.cache_entry(&alias) else {
         log::debug!(
             "[purple] container_action: queue aborted, no cache for alias={}",
             alias
@@ -669,8 +826,8 @@ fn queue_container_action(
         return;
     };
     let runtime = entry.runtime;
-    let askpass = app
-        .hosts_state
+    let askpass = ctx
+        .hosts
         .list()
         .iter()
         .find(|h| h.alias == alias)
@@ -681,7 +838,7 @@ fn queue_container_action(
         container_id,
         action
     );
-    app.container_state
+    ctx.container_state
         .queue_action(crate::app::ContainerActionRequest {
             alias,
             askpass,
@@ -700,28 +857,42 @@ pub(super) fn handle_key_push_key(
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
-    match route_confirm_key(key) {
-        ConfirmAction::Yes => {
-            let key_index = match &app.screen {
-                Screen::ConfirmKeyPush { key_index } => *key_index,
-                _ => return,
-            };
-            let aliases = std::mem::take(&mut app.keys.push_mut().committed);
-            app.set_screen(Screen::HostList);
-            start_key_push(app, key_index, aliases, events_tx);
+    let effects = {
+        let mut ctx = KeyPushConfirmCtx {
+            keys: &mut app.keys,
+            screen: &mut app.screen,
+            effects: Effects::default(),
+        };
+        match route_confirm_key(key) {
+            ConfirmAction::Yes => {
+                let key_index = match &*ctx.screen {
+                    Screen::ConfirmKeyPush { key_index } => *key_index,
+                    _ => return,
+                };
+                let aliases = std::mem::take(&mut ctx.keys.push_mut().committed);
+                ctx.set_screen(Screen::HostList);
+                // The push worker is the terminal whole-App op (reads the key
+                // list and config path, spawns a thread). it runs deferred
+                // after the screen transition. its first observable action is
+                // the guard/progress toast, with no intervening toast.
+                let tx = events_tx.clone();
+                ctx.defer(move |app| start_key_push(app, key_index, aliases, &tx));
+            }
+            ConfirmAction::No => {
+                // Return to the picker with the selection still intact so the
+                // user can refine it.
+                let key_index = match &*ctx.screen {
+                    Screen::ConfirmKeyPush { key_index } => *key_index,
+                    _ => return,
+                };
+                ctx.keys.push_mut().committed.clear();
+                ctx.set_screen(Screen::KeyPushPicker { key_index });
+            }
+            ConfirmAction::Ignored => {}
         }
-        ConfirmAction::No => {
-            // Return to the picker with the selection still intact so the
-            // user can refine it.
-            let key_index = match &app.screen {
-                Screen::ConfirmKeyPush { key_index } => *key_index,
-                _ => return,
-            };
-            app.keys.push_mut().committed.clear();
-            app.set_screen(Screen::KeyPushPicker { key_index });
-        }
-        ConfirmAction::Ignored => {}
-    }
+        ctx.effects
+    };
+    effects.apply(app);
 }
 
 /// Spawn the background push worker. Reads the pubkey from disk on the

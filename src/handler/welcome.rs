@@ -1,11 +1,48 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
+use super::ctx::{Effectful, Effects, Nav};
 use crate::app::{App, Screen};
+use crate::runtime::env::Env;
+
+/// The slice of App the welcome overlay touches: the screen and the resolved
+/// environment (for the preferences path). The known-hosts import touches most
+/// of App (hosts, status, ui, reload), so it runs as a deferred effect after
+/// the slice borrow ends.
+struct WelcomeCtx<'a> {
+    screen: &'a mut Screen,
+    env: &'a Env,
+    effects: Effects,
+}
+
+impl Nav for WelcomeCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Effectful for WelcomeCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
 
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
+    let effects = {
+        let mut ctx = WelcomeCtx {
+            screen: &mut app.screen,
+            env: app.env.as_ref(),
+            effects: Effects::default(),
+        };
+        welcome_key(&mut ctx, key);
+        ctx.effects
+    };
+    effects.apply(app);
+}
+
+fn welcome_key(ctx: &mut WelcomeCtx, key: KeyEvent) {
     let Screen::Welcome {
         known_hosts_count, ..
-    } = &app.screen
+    } = &*ctx.screen
     else {
         return;
     };
@@ -13,18 +50,18 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 
     // Closing Welcome seeds last_seen_version so future launches do not re-trigger the upgraded flow.
     let version = env!("CARGO_PKG_VERSION");
-    if let Err(e) = crate::preferences::save_last_seen_version(app.env().paths(), version) {
+    if let Err(e) = crate::preferences::save_last_seen_version(ctx.env.paths(), version) {
         log::warn!("[purple] failed to seed last_seen_version on welcome close: {e}");
     }
     if key.code == KeyCode::Char('?') {
-        app.set_screen(Screen::Help {
+        ctx.set_screen(Screen::Help {
             return_screen: Box::new(Screen::HostList),
         });
     } else if key.code == KeyCode::Char('I') && known_hosts_count > 0 {
-        app.set_screen(Screen::HostList);
-        super::confirm::execute_known_hosts_import(app);
+        ctx.set_screen(Screen::HostList);
+        ctx.defer(super::confirm::execute_known_hosts_import);
     } else {
-        app.set_screen(Screen::HostList);
+        ctx.set_screen(Screen::HostList);
     }
 }
 

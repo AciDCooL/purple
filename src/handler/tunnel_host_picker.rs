@@ -7,7 +7,8 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, Screen};
+use super::ctx::{Effectful, Effects, Nav};
+use crate::app::{App, HostState, Screen, UiSelection};
 
 /// Editable hosts visible in the picker, in display order.
 ///
@@ -30,8 +31,14 @@ pub(crate) fn editable_aliases(app: &App) -> Vec<String> {
 /// case-insensitive substring search. Same predictable semantics across
 /// every "type to filter" overlay in the app.
 pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
-    let query = app.ui.tunnel_host_picker_query().to_lowercase();
-    app.hosts_state
+    filter_hosts(app.ui.tunnel_host_picker_query(), &app.hosts_state)
+}
+
+/// Shared filter used by both the public `filtered_hosts(&App)` (render side)
+/// and the picker slice. Single source of truth for the editable-host match.
+fn filter_hosts(query: &str, hosts: &HostState) -> Vec<(String, String)> {
+    let query = query.to_lowercase();
+    hosts
         .list()
         .iter()
         .filter(|h| h.source_file.is_none())
@@ -45,68 +52,113 @@ pub(crate) fn filtered_hosts(app: &App) -> Vec<(String, String)> {
         .collect()
 }
 
+/// The slice of App the tunnel host picker touches: the picker selection and
+/// query (`ui`), the host list (read-only, for the editable-host filter) and
+/// the screen. Opening the tunnel add form is a whole-App helper shared with
+/// four other handlers, so it runs as a deferred effect after the slice borrow
+/// ends. The picker never reaches into tunnels, providers or any other domain.
+struct TunnelHostPickerCtx<'a> {
+    ui: &'a mut UiSelection,
+    hosts: &'a HostState,
+    screen: &'a mut Screen,
+    effects: Effects,
+}
+
+impl Nav for TunnelHostPickerCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Effectful for TunnelHostPickerCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
+
+impl TunnelHostPickerCtx<'_> {
+    /// Hosts matching the live query, mirroring the public `filtered_hosts`.
+    fn filtered_hosts(&self) -> Vec<(String, String)> {
+        filter_hosts(self.ui.tunnel_host_picker_query(), self.hosts)
+    }
+}
+
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
-    let total = filtered_hosts(app).len();
+    let effects = {
+        let mut ctx = TunnelHostPickerCtx {
+            ui: &mut app.ui,
+            hosts: &app.hosts_state,
+            screen: &mut app.screen,
+            effects: Effects::default(),
+        };
+        picker_key(&mut ctx, key);
+        ctx.effects
+    };
+    effects.apply(app);
+}
+
+fn picker_key(ctx: &mut TunnelHostPickerCtx, key: KeyEvent) {
+    let total = ctx.filtered_hosts().len();
     match key.code {
-        KeyCode::Esc => close(app),
+        KeyCode::Esc => close(ctx),
         KeyCode::Down if total > 0 => {
-            let cur = app.ui.tunnel_host_picker_state().selected().unwrap_or(0);
+            let cur = ctx.ui.tunnel_host_picker_state().selected().unwrap_or(0);
             let next = (cur + 1).min(total - 1);
-            app.ui.tunnel_host_picker_state_mut().select(Some(next));
+            ctx.ui.tunnel_host_picker_state_mut().select(Some(next));
         }
         KeyCode::Up => {
-            let cur = app.ui.tunnel_host_picker_state().selected().unwrap_or(0);
-            app.ui
+            let cur = ctx.ui.tunnel_host_picker_state().selected().unwrap_or(0);
+            ctx.ui
                 .tunnel_host_picker_state_mut()
                 .select(Some(cur.saturating_sub(1)));
         }
         KeyCode::Enter => {
-            let Some(idx) = app.ui.tunnel_host_picker_state().selected() else {
+            let Some(idx) = ctx.ui.tunnel_host_picker_state().selected() else {
                 return;
             };
-            let Some((alias, _)) = filtered_hosts(app).into_iter().nth(idx) else {
+            let Some((alias, _)) = ctx.filtered_hosts().into_iter().nth(idx) else {
                 return;
             };
-            app.ui.tunnel_host_picker_state_mut().select(None);
-            app.ui.tunnel_host_picker_query_mut().clear();
-            app.open_tunnel_add_form(alias);
+            ctx.ui.tunnel_host_picker_state_mut().select(None);
+            ctx.ui.tunnel_host_picker_query_mut().clear();
+            ctx.defer(move |app| app.open_tunnel_add_form(alias));
         }
         KeyCode::Backspace => {
             // Mirror the jump: Backspace on an empty query
             // closes the overlay; otherwise it shortens the query.
-            if app.ui.tunnel_host_picker_query().is_empty() {
-                close(app);
+            if ctx.ui.tunnel_host_picker_query().is_empty() {
+                close(ctx);
             } else {
-                app.ui.tunnel_host_picker_query_mut().pop();
-                reset_cursor_after_query_change(app);
+                ctx.ui.tunnel_host_picker_query_mut().pop();
+                reset_cursor_after_query_change(ctx);
             }
         }
         KeyCode::Char(c)
             if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && app.ui.tunnel_host_picker_query().len() < 64 =>
+                && ctx.ui.tunnel_host_picker_query().len() < 64 =>
         {
             // Cap the query length so a stuck key cannot grow the buffer
             // unbounded. Same 64-char cap the jump uses.
-            app.ui.tunnel_host_picker_query_mut().push(c);
-            reset_cursor_after_query_change(app);
+            ctx.ui.tunnel_host_picker_query_mut().push(c);
+            reset_cursor_after_query_change(ctx);
         }
         _ => {}
     }
 }
 
-fn close(app: &mut App) {
-    app.ui.tunnel_host_picker_state_mut().select(None);
-    app.ui.tunnel_host_picker_query_mut().clear();
-    app.set_screen(Screen::HostList);
+fn close(ctx: &mut TunnelHostPickerCtx) {
+    ctx.ui.tunnel_host_picker_state_mut().select(None);
+    ctx.ui.tunnel_host_picker_query_mut().clear();
+    ctx.set_screen(Screen::HostList);
 }
 
 /// After the candidate set shrinks or grows, snap the cursor to row 0 (or
 /// `None` when the set is empty) so the highlight always sits on a real row.
-fn reset_cursor_after_query_change(app: &mut App) {
-    let total = filtered_hosts(app).len();
+fn reset_cursor_after_query_change(ctx: &mut TunnelHostPickerCtx) {
+    let total = ctx.filtered_hosts().len();
     if total == 0 {
-        app.ui.tunnel_host_picker_state_mut().select(None);
+        ctx.ui.tunnel_host_picker_state_mut().select(None);
     } else {
-        app.ui.tunnel_host_picker_state_mut().select(Some(0));
+        ctx.ui.tunnel_host_picker_state_mut().select(Some(0));
     }
 }

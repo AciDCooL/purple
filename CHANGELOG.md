@@ -1,3 +1,10 @@
+## 3.18.2 - 2026-05-26
+
+- change: A tighter, safer core behind every keystroke.
+- change: Your edits now stay contained to the screen you're on. Each screen works only on its own part of purple's state, so a whole class of state bugs is caught before it ships.
+- change: The "discard unsaved changes?" prompt on host, provider, snippet and tunnel forms is now backed by one shared check per form, so it can't drift out of sync and silently drop your edits as new fields get added.
+- change: Every key and screen works exactly as you expect, so your daily flow is untouched while purple's internals get safer to build on.
+
 ## 3.18.1 - 2026-05-24
 
 - change: Sturdier internals across host rename and removal.

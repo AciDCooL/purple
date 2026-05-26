@@ -5,7 +5,6 @@
 //! chosen which host the new tunnel belongs to.
 
 use crossterm::event::{KeyCode, KeyEvent};
-use log::{debug, info};
 
 use crate::app::{App, Screen};
 use crate::tunnel::TunnelRule;
@@ -51,16 +50,18 @@ fn toggle_tunnel(app: &mut App) {
     let Some((alias, rule)) = selected_row(app) else {
         return;
     };
+    // Start/stop runs through the shared tunnel-action core (see
+    // `handler::tunnel`). This screen keeps its own demo + empty guards and
+    // its own cursor re-anchoring; only the state mutation is shared.
     if app.tunnels.active_contains(&alias) {
-        if let Some(mut tunnel) = app.tunnels.active_remove(&alias) {
-            if let Err(e) = tunnel.child.kill() {
-                debug!("[external] Failed to kill tunnel process for {alias}: {e}");
-            }
-            let _ = tunnel.child.wait();
-            drop(tunnel);
-            app.refresh_tunnel_bind_ports();
+        let (stopped, effects) = {
+            let mut ctx = super::tunnel::ctx_from_app(app);
+            let stopped = ctx.stop_active_tunnel(&alias);
+            (stopped, ctx.effects)
+        };
+        effects.apply(app);
+        if stopped {
             reposition_cursor_on(app, &alias, &rule);
-            app.notify(crate::messages::tunnel_stopped(&alias));
         }
         return;
     }
@@ -68,49 +69,22 @@ fn toggle_tunnel(app: &mut App) {
         app.notify_warning(crate::messages::DEMO_TUNNELS_DISABLED);
         return;
     }
-    let askpass = app
+    if app
         .hosts_state
-        .list()
-        .iter()
-        .find(|h| h.alias == alias)
-        .and_then(|h| h.askpass.clone());
-    let rules = app.hosts_state.ssh_config().find_tunnel_directives(&alias);
-    if rules.is_empty() {
+        .ssh_config()
+        .find_tunnel_directives(&alias)
+        .is_empty()
+    {
         return;
     }
-    match crate::tunnel::start_tunnel(
-        &alias,
-        app.reload.config_path(),
-        askpass.as_deref(),
-        app.bw_session.as_deref(),
-    ) {
-        Ok(child) => {
-            for rule in &rules {
-                info!(
-                    "Tunnel started: type={} local={} remote={}:{} alias={alias}",
-                    rule.tunnel_type.label(),
-                    rule.bind_port,
-                    rule.remote_host,
-                    rule.remote_port
-                );
-            }
-            app.tunnels.ensure_lsof_poller();
-            let parser_tx = app.tunnels.parser_tx();
-            let active = crate::tunnel::ActiveTunnel::spawn(child, &alias, parser_tx);
-            app.tunnels.active_insert(alias.clone(), active);
-            app.refresh_tunnel_bind_ports();
-            // Tunnel start spawns a real ssh session, same as a shell
-            // connect, so record it in connection history.
-            app.history.record(&alias);
-            app.record_key_use(&alias, crate::key_activity::now_secs());
-            app.apply_sort();
-            reposition_cursor_on(app, &alias, &rule);
-            app.notify(crate::messages::tunnel_started(&alias));
-        }
-        Err(e) => {
-            log::error!("[external] tunnel start failed: alias={alias}: {e}");
-            app.notify_error(crate::messages::tunnel_start_failed(&e));
-        }
+    let (started, effects) = {
+        let mut ctx = super::tunnel::ctx_from_app(app);
+        let started = ctx.spawn_active_tunnel(&alias);
+        (started, ctx.effects)
+    };
+    effects.apply(app);
+    if started {
+        reposition_cursor_on(app, &alias, &rule);
     }
 }
 
@@ -162,22 +136,17 @@ fn confirm_delete_selected(app: &mut App) {
     };
     let directive_key = rule.tunnel_type.directive_key().to_string();
     let directive_value = rule.to_directive_value();
-    let config_backup = app.hosts_state.ssh_config().clone();
-    if !app
-        .hosts_state
-        .ssh_config_mut()
-        .remove_forward(&alias, &directive_key, &directive_value)
-    {
-        app.notify_warning(crate::messages::TUNNEL_NOT_FOUND);
+    // Removal + persist + reload runs through the shared tunnel-action core;
+    // this screen keeps its own row_count-based cursor clamp.
+    let (removed, effects) = {
+        let mut ctx = super::tunnel::ctx_from_app(app);
+        let removed = ctx.remove_forward_tx(&alias, &directive_key, &directive_value);
+        (removed, ctx.effects)
+    };
+    effects.apply(app);
+    if !removed {
         return;
     }
-    if let Err(e) = app.hosts_state.ssh_config().write() {
-        app.hosts_state.set_ssh_config(config_backup);
-        app.notify_error(crate::messages::failed_to_save(&e));
-        return;
-    }
-    app.update_last_modified();
-    app.reload_hosts();
     // Clamp cursor: row count shrinks by 1, so the previous selection may
     // sit past the new end.
     let total = row_count(app);

@@ -31,6 +31,37 @@ pub struct ConflictState {
     pub provider_form_mtime: Option<SystemTime>,
 }
 
+impl ConflictState {
+    /// Clear all form mtime state (call on form cancel or successful submit).
+    pub fn clear_form_mtimes(&mut self) {
+        self.form_mtime = None;
+        self.form_include_mtimes.clear();
+        self.form_include_dir_mtimes.clear();
+        self.provider_form_mtime = None;
+    }
+}
+
+/// True if the main config or any tracked Include file/directory changed since
+/// the form's mtimes were captured. Returns false when no form mtime is set.
+pub(crate) fn config_changed(conflict: &ConflictState, config_path: &Path) -> bool {
+    match conflict.form_mtime {
+        Some(open_mtime) => {
+            if get_mtime(config_path) != Some(open_mtime) {
+                return true;
+            }
+            conflict
+                .form_include_mtimes
+                .iter()
+                .any(|(path, old_mtime)| get_mtime(path) != *old_mtime)
+                || conflict
+                    .form_include_dir_mtimes
+                    .iter()
+                    .any(|(path, old_mtime)| get_mtime(path) != *old_mtime)
+        }
+        None => false,
+    }
+}
+
 impl ReloadState {
     pub fn config_path(&self) -> &Path {
         &self.config_path

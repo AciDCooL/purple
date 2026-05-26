@@ -1,66 +1,103 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, Screen};
+use super::ctx::Nav;
+use crate::app::{App, KeysState, Screen, UiSelection};
+
+/// The slice of App the help overlay and Keys-tab navigation touch: the help
+/// scroll / tag-picker selection state (`ui`), the discovered-keys list
+/// (`keys`) and the screen. None of these handlers notify or defer whole-App
+/// work, so they only implement `Nav`.
+struct HelpCtx<'a> {
+    ui: &'a mut UiSelection,
+    keys: &'a mut KeysState,
+    screen: &'a mut Screen,
+}
+
+impl Nav for HelpCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+fn ctx_from_app(app: &mut App) -> HelpCtx<'_> {
+    HelpCtx {
+        ui: &mut app.ui,
+        keys: &mut app.keys,
+        screen: &mut app.screen,
+    }
+}
 
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
+    let mut ctx = ctx_from_app(app);
+    help_key(&mut ctx, key);
+}
+
+fn help_key(ctx: &mut HelpCtx, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
-            app.ui.set_help_scroll(0);
-            let return_screen = match std::mem::replace(&mut app.screen, Screen::HostList) {
-                Screen::Help { return_screen } => *return_screen,
+            ctx.ui.set_help_scroll(0);
+            let return_screen = match &*ctx.screen {
+                Screen::Help { return_screen } => (**return_screen).clone(),
                 _ => Screen::HostList,
             };
-            app.set_screen(return_screen);
+            ctx.set_screen(return_screen);
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.ui
-                .set_help_scroll(app.ui.help_scroll().saturating_add(1));
+            ctx.ui
+                .set_help_scroll(ctx.ui.help_scroll().saturating_add(1));
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.ui
-                .set_help_scroll(app.ui.help_scroll().saturating_sub(1));
+            ctx.ui
+                .set_help_scroll(ctx.ui.help_scroll().saturating_sub(1));
         }
         KeyCode::PageDown => {
-            app.ui
-                .set_help_scroll(app.ui.help_scroll().saturating_add(10));
+            ctx.ui
+                .set_help_scroll(ctx.ui.help_scroll().saturating_add(10));
         }
         KeyCode::PageUp => {
-            app.ui
-                .set_help_scroll(app.ui.help_scroll().saturating_sub(10));
+            ctx.ui
+                .set_help_scroll(ctx.ui.help_scroll().saturating_sub(10));
         }
         _ => {}
     }
 }
 
 pub(super) fn handle_key_list_key(app: &mut App, key: KeyEvent) {
+    let mut ctx = ctx_from_app(app);
+    key_list_key(&mut ctx, key);
+}
+
+fn key_list_key(ctx: &mut HelpCtx, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('K') => {
-            app.set_screen(Screen::HostList);
+            ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut app.screen, Screen::HostList);
-            app.set_screen(Screen::Help {
+            let old = (*ctx.screen).clone();
+            ctx.set_screen(Screen::Help {
                 return_screen: Box::new(old),
             });
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.select_next_key();
+            let len = ctx.keys.list().len();
+            crate::app::cycle_selection(ctx.keys.list_state_mut(), len, true);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.select_prev_key();
+            let len = ctx.keys.list().len();
+            crate::app::cycle_selection(ctx.keys.list_state_mut(), len, false);
         }
         KeyCode::PageDown => {
-            let len = app.keys.list().len();
-            crate::app::page_down(app.keys.list_state_mut(), len, 10);
+            let len = ctx.keys.list().len();
+            crate::app::page_down(ctx.keys.list_state_mut(), len, 10);
         }
         KeyCode::PageUp => {
-            let len = app.keys.list().len();
-            crate::app::page_up(app.keys.list_state_mut(), len, 10);
+            let len = ctx.keys.list().len();
+            crate::app::page_up(ctx.keys.list_state_mut(), len, 10);
         }
         KeyCode::Enter => {
-            if let Some(index) = app.keys.list_state().selected() {
-                if index < app.keys.list().len() {
-                    app.set_screen(Screen::KeyDetail { index });
+            if let Some(index) = ctx.keys.list_state().selected() {
+                if index < ctx.keys.list().len() {
+                    ctx.set_screen(Screen::KeyDetail { index });
                 }
             }
         }
@@ -69,13 +106,18 @@ pub(super) fn handle_key_list_key(app: &mut App, key: KeyEvent) {
 }
 
 pub(super) fn handle_key_detail_key(app: &mut App, key: KeyEvent) {
+    let mut ctx = ctx_from_app(app);
+    key_detail_key(&mut ctx, key);
+}
+
+fn key_detail_key(ctx: &mut HelpCtx, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
-            app.set_screen(Screen::KeyList);
+            ctx.set_screen(Screen::KeyList);
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut app.screen, Screen::HostList);
-            app.set_screen(Screen::Help {
+            let old = (*ctx.screen).clone();
+            ctx.set_screen(Screen::Help {
                 return_screen: Box::new(old),
             });
         }

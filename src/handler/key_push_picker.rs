@@ -6,7 +6,8 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, Screen};
+use super::ctx::{Nav, Notify};
+use crate::app::{App, HostState, KeysState, Screen, StatusCenter};
 use crate::ssh_config::model::HostEntry;
 
 /// Iterator over hosts that may appear in the picker. Vault-managed hosts
@@ -25,23 +26,64 @@ pub(crate) fn is_vault_host(host: &HostEntry) -> bool {
     crate::vault_ssh::has_purple_vault_context(host)
 }
 
+/// The slice of App the key-push picker touches: the Keys-tab state (push
+/// selection, list cursor, committed set), the host list (read-only, the
+/// pickable source), the screen and the status center. It never reaches
+/// into tunnels, containers or any other domain.
+struct KeyPushCtx<'a> {
+    keys: &'a mut KeysState,
+    hosts: &'a HostState,
+    screen: &'a mut Screen,
+    status: &'a mut StatusCenter,
+}
+
+impl Nav for KeyPushCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Notify for KeyPushCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
+
+impl KeyPushCtx<'_> {
+    /// Hosts that may appear in the picker. Mirrors the public
+    /// `pickable_hosts` on the slice's host list.
+    fn pickable(&self) -> impl Iterator<Item = &HostEntry> {
+        self.hosts.list().iter()
+    }
+}
+
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
-    let key_index = match app.screen {
-        Screen::KeyPushPicker { key_index } => key_index,
+    let mut ctx = KeyPushCtx {
+        keys: &mut app.keys,
+        hosts: &app.hosts_state,
+        screen: &mut app.screen,
+        status: &mut app.status_center,
+    };
+    key_push_key(&mut ctx, key);
+}
+
+fn key_push_key(ctx: &mut KeyPushCtx, key: KeyEvent) {
+    let key_index = match &*ctx.screen {
+        Screen::KeyPushPicker { key_index } => *key_index,
         _ => return,
     };
-    let host_count = pickable_hosts(app).count();
+    let host_count = ctx.pickable().count();
     match key.code {
         KeyCode::Esc => {
-            app.keys.push_mut().selected.clear();
-            app.set_screen(Screen::HostList);
+            ctx.keys.push_mut().selected.clear();
+            ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('j') | KeyCode::Down => {
             if host_count == 0 {
                 return;
             }
-            let cur = app.keys.push().list_state.selected().unwrap_or(0);
-            app.keys
+            let cur = ctx.keys.push().list_state.selected().unwrap_or(0);
+            ctx.keys
                 .push_mut()
                 .list_state
                 .select(Some((cur + 1).min(host_count - 1)));
@@ -50,32 +92,32 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             if host_count == 0 {
                 return;
             }
-            let cur = app.keys.push().list_state.selected().unwrap_or(0);
-            app.keys
+            let cur = ctx.keys.push().list_state.selected().unwrap_or(0);
+            ctx.keys
                 .push_mut()
                 .list_state
                 .select(Some(cur.saturating_sub(1)));
         }
         KeyCode::PageDown => {
-            crate::app::page_down(&mut app.keys.push_mut().list_state, host_count, 10);
+            crate::app::page_down(&mut ctx.keys.push_mut().list_state, host_count, 10);
         }
         KeyCode::PageUp => {
-            crate::app::page_up(&mut app.keys.push_mut().list_state, host_count, 10);
+            crate::app::page_up(&mut ctx.keys.push_mut().list_state, host_count, 10);
         }
         KeyCode::Home | KeyCode::Char('g') if host_count > 0 => {
-            app.keys.push_mut().list_state.select(Some(0));
+            ctx.keys.push_mut().list_state.select(Some(0));
         }
         KeyCode::End | KeyCode::Char('G') if host_count > 0 => {
-            app.keys.push_mut().list_state.select(Some(host_count - 1));
+            ctx.keys.push_mut().list_state.select(Some(host_count - 1));
         }
         KeyCode::Char(' ') => {
-            toggle_at_cursor(app);
+            toggle_at_cursor(ctx);
         }
         KeyCode::Char('a') | KeyCode::Char('A') => {
-            toggle_select_all_eligible(app);
+            toggle_select_all_eligible(ctx);
         }
         KeyCode::Enter => {
-            commit_to_confirm(app, key_index);
+            commit_to_confirm(ctx, key_index);
         }
         _ => {}
     }
@@ -84,35 +126,36 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 /// Flip the selection state of the alias at the cursor. Vault-ssh hosts
 /// are skipped so the user cannot accidentally target a cert-managed
 /// host with a static-key append.
-fn toggle_at_cursor(app: &mut App) {
-    let Some(idx) = app.keys.push().list_state.selected() else {
+fn toggle_at_cursor(ctx: &mut KeyPushCtx) {
+    let Some(idx) = ctx.keys.push().list_state.selected() else {
         return;
     };
-    let host = match pickable_hosts(app).nth(idx) {
+    let host = match ctx.pickable().nth(idx) {
         Some(h) => h,
         None => return,
     };
     if is_vault_host(host) {
-        app.notify(crate::messages::KEY_PUSH_VAULT_SKIP);
+        ctx.notify(crate::messages::KEY_PUSH_VAULT_SKIP);
         return;
     }
     let alias = host.alias.clone();
-    if app.keys.push().selected.contains(&alias) {
-        app.keys.push_mut().selected.remove(&alias);
+    if ctx.keys.push().selected.contains(&alias) {
+        ctx.keys.push_mut().selected.remove(&alias);
     } else {
-        app.keys.push_mut().selected.insert(alias.clone());
+        ctx.keys.push_mut().selected.insert(alias.clone());
     }
     log::debug!(
         "[purple] key_push picker: toggled {} (now {} selected)",
         alias,
-        app.keys.push().selected.len()
+        ctx.keys.push().selected.len()
     );
 }
 
 /// `a` toggle: if every eligible host is already selected, clear them;
 /// otherwise select all eligible. Matches the host-list bulk-select rhythm.
-fn toggle_select_all_eligible(app: &mut App) {
-    let eligible: Vec<String> = pickable_hosts(app)
+fn toggle_select_all_eligible(ctx: &mut KeyPushCtx) {
+    let eligible: Vec<String> = ctx
+        .pickable()
         .filter(|h| !is_vault_host(h))
         .map(|h| h.alias.clone())
         .collect();
@@ -121,10 +164,10 @@ fn toggle_select_all_eligible(app: &mut App) {
     }
     let all_already_selected = eligible
         .iter()
-        .all(|a| app.keys.push().selected.contains(a));
+        .all(|a| ctx.keys.push().selected.contains(a));
     if all_already_selected {
         for alias in &eligible {
-            app.keys.push_mut().selected.remove(alias);
+            ctx.keys.push_mut().selected.remove(alias);
         }
         log::debug!(
             "[purple] key_push picker: cleared all {} eligible selections",
@@ -133,7 +176,7 @@ fn toggle_select_all_eligible(app: &mut App) {
     } else {
         let n = eligible.len();
         for alias in eligible {
-            app.keys.push_mut().selected.insert(alias);
+            ctx.keys.push_mut().selected.insert(alias);
         }
         log::debug!(
             "[purple] key_push picker: selected all {} eligible hosts",
@@ -145,19 +188,20 @@ fn toggle_select_all_eligible(app: &mut App) {
 /// Enter: freeze the selection into `app.keys.push().committed` and
 /// transition. Empty selection notifies but stays on the picker so the
 /// user gets feedback instead of a silent no-op.
-fn commit_to_confirm(app: &mut App, key_index: usize) {
-    if app.keys.push().selected.is_empty() {
-        app.notify(crate::messages::KEY_PUSH_NONE_SELECTED);
+fn commit_to_confirm(ctx: &mut KeyPushCtx, key_index: usize) {
+    if ctx.keys.push().selected.is_empty() {
+        ctx.notify(crate::messages::KEY_PUSH_NONE_SELECTED);
         return;
     }
     // Preserve picker order (the user just saw the list in this order),
     // not HashSet iteration order, so the confirm dialog reads stably.
-    let aliases: Vec<String> = pickable_hosts(app)
+    let aliases: Vec<String> = ctx
+        .pickable()
         .map(|h| h.alias.clone())
-        .filter(|a| app.keys.push().selected.contains(a))
+        .filter(|a| ctx.keys.push().selected.contains(a))
         .collect();
-    app.keys.push_mut().committed = aliases;
-    app.set_screen(Screen::ConfirmKeyPush { key_index });
+    ctx.keys.push_mut().committed = aliases;
+    ctx.set_screen(Screen::ConfirmKeyPush { key_index });
 }
 
 #[cfg(test)]

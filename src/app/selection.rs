@@ -754,7 +754,8 @@ impl App {
     /// Load tunnel directives for a host alias.
     /// Uses find_tunnel_directives for Include-aware, multi-pattern host lookup.
     pub fn refresh_tunnel_list(&mut self, alias: &str) {
-        self.tunnels.list = self.hosts_state.ssh_config.find_tunnel_directives(alias);
+        self.tunnels
+            .load_directives(&self.hosts_state.ssh_config, alias);
     }
 
     /// Move tunnel list selection up.

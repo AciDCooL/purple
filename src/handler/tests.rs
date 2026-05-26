@@ -3269,12 +3269,9 @@ fn test_history_rename_leaves_sibling_keys_untouched() {
 
 fn make_snippet_app() -> App {
     let mut app = make_app("Host myserver\n  HostName 1.2.3.4\n");
-    let dir = std::env::temp_dir().join(format!(
-        "purple_handler_snip_{}_{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::create_dir_all(&dir);
+    // Unique tempdir per call so parallel test threads never share a snippet
+    // store path. keep() leaks it like make_app, avoiding a process::id race.
+    let dir = tempfile::tempdir().expect("tempdir").keep();
     app.snippets.store_mut().path_override = Some(dir.join("snippets"));
     app.snippets.store_mut().snippets = vec![
         crate::snippet::Snippet {
@@ -3681,8 +3678,7 @@ fn test_snippet_picker_enter_with_no_selection() {
 fn test_host_list_r_opens_snippet_picker() {
     let mut app = make_app("Host myserver\n  HostName 1.2.3.4\n");
     app.ui.list_state_mut().select(Some(0));
-    let dir = std::env::temp_dir().join(format!("purple_handler_snip_r_{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
+    let dir = tempfile::tempdir().expect("tempdir").keep();
     app.snippets.store_mut().path_override = Some(dir.join("snippets"));
     let (tx, _rx) = mpsc::channel();
 
@@ -3699,8 +3695,7 @@ fn test_host_list_r_opens_snippet_picker() {
 fn test_host_list_r_shift_opens_snippet_picker_all() {
     let mut app = make_app("Host a\n  HostName 1.1.1.1\nHost b\n  HostName 2.2.2.2\n");
     app.ui.list_state_mut().select(Some(0));
-    let dir = std::env::temp_dir().join(format!("purple_handler_snip_R_{}", std::process::id()));
-    let _ = std::fs::create_dir_all(&dir);
+    let dir = tempfile::tempdir().expect("tempdir").keep();
     app.snippets.store_mut().path_override = Some(dir.join("snippets"));
     let (tx, _rx) = mpsc::channel();
 

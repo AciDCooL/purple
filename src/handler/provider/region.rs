@@ -1,10 +1,38 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, Screen};
+use crate::app::{App, ProviderState, Screen, StatusCenter, UiSelection};
+use crate::handler::ctx::Notify;
 use crate::providers::ProviderKind;
 
 type ZoneList = &'static [(&'static str, &'static str)];
 type ZoneGroups = &'static [(&'static str, usize, usize)];
+
+/// The slice of App the region picker touches: the provider form (`providers`,
+/// for the `regions` string it edits), the picker cursor (`ui`) and the status
+/// center (`status`, for the selection-count toast). Everything the handler
+/// does is slice-local, so no whole-App effects are deferred; the provider name
+/// is resolved from `screen` in the thin wrapper and passed in. The slice never
+/// reaches into hosts, vault or any other domain.
+struct RegionPickerCtx<'a> {
+    providers: &'a mut ProviderState,
+    ui: &'a mut UiSelection,
+    status: &'a mut StatusCenter,
+}
+
+impl Notify for RegionPickerCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
+
+impl RegionPickerCtx<'_> {
+    /// Close the region picker overlay. Mirrors `App::close_region_picker` on
+    /// the slice (only touches `ui`).
+    fn close_region_picker(&mut self) {
+        log::debug!("[purple] close_region_picker");
+        self.ui.region_picker_mut().open = false;
+    }
+}
 
 /// Build the same row list used by the region picker renderer.
 pub(crate) fn region_picker_rows(provider: &str) -> Vec<Option<&'static str>> {
@@ -76,16 +104,27 @@ pub(crate) fn zone_data_for(provider: &str) -> (ZoneList, ZoneGroups) {
 }
 
 pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
+    // Resolve the provider name from the screen in the wrapper while it still
+    // holds `&App`, then narrow to the region-picker slice.
     let provider_name = match &app.screen {
         Screen::ProviderForm { id } => id.provider.clone(),
         _ => return,
     };
+    let mut ctx = RegionPickerCtx {
+        providers: &mut app.providers,
+        ui: &mut app.ui,
+        status: &mut app.status_center,
+    };
+    region_picker_key(&mut ctx, key, &provider_name);
+}
+
+fn region_picker_key(ctx: &mut RegionPickerCtx, key: KeyEvent, provider_name: &str) {
     let kind = provider_name.parse::<ProviderKind>().ok();
-    let rows = region_picker_rows(&provider_name);
+    let rows = region_picker_rows(provider_name);
     let total = rows.len();
 
     // Parse current regions into a set for toggling
-    let mut selected: std::collections::HashSet<String> = app
+    let mut selected: std::collections::HashSet<String> = ctx
         .providers
         .form()
         .regions
@@ -104,12 +143,12 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
 
     match key.code {
         KeyCode::Esc => {
-            app.providers.form_mut().regions = rebuild_regions_string(&selected, &provider_name);
-            app.providers.form_mut().sync_cursor_to_end();
-            app.close_region_picker();
+            ctx.providers.form_mut().regions = rebuild_regions_string(&selected, provider_name);
+            ctx.providers.form_mut().sync_cursor_to_end();
+            ctx.close_region_picker();
             let count = selected.len();
             if count > 0 {
-                app.notify(crate::messages::regions_selected_count(count, zone_label));
+                ctx.notify(crate::messages::regions_selected_count(count, zone_label));
             }
         }
         KeyCode::Enter => {
@@ -117,28 +156,28 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
             // exclusively and closes. For multi-select: Enter confirms current
             // selection (same as Esc).
             if kind == Some(ProviderKind::Ovh) {
-                let cursor = app.ui.region_picker().cursor;
+                let cursor = ctx.ui.region_picker().cursor;
                 if let Some(Some(code)) = rows.get(cursor) {
                     selected.clear();
                     selected.insert(code.to_string());
                 }
             }
-            app.providers.form_mut().regions = rebuild_regions_string(&selected, &provider_name);
-            app.providers.form_mut().sync_cursor_to_end();
-            app.close_region_picker();
+            ctx.providers.form_mut().regions = rebuild_regions_string(&selected, provider_name);
+            ctx.providers.form_mut().sync_cursor_to_end();
+            ctx.close_region_picker();
             let count = selected.len();
             if count > 0 {
-                app.notify(crate::messages::regions_selected_count(count, zone_label));
+                ctx.notify(crate::messages::regions_selected_count(count, zone_label));
             }
         }
-        KeyCode::Down | KeyCode::Char('j') if app.ui.region_picker().cursor + 1 < total => {
-            app.ui.region_picker_mut().cursor += 1;
+        KeyCode::Down | KeyCode::Char('j') if ctx.ui.region_picker().cursor + 1 < total => {
+            ctx.ui.region_picker_mut().cursor += 1;
         }
-        KeyCode::Up | KeyCode::Char('k') if app.ui.region_picker().cursor > 0 => {
-            app.ui.region_picker_mut().cursor -= 1;
+        KeyCode::Up | KeyCode::Char('k') if ctx.ui.region_picker().cursor > 0 => {
+            ctx.ui.region_picker_mut().cursor -= 1;
         }
         KeyCode::Char(' ') => {
-            let cursor = app.ui.region_picker().cursor;
+            let cursor = ctx.ui.region_picker().cursor;
             if let Some(Some(code)) = rows.get(cursor) {
                 // Toggle single region
                 if selected.contains(*code) {
@@ -162,7 +201,7 @@ pub(crate) fn handle_region_picker(app: &mut App, key: KeyEvent) {
                     }
                 }
             }
-            app.providers.form_mut().regions = rebuild_regions_string(&selected, &provider_name);
+            ctx.providers.form_mut().regions = rebuild_regions_string(&selected, provider_name);
         }
         _ => {}
     }

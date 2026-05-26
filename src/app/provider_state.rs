@@ -383,6 +383,28 @@ impl ProviderState {
         self.form_baseline = baseline;
     }
 
+    /// True if the provider form differs from its captured baseline.
+    pub fn form_is_dirty(&self) -> bool {
+        match &self.form_baseline {
+            Some(b) => {
+                self.form.url != b.url
+                    || self.form.token != b.token
+                    || self.form.profile != b.profile
+                    || self.form.project != b.project
+                    || self.form.compartment != b.compartment
+                    || self.form.regions != b.regions
+                    || self.form.alias_prefix != b.alias_prefix
+                    || self.form.user != b.user
+                    || self.form.identity_file != b.identity_file
+                    || self.form.verify_tls != b.verify_tls
+                    || self.form.auto_sync != b.auto_sync
+                    || self.form.vault_role != b.vault_role
+                    || self.form.vault_addr != b.vault_addr
+            }
+            None => false,
+        }
+    }
+
     pub fn expanded_providers(&self) -> &HashSet<String> {
         &self.expanded_providers
     }
@@ -727,5 +749,74 @@ mod tests {
         assert_eq!(s.batch_updated(), 0);
         assert_eq!(s.batch_stale(), 0);
         assert_eq!(s.batch_total(), 0);
+    }
+
+    fn state_matching_baseline() -> ProviderState {
+        let b = ProviderFormBaseline {
+            url: "https://api".into(),
+            token: "tok".into(),
+            profile: "default".into(),
+            project: "proj".into(),
+            compartment: "comp".into(),
+            regions: "eu-west".into(),
+            alias_prefix: "ap".into(),
+            user: "ec2-user".into(),
+            identity_file: "~/.ssh/id".into(),
+            verify_tls: true,
+            auto_sync: false,
+            vault_role: "role".into(),
+            vault_addr: "https://vault".into(),
+        };
+        let mut s = ProviderState::default();
+        s.form.url = b.url.clone();
+        s.form.token = b.token.clone();
+        s.form.profile = b.profile.clone();
+        s.form.project = b.project.clone();
+        s.form.compartment = b.compartment.clone();
+        s.form.regions = b.regions.clone();
+        s.form.alias_prefix = b.alias_prefix.clone();
+        s.form.user = b.user.clone();
+        s.form.identity_file = b.identity_file.clone();
+        s.form.verify_tls = b.verify_tls;
+        s.form.auto_sync = b.auto_sync;
+        s.form.vault_role = b.vault_role.clone();
+        s.form.vault_addr = b.vault_addr.clone();
+        s.set_form_baseline(Some(b));
+        s
+    }
+
+    #[test]
+    fn form_is_dirty_is_false_without_a_baseline() {
+        let mut s = ProviderState::default();
+        s.form.url = "edited".into();
+        assert!(!s.form_is_dirty());
+    }
+
+    #[test]
+    fn form_is_dirty_is_false_when_form_equals_baseline() {
+        assert!(!state_matching_baseline().form_is_dirty());
+    }
+
+    fn assert_field_change_is_dirty(field: &str, mutate: impl FnOnce(&mut ProviderFormFields)) {
+        let mut s = state_matching_baseline();
+        mutate(&mut s.form);
+        assert!(s.form_is_dirty(), "a change in {field} must read dirty");
+    }
+
+    #[test]
+    fn form_is_dirty_detects_a_change_in_each_field() {
+        assert_field_change_is_dirty("url", |f| f.url.push('x'));
+        assert_field_change_is_dirty("token", |f| f.token.push('x'));
+        assert_field_change_is_dirty("profile", |f| f.profile.push('x'));
+        assert_field_change_is_dirty("project", |f| f.project.push('x'));
+        assert_field_change_is_dirty("compartment", |f| f.compartment.push('x'));
+        assert_field_change_is_dirty("regions", |f| f.regions.push('x'));
+        assert_field_change_is_dirty("alias_prefix", |f| f.alias_prefix.push('x'));
+        assert_field_change_is_dirty("user", |f| f.user.push('x'));
+        assert_field_change_is_dirty("identity_file", |f| f.identity_file.push('x'));
+        assert_field_change_is_dirty("verify_tls", |f| f.verify_tls = !f.verify_tls);
+        assert_field_change_is_dirty("auto_sync", |f| f.auto_sync = !f.auto_sync);
+        assert_field_change_is_dirty("vault_role", |f| f.vault_role.push('x'));
+        assert_field_change_is_dirty("vault_addr", |f| f.vault_addr.push('x'));
     }
 }

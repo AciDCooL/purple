@@ -8,7 +8,10 @@ use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, ContainerLogsRequest, ContainerLogsSearch, Screen};
+use super::ctx::Nav;
+use crate::app::{
+    App, ContainerLogsRequest, ContainerLogsSearch, ContainerState, HostState, Screen,
+};
 use crate::event::AppEvent;
 
 /// Number of trailing log lines requested per fetch. Sized to fit a
@@ -145,7 +148,33 @@ fn scroll_to_current_match(
     }
 }
 
+/// The slice of App the container-logs overlay touches: the screen (which
+/// carries the logs body, scroll, search and coordinates inside the
+/// `ContainerLogs` variant), the container cache/queue and the host list
+/// (read-only, for the per-host askpass on refresh). It never reaches into
+/// tunnels, providers or any other domain.
+struct ContainerLogsCtx<'a> {
+    screen: &'a mut Screen,
+    container_state: &'a mut ContainerState,
+    hosts: &'a HostState,
+}
+
+impl Nav for ContainerLogsCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
 pub(super) fn handle_key(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender<AppEvent>) {
+    let mut ctx = ContainerLogsCtx {
+        screen: &mut app.screen,
+        container_state: &mut app.container_state,
+        hosts: &app.hosts_state,
+    };
+    container_logs_key(&mut ctx, key);
+}
+
+fn container_logs_key(ctx: &mut ContainerLogsCtx, key: KeyEvent) {
     let Screen::ContainerLogs {
         body,
         scroll,
@@ -155,7 +184,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender
         last_render_height,
         search,
         ..
-    } = &mut app.screen
+    } = &mut *ctx.screen
     else {
         return;
     };
@@ -210,14 +239,14 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             log::debug!("[purple] container_logs: closed");
-            app.set_screen(Screen::HostList);
+            ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('?') => {
             // Help dispatcher reads `app.top_page` to pick the
             // tab-specific help; the containers tab block already
             // documents `l logs`. Returning to HostList preserves
             // the tab the user was on.
-            app.set_screen(Screen::Help {
+            ctx.set_screen(Screen::Help {
                 return_screen: Box::new(Screen::HostList),
             });
         }
@@ -253,63 +282,65 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender
             let alias = alias.clone();
             let container_id = container_id.clone();
             let container_name = container_name.clone();
-            requeue_logs_fetch(app, alias, container_id, container_name);
+            ctx.requeue_logs_fetch(alias, container_id, container_name);
         }
         _ => {}
     }
 }
 
-fn requeue_logs_fetch(app: &mut App, alias: String, container_id: String, container_name: String) {
-    let Some(entry) = app.container_state.cache_entry(&alias) else {
-        log::debug!(
-            "[purple] container_logs: refresh aborted, no cache for alias={}",
-            alias
-        );
-        return;
-    };
-    let runtime = entry.runtime;
-    let askpass = app
-        .hosts_state
-        .list()
-        .iter()
-        .find(|h| h.alias == alias)
-        .and_then(|h| h.askpass.clone());
+impl ContainerLogsCtx<'_> {
+    fn requeue_logs_fetch(&mut self, alias: String, container_id: String, container_name: String) {
+        let Some(entry) = self.container_state.cache_entry(&alias) else {
+            log::debug!(
+                "[purple] container_logs: refresh aborted, no cache for alias={}",
+                alias
+            );
+            return;
+        };
+        let runtime = entry.runtime;
+        let askpass = self
+            .hosts
+            .list()
+            .iter()
+            .find(|h| h.alias == alias)
+            .and_then(|h| h.askpass.clone());
 
-    if let Screen::ContainerLogs {
-        body,
-        scroll,
-        error,
-        fetched_at,
-        search,
-        ..
-    } = &mut app.screen
-    {
-        body.clear();
-        *scroll = 0;
-        *error = None;
-        *fetched_at = 0;
-        // Wipe stale line indices: the body just emptied, so any old
-        // match positions now point past the end. The completion path
-        // in event_loop calls `refresh_search` to repopulate against
-        // the fresh body, but until then the search bar would show
-        // a stale "(3 of 5)" badge tied to the previous fetch.
-        if let Some(s) = search.as_mut() {
-            s.matches.clear();
-            s.current = 0;
+        if let Screen::ContainerLogs {
+            body,
+            scroll,
+            error,
+            fetched_at,
+            search,
+            ..
+        } = &mut *self.screen
+        {
+            body.clear();
+            *scroll = 0;
+            *error = None;
+            *fetched_at = 0;
+            // Wipe stale line indices: the body just emptied, so any old
+            // match positions now point past the end. The completion path
+            // in event_loop calls `refresh_search` to repopulate against
+            // the fresh body, but until then the search bar would show
+            // a stale "(3 of 5)" badge tied to the previous fetch.
+            if let Some(s) = search.as_mut() {
+                s.matches.clear();
+                s.current = 0;
+            }
         }
+        log::debug!(
+            "[purple] container_logs: refresh queued alias={} id={}",
+            alias,
+            container_id
+        );
+        self.container_state.queue_logs(ContainerLogsRequest {
+            alias,
+            askpass,
+            runtime,
+            container_id,
+            container_name,
+        });
     }
-    log::debug!(
-        "[purple] container_logs: refresh queued alias={} id={}",
-        alias,
-        container_id
-    );
-    app.container_state.queue_logs(ContainerLogsRequest {
-        alias,
-        askpass,
-        runtime,
-        container_id,
-        container_name,
-    });
 }
 
 #[cfg(test)]

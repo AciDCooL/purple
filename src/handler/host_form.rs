@@ -1,43 +1,80 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, FormField, Screen};
+use super::ctx::{Effectful, Effects, Notify};
+use crate::app::{App, FormField, FormState, Screen, StatusCenter};
 use crate::quick_add;
 use crate::ssh_config::model::HostEntry;
 
+/// The slice of App the host-form key handler touches while editing: the host
+/// form fields (`forms`) and the status center (`status`, for the smart-paste
+/// toasts). Submitting, closing and opening a picker each reach far beyond a
+/// form slice (the save path writes the config, reloads hosts, migrates
+/// alias-keyed caches and refreshes the cert cache; closing flushes a pending
+/// vault write; the key/proxyjump/vault-role pickers read keys, hosts and
+/// providers), so those whole-App operations are deferred as effects and
+/// applied to the full `App` after the slice borrow ends. The slice never
+/// reaches into hosts, vault, providers or any other domain directly.
+struct HostFormCtx<'a> {
+    forms: &'a mut FormState,
+    status: &'a mut StatusCenter,
+    effects: Effects,
+}
+
+impl Notify for HostFormCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
+
+impl Effectful for HostFormCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
+
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
-    // Dispatch to password picker if it's open
+    // Picker dispatch stays in the wrapper: each picker handler takes the full
+    // `&mut App` (its own migrated slice reads keys/hosts/providers), so we
+    // delegate before narrowing to the form slice.
     if app.ui.password_picker().open {
         super::picker::handle_password_picker(app, key);
         return;
     }
-
-    // Dispatch to key picker if it's open
     if app.ui.key_picker().open {
         super::picker::handle_key_picker_shared(app, key, false);
         return;
     }
-
-    // Dispatch to proxyjump picker if it's open
     if app.ui.proxyjump_picker().open {
         super::picker::handle_proxyjump_picker(app, key);
         return;
     }
-
-    // Dispatch to vault role picker if it's open
     if app.ui.vault_role_picker().open {
         super::picker::handle_vault_role_picker(app, key);
         return;
     }
 
+    let effects = {
+        let mut ctx = HostFormCtx {
+            forms: &mut app.forms,
+            status: &mut app.status_center,
+            effects: Effects::default(),
+        };
+        host_form_key(&mut ctx, key);
+        ctx.effects
+    };
+    effects.apply(app);
+}
+
+fn host_form_key(ctx: &mut HostFormCtx, key: KeyEvent) {
     // Handle discard confirmation dialog via the shared confirm router.
-    if app.forms.is_discard_pending() {
+    if ctx.forms.is_discard_pending() {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                app.forms.dismiss_discard_confirm();
-                app.close_host_form();
+                ctx.forms.dismiss_discard_confirm();
+                ctx.defer(App::close_host_form);
             }
             super::ConfirmAction::No => {
-                app.forms.dismiss_discard_confirm();
+                ctx.forms.dismiss_discard_confirm();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -46,79 +83,79 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 
     match key.code {
         KeyCode::Esc => {
-            if app.host_form_is_dirty() {
-                app.forms.request_discard_confirm();
+            if ctx.forms.host_form_is_dirty() {
+                ctx.forms.request_discard_confirm();
             } else {
-                app.close_host_form();
+                ctx.defer(App::close_host_form);
             }
         }
         KeyCode::Tab | KeyCode::Down => {
             // Smart paste detection: when leaving Alias field, check for user@host:port
-            if app.forms.host_mut().focused_field == FormField::Alias {
-                maybe_smart_paste(app);
+            if ctx.forms.host_mut().focused_field == FormField::Alias {
+                smart_paste(ctx.forms, ctx.status);
             }
-            if !app.forms.host_mut().expanded {
+            if !ctx.forms.host_mut().expanded {
                 // Collapsed mode: Tab/Down from last required field expands
-                match app.forms.host_mut().focused_field {
+                match ctx.forms.host_mut().focused_field {
                     FormField::Alias => {
-                        app.forms.host_mut().focused_field = FormField::Hostname;
+                        ctx.forms.host_mut().focused_field = FormField::Hostname;
                     }
                     FormField::Hostname => {
-                        app.forms.host_mut().expanded = true;
-                        app.forms.host_mut().focused_field = FormField::User;
+                        ctx.forms.host_mut().expanded = true;
+                        ctx.forms.host_mut().focused_field = FormField::User;
                     }
                     // Defensive: if focus is on an optional field while collapsed, reset
                     _ => {
-                        app.forms.host_mut().focused_field = FormField::Alias;
+                        ctx.forms.host_mut().focused_field = FormField::Alias;
                     }
                 }
             } else {
                 // Progressive disclosure: advance through the visible field
                 // subset so Tab skips over the hidden `VaultAddr` field when
                 // no role is set.
-                app.forms.host_mut().focus_next_visible();
+                ctx.forms.host_mut().focus_next_visible();
             }
-            app.forms.host_mut().sync_cursor_to_end();
-            app.forms.host_mut().update_hint();
+            ctx.forms.host_mut().sync_cursor_to_end();
+            ctx.forms.host_mut().update_hint();
         }
         KeyCode::BackTab | KeyCode::Up => {
-            if !app.forms.host_mut().expanded {
+            if !ctx.forms.host_mut().expanded {
                 // Collapsed: cycle within required fields only
-                app.forms.host_mut().focused_field = match app.forms.host_mut().focused_field {
+                ctx.forms.host_mut().focused_field = match ctx.forms.host_mut().focused_field {
                     FormField::Alias => FormField::Hostname,
                     // Any other field (including Hostname): go to Alias
                     _ => FormField::Alias,
                 };
             } else {
-                app.forms.host_mut().focus_prev_visible();
+                ctx.forms.host_mut().focus_prev_visible();
             }
-            app.forms.host_mut().sync_cursor_to_end();
-            app.forms.host_mut().update_hint();
+            ctx.forms.host_mut().sync_cursor_to_end();
+            ctx.forms.host_mut().update_hint();
         }
-        KeyCode::Left if app.forms.host_mut().cursor_pos > 0 => {
-            app.forms.host_mut().cursor_pos -= 1;
+        KeyCode::Left if ctx.forms.host_mut().cursor_pos > 0 => {
+            ctx.forms.host_mut().cursor_pos -= 1;
         }
         KeyCode::Right => {
-            let len = app.forms.host_mut().focused_value().chars().count();
-            if app.forms.host_mut().cursor_pos < len {
-                app.forms.host_mut().cursor_pos += 1;
+            let len = ctx.forms.host_mut().focused_value().chars().count();
+            if ctx.forms.host_mut().cursor_pos < len {
+                ctx.forms.host_mut().cursor_pos += 1;
             }
         }
         KeyCode::Home => {
-            app.forms.host_mut().cursor_pos = 0;
+            ctx.forms.host_mut().cursor_pos = 0;
         }
         KeyCode::End => {
-            app.forms.host_mut().sync_cursor_to_end();
+            ctx.forms.host_mut().sync_cursor_to_end();
         }
         KeyCode::Enter => {
             // INVARIANT: Enter ALWAYS submits the form, regardless of focused
             // field. Pickers are reached via Space (see Char(' ') arm below).
             // Smart-paste detection runs before submit on the Alias field so
             // pasted user@host:port targets get split into the right fields.
-            if app.forms.host_mut().focused_field == FormField::Alias {
-                maybe_smart_paste(app);
+            if ctx.forms.host_mut().focused_field == FormField::Alias {
+                smart_paste(ctx.forms, ctx.status);
             }
-            submit_form(app);
+            ctx.defer(submit_form);
         }
         // SPACE GUARD MUST PRECEDE the generic Char(c) arm.
         // Rust matches arms top-to-bottom; reordering this arm below the
@@ -137,18 +174,18 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
         // inserts a literal space — Space on empty VaultSsh with no
         // candidates degrades cleanly to "type the role yourself".
         KeyCode::Char(' ')
-            if app.forms.host_mut().focused_field.is_picker()
-                && app.forms.host_mut().focused_value().is_empty() =>
+            if ctx.forms.host_mut().focused_field.is_picker()
+                && ctx.forms.host_mut().focused_value().is_empty() =>
         {
-            open_picker_for_focused_field(app);
+            ctx.defer(open_picker_for_focused_field);
         }
         KeyCode::Char(c) => {
-            app.forms.host_mut().insert_char(c);
-            app.forms.host_mut().update_hint();
+            ctx.forms.host_mut().insert_char(c);
+            ctx.forms.host_mut().update_hint();
         }
         KeyCode::Backspace => {
-            app.forms.host_mut().delete_char_before_cursor();
-            app.forms.host_mut().update_hint();
+            ctx.forms.host_mut().delete_char_before_cursor();
+            ctx.forms.host_mut().update_hint();
         }
         _ => {}
     }
@@ -157,8 +194,10 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
 /// If the alias field contains something like user@host:port, auto-parse and fill fields.
 /// Also detects bare domains and IP addresses (e.g. "db.example.com", "192.168.1.1")
 /// and moves them to the hostname field with a short alias derived from the first segment.
-fn maybe_smart_paste(app: &mut App) {
-    let alias_value = app.forms.host().alias.clone();
+/// `notify` matches `App::notify` exactly, so the toast wording and class are
+/// unchanged from the pre-slice handler.
+fn smart_paste(forms: &mut FormState, status: &mut StatusCenter) {
+    let alias_value = forms.host().alias.clone();
     if quick_add::looks_like_target(&alias_value) {
         if let Ok(parsed) = quick_add::parse_target(&alias_value) {
             let clean_alias = parsed
@@ -167,14 +206,14 @@ fn maybe_smart_paste(app: &mut App) {
                 .next()
                 .unwrap_or(&parsed.hostname)
                 .to_string();
-            app.forms.host_mut().apply_smart_paste(parsed, clean_alias);
-            app.notify(crate::messages::SMART_PARSED);
+            forms.host_mut().apply_smart_paste(parsed, clean_alias);
+            status.notify(crate::messages::SMART_PARSED);
             log::debug!(
                 "host_form: smart-paste parsed alias={} host={} user={} port={}",
-                app.forms.host().alias,
-                app.forms.host().hostname,
-                app.forms.host().user,
-                app.forms.host().port
+                forms.host().alias,
+                forms.host().hostname,
+                forms.host().user,
+                forms.host().port
             );
         }
         return;
@@ -193,12 +232,12 @@ fn maybe_smart_paste(app: &mut App) {
         && trimmed
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
-        && app.forms.host_mut().hostname.is_empty()
+        && forms.host_mut().hostname.is_empty()
     {
         // Copy the value to the Host field as a suggestion. The Name field
         // stays unchanged so the user keeps full control over the alias.
-        app.forms.host_mut().hostname = trimmed.to_string();
-        app.notify(crate::messages::LOOKS_LIKE_ADDRESS);
+        forms.host_mut().hostname = trimmed.to_string();
+        status.notify(crate::messages::LOOKS_LIKE_ADDRESS);
         log::debug!("host_form: auto-suggest hostname={trimmed}");
     }
 }

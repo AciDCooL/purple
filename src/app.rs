@@ -8,7 +8,7 @@ use crate::ssh_config::model::SshConfigFile;
 /// hostnames and aliases). Falls back to a char-based scan when either
 /// string contains non-ASCII bytes to avoid false matches across UTF-8
 /// character boundaries.
-pub(super) fn contains_ci(haystack: &str, needle: &str) -> bool {
+pub(crate) fn contains_ci(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
         return true;
     }
@@ -89,6 +89,7 @@ pub use ping::{
 pub use provider_state::{
     LabelMigrationField, PendingLabelMigration, ProviderRow, ProviderState, SyncRecord,
 };
+pub(crate) use reload_state::config_changed;
 pub use reload_state::{ConflictState, ReloadState};
 pub use screen::{ContainerLogsSearch, Screen, StackMember, TopPage, WhatsNewState};
 pub use search::SearchState;

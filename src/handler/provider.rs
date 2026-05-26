@@ -4,7 +4,8 @@ use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::app::{App, Screen};
+use super::ctx::{Effectful, Effects, Nav, Notify};
+use crate::app::{App, FormState, ProviderState, Screen, StatusCenter};
 use crate::event::AppEvent;
 use crate::providers;
 use crate::providers::ProviderKind;
@@ -17,6 +18,88 @@ mod region;
 #[cfg(test)]
 pub(super) use region::region_picker_rows;
 pub(crate) use region::zone_data_for;
+
+/// The slice of App the provider-form key handler touches while editing: the
+/// provider form fields (`providers`), the form-discard flag (`forms`) and the
+/// status center (`status`, for the AWS token-format warning). Submitting,
+/// closing and opening a picker each reach far beyond a form slice (submit
+/// writes the provider config, rewrites legacy SSH-config markers, spawns a
+/// background sync and updates the footer summary; closing flushes a pending
+/// vault write and clears the form mtime; the key picker rescans `~/.ssh`), so
+/// those whole-App operations are deferred as effects and applied to the full
+/// `App` after the slice borrow ends. The region picker only touches `ui`, so
+/// it is deferred together with the key picker in the same arm to keep the
+/// `App::open_*_picker` call shape identical to the pre-slice handler. The
+/// slice never reaches into hosts, vault or any other domain directly.
+struct ProviderFormCtx<'a> {
+    providers: &'a mut ProviderState,
+    forms: &'a mut FormState,
+    status: &'a mut StatusCenter,
+    effects: Effects,
+}
+
+impl Notify for ProviderFormCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
+
+impl Effectful for ProviderFormCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
+
+impl ProviderFormCtx<'_> {
+    /// Show a non-blocking warning when leaving the Token field with an
+    /// invalid AWS format. Slice-local: reads the form and writes a toast.
+    fn warn_aws_token_format(&mut self, provider_name: &str) {
+        if provider_name.parse::<ProviderKind>().ok() != Some(ProviderKind::Aws) {
+            return;
+        }
+        if self.providers.form_mut().focused_field != crate::app::ProviderFormField::Token {
+            return;
+        }
+        let token = self.providers.form_mut().token.trim();
+        if token.is_empty() {
+            return;
+        }
+        if !token.contains(':') {
+            self.notify_warning(crate::messages::TOKEN_FORMAT_AWS);
+        }
+    }
+}
+
+/// The slice of App the label-migration key handler touches while editing the
+/// two label fields: the pending-migration scratch state (`providers`), the
+/// status center (`status`, for label-validation errors), and the screen
+/// (`screen`, so Esc can return to the providers list). The Enter action moves
+/// on to the provider form via `App::open_provider_form`, which captures the
+/// provider-config mtime and is therefore deferred as the terminal effect.
+struct LabelMigrationCtx<'a> {
+    providers: &'a mut ProviderState,
+    status: &'a mut StatusCenter,
+    screen: &'a mut Screen,
+    effects: Effects,
+}
+
+impl Nav for LabelMigrationCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Notify for LabelMigrationCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
+
+impl Effectful for LabelMigrationCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
 
 pub(super) fn handle_provider_list_key(
     app: &mut App,
@@ -348,17 +431,33 @@ pub fn handle_label_migration_key(
     key: KeyEvent,
     _events_tx: &mpsc::Sender<AppEvent>,
 ) {
+    // Resolve the provider name from the screen in the wrapper while it still
+    // holds `&App`, then narrow to the label-migration slice.
     let provider = match &app.screen {
         Screen::ProviderLabelMigration { provider } => provider.clone(),
         _ => return,
     };
+    let effects = {
+        let mut ctx = LabelMigrationCtx {
+            providers: &mut app.providers,
+            status: &mut app.status_center,
+            screen: &mut app.screen,
+            effects: Effects::default(),
+        };
+        label_migration_key(&mut ctx, key, &provider);
+        ctx.effects
+    };
+    effects.apply(app);
+}
+
+fn label_migration_key(ctx: &mut LabelMigrationCtx, key: KeyEvent, provider: &str) {
     match key.code {
         KeyCode::Esc => {
-            app.providers.cancel_label_migration();
-            app.set_screen(Screen::Providers);
+            ctx.providers.cancel_label_migration();
+            ctx.set_screen(Screen::Providers);
         }
         KeyCode::Tab | KeyCode::Down => {
-            if let Some(p) = app.providers.pending_label_migration_mut() {
+            if let Some(p) = ctx.providers.pending_label_migration_mut() {
                 p.focused = match p.focused {
                     crate::app::LabelMigrationField::Existing => {
                         crate::app::LabelMigrationField::New
@@ -371,7 +470,7 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::BackTab | KeyCode::Up => {
-            if let Some(p) = app.providers.pending_label_migration_mut() {
+            if let Some(p) = ctx.providers.pending_label_migration_mut() {
                 p.focused = match p.focused {
                     crate::app::LabelMigrationField::Existing => {
                         crate::app::LabelMigrationField::New
@@ -384,14 +483,14 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::Left => {
-            if let Some(p) = app.providers.pending_label_migration_mut() {
+            if let Some(p) = ctx.providers.pending_label_migration_mut() {
                 if p.cursor_pos > 0 {
                     p.cursor_pos -= 1;
                 }
             }
         }
         KeyCode::Right => {
-            if let Some(p) = app.providers.pending_label_migration_mut() {
+            if let Some(p) = ctx.providers.pending_label_migration_mut() {
                 let max = p.focused_value().chars().count();
                 if p.cursor_pos < max {
                     p.cursor_pos += 1;
@@ -399,17 +498,17 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::Home => {
-            if let Some(p) = app.providers.pending_label_migration_mut() {
+            if let Some(p) = ctx.providers.pending_label_migration_mut() {
                 p.cursor_pos = 0;
             }
         }
         KeyCode::End => {
-            if let Some(p) = app.providers.pending_label_migration_mut() {
+            if let Some(p) = ctx.providers.pending_label_migration_mut() {
                 p.cursor_pos = p.focused_value().chars().count();
             }
         }
         KeyCode::Backspace => {
-            if let Some(p) = app.providers.pending_label_migration_mut() {
+            if let Some(p) = ctx.providers.pending_label_migration_mut() {
                 if p.cursor_pos > 0 {
                     let cursor_pos = p.cursor_pos;
                     let target = p.focused_value_mut();
@@ -421,7 +520,7 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::Delete => {
-            if let Some(p) = app.providers.pending_label_migration_mut() {
+            if let Some(p) = ctx.providers.pending_label_migration_mut() {
                 let len = p.focused_value().chars().count();
                 if p.cursor_pos < len {
                     let cursor_pos = p.cursor_pos;
@@ -437,7 +536,7 @@ pub fn handle_label_migration_key(
             if !allowed {
                 return;
             }
-            if let Some(p) = app.providers.pending_label_migration_mut() {
+            if let Some(p) = ctx.providers.pending_label_migration_mut() {
                 let cursor_pos = p.cursor_pos;
                 let target = p.focused_value_mut();
                 if target.len() < 32 {
@@ -449,29 +548,33 @@ pub fn handle_label_migration_key(
             }
         }
         KeyCode::Enter => {
-            let (existing, new) = match app.providers.pending_label_migration() {
+            let (existing, new) = match ctx.providers.pending_label_migration() {
                 Some(p) => (p.existing_label.clone(), p.new_label.clone()),
                 None => return,
             };
             if let Err(e) = crate::providers::config::validate_label(&existing) {
-                app.notify_error(crate::messages::label_invalid(&e));
+                ctx.notify_error(crate::messages::label_invalid(&e));
                 return;
             }
             if let Err(e) = crate::providers::config::validate_label(&new) {
-                app.notify_error(crate::messages::label_invalid(&e));
+                ctx.notify_error(crate::messages::label_invalid(&e));
                 return;
             }
             if existing == new {
-                app.notify_error(crate::messages::LABEL_MUST_DIFFER.to_string());
+                ctx.notify_error(crate::messages::LABEL_MUST_DIFFER.to_string());
                 return;
             }
             // Move on to step 2: the standard provider form, pre-keyed to
             // the new labeled id. submit_provider_form will pick up
             // pending_label_migration to also rewrite the existing section.
-            app.open_provider_form(crate::providers::config::ProviderConfigId::labeled(
-                provider.clone(),
-                new,
-            ));
+            // open_provider_form captures the provider-config mtime, so it
+            // is deferred as the terminal effect.
+            let provider = provider.to_string();
+            ctx.defer(move |app| {
+                app.open_provider_form(crate::providers::config::ProviderConfigId::labeled(
+                    provider, new,
+                ));
+            });
         }
         _ => {}
     }
@@ -519,29 +622,14 @@ fn open_add_config_flow(app: &mut App, provider_name: &str) {
     }
 }
 
-/// Show a non-blocking warning when leaving the Token field with an invalid format.
-fn warn_aws_token_format(app: &mut App, provider_name: &str) {
-    if provider_name.parse::<ProviderKind>().ok() != Some(ProviderKind::Aws) {
-        return;
-    }
-    if app.providers.form_mut().focused_field != crate::app::ProviderFormField::Token {
-        return;
-    }
-    let token = app.providers.form_mut().token.trim();
-    if token.is_empty() {
-        return;
-    }
-    if !token.contains(':') {
-        app.notify_warning(crate::messages::TOKEN_FORMAT_AWS);
-    }
-}
-
 pub(super) fn handle_provider_form_key(
     app: &mut App,
     key: KeyEvent,
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
-    // Dispatch to key picker if open
+    // Picker dispatch stays in the wrapper: each picker handler takes the full
+    // `&mut App` (the key picker rescans `~/.ssh`, the region picker reads the
+    // screen), so we delegate before narrowing to the form slice.
     if app.ui.key_picker().open {
         super::picker::handle_key_picker_shared(app, key, true);
         return;
@@ -557,10 +645,30 @@ pub(super) fn handle_provider_form_key(
         Screen::ProviderForm { id } => id.provider.clone(),
         _ => return,
     };
+
+    let effects = {
+        let mut ctx = ProviderFormCtx {
+            providers: &mut app.providers,
+            forms: &mut app.forms,
+            status: &mut app.status_center,
+            effects: Effects::default(),
+        };
+        provider_form_key(&mut ctx, key, &provider_name, events_tx);
+        ctx.effects
+    };
+    effects.apply(app);
+}
+
+fn provider_form_key(
+    ctx: &mut ProviderFormCtx,
+    key: KeyEvent,
+    provider_name: &str,
+    events_tx: &mpsc::Sender<AppEvent>,
+) {
     // Progressive disclosure: hide `VaultAddr` when no role is set so Tab
     // navigation skips the hidden field. `visible_fields` is a filtered
     // snapshot of `fields_for(provider)` taken once per key press.
-    let visible = app.providers.form_mut().visible_fields(&provider_name);
+    let visible = ctx.providers.form_mut().visible_fields(provider_name);
     let fields: &[crate::app::ProviderFormField] = &visible;
     // Field-kind predicates live on `ProviderFormField` so the rule is
     // enforced in one place. Note: `is_picker` here matches the full set
@@ -570,17 +678,17 @@ pub(super) fn handle_provider_form_key(
     // expects to open the picker. `is_picker` on the type is the source of
     // truth.
     let is_toggle = |f: crate::app::ProviderFormField| f.is_toggle();
-    let is_picker = |f: crate::app::ProviderFormField| f.is_picker(&provider_name);
+    let is_picker = |f: crate::app::ProviderFormField| f.is_picker(provider_name);
 
     // Handle discard confirmation dialog via the shared confirm router.
-    if app.forms.is_discard_pending() {
+    if ctx.forms.is_discard_pending() {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                app.forms.dismiss_discard_confirm();
-                app.close_provider_form();
+                ctx.forms.dismiss_discard_confirm();
+                ctx.defer(App::close_provider_form);
             }
             super::ConfirmAction::No => {
-                app.forms.dismiss_discard_confirm();
+                ctx.forms.dismiss_discard_confirm();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -589,15 +697,15 @@ pub(super) fn handle_provider_form_key(
 
     match key.code {
         KeyCode::Esc => {
-            if app.provider_form_is_dirty() {
-                app.forms.request_discard_confirm();
+            if ctx.providers.form_is_dirty() {
+                ctx.forms.request_discard_confirm();
             } else {
-                app.close_provider_form();
+                ctx.defer(App::close_provider_form);
             }
         }
         KeyCode::Tab | KeyCode::Down => {
-            warn_aws_token_format(app, &provider_name);
-            if !app.providers.form_mut().expanded {
+            ctx.warn_aws_token_format(provider_name);
+            if !ctx.providers.form_mut().expanded {
                 // Use visible_fields so the dynamic Label (issue #51) joins the
                 // navigation cycle alongside provider-static fields. Required
                 // fields are always first in the per-provider arrays, and the
@@ -607,129 +715,137 @@ pub(super) fn handle_provider_form_key(
                 let req_count = all
                     .iter()
                     .filter(|f| {
-                        crate::app::ProviderFormField::is_required_field(**f, &provider_name)
+                        crate::app::ProviderFormField::is_required_field(**f, provider_name)
                     })
                     .count();
                 let required = &all[..req_count];
                 if required.is_empty() {
                     // Fallback: no required fields, use full field list
-                    app.providers.form_mut().focused_field =
-                        app.providers.form_mut().focused_field.next(fields);
+                    ctx.providers.form_mut().focused_field =
+                        ctx.providers.form_mut().focused_field.next(fields);
                 } else {
                     let pos = required
                         .iter()
-                        .position(|f| *f == app.providers.form_mut().focused_field);
+                        .position(|f| *f == ctx.providers.form_mut().focused_field);
                     if let Some(idx) = pos {
                         if idx + 1 < required.len() {
-                            app.providers.form_mut().focused_field = required[idx + 1];
+                            ctx.providers.form_mut().focused_field = required[idx + 1];
                         } else if req_count < all.len() {
                             // Last required field: expand and focus first optional
-                            app.providers.form_mut().expanded = true;
-                            app.providers.form_mut().focused_field = all[req_count];
+                            ctx.providers.form_mut().expanded = true;
+                            ctx.providers.form_mut().focused_field = all[req_count];
                         } else {
                             // No optional fields, wrap
-                            app.providers.form_mut().focused_field = required[0];
+                            ctx.providers.form_mut().focused_field = required[0];
                         }
                     } else {
-                        app.providers.form_mut().focused_field =
-                            app.providers.form_mut().focused_field.next(fields);
+                        ctx.providers.form_mut().focused_field =
+                            ctx.providers.form_mut().focused_field.next(fields);
                     }
                 }
             } else {
-                app.providers.form_mut().focused_field =
-                    app.providers.form_mut().focused_field.next(fields);
+                ctx.providers.form_mut().focused_field =
+                    ctx.providers.form_mut().focused_field.next(fields);
             }
-            app.providers.form_mut().sync_cursor_to_end();
+            ctx.providers.form_mut().sync_cursor_to_end();
         }
         KeyCode::BackTab | KeyCode::Up => {
-            warn_aws_token_format(app, &provider_name);
-            if !app.providers.form_mut().expanded {
+            ctx.warn_aws_token_format(provider_name);
+            if !ctx.providers.form_mut().expanded {
                 let all = &visible;
                 let req_count = all
                     .iter()
                     .filter(|f| {
-                        crate::app::ProviderFormField::is_required_field(**f, &provider_name)
+                        crate::app::ProviderFormField::is_required_field(**f, provider_name)
                     })
                     .count();
                 let required = &all[..req_count];
                 if required.is_empty() {
                     // Fallback: no required fields, use full field list
-                    app.providers.form_mut().focused_field =
-                        app.providers.form_mut().focused_field.prev(fields);
+                    ctx.providers.form_mut().focused_field =
+                        ctx.providers.form_mut().focused_field.prev(fields);
                 } else {
                     let pos = required
                         .iter()
-                        .position(|f| *f == app.providers.form_mut().focused_field);
+                        .position(|f| *f == ctx.providers.form_mut().focused_field);
                     if let Some(idx) = pos {
                         let prev_idx = if idx > 0 { idx - 1 } else { required.len() - 1 };
-                        app.providers.form_mut().focused_field = required[prev_idx];
+                        ctx.providers.form_mut().focused_field = required[prev_idx];
                     } else {
                         // Focus is on a non-required field while collapsed; go to last required
-                        app.providers.form_mut().focused_field = required[required.len() - 1];
+                        ctx.providers.form_mut().focused_field = required[required.len() - 1];
                     }
                 }
             } else {
-                app.providers.form_mut().focused_field =
-                    app.providers.form_mut().focused_field.prev(fields);
+                ctx.providers.form_mut().focused_field =
+                    ctx.providers.form_mut().focused_field.prev(fields);
             }
-            app.providers.form_mut().sync_cursor_to_end();
+            ctx.providers.form_mut().sync_cursor_to_end();
         }
-        KeyCode::Left if app.providers.form_mut().cursor_pos > 0 => {
-            app.providers.form_mut().cursor_pos -= 1;
+        KeyCode::Left if ctx.providers.form_mut().cursor_pos > 0 => {
+            ctx.providers.form_mut().cursor_pos -= 1;
         }
         KeyCode::Right => {
-            let len = app.providers.form_mut().focused_value().chars().count();
-            if app.providers.form_mut().cursor_pos < len {
-                app.providers.form_mut().cursor_pos += 1;
+            let len = ctx.providers.form_mut().focused_value().chars().count();
+            if ctx.providers.form_mut().cursor_pos < len {
+                ctx.providers.form_mut().cursor_pos += 1;
             }
         }
         KeyCode::Home => {
-            app.providers.form_mut().cursor_pos = 0;
+            ctx.providers.form_mut().cursor_pos = 0;
         }
         KeyCode::End => {
-            app.providers.form_mut().sync_cursor_to_end();
+            ctx.providers.form_mut().sync_cursor_to_end();
         }
         KeyCode::Enter => {
             // INVARIANT: Enter ALWAYS submits the form, regardless of focused
             // field. Pickers/toggles are reached via Space (see arms below).
-            submit_provider_form(app, events_tx);
+            // Submit writes the provider config, rewrites legacy SSH-config
+            // markers, spawns a background sync and updates the footer summary,
+            // so it runs on the full `App` as the deferred terminal action.
+            let tx = events_tx.clone();
+            ctx.defer(move |app| submit_provider_form(app, &tx));
         }
         // SPACE GUARDS MUST PRECEDE the generic Char(c) arm.
         // Order: toggle first, picker second (no overlap, but explicit
         // ordering protects against future ProviderFormField additions).
         KeyCode::Char(' ')
-            if app.providers.form_mut().focused_field
+            if ctx.providers.form_mut().focused_field
                 == crate::app::ProviderFormField::VerifyTls =>
         {
-            app.providers.form_mut().verify_tls = !app.providers.form_mut().verify_tls;
+            ctx.providers.form_mut().verify_tls = !ctx.providers.form_mut().verify_tls;
         }
         KeyCode::Char(' ')
-            if app.providers.form_mut().focused_field
+            if ctx.providers.form_mut().focused_field
                 == crate::app::ProviderFormField::AutoSync =>
         {
-            app.providers.form_mut().auto_sync = !app.providers.form_mut().auto_sync;
+            ctx.providers.form_mut().auto_sync = !ctx.providers.form_mut().auto_sync;
         }
         // Empty-field gate: same rationale as host_form — once the user
         // has typed anything, Space inserts a literal space so custom
         // identity paths (e.g. `~/My Keys/id_rsa`) and free-form region
         // lists work. On an empty picker field, Space opens the picker.
+        // Both picker opens reach beyond the slice (the key picker rescans
+        // `~/.ssh`), so the open is deferred to the full `App`.
         KeyCode::Char(' ')
-            if is_picker(app.providers.form_mut().focused_field)
-                && app.providers.form_mut().focused_value().is_empty() =>
+            if is_picker(ctx.providers.form_mut().focused_field)
+                && ctx.providers.form_mut().focused_value().is_empty() =>
         {
-            let f = app.providers.form_mut().focused_field;
-            if f == crate::app::ProviderFormField::IdentityFile {
-                app.open_key_picker();
-            } else if f == crate::app::ProviderFormField::Regions {
-                app.open_region_picker();
-            }
+            let f = ctx.providers.form_mut().focused_field;
+            ctx.defer(move |app| {
+                if f == crate::app::ProviderFormField::IdentityFile {
+                    app.open_key_picker();
+                } else if f == crate::app::ProviderFormField::Regions {
+                    app.open_region_picker();
+                }
+            });
         }
         KeyCode::Char(c) => {
             // Toggle fields (VerifyTls/AutoSync) have no text value to mutate;
             // every other field, including picker fields, accepts free-text
             // typing so users can supply custom paths or region values not
             // surfaced by the picker. Matches the host form's Char arm.
-            let f = app.providers.form_mut().focused_field;
+            let f = ctx.providers.form_mut().focused_field;
             if is_toggle(f) {
                 // Nothing to do.
             } else if f == crate::app::ProviderFormField::Label {
@@ -738,17 +854,17 @@ pub(super) fn handle_provider_form_key(
                 // validation. Reject silently like the migration screen
                 // (handler/provider.rs:502) does for the same constraints.
                 let allowed = c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-';
-                if allowed && app.providers.form_mut().label.len() < 32 {
-                    app.providers.form_mut().insert_char(c);
+                if allowed && ctx.providers.form_mut().label.len() < 32 {
+                    ctx.providers.form_mut().insert_char(c);
                 }
             } else {
-                app.providers.form_mut().insert_char(c);
+                ctx.providers.form_mut().insert_char(c);
             }
         }
         KeyCode::Backspace => {
-            let f = app.providers.form_mut().focused_field;
+            let f = ctx.providers.form_mut().focused_field;
             if !is_toggle(f) {
-                app.providers.form_mut().delete_char_before_cursor();
+                ctx.providers.form_mut().delete_char_before_cursor();
             }
         }
         _ => {}

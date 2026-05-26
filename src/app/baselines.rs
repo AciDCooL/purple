@@ -4,7 +4,9 @@
 
 use crate::app::App;
 use crate::app::Screen;
-use crate::app::reload_state::{get_mtime, snapshot_include_dir_mtimes, snapshot_include_mtimes};
+use crate::app::reload_state::{
+    config_changed, get_mtime, snapshot_include_dir_mtimes, snapshot_include_mtimes,
+};
 use crate::app::{HostForm, SnippetForm, TunnelForm};
 use crate::snippet::Snippet;
 use crate::ssh_config::model::PatternEntry;
@@ -64,10 +66,7 @@ pub struct ProviderFormBaseline {
 impl App {
     /// Clear form mtime state (call on form cancel or successful submit).
     pub fn clear_form_mtime(&mut self) {
-        self.conflict.form_mtime = None;
-        self.conflict.form_include_mtimes.clear();
-        self.conflict.form_include_dir_mtimes.clear();
-        self.conflict.provider_form_mtime = None;
+        self.conflict.clear_form_mtimes();
     }
 
     /// Capture config and Include file mtimes when opening a host form.
@@ -102,21 +101,7 @@ impl App {
 
     /// Check if the host form has been modified since baseline was captured.
     pub fn host_form_is_dirty(&self) -> bool {
-        match &self.forms.host_baseline {
-            Some(b) => {
-                self.forms.host.alias != b.alias
-                    || self.forms.host.hostname != b.hostname
-                    || self.forms.host.user != b.user
-                    || self.forms.host.port != b.port
-                    || self.forms.host.identity_file != b.identity_file
-                    || self.forms.host.proxy_jump != b.proxy_jump
-                    || self.forms.host.askpass != b.askpass
-                    || self.forms.host.vault_ssh != b.vault_ssh
-                    || self.forms.host.vault_addr != b.vault_addr
-                    || self.forms.host.tags != b.tags
-            }
-            None => false,
-        }
+        self.forms.host_form_is_dirty()
     }
 
     /// Tear down host form state and return to the host list. Flush runs
@@ -413,16 +398,7 @@ impl App {
 
     /// Check if the tunnel form has been modified since baseline was captured.
     pub fn tunnel_form_is_dirty(&self) -> bool {
-        match &self.tunnels.form_baseline {
-            Some(b) => {
-                self.tunnels.form.tunnel_type != b.tunnel_type
-                    || self.tunnels.form.bind_port != b.bind_port
-                    || self.tunnels.form.remote_host != b.remote_host
-                    || self.tunnels.form.remote_port != b.remote_port
-                    || self.tunnels.form.bind_address != b.bind_address
-            }
-            None => false,
-        }
+        self.tunnels.form_is_dirty()
     }
 
     /// Capture a baseline snapshot of the snippet form for dirty-check on Esc.
@@ -436,14 +412,7 @@ impl App {
 
     /// Check if the snippet form has been modified since baseline was captured.
     pub fn snippet_form_is_dirty(&self) -> bool {
-        match &self.snippets.form_baseline {
-            Some(b) => {
-                self.snippets.form.name != b.name
-                    || self.snippets.form.command != b.command
-                    || self.snippets.form.description != b.description
-            }
-            None => false,
-        }
+        self.snippets.form_is_dirty()
     }
 
     /// Capture a baseline snapshot of the provider form for dirty-check on Esc.
@@ -467,45 +436,12 @@ impl App {
 
     /// Check if the provider form has been modified since baseline was captured.
     pub fn provider_form_is_dirty(&self) -> bool {
-        match &self.providers.form_baseline {
-            Some(b) => {
-                self.providers.form.url != b.url
-                    || self.providers.form.token != b.token
-                    || self.providers.form.profile != b.profile
-                    || self.providers.form.project != b.project
-                    || self.providers.form.compartment != b.compartment
-                    || self.providers.form.regions != b.regions
-                    || self.providers.form.alias_prefix != b.alias_prefix
-                    || self.providers.form.user != b.user
-                    || self.providers.form.identity_file != b.identity_file
-                    || self.providers.form.verify_tls != b.verify_tls
-                    || self.providers.form.auto_sync != b.auto_sync
-                    || self.providers.form.vault_role != b.vault_role
-                    || self.providers.form.vault_addr != b.vault_addr
-            }
-            None => false,
-        }
+        self.providers.form_is_dirty()
     }
 
     /// Check if config or any Include file/directory has changed since the form was opened.
     pub fn config_changed_since_form_open(&self) -> bool {
-        match self.conflict.form_mtime {
-            Some(open_mtime) => {
-                if get_mtime(&self.reload.config_path) != Some(open_mtime) {
-                    return true;
-                }
-                self.conflict
-                    .form_include_mtimes
-                    .iter()
-                    .any(|(path, old_mtime)| get_mtime(path) != *old_mtime)
-                    || self
-                        .conflict
-                        .form_include_dir_mtimes
-                        .iter()
-                        .any(|(path, old_mtime)| get_mtime(path) != *old_mtime)
-            }
-            None => false,
-        }
+        config_changed(&self.conflict, &self.reload.config_path)
     }
 
     /// Check if ~/.purple/providers has changed since the provider form was opened.

@@ -643,7 +643,7 @@ fn handle_pending_container_exec(
     };
 
     // Defense-in-depth: container_id is currently gated by
-    // `selected_running_row_with_runtime` (which calls validate_container_id)
+    // `validate_running_row` (which calls validate_container_id)
     // before pending_container_exec is populated. This second validation
     // covers any future entry point (MCP tool call, paste-via-jump, etc.)
     // that might populate the request without going through that gate.
