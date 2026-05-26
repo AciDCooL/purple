@@ -1,3 +1,10 @@
+//! Key handler for the host list, the app's primary screen.
+//!
+//! Takes `&mut App`, not a per-domain slice: it is a router that dispatches
+//! across every domain (search, tags, ping, tunnels, containers, vault,
+//! providers) and switches top-pages. The single-domain handlers use the slice
+//! pattern in `ctx.rs`; routers keep the full borrow by design.
+
 use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

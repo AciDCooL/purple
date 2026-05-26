@@ -12,6 +12,13 @@
 //! slice to carry a status center or an effect queue it never uses. Each helper
 //! mirrors the equivalent `App` method exactly so a migrated handler keeps
 //! identical behaviour.
+//!
+//! Three handlers stay on `&mut App` by design rather than a slice, because
+//! they are routers, not single-domain handlers: `host_list` dispatches across
+//! every domain and switches top-pages, `jump` forwards synthetic key events
+//! into other handlers, and `tunnels_overview` switches top-pages and delegates
+//! tunnel mutations to the shared tunnel-action core. A slice that views every
+//! domain is just `&mut App` with friction, so these keep the full borrow.
 
 use crate::app::{App, MessageClass, Screen, StatusCenter, StatusMessage};
 

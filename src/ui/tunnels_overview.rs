@@ -17,7 +17,8 @@ use unicode_width::UnicodeWidthStr;
 use super::design;
 use super::host_list;
 use super::theme;
-use crate::app::{App, TunnelSortMode};
+use crate::app::{App, HostState, SearchState, TunnelSortMode, TunnelState};
+use crate::history::ConnectionHistory;
 use crate::tunnel::{TunnelRule, TunnelType, format_uptime};
 
 /// Top-bar height (1 inner row + 2 border rows).
@@ -73,18 +74,19 @@ struct TunnelRow {
 /// applying the active search filter and `TunnelSortMode`. The handler
 /// uses this to resolve cursor-relative actions (edit/delete/toggle) so
 /// row N under the cursor always matches row N on screen.
-pub(crate) fn visible_pairs(app: &App) -> Vec<(String, TunnelRule)> {
-    let query = app
-        .search
+pub(crate) fn visible_pairs(
+    search: &SearchState,
+    hosts: &HostState,
+    tunnels: &TunnelState,
+    history: &ConnectionHistory,
+) -> Vec<(String, TunnelRule)> {
+    let query = search
         .query()
         .map(|q| q.to_lowercase())
         .filter(|q| !q.is_empty());
     let mut pairs: Vec<(String, TunnelRule)> = Vec::new();
-    for host in app.hosts_state.list() {
-        let rules = app
-            .hosts_state
-            .ssh_config()
-            .find_tunnel_directives(&host.alias);
+    for host in hosts.list() {
+        let rules = hosts.ssh_config().find_tunnel_directives(&host.alias);
         for rule in rules {
             if let Some(ref q) = query {
                 let alias_match = host.alias.to_lowercase().contains(q);
@@ -96,7 +98,7 @@ pub(crate) fn visible_pairs(app: &App) -> Vec<(String, TunnelRule)> {
             pairs.push((host.alias.clone(), rule));
         }
     }
-    sort_pairs(&mut pairs, app);
+    sort_pairs(&mut pairs, tunnels, history);
     pairs
 }
 
@@ -104,19 +106,23 @@ pub(crate) fn visible_pairs(app: &App) -> Vec<(String, TunnelRule)> {
 /// active tunnels by `started_at` desc, then idle tunnels by host
 /// last-connected desc. AlphaHostname sorts by alias ascending. Stable
 /// sort preserves the per-host directive order within a tie.
-fn sort_pairs(pairs: &mut [(String, TunnelRule)], app: &App) {
-    match app.tunnels.sort_mode() {
+fn sort_pairs(
+    pairs: &mut [(String, TunnelRule)],
+    tunnels: &TunnelState,
+    history: &ConnectionHistory,
+) {
+    match tunnels.sort_mode() {
         TunnelSortMode::MostRecent => {
             pairs.sort_by(|a, b| {
-                let a_started = app.tunnels.active_get(&a.0).map(|t| t.started_at);
-                let b_started = app.tunnels.active_get(&b.0).map(|t| t.started_at);
+                let a_started = tunnels.active_get(&a.0).map(|t| t.started_at);
+                let b_started = tunnels.active_get(&b.0).map(|t| t.started_at);
                 match (a_started, b_started) {
                     (Some(ax), Some(bx)) => bx.cmp(&ax),
                     (Some(_), None) => std::cmp::Ordering::Less,
                     (None, Some(_)) => std::cmp::Ordering::Greater,
                     (None, None) => {
-                        let ts_a = app.history.last_connected(&a.0);
-                        let ts_b = app.history.last_connected(&b.0);
+                        let ts_a = history.last_connected(&a.0);
+                        let ts_b = history.last_connected(&b.0);
                         ts_b.cmp(&ts_a)
                             .then_with(|| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()))
                     }
@@ -132,7 +138,7 @@ fn sort_pairs(pairs: &mut [(String, TunnelRule)], app: &App) {
 /// Decorate `visible_pairs` with active-state, `started_at`, and live
 /// throughput readout for rendering.
 fn build_rows(app: &App) -> Vec<TunnelRow> {
-    visible_pairs(app)
+    visible_pairs(&app.search, &app.hosts_state, &app.tunnels, &app.history)
         .into_iter()
         .map(|(alias, rule)| {
             let runtime = app.tunnels.active_get(&alias);

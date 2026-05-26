@@ -1,3 +1,8 @@
+## 3.18.3 - 2026-05-26
+
+- change: Every screen now runs on purple's safer core.
+- change: The bulk tag editor and the Tunnels overview now work only on their own slice of purple's state, finishing the per-screen isolation from 3.18.2. Every key and screen behaves exactly as before.
+
 ## 3.18.2 - 2026-05-26
 
 - change: A tighter, safer core behind every keystroke.

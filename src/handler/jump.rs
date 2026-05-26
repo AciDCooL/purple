@@ -1,3 +1,10 @@
+//! Key handler for the jump overlay (the `:` command bar).
+//!
+//! Takes `&mut App`, not a per-domain slice: it forwards synthetic key events
+//! into other handlers (host_list, tunnels_overview, containers) and lands the
+//! cursor across domains, so it is a router. See `ctx.rs` for the slice pattern
+//! the single-domain handlers use.
+
 use crossterm::event::{KeyCode, KeyEvent};
 use std::sync::mpsc;
 
@@ -110,7 +117,12 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
             // matching row in the overview's visible_pairs and set the
             // ListState there so the cursor lands on the actual tunnel
             // the user picked.
-            let pairs = crate::ui::tunnels_overview::visible_pairs(app);
+            let pairs = crate::ui::tunnels_overview::visible_pairs(
+                &app.search,
+                &app.hosts_state,
+                &app.tunnels,
+                &app.history,
+            );
             if let Some(idx) = pairs
                 .iter()
                 .position(|(alias, rule)| alias == &t.alias && rule.bind_port == t.bind_port)

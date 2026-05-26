@@ -1255,6 +1255,158 @@ pub(crate) fn cycle_selection(state: &mut ListState, len: usize, forward: bool) 
     state.select(Some(i));
 }
 
+/// Apply pending bulk-tag actions to the selected hosts and persist the
+/// config. Slice-scoped: touches only host and form state, so the caller runs
+/// the whole-App tails (mtime refresh, reload) when the result reports changed
+/// hosts. Leaves the config untouched on a write failure so the user can retry.
+pub(crate) fn apply_bulk_tags(
+    hosts: &mut HostState,
+    forms: &mut FormState,
+) -> Result<BulkTagApplyResult, String> {
+    if forms.bulk_tag_editor.aliases.is_empty() {
+        return Err(crate::messages::BULK_TAG_NO_HOSTS_SELECTED.to_string());
+    }
+    let aliases = forms.bulk_tag_editor.aliases.clone();
+    let rows = forms.bulk_tag_editor.rows.clone();
+    let skipped_set: std::collections::HashSet<&str> = forms
+        .bulk_tag_editor
+        .skipped_included
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+
+    // Short-circuit when the user opened the editor but never changed any
+    // row. Avoids a no-op config write and a confusing toast.
+    let has_pending = rows.iter().any(|r| r.action != BulkTagAction::Leave);
+    if !has_pending {
+        return Ok(BulkTagApplyResult {
+            skipped_included: skipped_set.len(),
+            ..Default::default()
+        });
+    }
+
+    let mut changed_hosts: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    let mut skipped_included = 0usize;
+    // Captured only when a host actually changes so `u` can undo the whole
+    // bulk op in one keystroke. Collected before the write so a write failure
+    // leaves the snapshot untouched (we roll back config anyway below).
+    let mut undo_snapshot: Vec<(String, Vec<String>)> = Vec::new();
+
+    for alias in &aliases {
+        if skipped_set.contains(alias.as_str()) {
+            skipped_included += 1;
+            continue;
+        }
+        let Some(host) = hosts.list.iter().find(|h| &h.alias == alias) else {
+            continue;
+        };
+        let original_tags = host.tags.clone();
+        let mut new_tags = original_tags.clone();
+        let mut host_changed = false;
+        for row in &rows {
+            match row.action {
+                BulkTagAction::Leave => {}
+                BulkTagAction::AddToAll => {
+                    if !new_tags.iter().any(|t| t == &row.tag) {
+                        new_tags.push(row.tag.clone());
+                        added += 1;
+                        host_changed = true;
+                    }
+                }
+                BulkTagAction::RemoveFromAll => {
+                    let before = new_tags.len();
+                    new_tags.retain(|t| t != &row.tag);
+                    if new_tags.len() != before {
+                        removed += 1;
+                        host_changed = true;
+                    }
+                }
+            }
+        }
+        if host_changed {
+            let _ = hosts.ssh_config.set_host_tags(alias, &new_tags);
+            changed_hosts.insert(alias.clone());
+            undo_snapshot.push((alias.clone(), original_tags));
+        }
+    }
+
+    if changed_hosts.is_empty() {
+        return Ok(BulkTagApplyResult {
+            skipped_included,
+            ..Default::default()
+        });
+    }
+
+    // Clone only when we actually need to write, so no-op applies skip the
+    // allocation entirely.
+    let config_backup = hosts.ssh_config.clone();
+    if let Err(e) = hosts.ssh_config.write() {
+        log::error!("[purple] bulk tag apply write failed: {e}");
+        hosts.ssh_config = config_backup;
+        return Err(format!("Failed to save: {}", e));
+    }
+
+    log::debug!(
+        "bulk tag apply: {} hosts, +{} -{}, skipped {}",
+        changed_hosts.len(),
+        added,
+        removed,
+        skipped_included
+    );
+    // Store the undo snapshot so `u` can restore previous tags. Cleared by a
+    // successful undo or by the next config mutation.
+    if !undo_snapshot.is_empty() {
+        forms.bulk_tag_undo = Some(undo_snapshot);
+    }
+
+    Ok(BulkTagApplyResult {
+        changed_hosts: changed_hosts.len(),
+        added,
+        removed,
+        skipped_included,
+    })
+}
+
+/// Cycle the bulk-tag row under the cursor through its tri-state action.
+/// Slice-scoped so the handler can call it without borrowing the whole App.
+pub(crate) fn bulk_tag_cycle_current(ui: &UiSelection, forms: &mut FormState) {
+    let Some(idx) = ui.bulk_tag_editor_state.selected() else {
+        return;
+    };
+    if let Some(row) = forms.bulk_tag_editor.rows.get_mut(idx) {
+        row.action = row.action.cycle();
+    }
+}
+
+/// Append a freshly typed tag to the bulk-tag row list, marked `AddToAll`.
+/// No-op on empty input; flips the existing row to `AddToAll` on a duplicate.
+/// Slice-scoped so the handler can call it without borrowing the whole App.
+pub(crate) fn bulk_tag_commit_new_tag(ui: &mut UiSelection, forms: &mut FormState) {
+    let Some(input) = forms.bulk_tag_editor.new_tag_input.take() else {
+        return;
+    };
+    forms.bulk_tag_editor.new_tag_cursor = 0;
+    let tag = input.trim().to_string();
+    if tag.is_empty() {
+        return;
+    }
+    if let Some(existing) = forms.bulk_tag_editor.rows.iter().position(|r| r.tag == tag) {
+        forms.bulk_tag_editor.rows[existing].action = BulkTagAction::AddToAll;
+        ui.bulk_tag_editor_state.select(Some(existing));
+        return;
+    }
+    let row = BulkTagRow {
+        tag,
+        initial_count: 0,
+        action: BulkTagAction::AddToAll,
+    };
+    let insert_at = forms.bulk_tag_editor.rows.len();
+    forms.bulk_tag_editor.rows.push(row);
+    ui.bulk_tag_editor_state.select(Some(insert_at));
+}
+
 /// Jump forward by page_size items, clamping at the end (no wrap).
 pub(crate) fn page_down(state: &mut ListState, len: usize, page_size: usize) {
     if len == 0 {

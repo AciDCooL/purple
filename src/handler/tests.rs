@@ -7459,7 +7459,12 @@ fn jump_enter_on_tunnel_hit_switches_to_tunnels_page_and_selects_row() {
     assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
     // Selection landed on the matching tunnel row in the tunnels overview
     // ListState (NOT the host list).
-    let pairs = crate::ui::tunnels_overview::visible_pairs(&app);
+    let pairs = crate::ui::tunnels_overview::visible_pairs(
+        &app.search,
+        &app.hosts_state,
+        &app.tunnels,
+        &app.history,
+    );
     let expected_idx = pairs
         .iter()
         .position(|(alias, rule)| alias == "alpha" && rule.bind_port == 5432);
@@ -9383,7 +9388,12 @@ fn tunnels_overview_reposition_cursor_follows_row_to_new_index() {
     // the most-recently-connected host, jumping from index 1 to index 0.
     app.history.record("zzz");
     crate::handler::tunnels_overview::reposition_cursor_on(&mut app, "zzz", &zzz_rule);
-    let pairs = crate::ui::tunnels_overview::visible_pairs(&app);
+    let pairs = crate::ui::tunnels_overview::visible_pairs(
+        &app.search,
+        &app.hosts_state,
+        &app.tunnels,
+        &app.history,
+    );
     let zzz_idx = pairs.iter().position(|(a, _)| a == "zzz").expect("zzz row");
     assert_eq!(
         app.ui.tunnels_overview_state().selected(),

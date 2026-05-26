@@ -1,15 +1,66 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
-use crate::app::{App, BulkTagEditorState, Screen};
+use super::ctx::{Effectful, Effects, Nav, Notify};
+use crate::app::{
+    App, BulkTagEditorState, FormState, HostState, Screen, StatusCenter, UiSelection,
+};
+
+/// The slice of App the bulk tag editor touches: host state (apply writes the
+/// config), the form scratch (rows, new-tag input), the picker selection, the
+/// screen and the status center. Applying the edit reloads hosts, which
+/// touches most of App, so that tail runs as a deferred effect after the slice
+/// borrow ends.
+struct BulkTagCtx<'a> {
+    hosts: &'a mut HostState,
+    forms: &'a mut FormState,
+    ui: &'a mut UiSelection,
+    screen: &'a mut Screen,
+    status: &'a mut StatusCenter,
+    effects: Effects,
+}
+
+impl Nav for BulkTagCtx<'_> {
+    fn screen_mut(&mut self) -> &mut Screen {
+        self.screen
+    }
+}
+
+impl Notify for BulkTagCtx<'_> {
+    fn status_mut(&mut self) -> &mut StatusCenter {
+        self.status
+    }
+}
+
+impl Effectful for BulkTagCtx<'_> {
+    fn effects_mut(&mut self) -> &mut Effects {
+        &mut self.effects
+    }
+}
 
 pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
+    let effects = {
+        let mut ctx = BulkTagCtx {
+            hosts: &mut app.hosts_state,
+            forms: &mut app.forms,
+            ui: &mut app.ui,
+            screen: &mut app.screen,
+            status: &mut app.status_center,
+            effects: Effects::default(),
+        };
+        bulk_tag_key(&mut ctx, key);
+        ctx.effects
+    };
+    effects.apply(app);
+}
+
+fn bulk_tag_key(ctx: &mut BulkTagCtx, key: KeyEvent) {
     // When the "new tag" input bar is active, route character input there
     // first so users can type tag names without triggering the row-level
     // keybindings (j/k/Space/Enter). Esc cancels the input without closing
     // the editor. The new-tag-input early-return runs BEFORE the discard
     // confirm so typing-mode Esc does not trigger the dirty check.
-    if app.forms.bulk_tag_editor_mut().new_tag_input.is_some() {
-        handle_new_tag_input(app, key);
+    if ctx.forms.bulk_tag_editor().new_tag_input.is_some() {
+        handle_new_tag_input(ctx, key);
         return;
     }
 
@@ -17,15 +68,15 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
     // main handler armed the discard-confirm dialog and re-rendered with the
     // discard footer. Route the next keypress through the central confirm
     // router (uniform with form discard prompts elsewhere).
-    if app.forms.is_discard_pending() {
+    if ctx.forms.is_discard_pending() {
         match super::route_confirm_key(key) {
             super::ConfirmAction::Yes => {
-                app.forms.dismiss_discard_confirm();
-                app.set_screen(Screen::HostList);
-                *app.forms.bulk_tag_editor_mut() = BulkTagEditorState::default();
+                ctx.forms.dismiss_discard_confirm();
+                ctx.set_screen(Screen::HostList);
+                *ctx.forms.bulk_tag_editor_mut() = BulkTagEditorState::default();
             }
             super::ConfirmAction::No => {
-                app.forms.dismiss_discard_confirm();
+                ctx.forms.dismiss_discard_confirm();
             }
             super::ConfirmAction::Ignored => {}
         }
@@ -37,46 +88,63 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             // Stakes test: tag edits are non-trivial work (typing new tags,
             // deciding add/remove per row across N hosts). Warn before
             // discarding.
-            if app.forms.bulk_tag_editor_mut().is_dirty() {
-                app.forms.request_discard_confirm();
+            if ctx.forms.bulk_tag_editor_mut().is_dirty() {
+                ctx.forms.request_discard_confirm();
             } else {
-                app.set_screen(Screen::HostList);
-                *app.forms.bulk_tag_editor_mut() = BulkTagEditorState::default();
+                ctx.set_screen(Screen::HostList);
+                *ctx.forms.bulk_tag_editor_mut() = BulkTagEditorState::default();
             }
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut app.screen, Screen::HostList);
-            app.set_screen(Screen::Help {
+            let old = std::mem::replace(&mut *ctx.screen, Screen::HostList);
+            ctx.set_screen(Screen::Help {
                 return_screen: Box::new(old),
             });
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.bulk_tag_editor_next();
+            crate::app::cycle_selection(
+                ctx.ui.bulk_tag_editor_state_mut(),
+                ctx.forms.bulk_tag_editor().rows.len(),
+                true,
+            );
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.bulk_tag_editor_prev();
+            crate::app::cycle_selection(
+                ctx.ui.bulk_tag_editor_state_mut(),
+                ctx.forms.bulk_tag_editor().rows.len(),
+                false,
+            );
         }
         // SPACE GUARD MUST PRECEDE any generic Char(c) arm in this handler
         // so Space cycles the focused tag's tri-state rather than typing a
         // literal space into the new-tag input.
         KeyCode::Char(' ') => {
-            app.bulk_tag_editor_cycle_current();
+            crate::app::bulk_tag_cycle_current(ctx.ui, ctx.forms);
         }
         KeyCode::Char('+') => {
-            app.forms.bulk_tag_editor_mut().new_tag_input = Some(String::new());
-            app.forms.bulk_tag_editor_mut().new_tag_cursor = 0;
+            ctx.forms.bulk_tag_editor_mut().new_tag_input = Some(String::new());
+            ctx.forms.bulk_tag_editor_mut().new_tag_cursor = 0;
         }
-        KeyCode::Enter => match app.bulk_tag_apply() {
+        KeyCode::Enter => match crate::app::apply_bulk_tags(ctx.hosts, ctx.forms) {
             Ok(result) => {
-                app.set_screen(Screen::HostList);
-                *app.forms.bulk_tag_editor_mut() = BulkTagEditorState::default();
+                ctx.set_screen(Screen::HostList);
+                *ctx.forms.bulk_tag_editor_mut() = BulkTagEditorState::default();
+                // mtime refresh + reload touch most of App, so they run after
+                // the slice borrow ends. The success toast is deferred behind
+                // them so a reload-time conflict warning (notify_error inside
+                // reload_hosts) still shows last, exactly as the pre-slice
+                // inline order did.
+                if result.changed_hosts > 0 {
+                    ctx.update_last_modified();
+                    ctx.reload_hosts();
+                }
                 let msg = format_apply_status(&result);
                 if !msg.is_empty() {
-                    app.notify(msg);
+                    ctx.defer(move |app| app.notify(msg));
                 }
             }
             Err(err) => {
-                app.notify_error(err);
+                ctx.notify_error(err);
             }
         },
         _ => {}
@@ -96,64 +164,64 @@ pub(crate) fn format_apply_status(result: &crate::app::BulkTagApplyResult) -> St
     )
 }
 
-fn handle_new_tag_input(app: &mut App, key: KeyEvent) {
+fn handle_new_tag_input(ctx: &mut BulkTagCtx, key: KeyEvent) {
     match key.code {
         KeyCode::Enter => {
-            app.bulk_tag_editor_commit_new_tag();
+            crate::app::bulk_tag_commit_new_tag(ctx.ui, ctx.forms);
         }
         KeyCode::Esc => {
-            app.forms.bulk_tag_editor_mut().new_tag_input = None;
-            app.forms.bulk_tag_editor_mut().new_tag_cursor = 0;
+            ctx.forms.bulk_tag_editor_mut().new_tag_input = None;
+            ctx.forms.bulk_tag_editor_mut().new_tag_cursor = 0;
         }
-        KeyCode::Left if app.forms.bulk_tag_editor_mut().new_tag_cursor > 0 => {
-            app.forms.bulk_tag_editor_mut().new_tag_cursor -= 1;
+        KeyCode::Left if ctx.forms.bulk_tag_editor().new_tag_cursor > 0 => {
+            ctx.forms.bulk_tag_editor_mut().new_tag_cursor -= 1;
         }
         KeyCode::Right => {
-            let len = app
+            let len = ctx
                 .forms
                 .bulk_tag_editor()
                 .new_tag_input
                 .as_ref()
                 .map(|s| s.chars().count());
             if let Some(len) = len {
-                if app.forms.bulk_tag_editor().new_tag_cursor < len {
-                    app.forms.bulk_tag_editor_mut().new_tag_cursor += 1;
+                if ctx.forms.bulk_tag_editor().new_tag_cursor < len {
+                    ctx.forms.bulk_tag_editor_mut().new_tag_cursor += 1;
                 }
             }
         }
         KeyCode::Home => {
-            app.forms.bulk_tag_editor_mut().new_tag_cursor = 0;
+            ctx.forms.bulk_tag_editor_mut().new_tag_cursor = 0;
         }
         KeyCode::End => {
-            let len = app
+            let len = ctx
                 .forms
                 .bulk_tag_editor()
                 .new_tag_input
                 .as_ref()
                 .map(|s| s.chars().count());
             if let Some(len) = len {
-                app.forms.bulk_tag_editor_mut().new_tag_cursor = len;
+                ctx.forms.bulk_tag_editor_mut().new_tag_cursor = len;
             }
         }
-        KeyCode::Backspace if app.forms.bulk_tag_editor().new_tag_cursor > 0 => {
-            let cursor = app.forms.bulk_tag_editor().new_tag_cursor;
+        KeyCode::Backspace if ctx.forms.bulk_tag_editor().new_tag_cursor > 0 => {
+            let cursor = ctx.forms.bulk_tag_editor().new_tag_cursor;
             let mut drained = false;
-            if let Some(ref mut input) = app.forms.bulk_tag_editor_mut().new_tag_input {
+            if let Some(ref mut input) = ctx.forms.bulk_tag_editor_mut().new_tag_input {
                 let byte_pos = crate::app::char_to_byte_pos(input, cursor);
                 let prev = crate::app::char_to_byte_pos(input, cursor - 1);
                 input.drain(prev..byte_pos);
                 drained = true;
             }
             if drained {
-                app.forms.bulk_tag_editor_mut().new_tag_cursor -= 1;
+                ctx.forms.bulk_tag_editor_mut().new_tag_cursor -= 1;
             }
         }
         KeyCode::Char(c) => {
-            let cursor = app.forms.bulk_tag_editor().new_tag_cursor;
-            if let Some(ref mut input) = app.forms.bulk_tag_editor_mut().new_tag_input {
+            let cursor = ctx.forms.bulk_tag_editor().new_tag_cursor;
+            if let Some(ref mut input) = ctx.forms.bulk_tag_editor_mut().new_tag_input {
                 let byte_pos = crate::app::char_to_byte_pos(input, cursor);
                 input.insert(byte_pos, c);
-                app.forms.bulk_tag_editor_mut().new_tag_cursor += 1;
+                ctx.forms.bulk_tag_editor_mut().new_tag_cursor += 1;
             }
         }
         _ => {}

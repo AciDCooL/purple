@@ -3,6 +3,12 @@
 //! Supports navigation, start/stop, and add/edit/delete. Adding from this
 //! screen routes through the host picker first because the user has not yet
 //! chosen which host the new tunnel belongs to.
+//!
+//! Takes `&mut App`, not a per-domain slice: it is a tab-router that switches
+//! top-pages, opens the jump overlay and delegates tunnel mutations to the
+//! shared tunnel-action core (`handler::tunnel`). The row query it shares with
+//! the renderer (`ui::tunnels_overview::visible_pairs`) takes slice references,
+//! not `App`.
 
 use crossterm::event::{KeyCode, KeyEvent};
 
@@ -14,14 +20,25 @@ use crate::tunnel::TunnelRule;
 /// at the row visually under it.
 fn selected_row(app: &App) -> Option<(String, TunnelRule)> {
     let sel = app.ui.tunnels_overview_state().selected()?;
-    crate::ui::tunnels_overview::visible_pairs(app)
-        .into_iter()
-        .nth(sel)
+    crate::ui::tunnels_overview::visible_pairs(
+        &app.search,
+        &app.hosts_state,
+        &app.tunnels,
+        &app.history,
+    )
+    .into_iter()
+    .nth(sel)
 }
 
 /// Total visible row count; used for cursor clamping.
 fn row_count(app: &App) -> usize {
-    crate::ui::tunnels_overview::visible_pairs(app).len()
+    crate::ui::tunnels_overview::visible_pairs(
+        &app.search,
+        &app.hosts_state,
+        &app.tunnels,
+        &app.history,
+    )
+    .len()
 }
 
 fn select_next(app: &mut App) {
@@ -93,7 +110,12 @@ fn toggle_tunnel(app: &mut App) {
 /// row the user acted on. Falls back to clamping into range if the row
 /// vanished (e.g. directive removed concurrently).
 pub(super) fn reposition_cursor_on(app: &mut App, alias: &str, rule: &TunnelRule) {
-    let pairs = crate::ui::tunnels_overview::visible_pairs(app);
+    let pairs = crate::ui::tunnels_overview::visible_pairs(
+        &app.search,
+        &app.hosts_state,
+        &app.tunnels,
+        &app.history,
+    );
     if pairs.is_empty() {
         app.ui.tunnels_overview_state_mut().select(None);
         return;
@@ -162,9 +184,14 @@ fn confirm_delete_selected(app: &mut App) {
 /// sorted sequence the UI renders. Cursor indices captured in
 /// `pending_delete` are walked against this list on confirmation.
 fn nth_row(app: &App, target: usize) -> Option<(String, TunnelRule)> {
-    crate::ui::tunnels_overview::visible_pairs(app)
-        .into_iter()
-        .nth(target)
+    crate::ui::tunnels_overview::visible_pairs(
+        &app.search,
+        &app.hosts_state,
+        &app.tunnels,
+        &app.history,
+    )
+    .into_iter()
+    .nth(target)
 }
 
 /// Handle a key event while the user is on the Tunnels tab. Caller is
