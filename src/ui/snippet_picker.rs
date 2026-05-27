@@ -10,9 +10,9 @@ use crate::app::{App, Screen};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let host_count = match &app.screen {
-        Screen::SnippetPicker { target_aliases } => target_aliases.len(),
-        Screen::SnippetForm { target_aliases, .. } => target_aliases.len(),
-        Screen::SnippetParamForm { target_aliases, .. } => target_aliases.len(),
+        Screen::SnippetPicker | Screen::SnippetForm | Screen::SnippetParamForm => {
+            app.snippets.flow_targets().len()
+        }
         _ => 1,
     };
 

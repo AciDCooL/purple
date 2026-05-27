@@ -844,20 +844,20 @@ impl Oracle {
                 .cloned()
                 .unwrap_or_default();
 
-            let mut metadata = Vec::new();
-            metadata.push(("region".to_string(), region.to_string()));
-            metadata.push(("shape".to_string(), instance.shape.clone()));
+            let mut metadata = super::ProviderMetadata::new();
+            metadata.push("region", region.to_string());
+            metadata.push("shape", instance.shape.clone());
             if !os_name.is_empty() {
-                metadata.push(("os".to_string(), os_name));
+                metadata.push("os", os_name);
             }
-            metadata.push(("status".to_string(), instance.lifecycle_state.clone()));
+            metadata.push("status", instance.lifecycle_state.clone());
 
             hosts.push(ProviderHost {
                 server_id: instance.id.clone(),
                 name: instance.display_name.clone(),
                 ip,
                 tags: extract_tags(&instance.freeform_tags),
-                metadata,
+                metadata: metadata.finish(),
             });
         }
 

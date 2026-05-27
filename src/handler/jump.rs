@@ -174,9 +174,8 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
                 app.notify_warning(crate::messages::PALETTE_SNIPPET_NEEDS_HOST);
                 return;
             }
-            app.set_screen(Screen::SnippetPicker {
-                target_aliases: target,
-            });
+            app.snippets.set_flow_targets(target);
+            app.set_screen(Screen::SnippetPicker);
         }
     }
 }

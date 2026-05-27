@@ -501,16 +501,16 @@ fn open_snippet_forms_initialize_state_without_mtime() {
     // Add snippet: baseline captured, target_aliases preserved, NO mtime.
     let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
     app.open_snippet_add_form(aliases.clone());
-    match &app.screen {
-        Screen::SnippetForm {
-            target_aliases,
-            editing,
-        } => {
-            assert_eq!(target_aliases, &aliases);
-            assert!(editing.is_none(), "add: editing must be None");
-        }
-        other => panic!("expected SnippetForm, got {:?}", other),
-    }
+    assert!(
+        matches!(app.screen, Screen::SnippetForm),
+        "expected SnippetForm, got {:?}",
+        app.screen
+    );
+    assert_eq!(app.snippets.flow_targets(), &aliases[..]);
+    assert!(
+        app.snippets.form_editing().is_none(),
+        "add: editing must be None"
+    );
     assert!(app.snippets.form_baseline.is_some());
     // Pin the divergence: snippet open does NOT capture mtime.
     assert!(
@@ -526,16 +526,13 @@ fn open_snippet_forms_initialize_state_without_mtime() {
         description: "test snippet".to_string(),
     };
     app.open_snippet_edit_form(&snippet, aliases.clone(), 5);
-    match &app.screen {
-        Screen::SnippetForm {
-            target_aliases,
-            editing,
-        } => {
-            assert_eq!(target_aliases, &aliases);
-            assert_eq!(*editing, Some(5));
-        }
-        other => panic!("expected SnippetForm, got {:?}", other),
-    }
+    assert!(
+        matches!(app.screen, Screen::SnippetForm),
+        "expected SnippetForm, got {:?}",
+        app.screen
+    );
+    assert_eq!(app.snippets.flow_targets(), &aliases[..]);
+    assert_eq!(app.snippets.form_editing(), Some(5));
     // Pin that snippet data flows through SnippetForm::from_snippet.
     assert_eq!(app.snippets.form.name, "deploy");
     assert_eq!(app.snippets.form.command, "echo hi");
@@ -551,10 +548,9 @@ fn open_snippet_forms_initialize_state_without_mtime() {
 fn close_snippet_form_clears_state_and_returns_to_picker_with_aliases() {
     let mut app = make_app("Host a\n  HostName 1.2.3.4\n");
     app.capture_snippet_form_baseline();
-    app.set_screen(Screen::SnippetForm {
-        target_aliases: vec!["a".to_string()],
-        editing: None,
-    });
+    app.snippets.set_flow_targets(vec!["a".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.set_screen(Screen::SnippetForm);
     // Pin the two divergences: snippet close must NOT flush vault, and
     // must NOT clear form_mtime (no mtime is captured on snippet form open).
     app.vault.pending_config_write = true;
@@ -567,12 +563,15 @@ fn close_snippet_form_clears_state_and_returns_to_picker_with_aliases() {
         app.snippets.form_baseline.is_none(),
         "baseline must be cleared"
     );
-    match &app.screen {
-        Screen::SnippetPicker { target_aliases } => {
-            assert_eq!(target_aliases, &vec!["a".to_string(), "b".to_string()]);
-        }
-        other => panic!("expected SnippetPicker, got {:?}", other),
-    }
+    assert!(
+        matches!(app.screen, Screen::SnippetPicker),
+        "expected SnippetPicker, got {:?}",
+        app.screen
+    );
+    assert_eq!(
+        app.snippets.flow_targets(),
+        &["a".to_string(), "b".to_string()][..]
+    );
     assert!(
         app.vault.pending_config_write,
         "snippet close must NOT flush"
@@ -768,16 +767,15 @@ fn confirm_vault_sign_screen_stores_signable_list() {
         pubkey: std::path::PathBuf::from("/tmp/id_ed25519.pub"),
         vault_addr: None,
     }];
-    app.screen = Screen::ConfirmVaultSign {
-        signable: signable.clone(),
-    };
-    match &app.screen {
-        Screen::ConfirmVaultSign { signable: s } => {
-            assert_eq!(s.len(), 1);
-            assert_eq!(s[0].alias, "a");
-        }
-        _ => panic!("wrong screen"),
-    }
+    app.vault.set_pending_sign(signable.clone());
+    app.screen = Screen::ConfirmVaultSign;
+    assert!(matches!(app.screen, Screen::ConfirmVaultSign));
+    let stored = app
+        .vault
+        .pending_sign()
+        .expect("pending_sign payload must be set");
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].alias, "a");
 }
 
 #[test]
@@ -9712,4 +9710,57 @@ fn search_whitespace_only_query_matches_all_hosts() {
     let mut app = multiterm_app();
     app.start_search_with("   ");
     assert_eq!(filtered_aliases(&app), vec!["web1", "web2", "api1"]);
+}
+
+#[test]
+fn push_help_overlay_moves_current_screen_into_return_box() {
+    // The current Screen variant (carrying its identity payload) must
+    // end up unchanged inside the Help variant's return_screen Box.
+    let mut app = make_app("");
+    app.set_screen(Screen::EditHost {
+        alias: "web1".to_string(),
+    });
+    app.push_help_overlay();
+    let Screen::Help { return_screen } = &app.screen else {
+        panic!("expected Help, got {:?}", app.screen);
+    };
+    let Screen::EditHost { alias } = &**return_screen else {
+        panic!("expected EditHost in return box, got {return_screen:?}");
+    };
+    assert_eq!(alias, "web1");
+}
+
+#[test]
+fn pop_help_overlay_restores_boxed_screen_with_payload_intact() {
+    let mut app = make_app("");
+    app.set_screen(Screen::EditHost {
+        alias: "api-prod".to_string(),
+    });
+    app.push_help_overlay();
+    app.pop_help_overlay();
+    let Screen::EditHost { alias } = &app.screen else {
+        panic!("expected EditHost after pop, got {:?}", app.screen);
+    };
+    assert_eq!(alias, "api-prod");
+}
+
+#[test]
+fn push_help_overlay_is_noop_when_already_in_help() {
+    let mut app = make_app("");
+    app.set_screen(Screen::Help {
+        return_screen: Box::new(Screen::HostList),
+    });
+    app.push_help_overlay();
+    let Screen::Help { return_screen } = &app.screen else {
+        panic!("expected Help, got {:?}", app.screen);
+    };
+    assert!(matches!(**return_screen, Screen::HostList));
+}
+
+#[test]
+fn pop_help_overlay_is_noop_when_not_in_help() {
+    let mut app = make_app("");
+    app.set_screen(Screen::HostList);
+    app.pop_help_overlay();
+    assert!(matches!(app.screen, Screen::HostList));
 }

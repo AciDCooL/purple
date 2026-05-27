@@ -49,7 +49,7 @@ pub fn handle_key_event(
 ) -> Result<()> {
     // Global Ctrl+C handler — screen-conditional for SnippetOutput
     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-        if matches!(app.screen, Screen::SnippetOutput { .. }) {
+        if matches!(app.screen, Screen::SnippetOutput) {
             if let Some(state) = app.snippets.output() {
                 if !state.all_done {
                     if state.cancel.load(Ordering::Relaxed) {
@@ -100,23 +100,23 @@ pub fn handle_key_event(
         Screen::TunnelForm { .. } => tunnel::handle_tunnel_form_key(app, key),
         Screen::TunnelHostPicker => tunnel_host_picker::handle_key(app, key),
         Screen::ContainerHostPicker => container_host_picker::handle_key(app, key, events_tx),
-        Screen::SnippetPicker { .. } => snippet::handle_picker_key(app, key, events_tx),
-        Screen::SnippetForm { .. } => snippet::handle_form_key(app, key),
-        Screen::SnippetOutput { .. } => snippet::handle_output_key(app, key),
-        Screen::SnippetParamForm { .. } => snippet::handle_param_form_key(app, key, events_tx),
+        Screen::SnippetPicker => snippet::handle_picker_key(app, key, events_tx),
+        Screen::SnippetForm => snippet::handle_form_key(app, key),
+        Screen::SnippetOutput => snippet::handle_output_key(app, key),
+        Screen::SnippetParamForm => snippet::handle_param_form_key(app, key, events_tx),
         Screen::ConfirmHostKeyReset { .. } => confirm::handle_host_key_reset_key(app, key),
-        Screen::ConfirmVaultSign { .. } => confirm::handle_vault_sign_key(app, key, events_tx),
+        Screen::ConfirmVaultSign => confirm::handle_vault_sign_key(app, key, events_tx),
         Screen::ConfirmImport { .. } => confirm::handle_import_key(app, key),
-        Screen::ConfirmPurgeStale { .. } => confirm::handle_purge_stale_key(app, key),
+        Screen::ConfirmPurgeStale => confirm::handle_purge_stale_key(app, key),
         Screen::FileBrowser { .. } => file_browser::handle_key(app, key, events_tx),
         Screen::Containers { .. } => containers::handle_key(app, key, events_tx)?,
-        Screen::ContainerLogs { .. } => container_logs::handle_key(app, key, events_tx),
+        Screen::ContainerLogs => container_logs::handle_key(app, key, events_tx),
         Screen::ConfirmContainerRestart { .. } => confirm::handle_container_restart_key(app, key),
         Screen::ConfirmContainerStop { .. } => confirm::handle_container_stop_key(app, key),
         Screen::ContainerExecPrompt { .. } => container_exec_prompt::handle_key(app, key),
-        Screen::ConfirmStackRestart { .. } => confirm::handle_stack_restart_key(app, key),
-        Screen::ConfirmHostRestartAll { .. } => confirm::handle_host_restart_all_key(app, key),
-        Screen::ConfirmHostStopAll { .. } => confirm::handle_host_stop_all_key(app, key),
+        Screen::ConfirmStackRestart => confirm::handle_stack_restart_key(app, key),
+        Screen::ConfirmHostRestartAll => confirm::handle_host_restart_all_key(app, key),
+        Screen::ConfirmHostStopAll => confirm::handle_host_stop_all_key(app, key),
         Screen::Welcome { .. } => welcome::handle_key(app, key),
         Screen::WhatsNew(_) => whats_new::handle_key(app, key),
     }

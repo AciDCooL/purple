@@ -142,16 +142,13 @@ impl I3d {
                 let mut hosts = Vec::new();
                 for host in &host_list {
                     if let Some(ip) = select_host_ip(&host.ip_addresses) {
-                        let mut metadata = Vec::with_capacity(3);
+                        let mut metadata = super::ProviderMetadata::new();
                         if !host.category.is_empty() {
-                            metadata.push(("type".to_string(), host.category.clone()));
+                            metadata.push("type", host.category.clone());
                         }
                         if let Some(ncpu) = host.num_cpu {
                             if ncpu > 0 && !host.cpu_type.is_empty() {
-                                metadata.push((
-                                    "specs".to_string(),
-                                    format!("{}x {}", ncpu, host.cpu_type),
-                                ));
+                                metadata.push("specs", format!("{}x {}", ncpu, host.cpu_type));
                             }
                         }
                         let name = if host.server_name.is_empty() {
@@ -164,7 +161,7 @@ impl I3d {
                             name,
                             ip,
                             tags: Vec::new(),
-                            metadata,
+                            metadata: metadata.finish(),
                         });
                     }
                 }
@@ -193,12 +190,12 @@ impl I3d {
                 let mut hosts = Vec::new();
                 for server in &servers {
                     if let Some(ip) = select_flex_ip(&server.ip_addresses) {
-                        let mut metadata = Vec::with_capacity(4);
+                        let mut metadata = super::ProviderMetadata::new();
                         if !server.location.is_empty() {
-                            metadata.push(("location".to_string(), server.location.clone()));
+                            metadata.push("location", server.location.clone());
                         }
                         if !server.instance_type.is_empty() {
-                            metadata.push(("type".to_string(), server.instance_type.clone()));
+                            metadata.push("type", server.instance_type.clone());
                         }
                         if let Some(ref os) = server.os {
                             let os_val = os
@@ -207,11 +204,11 @@ impl I3d {
                                 .filter(|s| !s.is_empty())
                                 .or_else(|| os.name.as_deref().filter(|s| !s.is_empty()));
                             if let Some(val) = os_val {
-                                metadata.push(("os".to_string(), val.to_string()));
+                                metadata.push("os", val.to_string());
                             }
                         }
                         if !server.status.is_empty() {
-                            metadata.push(("status".to_string(), server.status.clone()));
+                            metadata.push("status", server.status.clone());
                         }
                         let name = if server.name.is_empty() {
                             server.uuid.clone()
@@ -223,7 +220,7 @@ impl I3d {
                             name,
                             ip,
                             tags: server.tags.clone(),
-                            metadata,
+                            metadata: metadata.finish(),
                         });
                     }
                 }
@@ -470,17 +467,17 @@ mod tests {
         assert_eq!(os.slug.as_deref(), Some("ubuntu-2204-lts"));
         assert_eq!(os.name.as_deref(), Some("Ubuntu 22.04"));
         // Verify slug wins in metadata assembly
-        let mut metadata = Vec::new();
+        let mut metadata = super::super::ProviderMetadata::new();
         let os_val = os
             .slug
             .as_deref()
             .filter(|s| !s.is_empty())
             .or_else(|| os.name.as_deref().filter(|s| !s.is_empty()));
         if let Some(val) = os_val {
-            metadata.push(("os".to_string(), val.to_string()));
+            metadata.push("os", val.to_string());
         }
         assert_eq!(
-            metadata,
+            metadata.finish(),
             [("os".to_string(), "ubuntu-2204-lts".to_string())]
         );
     }
@@ -767,15 +764,16 @@ mod tests {
             cpu_type: "Intel Xeon E-2288G".into(),
         };
         let ip = select_host_ip(&host.ip_addresses).unwrap();
-        let mut metadata = Vec::new();
+        let mut metadata = super::super::ProviderMetadata::new();
         if !host.category.is_empty() {
-            metadata.push(("type".to_string(), host.category.clone()));
+            metadata.push("type", host.category.clone());
         }
         if let Some(ncpu) = host.num_cpu {
             if ncpu > 0 && !host.cpu_type.is_empty() {
-                metadata.push(("specs".to_string(), format!("{}x {}", ncpu, host.cpu_type)));
+                metadata.push("specs", format!("{}x {}", ncpu, host.cpu_type));
             }
         }
+        let metadata = metadata.finish();
         assert_eq!(ip, "1.2.3.4");
         assert_eq!(metadata.len(), 2);
         assert_eq!(
@@ -808,12 +806,12 @@ mod tests {
             tags: vec!["prod".into()],
         };
         let ip = select_flex_ip(&server.ip_addresses).unwrap();
-        let mut metadata = Vec::new();
+        let mut metadata = super::super::ProviderMetadata::new();
         if !server.location.is_empty() {
-            metadata.push(("location".to_string(), server.location.clone()));
+            metadata.push("location", server.location.clone());
         }
         if !server.instance_type.is_empty() {
-            metadata.push(("type".to_string(), server.instance_type.clone()));
+            metadata.push("type", server.instance_type.clone());
         }
         if let Some(ref os) = server.os {
             let os_val = os
@@ -822,12 +820,13 @@ mod tests {
                 .filter(|s| !s.is_empty())
                 .or_else(|| os.name.as_deref().filter(|s| !s.is_empty()));
             if let Some(val) = os_val {
-                metadata.push(("os".to_string(), val.to_string()));
+                metadata.push("os", val.to_string());
             }
         }
         if !server.status.is_empty() {
-            metadata.push(("status".to_string(), server.status.clone()));
+            metadata.push("status", server.status.clone());
         }
+        let metadata = metadata.finish();
         assert_eq!(ip, "1.2.3.4");
         assert_eq!(metadata.len(), 4);
         assert_eq!(

@@ -175,19 +175,28 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, _events_tx: &mpsc::Sender
 }
 
 fn container_logs_key(ctx: &mut ContainerLogsCtx, key: KeyEvent) {
-    let Screen::ContainerLogs {
-        body,
-        scroll,
-        alias,
-        container_id,
-        container_name,
-        last_render_height,
-        search,
-        ..
-    } = &mut *ctx.screen
-    else {
+    if !matches!(*ctx.screen, Screen::ContainerLogs) {
         return;
-    };
+    }
+    // State was pruned out from under us (host removed via reload_hosts
+    // while the overlay was open). Drop to HostList so the user is not
+    // stranded on `Screen::ContainerLogs` with no body and no working
+    // Esc.
+    if ctx.container_state.logs_view().is_none() {
+        ctx.set_screen(Screen::HostList);
+        return;
+    }
+    let view = ctx
+        .container_state
+        .logs_view_mut()
+        .expect("logs_view presence just checked");
+    let body = &mut view.body;
+    let scroll = &mut view.scroll;
+    let alias = &view.alias;
+    let container_id = &view.container_id;
+    let container_name = &view.container_name;
+    let last_render_height = &view.last_render_height;
+    let search = &mut view.search;
 
     // Modeless search: while active, every keystroke either edits the
     // query (chars / cursor / delete) or steps through matches (Tab /
@@ -239,6 +248,7 @@ fn container_logs_key(ctx: &mut ContainerLogsCtx, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => {
             log::debug!("[purple] container_logs: closed");
+            ctx.container_state.clear_logs_view();
             ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('?') => {
@@ -305,27 +315,21 @@ impl ContainerLogsCtx<'_> {
             .find(|h| h.alias == alias)
             .and_then(|h| h.askpass.clone());
 
-        if let Screen::ContainerLogs {
-            body,
-            scroll,
-            error,
-            fetched_at,
-            search,
-            ..
-        } = &mut *self.screen
-        {
-            body.clear();
-            *scroll = 0;
-            *error = None;
-            *fetched_at = 0;
-            // Wipe stale line indices: the body just emptied, so any old
-            // match positions now point past the end. The completion path
-            // in event_loop calls `refresh_search` to repopulate against
-            // the fresh body, but until then the search bar would show
-            // a stale "(3 of 5)" badge tied to the previous fetch.
-            if let Some(s) = search.as_mut() {
-                s.matches.clear();
-                s.current = 0;
+        if matches!(*self.screen, Screen::ContainerLogs) {
+            if let Some(view) = self.container_state.logs_view_mut() {
+                view.body.clear();
+                view.scroll = 0;
+                view.error = None;
+                view.fetched_at = 0;
+                // Wipe stale line indices: the body just emptied, so any old
+                // match positions now point past the end. The completion path
+                // in event_loop calls `refresh_search` to repopulate against
+                // the fresh body, but until then the search bar would show
+                // a stale "(3 of 5)" badge tied to the previous fetch.
+                if let Some(s) = view.search.as_mut() {
+                    s.matches.clear();
+                    s.current = 0;
+                }
             }
         }
         log::debug!(

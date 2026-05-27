@@ -326,24 +326,24 @@ fn build_os_string(image_ref: &Option<ImageReference>) -> Option<String> {
 
 /// Build metadata key-value pairs for a VM.
 fn build_metadata(vm: &VirtualMachine) -> Vec<(String, String)> {
-    let mut metadata = Vec::new();
+    let mut metadata = super::ProviderMetadata::new();
     if !vm.location.is_empty() {
-        metadata.push(("region".to_string(), vm.location.to_ascii_lowercase()));
+        metadata.push("region", vm.location.to_ascii_lowercase());
     }
     if let Some(ref hw) = vm.properties.hardware_profile {
         if !hw.vm_size.is_empty() {
-            metadata.push(("vm_size".to_string(), hw.vm_size.clone()));
+            metadata.push("vm_size", hw.vm_size.clone());
         }
     }
     if let Some(ref sp) = vm.properties.storage_profile {
         if let Some(os) = build_os_string(&sp.image_reference) {
-            metadata.push(("image".to_string(), os));
+            metadata.push("image", os);
         }
     }
     if let Some(state) = extract_power_state(&vm.properties.instance_view) {
-        metadata.push(("status".to_string(), state));
+        metadata.push("status", state);
     }
-    metadata
+    metadata.finish()
 }
 
 /// Build tags from Azure VM tags (key:value map).
@@ -397,7 +397,7 @@ fn fetch_paginated<T: serde::de::DeserializeOwned>(
 
         let mut response = match agent
             .get(&url)
-            .header("Authorization", &format!("Bearer {}", access_token))
+            .header("Authorization", &super::bearer_auth(access_token))
             .call()
         {
             Ok(r) => r,

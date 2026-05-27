@@ -194,21 +194,20 @@ pub enum Screen {
     /// tunnel: the user must choose a host before the tunnel form opens.
     /// On confirm, transitions to `TunnelForm { alias, editing: None }`.
     TunnelHostPicker,
-    SnippetPicker {
-        target_aliases: Vec<String>,
-    },
-    SnippetForm {
-        target_aliases: Vec<String>,
-        editing: Option<usize>,
-    },
-    SnippetOutput {
-        snippet_name: String,
-        target_aliases: Vec<String>,
-    },
-    SnippetParamForm {
-        snippet: crate::snippet::Snippet,
-        target_aliases: Vec<String>,
-    },
+    /// Multi-host picker for snippet execution. The host aliases live
+    /// on `snippets.flow_targets`; the variant stays data-less.
+    SnippetPicker,
+    /// Edit form for a snippet. `editing` (index) and target_aliases
+    /// live on `snippets.form_editing` / `snippets.flow_targets`.
+    SnippetForm,
+    /// Output viewer after running a snippet against the flow targets.
+    /// `snippet_name` lives on `snippets.output_snippet_name`;
+    /// `target_aliases` on `snippets.flow_targets`.
+    SnippetOutput,
+    /// Param-substitution form shown before running a parametrised
+    /// snippet. The `Snippet` lives on `snippets.param_snippet` and
+    /// the target aliases on `snippets.flow_targets`.
+    SnippetParamForm,
     ConfirmHostKeyReset {
         alias: String,
         hostname: String,
@@ -226,24 +225,12 @@ pub enum Screen {
     /// on Enter, spawns a `docker ps` listing for the chosen host and
     /// returns to the overview.
     ContainerHostPicker,
-    /// One-shot logs viewer for a single container. `body` is empty
-    /// while the SSH `docker logs --tail 200` call is in flight; once
-    /// the result lands the lines populate it. `scroll` is line-based,
-    /// `0` is the top. `last_render_height` is written by the renderer
-    /// each frame so the logs-arrival path and `G` can compute the
-    /// tail-anchored scroll without guessing the visible-area size.
-    ContainerLogs {
-        alias: String,
-        container_id: String,
-        container_name: String,
-        body: Vec<String>,
-        fetched_at: u64,
-        error: Option<String>,
-        scroll: u16,
-        last_render_height: u16,
-        /// `/` search state. `None` when no search is active.
-        search: Option<ContainerLogsSearch>,
-    },
+    /// One-shot logs viewer for a single container. The identity
+    /// (alias / container_id / container_name), the streaming body, the
+    /// scroll position and the search state all live on
+    /// `container_state.logs_view`; this variant only tags the open
+    /// overlay so the dispatch table reads cleanly.
+    ContainerLogs,
     /// Confirm dialog for `K` (kick). restart a single running
     /// container. Reuses `route_confirm_key` so y/n/Esc are the only
     /// effective inputs; stake-test footer phrases the verb on both
@@ -276,41 +263,29 @@ pub enum Screen {
     },
     /// Confirm dialog for `Ctrl-K` (stack kick). Restarts every running
     /// member of a compose stack on a single host, sequentially. The
-    /// drain queue + 30s cache TTL pace the work; we accept the trivial
-    /// per-tick interleaving.
-    ConfirmStackRestart {
-        alias: String,
-        project: String,
-        members: Vec<StackMember>,
-    },
+    /// alias/project/members payload lives on
+    /// `containers_overview.pending_bulk_confirm` so screen
+    /// transitions stay allocation-free.
+    ConfirmStackRestart,
     /// Confirm dialog for `K` pressed on a host-divider row in the
     /// containers overview. Restarts every running container on the
-    /// host, ignoring compose-project boundaries. Shares the bulk
-    /// confirm shape with `ConfirmStackRestart`.
-    ConfirmHostRestartAll {
-        alias: String,
-        members: Vec<StackMember>,
-    },
+    /// host. Payload on `containers_overview.pending_bulk_confirm`.
+    ConfirmHostRestartAll,
     /// Confirm dialog for `S` pressed on a host-divider row. Stops
-    /// every running container on the host, sequentially.
-    ConfirmHostStopAll {
-        alias: String,
-        members: Vec<StackMember>,
-    },
+    /// every running container on the host. Payload on
+    /// `containers_overview.pending_bulk_confirm`.
+    ConfirmHostStopAll,
     ConfirmImport {
         count: usize,
     },
-    ConfirmPurgeStale {
-        aliases: Vec<String>,
-        provider: Option<String>,
-    },
-    ConfirmVaultSign {
-        /// Precomputed list of hosts that resolve to a Vault SSH role. Computed
-        /// when the user presses `V`. `certificate_file` is the host's existing
-        /// `CertificateFile` directive (empty when unset) so the background
-        /// worker checks renewal against the configured cert path.
-        signable: Vec<crate::vault_ssh::VaultSignTarget>,
-    },
+    /// Confirm dialog for purging stale (provider-managed but deleted)
+    /// hosts. The alias list and provider scope live on
+    /// `providers.pending_purge` so the variant stays data-less.
+    ConfirmPurgeStale,
+    /// Confirm dialog for `V` (bulk vault sign). The precomputed
+    /// signable list lives on `vault.pending_sign` so the screen
+    /// variant stays data-less.
+    ConfirmVaultSign,
     Welcome {
         has_backup: bool,
         host_count: usize,
@@ -349,24 +324,24 @@ impl Screen {
             Screen::TunnelList { .. } => "TunnelList",
             Screen::TunnelForm { .. } => "TunnelForm",
             Screen::TunnelHostPicker => "TunnelHostPicker",
-            Screen::SnippetPicker { .. } => "SnippetPicker",
-            Screen::SnippetForm { .. } => "SnippetForm",
-            Screen::SnippetOutput { .. } => "SnippetOutput",
-            Screen::SnippetParamForm { .. } => "SnippetParamForm",
+            Screen::SnippetPicker => "SnippetPicker",
+            Screen::SnippetForm => "SnippetForm",
+            Screen::SnippetOutput => "SnippetOutput",
+            Screen::SnippetParamForm => "SnippetParamForm",
             Screen::ConfirmHostKeyReset { .. } => "ConfirmHostKeyReset",
             Screen::FileBrowser { .. } => "FileBrowser",
             Screen::Containers { .. } => "Containers",
             Screen::ContainerHostPicker => "ContainerHostPicker",
-            Screen::ContainerLogs { .. } => "ContainerLogs",
+            Screen::ContainerLogs => "ContainerLogs",
             Screen::ConfirmContainerRestart { .. } => "ConfirmContainerRestart",
             Screen::ConfirmContainerStop { .. } => "ConfirmContainerStop",
             Screen::ContainerExecPrompt { .. } => "ContainerExecPrompt",
-            Screen::ConfirmStackRestart { .. } => "ConfirmStackRestart",
-            Screen::ConfirmHostRestartAll { .. } => "ConfirmHostRestartAll",
-            Screen::ConfirmHostStopAll { .. } => "ConfirmHostStopAll",
+            Screen::ConfirmStackRestart => "ConfirmStackRestart",
+            Screen::ConfirmHostRestartAll => "ConfirmHostRestartAll",
+            Screen::ConfirmHostStopAll => "ConfirmHostStopAll",
             Screen::ConfirmImport { .. } => "ConfirmImport",
-            Screen::ConfirmPurgeStale { .. } => "ConfirmPurgeStale",
-            Screen::ConfirmVaultSign { .. } => "ConfirmVaultSign",
+            Screen::ConfirmPurgeStale => "ConfirmPurgeStale",
+            Screen::ConfirmVaultSign => "ConfirmVaultSign",
             Screen::Welcome { .. } => "Welcome",
             Screen::BulkTagEditor => "BulkTagEditor",
             Screen::WhatsNew(_) => "WhatsNew",

@@ -159,9 +159,8 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
         return;
     }
 
-    app.set_screen(Screen::ConfirmVaultSign {
-        signable: needs_signing,
-    });
+    app.vault.set_pending_sign(needs_signing);
+    app.set_screen(Screen::ConfirmVaultSign);
 }
 
 /// `F` — open the file browser overlay for the selected host. Spawns a

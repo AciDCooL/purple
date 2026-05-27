@@ -70,10 +70,9 @@ impl SnippetCtx<'_> {
             target_aliases.len()
         );
         *self.snippets.form_mut() = crate::app::SnippetForm::new();
-        self.set_screen(Screen::SnippetForm {
-            target_aliases,
-            editing: None,
-        });
+        self.snippets.set_flow_targets(target_aliases);
+        self.snippets.set_form_editing(None);
+        self.set_screen(Screen::SnippetForm);
         self.capture_snippet_form_baseline();
     }
 
@@ -91,10 +90,9 @@ impl SnippetCtx<'_> {
             editing
         );
         *self.snippets.form_mut() = crate::app::SnippetForm::from_snippet(snippet);
-        self.set_screen(Screen::SnippetForm {
-            target_aliases,
-            editing: Some(editing),
-        });
+        self.snippets.set_flow_targets(target_aliases);
+        self.snippets.set_form_editing(Some(editing));
+        self.set_screen(Screen::SnippetForm);
         self.capture_snippet_form_baseline();
     }
 
@@ -106,7 +104,9 @@ impl SnippetCtx<'_> {
             target_aliases.len()
         );
         self.snippets.set_form_baseline(None);
-        self.set_screen(Screen::SnippetPicker { target_aliases });
+        self.snippets.set_flow_targets(target_aliases);
+        self.snippets.set_form_editing(None);
+        self.set_screen(Screen::SnippetPicker);
     }
 
     /// Capture a baseline of the snippet form for the dirty-check on Esc.
@@ -167,9 +167,8 @@ pub(super) fn open_snippet_picker(app: &mut App, aliases: Vec<String>) {
     if !ctx.snippets.store().snippets.is_empty() {
         ctx.ui.snippet_picker_state_mut().select(Some(0));
     }
-    ctx.set_screen(Screen::SnippetPicker {
-        target_aliases: aliases,
-    });
+    ctx.snippets.set_flow_targets(aliases);
+    ctx.set_screen(Screen::SnippetPicker);
 }
 
 pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
@@ -178,17 +177,14 @@ pub(super) fn handle_picker_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::
 }
 
 fn picker_key(ctx: &mut SnippetCtx, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
-    let target_aliases = match &*ctx.screen {
-        Screen::SnippetPicker { target_aliases } => target_aliases.clone(),
-        _ => return,
-    };
+    if !matches!(*ctx.screen, Screen::SnippetPicker) {
+        return;
+    }
+    let target_aliases: Vec<String> = ctx.snippets.flow_targets().to_vec();
 
     // Allow ? to open help even during search
     if key.code == KeyCode::Char('?') {
-        let old = std::mem::replace(&mut *ctx.screen, Screen::HostList);
-        ctx.set_screen(Screen::Help {
-            return_screen: Box::new(old),
-        });
+        ctx.push_help_overlay();
         return;
     }
 
@@ -305,10 +301,9 @@ fn run_or_prompt_params(
         ctx.snippets
             .set_param_form(Some(crate::app::SnippetParamFormState::new(&params)));
         ctx.snippets.set_pending_terminal(terminal_mode);
-        ctx.set_screen(Screen::SnippetParamForm {
-            snippet,
-            target_aliases,
-        });
+        ctx.snippets.set_flow_targets(target_aliases);
+        ctx.snippets.set_param_snippet(Some(snippet));
+        ctx.set_screen(Screen::SnippetParamForm);
     } else if terminal_mode {
         ctx.snippets.set_pending(Some((snippet, target_aliases)));
         ctx.hosts.clear_multi_select();
@@ -367,10 +362,10 @@ fn start_snippet_output(
             cancel: cancel.clone(),
         }));
 
-    ctx.set_screen(Screen::SnippetOutput {
-        snippet_name: snippet.name.clone(),
-        target_aliases: target_aliases.to_vec(),
-    });
+    ctx.snippets.set_flow_targets(target_aliases.to_vec());
+    ctx.snippets
+        .set_output_snippet_name(Some(snippet.name.clone()));
+    ctx.set_screen(Screen::SnippetOutput);
 
     crate::snippet::spawn_snippet_execution(
         run_id,
@@ -427,6 +422,12 @@ fn output_key(ctx: &mut SnippetCtx, key: KeyEvent) {
                 }
             }
             ctx.snippets.set_output(None);
+            // Free the flow context slots so the next snippet flow opens
+            // against a clean state, instead of inheriting the prior
+            // targets and snippet name.
+            ctx.snippets.clear_flow_targets();
+            ctx.snippets.set_output_snippet_name(None);
+            ctx.snippets.set_param_snippet(None);
             ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('j') | KeyCode::Down => {
@@ -516,10 +517,7 @@ fn output_key(ctx: &mut SnippetCtx, key: KeyEvent) {
             }
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut *ctx.screen, Screen::HostList);
-            ctx.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            ctx.push_help_overlay();
         }
         _ => {}
     }
@@ -617,13 +615,14 @@ pub(super) fn handle_param_form_key(
 }
 
 fn param_form_key(ctx: &mut SnippetCtx, key: KeyEvent, events_tx: &mpsc::Sender<AppEvent>) {
-    let (snippet, target_aliases) = match &*ctx.screen {
-        Screen::SnippetParamForm {
-            snippet,
-            target_aliases,
-        } => (snippet.clone(), target_aliases.clone()),
-        _ => return,
+    if !matches!(*ctx.screen, Screen::SnippetParamForm) {
+        return;
+    }
+    let snippet = match ctx.snippets.param_snippet() {
+        Some(s) => s.clone(),
+        None => return,
     };
+    let target_aliases: Vec<String> = ctx.snippets.flow_targets().to_vec();
 
     let form = match ctx.snippets.param_form_mut() {
         Some(f) => f,
@@ -636,7 +635,8 @@ fn param_form_key(ctx: &mut SnippetCtx, key: KeyEvent, events_tx: &mpsc::Sender<
             super::ConfirmAction::Yes => {
                 ctx.forms.dismiss_discard_confirm();
                 ctx.snippets.close_param_form();
-                ctx.set_screen(Screen::SnippetPicker { target_aliases });
+                ctx.snippets.set_param_snippet(None);
+                ctx.set_screen(Screen::SnippetPicker);
             }
             super::ConfirmAction::No => {
                 ctx.forms.dismiss_discard_confirm();
@@ -652,7 +652,8 @@ fn param_form_key(ctx: &mut SnippetCtx, key: KeyEvent, events_tx: &mpsc::Sender<
                 ctx.forms.request_discard_confirm();
             } else {
                 ctx.snippets.close_param_form();
-                ctx.set_screen(Screen::SnippetPicker { target_aliases });
+                ctx.snippets.set_param_snippet(None);
+                ctx.set_screen(Screen::SnippetPicker);
             }
         }
         KeyCode::Tab | KeyCode::Down if form.focused_index + 1 < form.params.len() => {
@@ -715,13 +716,11 @@ pub(super) fn handle_form_key(app: &mut App, key: KeyEvent) {
 }
 
 fn form_key(ctx: &mut SnippetCtx, key: KeyEvent) {
-    let (target_aliases, editing) = match &*ctx.screen {
-        Screen::SnippetForm {
-            target_aliases,
-            editing,
-        } => (target_aliases.clone(), *editing),
-        _ => return,
-    };
+    if !matches!(*ctx.screen, Screen::SnippetForm) {
+        return;
+    }
+    let target_aliases: Vec<String> = ctx.snippets.flow_targets().to_vec();
+    let editing: Option<usize> = ctx.snippets.form_editing();
 
     // Handle discard confirmation dialog via the shared confirm router.
     if ctx.forms.is_discard_pending() {
@@ -874,10 +873,9 @@ mod param_form_tests {
             command: "echo hi".to_string(),
             description: String::new(),
         };
-        app.screen = Screen::SnippetParamForm {
-            snippet,
-            target_aliases: vec!["h1".to_string()],
-        };
+        app.snippets.set_param_snippet(Some(snippet));
+        app.snippets.set_flow_targets(vec!["h1".to_string()]);
+        app.screen = Screen::SnippetParamForm;
         app.snippets
             .set_param_form(Some(SnippetParamFormState::new(&[])));
         app
@@ -893,7 +891,7 @@ mod param_form_tests {
         let mut app = make_app();
         let (tx, _rx) = mpsc::channel();
         handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
-        assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+        assert!(matches!(app.screen, Screen::SnippetPicker));
         assert!(app.snippets.param_form().is_none());
     }
 
@@ -907,8 +905,9 @@ mod param_form_tests {
         }];
         app.snippets
             .set_param_form(Some(SnippetParamFormState::new(&params)));
-        if let Screen::SnippetParamForm { snippet, .. } = &mut app.screen {
-            snippet.command = "echo {{name}}".to_string();
+        if let Some(mut s) = app.snippets.param_snippet().cloned() {
+            s.command = "echo {{name}}".to_string();
+            app.snippets.set_param_snippet(Some(s));
         }
         let (tx, _rx) = mpsc::channel();
         handle_param_form_key(&mut app, k(KeyCode::Char('h')), &tx);
@@ -925,8 +924,9 @@ mod param_form_tests {
         }];
         app.snippets
             .set_param_form(Some(SnippetParamFormState::new(&params)));
-        if let Screen::SnippetParamForm { snippet, .. } = &mut app.screen {
-            snippet.command = "echo {{name}}".to_string();
+        if let Some(mut s) = app.snippets.param_snippet().cloned() {
+            s.command = "echo {{name}}".to_string();
+            app.snippets.set_param_snippet(Some(s));
         }
         app.snippets
             .param_form_mut()
@@ -946,7 +946,7 @@ mod param_form_tests {
         let (tx, _rx) = mpsc::channel();
         handle_param_form_key(&mut app, k(KeyCode::Esc), &tx);
         assert!(app.forms.is_discard_pending());
-        assert!(matches!(app.screen, Screen::SnippetParamForm { .. }));
+        assert!(matches!(app.screen, Screen::SnippetParamForm));
     }
 
     #[test]
@@ -959,7 +959,7 @@ mod param_form_tests {
         assert!(!app.forms.is_discard_pending());
         assert!(app.snippets.param_form().is_none());
         assert!(!app.snippets.pending_terminal());
-        assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+        assert!(matches!(app.screen, Screen::SnippetPicker));
     }
 
     #[test]
@@ -971,7 +971,7 @@ mod param_form_tests {
         handle_param_form_key(&mut app, k(KeyCode::Char('n')), &tx);
         assert!(!app.forms.is_discard_pending());
         assert!(app.snippets.param_form().is_some());
-        assert!(matches!(app.screen, Screen::SnippetParamForm { .. }));
+        assert!(matches!(app.screen, Screen::SnippetParamForm));
     }
 
     // Pins the route_confirm_key Ignored contract: a stray key must NOT
@@ -1024,10 +1024,10 @@ mod output_tests {
             all_done: true,
             cancel: Arc::new(AtomicBool::new(false)),
         }));
-        app.screen = Screen::SnippetOutput {
-            snippet_name: "echo".to_string(),
-            target_aliases: vec!["h0".to_string()],
-        };
+        app.snippets
+            .set_output_snippet_name(Some("echo".to_string()));
+        app.snippets.set_flow_targets(vec!["h0".to_string()]);
+        app.screen = Screen::SnippetOutput;
         app
     }
 

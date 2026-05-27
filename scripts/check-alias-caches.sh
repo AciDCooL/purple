@@ -52,6 +52,7 @@ app/tunnel_state.rs:demo_live_snapshots
 app/tunnel_state.rs:summaries_cache
 app/vault.rs:cert_cache
 app/vault.rs:cert_checks_in_flight
+app/vault.rs:cert_stat_throttle
 app/vault.rs:sign_in_flight"
 #
 # Classification notes (kept out of EXPECTED_LIST so the diff stays clean):
@@ -59,7 +60,8 @@ app/vault.rs:sign_in_flight"
 #     container_state::cache, ping::status, ping::last_checked,
 #     file_browser_state::host_paths, tunnel_state::summaries_cache,
 #     tunnel_state::demo_live_snapshots, vault::cert_cache,
-#     vault::cert_checks_in_flight, vault::sign_in_flight,
+#     vault::cert_checks_in_flight, vault::cert_stat_throttle,
+#     vault::sign_in_flight,
 #     containers_overview::auto_list_in_flight,
 #     containers_overview::collapsed_hosts,
 #     containers_overview::in_flight_aliases (on refresh_batch).

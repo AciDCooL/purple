@@ -8,13 +8,11 @@ use super::theme;
 use crate::app::{App, Screen};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let (snippet_name, host_count) = match &app.screen {
-        Screen::SnippetOutput {
-            snippet_name,
-            target_aliases,
-        } => (snippet_name.clone(), target_aliases.len()),
-        _ => return,
-    };
+    if !matches!(app.screen, Screen::SnippetOutput) {
+        return;
+    }
+    let snippet_name = app.snippets.output_snippet_name().unwrap_or("").to_string();
+    let host_count = app.snippets.flow_targets().len();
 
     let state = match app.snippets.output() {
         Some(s) => s,

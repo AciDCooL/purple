@@ -96,10 +96,7 @@ fn bulk_tag_key(ctx: &mut BulkTagCtx, key: KeyEvent) {
             }
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut *ctx.screen, Screen::HostList);
-            ctx.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            ctx.push_help_overlay();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             crate::app::cycle_selection(

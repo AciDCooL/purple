@@ -63,8 +63,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     } else {
         let lines = match return_screen {
             Screen::FileBrowser { .. } => file_browser_lines(),
-            Screen::SnippetPicker { .. } => snippet_picker_lines(),
-            Screen::SnippetOutput { .. } => snippet_output_lines(),
+            Screen::SnippetPicker => snippet_picker_lines(),
+            Screen::SnippetOutput => snippet_output_lines(),
             Screen::Containers { .. } => containers_lines(),
             Screen::TunnelList { .. } => tunnels_lines(),
             Screen::Providers => providers_lines(),
@@ -267,8 +267,8 @@ fn context_title(screen: &Screen) -> &'static str {
         // help the user could mean from here.
         Screen::HostList | Screen::Welcome { .. } => "Help",
         Screen::FileBrowser { .. } => "File Explorer",
-        Screen::SnippetPicker { .. } => "Snippets",
-        Screen::SnippetOutput { .. } => "Output",
+        Screen::SnippetPicker => "Snippets",
+        Screen::SnippetOutput => "Output",
         Screen::Containers { .. } => "Containers",
         Screen::TunnelList { .. } => "Tunnels",
         Screen::Providers => "Providers",
@@ -764,19 +764,8 @@ mod tests {
             }),
             "File Explorer"
         );
-        assert_eq!(
-            context_title(&Screen::SnippetPicker {
-                target_aliases: vec![]
-            }),
-            "Snippets"
-        );
-        assert_eq!(
-            context_title(&Screen::SnippetOutput {
-                snippet_name: "x".into(),
-                target_aliases: vec![],
-            }),
-            "Output"
-        );
+        assert_eq!(context_title(&Screen::SnippetPicker), "Snippets");
+        assert_eq!(context_title(&Screen::SnippetOutput), "Output");
         assert_eq!(
             context_title(&Screen::Containers {
                 alias: "test".into()

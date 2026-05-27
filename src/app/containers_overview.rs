@@ -199,6 +199,35 @@ pub const LOGS_TAIL: usize = 50;
 /// loosely in lockstep.
 pub const LIST_CACHE_TTL_SECS: u64 = 30;
 
+/// Which bulk-action confirm dialog is open. Mirrored by the
+/// corresponding `Screen::Confirm*` variant (now data-less) so the
+/// renderer knows which header to draw.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BulkConfirmKind {
+    /// `Ctrl-K` on a container row: restart every running member of
+    /// the selected container's compose stack.
+    StackRestart,
+    /// `K` on a host-divider row: restart every running container on
+    /// that host, ignoring compose-project boundaries.
+    HostRestartAll,
+    /// `S` on a host-divider row: stop every running container on
+    /// that host.
+    HostStopAll,
+}
+
+/// Payload of the three bulk container confirm dialogs. The Screen
+/// variant carries only the kind tag; the alias/project/members live
+/// here so screen transitions never clone the member vec.
+#[derive(Debug, Clone)]
+pub struct BulkConfirmContext {
+    pub kind: BulkConfirmKind,
+    pub alias: String,
+    /// Compose project name. Always `Some` for `StackRestart`, `None`
+    /// for the host-wide variants.
+    pub project: Option<String>,
+    pub members: Vec<crate::app::StackMember>,
+}
+
 #[derive(Debug)]
 pub struct ContainersOverviewState {
     pub(in crate::app) sort_mode: ContainersSortMode,
@@ -231,6 +260,10 @@ pub struct ContainersOverviewState {
     /// cheaper than rebuilding the row set.
     pub(in crate::app) view_cache:
         std::cell::RefCell<Option<(u64, Vec<crate::ui::containers_overview::ContainerListItem>)>>,
+    /// Payload of the currently-open bulk container confirm dialog
+    /// (`ConfirmStackRestart` / `ConfirmHostRestartAll` /
+    /// `ConfirmHostStopAll`). `None` when no such dialog is open.
+    pub(in crate::app) pending_bulk_confirm: Option<BulkConfirmContext>,
 }
 
 impl Default for ContainersOverviewState {
@@ -244,6 +277,7 @@ impl Default for ContainersOverviewState {
             view_mode: ViewMode::Detailed,
             collapsed_hosts: HashSet::new(),
             view_cache: std::cell::RefCell::new(None),
+            pending_bulk_confirm: None,
         }
     }
 }
@@ -287,6 +321,25 @@ impl ContainersOverviewState {
 
     pub fn collapsed_hosts(&self) -> &HashSet<String> {
         &self.collapsed_hosts
+    }
+
+    /// Read the active bulk confirm payload (`None` when no bulk
+    /// container confirm dialog is open).
+    pub fn pending_bulk_confirm(&self) -> Option<&BulkConfirmContext> {
+        self.pending_bulk_confirm.as_ref()
+    }
+
+    /// Install a fresh bulk confirm payload. Caller is responsible for
+    /// transitioning the screen to the matching `Screen::Confirm*`
+    /// variant.
+    pub fn set_pending_bulk_confirm(&mut self, ctx: BulkConfirmContext) {
+        self.pending_bulk_confirm = Some(ctx);
+    }
+
+    /// Drop the active bulk confirm payload, returning it for use by
+    /// the confirm-yes handler.
+    pub fn take_pending_bulk_confirm(&mut self) -> Option<BulkConfirmContext> {
+        self.pending_bulk_confirm.take()
     }
 
     /// Fold or unfold a host group; returns the new collapsed state.
@@ -412,6 +465,11 @@ impl ContainersOverviewState {
                 batch.in_flight_aliases.insert(new.to_string());
             }
         }
+        if let Some(ctx) = self.pending_bulk_confirm.as_mut() {
+            if ctx.alias == old {
+                ctx.alias = new.to_string();
+            }
+        }
         if self.collapsed_hosts.remove(old) {
             debug_assert!(
                 !self.collapsed_hosts.contains(new),
@@ -476,6 +534,15 @@ impl ContainersOverviewState {
                 log::debug!(
                     "[purple] reload_hosts: dropped {dropped} orphan refresh_batch in_flight alias(es)"
                 );
+            }
+        }
+
+        // Bulk-confirm payload aimed at a deleted host: clear it; the
+        // matching Screen::Confirm* variant would render an empty body
+        // and a y press would no-op.
+        if let Some(ctx) = self.pending_bulk_confirm.as_ref() {
+            if !valid_aliases.contains(ctx.alias.as_str()) {
+                self.pending_bulk_confirm = None;
             }
         }
 

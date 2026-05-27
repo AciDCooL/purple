@@ -77,7 +77,7 @@ impl Linode {
             );
             let resp: LinodeResponse = agent
                 .get(&url)
-                .header("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &super::bearer_auth(token))
                 .call()
                 .map_err(map_ureq_error)?
                 .body_mut()
@@ -102,27 +102,27 @@ impl Linode {
                     });
                 if let Some(ip) = ip {
                     if !ip.is_empty() {
-                        let mut metadata = Vec::new();
+                        let mut metadata = super::ProviderMetadata::new();
                         if !instance.region.is_empty() {
-                            metadata.push(("region".to_string(), instance.region.clone()));
+                            metadata.push("region", instance.region.clone());
                         }
                         if !instance.instance_type.is_empty() {
-                            metadata.push(("plan".to_string(), instance.instance_type.clone()));
+                            metadata.push("plan", instance.instance_type.clone());
                         }
                         if let Some(ref image) = instance.image {
                             if !image.is_empty() {
-                                metadata.push(("image".to_string(), image.clone()));
+                                metadata.push("image", image.clone());
                             }
                         }
                         if !instance.status.is_empty() {
-                            metadata.push(("status".to_string(), instance.status.clone()));
+                            metadata.push("status", instance.status.clone());
                         }
                         hosts.push(ProviderHost {
                             server_id: instance.id.to_string(),
                             name: instance.label.clone(),
                             ip,
                             tags: instance.tags.clone(),
-                            metadata,
+                            metadata: metadata.finish(),
                         });
                     }
                 }

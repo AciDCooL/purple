@@ -359,10 +359,7 @@ fn containers_key(
             }
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut *ctx.screen, Screen::HostList);
-            ctx.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            ctx.push_help_overlay();
         }
         _ => {}
     }

@@ -175,10 +175,7 @@ fn host_detail_key(
             ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('?') => {
-            let old = (*ctx.screen).clone();
-            ctx.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            ctx.push_help_overlay();
         }
         KeyCode::Char('e') => {
             if let Some(host) = ctx.hosts.list().get(index).cloned() {
@@ -212,9 +209,9 @@ fn host_detail_key(
                 if let Some(hint) = stale_hint {
                     ctx.notify_warning(crate::messages::stale_host(&hint));
                 }
-                ctx.set_screen(Screen::SnippetPicker {
-                    target_aliases: vec![alias],
-                });
+                let aliases = vec![alias];
+                ctx.defer(move |app| app.snippets.set_flow_targets(aliases));
+                ctx.set_screen(Screen::SnippetPicker);
                 *ctx.ui.snippet_picker_state_mut() = ratatui::widgets::ListState::default();
                 if !snippet_indices.is_empty() {
                     ctx.ui.snippet_picker_state_mut().select(Some(0));

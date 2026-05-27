@@ -92,24 +92,24 @@ struct ScalewayImage {
 
 /// Build metadata key-value pairs for a server.
 fn build_metadata(server: &ScalewayServer, zone: &str) -> Vec<(String, String)> {
-    let mut metadata = Vec::new();
+    let mut metadata = super::ProviderMetadata::new();
     if !zone.is_empty() {
-        metadata.push(("zone".to_string(), zone.to_string()));
+        metadata.push("zone", zone.to_string());
     }
     if !server.commercial_type.is_empty() {
-        metadata.push(("type".to_string(), server.commercial_type.clone()));
+        metadata.push("type", server.commercial_type.clone());
     }
     if let Some(ref image) = server.image {
         if let Some(ref name) = image.name {
             if !name.is_empty() {
-                metadata.push(("image".to_string(), name.clone()));
+                metadata.push("image", name.clone());
             }
         }
     }
     if !server.state.is_empty() {
-        metadata.push(("status".to_string(), server.state.clone()));
+        metadata.push("status", server.state.clone());
     }
-    metadata
+    metadata.finish()
 }
 
 /// Select the best IP for a server.

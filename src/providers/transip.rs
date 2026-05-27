@@ -172,7 +172,7 @@ impl TransIp {
             let url = format!("{}/v6/vps?page={}&pageSize={}", base_url, page, per_page);
             let resp: VpsListResponse = agent
                 .get(&url)
-                .header("Authorization", &format!("Bearer {}", bearer))
+                .header("Authorization", &super::bearer_auth(&bearer))
                 .call()
                 .map_err(map_ureq_error)?
                 .body_mut()
@@ -186,18 +186,18 @@ impl TransIp {
                 }
                 let ip = super::strip_cidr(&vps.ip_address).to_string();
 
-                let mut metadata = Vec::with_capacity(4);
+                let mut metadata = super::ProviderMetadata::new();
                 if !vps.availability_zone.is_empty() {
-                    metadata.push(("zone".to_string(), vps.availability_zone.clone()));
+                    metadata.push("zone", vps.availability_zone.clone());
                 }
                 if !vps.product_name.is_empty() {
-                    metadata.push(("plan".to_string(), vps.product_name.clone()));
+                    metadata.push("plan", vps.product_name.clone());
                 }
                 if !vps.operating_system.is_empty() {
-                    metadata.push(("os".to_string(), vps.operating_system.clone()));
+                    metadata.push("os", vps.operating_system.clone());
                 }
                 if !vps.status.is_empty() {
-                    metadata.push(("status".to_string(), vps.status.clone()));
+                    metadata.push("status", vps.status.clone());
                 }
 
                 let display_name = if !vps.description.is_empty() {
@@ -215,7 +215,7 @@ impl TransIp {
                     name: display_name,
                     ip,
                     tags: vps.tags.clone(),
-                    metadata,
+                    metadata: metadata.finish(),
                 });
             }
 
@@ -409,19 +409,20 @@ mod tests {
         }]}"#;
         let resp: VpsListResponse = serde_json::from_str(json).unwrap();
         let vps = &resp.vpss[0];
-        let mut metadata = Vec::new();
+        let mut metadata = super::super::ProviderMetadata::new();
         if !vps.availability_zone.is_empty() {
-            metadata.push(("zone".to_string(), vps.availability_zone.clone()));
+            metadata.push("zone", vps.availability_zone.clone());
         }
         if !vps.product_name.is_empty() {
-            metadata.push(("plan".to_string(), vps.product_name.clone()));
+            metadata.push("plan", vps.product_name.clone());
         }
         if !vps.operating_system.is_empty() {
-            metadata.push(("os".to_string(), vps.operating_system.clone()));
+            metadata.push("os", vps.operating_system.clone());
         }
         if !vps.status.is_empty() {
-            metadata.push(("status".to_string(), vps.status.clone()));
+            metadata.push("status", vps.status.clone());
         }
+        let metadata = metadata.finish();
         assert_eq!(metadata.len(), 4);
         assert_eq!(metadata[0], ("zone".to_string(), "ams0".to_string()));
         assert_eq!(

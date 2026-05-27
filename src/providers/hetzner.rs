@@ -100,7 +100,7 @@ impl Hetzner {
             let url = format!("{}/v1/servers?page={}&per_page=50", base_url, page);
             let resp: HetznerResponse = agent
                 .get(&url)
-                .header("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &super::bearer_auth(token))
                 .call()
                 .map_err(map_ureq_error)?
                 .body_mut()
@@ -139,7 +139,7 @@ impl Hetzner {
                         })
                         .collect();
                     tags.sort();
-                    let mut metadata = Vec::new();
+                    let mut metadata = super::ProviderMetadata::new();
                     let region = server
                         .location
                         .as_ref()
@@ -153,30 +153,28 @@ impl Hetzner {
                                 .map(|l| &l.name)
                                 .filter(|n| !n.is_empty())
                         });
-                    if let Some(name) = region {
-                        metadata.push(("location".to_string(), name.clone()));
-                    }
+                    metadata.push_opt("location", region.cloned());
                     if let Some(ref st) = server.server_type {
                         if !st.name.is_empty() {
-                            metadata.push(("type".to_string(), st.name.clone()));
+                            metadata.push("type", st.name.clone());
                         }
                     }
                     if let Some(ref image) = server.image {
                         if let Some(ref name) = image.name {
                             if !name.is_empty() {
-                                metadata.push(("image".to_string(), name.clone()));
+                                metadata.push("image", name.clone());
                             }
                         }
                     }
                     if !server.status.is_empty() {
-                        metadata.push(("status".to_string(), server.status.clone()));
+                        metadata.push("status", server.status.clone());
                     }
                     hosts.push(ProviderHost {
                         server_id: server.id.to_string(),
                         name: server.name.clone(),
                         ip,
                         tags,
-                        metadata,
+                        metadata: metadata.finish(),
                     });
                 }
             }

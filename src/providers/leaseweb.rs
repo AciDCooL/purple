@@ -222,24 +222,21 @@ impl Leaseweb {
                         });
                     if let Some(ip) = ip {
                         if !ip.is_empty() {
-                            let mut metadata = Vec::with_capacity(4);
+                            let mut metadata = super::ProviderMetadata::new();
                             if let Some(ref loc) = server.location {
                                 if !loc.site.is_empty() {
-                                    metadata.push(("location".to_string(), loc.site.clone()));
+                                    metadata.push("location", loc.site.clone());
                                 }
                             }
                             if let Some(ref specs) = server.specs {
                                 let spec_str = format_baremetal_specs(specs);
                                 if !spec_str.is_empty() {
-                                    metadata.push(("specs".to_string(), spec_str));
+                                    metadata.push("specs", spec_str);
                                 }
                             }
                             if let Some(ref contract) = server.contract {
                                 if !contract.delivery_status.is_empty() {
-                                    metadata.push((
-                                        "status".to_string(),
-                                        contract.delivery_status.clone(),
-                                    ));
+                                    metadata.push("status", contract.delivery_status.clone());
                                 }
                             }
                             let name = if server.reference.is_empty() {
@@ -252,7 +249,7 @@ impl Leaseweb {
                                 name,
                                 ip,
                                 tags: Vec::new(),
-                                metadata,
+                                metadata: metadata.finish(),
                             });
                         }
                     }
@@ -284,22 +281,22 @@ impl Leaseweb {
                 let mut hosts = Vec::new();
                 for instance in &resp.instances {
                     if let Some(ip) = select_cloud_ip(&instance.ips) {
-                        let mut metadata = Vec::with_capacity(4);
+                        let mut metadata = super::ProviderMetadata::new();
                         if !instance.region.is_empty() {
-                            metadata.push(("region".to_string(), instance.region.clone()));
+                            metadata.push("region", instance.region.clone());
                         }
                         if !instance.instance_type.is_empty() {
-                            metadata.push(("type".to_string(), instance.instance_type.clone()));
+                            metadata.push("type", instance.instance_type.clone());
                         }
                         if let Some(ref image) = instance.image {
                             if let Some(ref name) = image.name {
                                 if !name.is_empty() {
-                                    metadata.push(("image".to_string(), name.clone()));
+                                    metadata.push("image", name.clone());
                                 }
                             }
                         }
                         if !instance.state.is_empty() {
-                            metadata.push(("status".to_string(), instance.state.clone()));
+                            metadata.push("status", instance.state.clone());
                         }
                         let name = if instance.reference.is_empty() {
                             instance.id.clone()
@@ -311,7 +308,7 @@ impl Leaseweb {
                             name,
                             ip,
                             tags: Vec::new(),
-                            metadata,
+                            metadata: metadata.finish(),
                         });
                     }
                 }

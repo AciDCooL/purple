@@ -282,28 +282,28 @@ fn select_ip(instance: &GcpInstance) -> Option<String> {
 
 /// Build metadata key-value pairs for an instance.
 fn build_metadata(instance: &GcpInstance) -> Vec<(String, String)> {
-    let mut metadata = Vec::new();
+    let mut metadata = super::ProviderMetadata::new();
     let zone = last_url_segment(&instance.zone);
     if !zone.is_empty() {
-        metadata.push(("zone".to_string(), zone.to_string()));
+        metadata.push("zone", zone);
     }
     let machine = last_url_segment(&instance.machine_type);
     if !machine.is_empty() {
-        metadata.push(("machine".to_string(), machine.to_string()));
+        metadata.push("machine", machine);
     }
     // OS from first disk's first license (e.g. "debian-11" from license URL)
     if let Some(disk) = instance.disks.first() {
         if let Some(license) = disk.licenses.first() {
             let os = last_url_segment(license);
             if !os.is_empty() {
-                metadata.push(("os".to_string(), os.to_string()));
+                metadata.push("os", os);
             }
         }
     }
     if !instance.status.is_empty() {
-        metadata.push(("status".to_string(), instance.status.clone()));
+        metadata.push("status", instance.status.clone());
     }
-    metadata
+    metadata.finish()
 }
 
 /// Build tags from GCP tags and labels.
@@ -485,7 +485,7 @@ impl Gcp {
 
             let mut response = match agent
                 .get(&url)
-                .header("Authorization", &format!("Bearer {}", access_token))
+                .header("Authorization", &super::bearer_auth(&access_token))
                 .call()
             {
                 Ok(r) => r,

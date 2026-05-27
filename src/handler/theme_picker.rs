@@ -58,10 +58,7 @@ fn theme_key(ctx: &mut ThemeCtx, key: KeyEvent) {
             ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut *ctx.screen, Screen::HostList);
-            ctx.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            ctx.push_help_overlay();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             let current = ctx.ui.theme_picker().list.selected().unwrap_or(0);

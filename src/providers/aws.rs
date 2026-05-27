@@ -566,16 +566,16 @@ impl Aws {
                     name
                 };
 
-                let mut metadata = Vec::new();
-                metadata.push(("region".to_string(), region.clone()));
+                let mut metadata = super::ProviderMetadata::new();
+                metadata.push("region", region.clone());
                 if !instance.instance_type.is_empty() {
-                    metadata.push(("instance".to_string(), instance.instance_type.clone()));
+                    metadata.push("instance", instance.instance_type.clone());
                 }
                 if let Some(os_name) = ami_names.get(&instance.image_id) {
-                    metadata.push(("os".to_string(), os_name.clone()));
+                    metadata.push("os", os_name.clone());
                 }
                 if !instance.instance_state.name.is_empty() {
-                    metadata.push(("status".to_string(), instance.instance_state.name.clone()));
+                    metadata.push("status", instance.instance_state.name.clone());
                 }
 
                 all_hosts.push(ProviderHost {
@@ -583,7 +583,7 @@ impl Aws {
                     name,
                     ip,
                     tags,
-                    metadata,
+                    metadata: metadata.finish(),
                 });
             }
         }

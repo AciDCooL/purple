@@ -310,73 +310,67 @@ pub(crate) fn handle_container_logs_complete(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    if let Screen::ContainerLogs {
-        alias: scr_alias,
-        container_id: scr_id,
-        body,
-        error,
-        fetched_at,
-        scroll,
-        last_render_height,
-        search,
-        ..
-    } = &mut app.screen
-    {
-        if scr_alias == &alias && scr_id == &container_id {
-            match result {
-                Ok(lines) => {
-                    log::debug!(
-                        "[purple] container_logs_complete: {} lines for alias={} id={}",
-                        lines.len(),
-                        alias,
-                        container_id
-                    );
-                    *body = lines;
-                    *error = None;
-                    *fetched_at = now;
-                    // Tail-anchor: align the bottom of the body with
-                    // the bottom of the viewport so the latest line
-                    // sits at the last visible row, with N preceding
-                    // lines filling the gap. The renderer wrote
-                    // `last_render_height` while painting the loading
-                    // placeholder one frame earlier.
-                    *scroll = crate::handler::container_logs::tail_scroll(
-                        body.len(),
-                        *last_render_height,
-                    );
-                    // Recompute search matches against the refreshed
-                    // body so an active `/foo` survives the `r` cycle.
-                    // Re-centre the viewport on the current match so
-                    // the user lands back on a visible hit.
-                    if let Some(s) = search.as_mut() {
-                        crate::handler::container_logs::refresh_search(body, s);
+    if matches!(app.screen, Screen::ContainerLogs) {
+        if let Some(view) = app.container_state.logs_view_mut() {
+            if view.alias == alias && view.container_id == container_id {
+                match result {
+                    Ok(lines) => {
                         log::debug!(
-                            "[purple] container_logs: search refreshed query={:?} matches={}",
-                            s.query,
-                            s.matches.len()
+                            "[purple] container_logs_complete: {} lines for alias={} id={}",
+                            lines.len(),
+                            alias,
+                            container_id
                         );
-                        crate::handler::container_logs::recenter_on_match(
-                            body.len(),
-                            *last_render_height,
-                            s,
-                            scroll,
+                        view.body = lines;
+                        view.error = None;
+                        view.fetched_at = now;
+                        // Tail-anchor: align the bottom of the body with
+                        // the bottom of the viewport so the latest line
+                        // sits at the last visible row, with N preceding
+                        // lines filling the gap. The renderer wrote
+                        // `last_render_height` while painting the loading
+                        // placeholder one frame earlier.
+                        view.scroll = crate::handler::container_logs::tail_scroll(
+                            view.body.len(),
+                            view.last_render_height,
                         );
+                        // Recompute search matches against the refreshed
+                        // body so an active `/foo` survives the `r` cycle.
+                        // Re-centre the viewport on the current match so
+                        // the user lands back on a visible hit.
+                        if let Some(mut s) = view.search.take() {
+                            crate::handler::container_logs::refresh_search(&view.body, &mut s);
+                            log::debug!(
+                                "[purple] container_logs: search refreshed query={:?} matches={}",
+                                s.query,
+                                s.matches.len()
+                            );
+                            let body_len = view.body.len();
+                            let last_h = view.last_render_height;
+                            crate::handler::container_logs::recenter_on_match(
+                                body_len,
+                                last_h,
+                                &s,
+                                &mut view.scroll,
+                            );
+                            view.search = Some(s);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "[external] container_logs_complete: alias={} id={} error={}",
+                            alias,
+                            container_id,
+                            e
+                        );
+                        view.body.clear();
+                        view.error = Some(e);
+                        view.fetched_at = now;
+                        view.scroll = 0;
                     }
                 }
-                Err(e) => {
-                    log::warn!(
-                        "[external] container_logs_complete: alias={} id={} error={}",
-                        alias,
-                        container_id,
-                        e
-                    );
-                    body.clear();
-                    *error = Some(e);
-                    *fetched_at = now;
-                    *scroll = 0;
-                }
+                return;
             }
-            return;
         }
     }
     log::debug!(

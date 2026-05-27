@@ -471,10 +471,7 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
             fb.remote_list_state.select(Some(0));
         }
         KeyCode::Char('?') => {
-            let old = (*ctx.screen).clone();
-            ctx.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            ctx.push_help_overlay();
         }
         _ => {}
     }

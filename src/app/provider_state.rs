@@ -139,6 +139,20 @@ pub struct ProviderState {
     /// user cancels the new config form, this is dropped and nothing is
     /// written.
     pub(in crate::app) pending_label_migration: Option<PendingLabelMigration>,
+    /// Payload of an open `Screen::ConfirmPurgeStale` dialog. The Screen
+    /// variant is data-less; the alias list and provider scope live here
+    /// so the dialog can be opened with hundreds of stale aliases
+    /// without paying for an enum clone on every transition.
+    pub(in crate::app) pending_purge: Option<PendingPurge>,
+}
+
+/// Payload of the stale-host purge confirm dialog.
+#[derive(Debug, Clone)]
+pub struct PendingPurge {
+    /// Aliases the user will be told they are about to remove.
+    pub aliases: Vec<String>,
+    /// Provider scope filter; `None` purges across providers.
+    pub provider: Option<String>,
 }
 
 /// State carried between step 1 (label both configs) and step 2
@@ -426,6 +440,18 @@ impl ProviderState {
     pub fn set_pending_label_migration(&mut self, migration: Option<PendingLabelMigration>) {
         self.pending_label_migration = migration;
     }
+
+    pub fn pending_purge(&self) -> Option<&PendingPurge> {
+        self.pending_purge.as_ref()
+    }
+
+    pub fn set_pending_purge(&mut self, pending: PendingPurge) {
+        self.pending_purge = Some(pending);
+    }
+
+    pub fn take_pending_purge(&mut self) -> Option<PendingPurge> {
+        self.pending_purge.take()
+    }
 }
 
 impl Default for ProviderState {
@@ -449,6 +475,7 @@ impl Default for ProviderState {
             form_baseline: None,
             expanded_providers: HashSet::new(),
             pending_label_migration: None,
+            pending_purge: None,
         }
     }
 }

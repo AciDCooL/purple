@@ -10,6 +10,13 @@ use anyhow::Result;
 
 use crate::app::{self, App};
 use crate::event::{self, AppEvent, EventHandler};
+
+/// Minimum gap between consecutive `stat()` calls on a host's vault cert
+/// inside `lazy_cert_check`. The probe runs on every TUI iteration; without
+/// a throttle it would syscall on every 16ms animation tick. A quarter
+/// second still detects external writes within a blink while cutting the
+/// syscall count by ~95%.
+const CERT_STAT_THROTTLE: std::time::Duration = std::time::Duration::from_millis(250);
 use crate::ssh_config::model::SshConfigFile;
 use crate::{
     animation, askpass, connection, ensure_bw_session, ensure_keychain_password,
@@ -399,67 +406,80 @@ fn dispatch_event(
 /// When the selected host has a vault role and the cached cert status is
 /// missing, stale or has been touched externally, spawn a background check.
 fn lazy_cert_check(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEvent>) {
-    if let Some(selected) = app.selected_host() {
-        let has_vault_role = vault_ssh::resolve_vault_role(
-            selected.vault_ssh.as_deref(),
-            selected.provider.as_deref(),
-            selected.provider_label.as_deref(),
-            app.providers.config(),
-        )
-        .is_some();
-        // Also trigger a check when the host wires in a purple-managed cert
-        // via `CertificateFile` without setting the role marker (the user
-        // signed with the `vault` CLI directly). Without this branch the
-        // TTL gauge would stay empty for CLI-signed certs.
-        let has_purple_cert_file = vault_ssh::cert_file_in_purple_dir(&selected.certificate_file);
-        if has_vault_role || has_purple_cert_file {
-            // Stat the cert file once per iteration to detect external writes
-            // (CLI sign, another purple instance) within one frame. Compared
-            // against the mtime recorded when the cache entry was populated;
-            // any mismatch forces a re-check, no matter the TTL.
-            let current_mtime = vault_ssh::resolve_cert_path(
-                app.env().paths(),
-                &selected.alias,
-                &selected.certificate_file,
+    // Snapshot the selected host's vault-relevant fields so the immutable
+    // borrow on `app` ends here, freeing `app.vault` for the throttle write.
+    // `has_purple_cert_file` also covers CLI-signed certs that lack the role
+    // marker: without that branch the TTL gauge would stay empty for them.
+    let Some((alias, certificate_file, has_vault_role, has_purple_cert_file)) =
+        app.selected_host().map(|s| {
+            let role = vault_ssh::resolve_vault_role(
+                s.vault_ssh.as_deref(),
+                s.provider.as_deref(),
+                s.provider_label.as_deref(),
+                app.providers.config(),
             )
+            .is_some();
+            let cert_file = vault_ssh::cert_file_in_purple_dir(&s.certificate_file);
+            (s.alias.clone(), s.certificate_file.clone(), role, cert_file)
+        })
+    else {
+        return;
+    };
+    if !(has_vault_role || has_purple_cert_file) {
+        return;
+    }
+
+    // Stat the cert file at most once per `CERT_STAT_THROTTLE` so the
+    // per-frame freshness probe detects external writes (CLI sign,
+    // another purple instance) without a syscall on every 16ms tick.
+    // Compared against the mtime recorded when the cache entry was
+    // populated; any mismatch forces a re-check, no matter the TTL.
+    let now = std::time::Instant::now();
+    let recently_stat = app
+        .vault
+        .last_cert_stat(&alias)
+        .is_some_and(|t| now.duration_since(t) < CERT_STAT_THROTTLE);
+    let current_mtime = if recently_stat {
+        app.vault
+            .cert_entry(&alias)
+            .and_then(|(_, _, mtime)| *mtime)
+    } else {
+        let m = vault_ssh::resolve_cert_path(app.env().paths(), &alias, &certificate_file)
             .ok()
             .and_then(|p| std::fs::metadata(&p).ok())
             .and_then(|m| m.modified().ok());
-            let cache_stale =
-                cache_entry_is_stale(app.vault.cert_entry(&selected.alias), current_mtime, |t| {
-                    t.elapsed().as_secs()
-                });
+        app.vault.note_cert_stat(alias.clone(), now);
+        m
+    };
+    let cache_stale = cache_entry_is_stale(app.vault.cert_entry(&alias), current_mtime, |t| {
+        t.elapsed().as_secs()
+    });
 
-            let sign_in_flight = app
-                .vault
-                .sign_in_flight()
-                .lock()
-                .map(|g| g.contains(&selected.alias))
-                .unwrap_or(false);
-            if cache_stale && !app.vault.is_cert_check_in_flight(&selected.alias) && !sign_in_flight
-            {
-                let alias = selected.alias.clone();
-                let cert_file = selected.certificate_file.clone();
-                app.vault.mark_cert_check_started(alias.clone());
-                let tx = events_tx.clone();
-                let env = std::sync::Arc::clone(&app.env);
-                std::thread::spawn(move || {
-                    let check_path =
-                        match vault_ssh::resolve_cert_path(env.paths(), &alias, &cert_file) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                let _ = tx.send(event::AppEvent::CertCheckError {
-                                    alias,
-                                    message: e.to_string(),
-                                });
-                                return;
-                            }
-                        };
-                    let status = vault_ssh::check_cert_validity(&env, &check_path);
-                    let _ = tx.send(event::AppEvent::CertCheckResult { alias, status });
-                });
-            }
-        }
+    let sign_in_flight = app
+        .vault
+        .sign_in_flight()
+        .lock()
+        .map(|g| g.contains(&alias))
+        .unwrap_or(false);
+    if cache_stale && !app.vault.is_cert_check_in_flight(&alias) && !sign_in_flight {
+        app.vault.mark_cert_check_started(alias.clone());
+        let tx = events_tx.clone();
+        let env = std::sync::Arc::clone(&app.env);
+        std::thread::spawn(move || {
+            let check_path =
+                match vault_ssh::resolve_cert_path(env.paths(), &alias, &certificate_file) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx.send(event::AppEvent::CertCheckError {
+                            alias,
+                            message: e.to_string(),
+                        });
+                        return;
+                    }
+                };
+            let status = vault_ssh::check_cert_validity(&env, &check_path);
+            let _ = tx.send(event::AppEvent::CertCheckResult { alias, status });
+        });
     }
 }
 

@@ -827,7 +827,7 @@ fn visual_container_logs() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "aws-api-staging".to_string(),
         container_id: "f9a0b1c2d3e4".to_string(),
         container_name: "api".to_string(),
@@ -842,7 +842,8 @@ fn visual_container_logs() {
         scroll: 0,
         last_render_height: 0,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     let actual = render_screen(&mut app);
     assert_golden("container_logs", &actual);
 }
@@ -871,7 +872,7 @@ fn visual_container_logs_search_active() {
             }
         })
         .collect();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "aws-api-staging".to_string(),
         container_id: "f9a0b1c2d3e4".to_string(),
         container_name: "api".to_string(),
@@ -886,7 +887,8 @@ fn visual_container_logs_search_active() {
             current: 0,
             cursor_pos: 3,
         }),
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     let actual = render_screen(&mut app);
     assert_golden("container_logs_search_active", &actual);
 }
@@ -928,27 +930,30 @@ fn visual_confirm_stack_restart() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    app.screen = Screen::ConfirmStackRestart {
-        alias: "aws-api-staging".to_string(),
-        project: "aws-api-staging".to_string(),
-        members: vec![
-            crate::app::StackMember {
-                container_id: "f9a0b1c2d3e4".to_string(),
-                container_name: "api".to_string(),
-                uptime: Some("2d".to_string()),
-            },
-            crate::app::StackMember {
-                container_id: "a1b2c3d4e5f6".to_string(),
-                container_name: "datadog-agent".to_string(),
-                uptime: Some("2d".to_string()),
-            },
-            crate::app::StackMember {
-                container_id: "11223344aabb".to_string(),
-                container_name: "nginx".to_string(),
-                uptime: Some("2d".to_string()),
-            },
-        ],
-    };
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::StackRestart,
+            alias: "aws-api-staging".to_string(),
+            project: Some("aws-api-staging".to_string()),
+            members: vec![
+                crate::app::StackMember {
+                    container_id: "f9a0b1c2d3e4".to_string(),
+                    container_name: "api".to_string(),
+                    uptime: Some("2d".to_string()),
+                },
+                crate::app::StackMember {
+                    container_id: "a1b2c3d4e5f6".to_string(),
+                    container_name: "datadog-agent".to_string(),
+                    uptime: Some("2d".to_string()),
+                },
+                crate::app::StackMember {
+                    container_id: "11223344aabb".to_string(),
+                    container_name: "nginx".to_string(),
+                    uptime: Some("2d".to_string()),
+                },
+            ],
+        });
+    app.screen = Screen::ConfirmStackRestart;
     let actual = render_screen(&mut app);
     assert_golden("confirm_stack_restart", &actual);
 }
@@ -958,26 +963,30 @@ fn visual_confirm_host_restart_all() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    app.screen = Screen::ConfirmHostRestartAll {
-        alias: "aws-api-staging".to_string(),
-        members: vec![
-            crate::app::StackMember {
-                container_id: "f9a0b1c2d3e4".to_string(),
-                container_name: "api".to_string(),
-                uptime: Some("2d".to_string()),
-            },
-            crate::app::StackMember {
-                container_id: "a1b2c3d4e5f6".to_string(),
-                container_name: "datadog-agent".to_string(),
-                uptime: Some("2d".to_string()),
-            },
-            crate::app::StackMember {
-                container_id: "11223344aabb".to_string(),
-                container_name: "nginx".to_string(),
-                uptime: Some("2d".to_string()),
-            },
-        ],
-    };
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::HostRestartAll,
+            alias: "aws-api-staging".to_string(),
+            project: None,
+            members: vec![
+                crate::app::StackMember {
+                    container_id: "f9a0b1c2d3e4".to_string(),
+                    container_name: "api".to_string(),
+                    uptime: Some("2d".to_string()),
+                },
+                crate::app::StackMember {
+                    container_id: "a1b2c3d4e5f6".to_string(),
+                    container_name: "datadog-agent".to_string(),
+                    uptime: Some("2d".to_string()),
+                },
+                crate::app::StackMember {
+                    container_id: "11223344aabb".to_string(),
+                    container_name: "nginx".to_string(),
+                    uptime: Some("2d".to_string()),
+                },
+            ],
+        });
+    app.screen = Screen::ConfirmHostRestartAll;
     let actual = render_screen(&mut app);
     assert_golden("confirm_host_restart_all", &actual);
 }
@@ -987,21 +996,25 @@ fn visual_confirm_host_stop_all() {
     let _g = setup();
     let mut app = demo::build_demo_app();
     app.top_page = crate::app::TopPage::Containers;
-    app.screen = Screen::ConfirmHostStopAll {
-        alias: "aws-api-staging".to_string(),
-        members: vec![
-            crate::app::StackMember {
-                container_id: "f9a0b1c2d3e4".to_string(),
-                container_name: "api".to_string(),
-                uptime: Some("2d".to_string()),
-            },
-            crate::app::StackMember {
-                container_id: "a1b2c3d4e5f6".to_string(),
-                container_name: "datadog-agent".to_string(),
-                uptime: Some("2d".to_string()),
-            },
-        ],
-    };
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::HostStopAll,
+            alias: "aws-api-staging".to_string(),
+            project: None,
+            members: vec![
+                crate::app::StackMember {
+                    container_id: "f9a0b1c2d3e4".to_string(),
+                    container_name: "api".to_string(),
+                    uptime: Some("2d".to_string()),
+                },
+                crate::app::StackMember {
+                    container_id: "a1b2c3d4e5f6".to_string(),
+                    container_name: "datadog-agent".to_string(),
+                    uptime: Some("2d".to_string()),
+                },
+            ],
+        });
+    app.screen = Screen::ConfirmHostStopAll;
     let actual = render_screen(&mut app);
     assert_golden("confirm_host_stop_all", &actual);
 }
@@ -1145,9 +1158,9 @@ fn visual_confirm_delete() {
 fn visual_snippet_picker() {
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.screen = Screen::SnippetPicker {
-        target_aliases: vec!["bastion-ams".to_string()],
-    };
+    app.snippets
+        .set_flow_targets(vec!["bastion-ams".to_string()]);
+    app.screen = Screen::SnippetPicker;
     let actual = render_screen(&mut app);
     assert_golden("snippet_picker", &actual);
 }
@@ -1156,10 +1169,10 @@ fn visual_snippet_picker() {
 fn visual_snippet_form() {
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["bastion-ams".to_string()],
-        editing: None,
-    };
+    app.snippets
+        .set_flow_targets(vec!["bastion-ams".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     let actual = render_screen(&mut app);
     assert_golden("snippet_form", &actual);
 }
@@ -1183,10 +1196,11 @@ fn visual_snippet_output() {
             all_done: true,
             cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }));
-    app.screen = Screen::SnippetOutput {
-        snippet_name: "uptime".to_string(),
-        target_aliases: vec!["bastion-ams".to_string()],
-    };
+    app.snippets
+        .set_output_snippet_name(Some("uptime".to_string()));
+    app.snippets
+        .set_flow_targets(vec!["bastion-ams".to_string()]);
+    app.screen = Screen::SnippetOutput;
     let actual = render_screen(&mut app);
     assert_golden("snippet_output", &actual);
 }
@@ -1205,10 +1219,10 @@ fn visual_snippet_param_form() {
     let params: Vec<crate::snippet::SnippetParam> = Vec::new();
     app.snippets
         .set_param_form(Some(crate::app::SnippetParamFormState::new(&params)));
-    app.screen = Screen::SnippetParamForm {
-        snippet,
-        target_aliases: vec!["bastion-ams".to_string()],
-    };
+    app.snippets.set_param_snippet(Some(snippet));
+    app.snippets
+        .set_flow_targets(vec!["bastion-ams".to_string()]);
+    app.screen = Screen::SnippetParamForm;
     let actual = render_screen(&mut app);
     assert_golden("snippet_param_form", &actual);
 }
@@ -1545,10 +1559,11 @@ fn visual_confirm_import() {
 fn visual_confirm_purge_stale() {
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.screen = Screen::ConfirmPurgeStale {
+    app.providers.set_pending_purge(crate::app::PendingPurge {
         aliases: vec!["aws-old-1".to_string(), "aws-old-2".to_string()],
         provider: Some("aws".to_string()),
-    };
+    });
+    app.screen = Screen::ConfirmPurgeStale;
     let actual = render_screen(&mut app);
     assert_golden("confirm_purge_stale", &actual);
 }
@@ -1557,9 +1572,8 @@ fn visual_confirm_purge_stale() {
 fn visual_confirm_vault_sign() {
     let _g = setup();
     let mut app = demo::build_demo_app();
-    app.screen = Screen::ConfirmVaultSign {
-        signable: Vec::new(),
-    };
+    app.vault.set_pending_sign(Vec::new());
+    app.screen = Screen::ConfirmVaultSign;
     let actual = render_screen(&mut app);
     assert_golden("confirm_vault_sign", &actual);
 }

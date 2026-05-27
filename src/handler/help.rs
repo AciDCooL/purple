@@ -36,11 +36,7 @@ fn help_key(ctx: &mut HelpCtx, key: KeyEvent) {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
             ctx.ui.set_help_scroll(0);
-            let return_screen = match &*ctx.screen {
-                Screen::Help { return_screen } => (**return_screen).clone(),
-                _ => Screen::HostList,
-            };
-            ctx.set_screen(return_screen);
+            ctx.pop_help_overlay();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             ctx.ui
@@ -73,10 +69,7 @@ fn key_list_key(ctx: &mut HelpCtx, key: KeyEvent) {
             ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('?') => {
-            let old = (*ctx.screen).clone();
-            ctx.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            ctx.push_help_overlay();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             let len = ctx.keys.list().len();
@@ -116,10 +109,7 @@ fn key_detail_key(ctx: &mut HelpCtx, key: KeyEvent) {
             ctx.set_screen(Screen::KeyList);
         }
         KeyCode::Char('?') => {
-            let old = (*ctx.screen).clone();
-            ctx.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            ctx.push_help_overlay();
         }
         _ => {}
     }

@@ -396,10 +396,11 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 app.notify_warning(crate::messages::NO_STALE_HOSTS);
             } else {
                 let aliases: Vec<String> = stale.into_iter().map(|(a, _)| a).collect();
-                app.set_screen(Screen::ConfirmPurgeStale {
+                app.providers.set_pending_purge(crate::app::PendingPurge {
                     aliases,
                     provider: None,
                 });
+                app.set_screen(Screen::ConfirmPurgeStale);
             }
         }
         KeyCode::Char('V') => actions::initiate_bulk_vault_sign(app),
@@ -459,10 +460,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             app.set_screen(Screen::WhatsNew(crate::app::WhatsNewState::default()));
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut app.screen, Screen::HostList);
-            app.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            app.push_help_overlay();
         }
         _ => {}
     }

@@ -19,6 +19,28 @@ pub struct ContainerSession {
     pub confirm_action: Option<(crate::containers::ContainerAction, String, String)>,
 }
 
+/// Open container logs viewer. The `Screen::ContainerLogs` variant is
+/// data-less; the alias/container identity and the streaming body live
+/// here so screen transitions never clone the body Vec.
+#[derive(Debug, Default)]
+pub struct LogsView {
+    pub alias: String,
+    pub container_id: String,
+    pub container_name: String,
+    /// Rendered lines fetched via SSH `docker logs --tail`. Empty while
+    /// the request is in flight, populated once the result lands.
+    pub body: Vec<String>,
+    pub fetched_at: u64,
+    pub error: Option<String>,
+    pub scroll: u16,
+    /// Written by the renderer each frame so `G` and the result-arrival
+    /// path can compute the tail-anchored scroll without guessing the
+    /// visible-area size.
+    pub last_render_height: u16,
+    /// `/` search state. `None` when no search is active.
+    pub search: Option<crate::app::ContainerLogsSearch>,
+}
+
 /// Always-present container-domain state: cache and cross-host pending operations.
 /// Separate from `ContainerSession`, which is the per-host overlay session state.
 #[derive(Debug, Default)]
@@ -29,6 +51,9 @@ pub struct ContainerState {
     pub(in crate::app) pending_fetch_aliases: Vec<String>,
     pub(in crate::app) cache:
         std::collections::HashMap<String, crate::containers::ContainerCacheEntry>,
+    /// Open `Screen::ContainerLogs` overlay payload, `None` when no
+    /// logs overlay is open.
+    pub(in crate::app) logs_view: Option<LogsView>,
 }
 
 impl ContainerState {
@@ -169,6 +194,28 @@ impl ContainerState {
         std::mem::take(&mut self.pending_fetch_aliases)
     }
 
+    /// Read the active container-logs overlay payload (`None` when no
+    /// logs overlay is open).
+    pub fn logs_view(&self) -> Option<&LogsView> {
+        self.logs_view.as_ref()
+    }
+
+    /// Mutable read for the active container-logs overlay payload.
+    pub fn logs_view_mut(&mut self) -> Option<&mut LogsView> {
+        self.logs_view.as_mut()
+    }
+
+    /// Install a fresh logs-view payload. Caller is responsible for
+    /// transitioning the screen.
+    pub fn set_logs_view(&mut self, view: LogsView) {
+        self.logs_view = Some(view);
+    }
+
+    /// Drop the logs-view payload. Called on overlay close.
+    pub fn clear_logs_view(&mut self) {
+        self.logs_view = None;
+    }
+
     /// Drop cache entries whose host alias is no longer in
     /// `valid_aliases`. Returns `true` when anything was dropped so the
     /// caller can persist the trimmed cache via
@@ -179,6 +226,15 @@ impl ContainerState {
         self.cache
             .retain(|alias, _| valid_aliases.contains(alias.as_str()));
         let dropped = pre.saturating_sub(self.cache.len());
+        // Logs overlay targeting a deleted host is no longer valid;
+        // dropping the view also frees the body Vec. The matching
+        // handler restores the screen to HostList on the next key
+        // (`container_logs_key` checks for a missing view).
+        if let Some(view) = self.logs_view.as_ref() {
+            if !valid_aliases.contains(view.alias.as_str()) {
+                self.logs_view = None;
+            }
+        }
         if dropped > 0 {
             log::debug!("[purple] reload_hosts: dropped {dropped} orphan container_cache host(s)");
             true
@@ -193,6 +249,13 @@ impl ContainerState {
     pub fn migrate_alias(&mut self, old: &str, new: &str) -> bool {
         if old == new {
             return false;
+        }
+        // Open logs overlay: rename its alias too so a refresh queued
+        // after the rename does not run against the stale name.
+        if let Some(view) = self.logs_view.as_mut() {
+            if view.alias == old {
+                view.alias = new.to_string();
+            }
         }
         if let Some(v) = self.cache.remove(old) {
             debug_assert!(

@@ -1,3 +1,10 @@
+## 3.18.7 - 2026-05-27
+
+- change: Snappier overlays. Vault cert checks throttled.
+- change: Opening or closing the container-logs, snippet and bulk-confirm overlays no longer copies the underlying payload, so transitions stay flat regardless of how many lines or rows the overlay carries.
+- change: Vault cert freshness check throttled to once every 250ms while you sit on the selected host. External signs (CLI, another purple instance) still surface within a blink and the per-frame syscall load drops several-fold.
+- change: Cloud provider sync internals share a Bearer auth helper and a typed metadata builder across all 16 providers, so a typo in one cannot silently drift from the rest.
+
 ## 3.18.6 - 2026-05-27
 
 - fix: Cleaner, balanced margins on every overlay.

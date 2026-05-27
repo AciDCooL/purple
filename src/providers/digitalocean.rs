@@ -32,7 +32,7 @@ impl DigitalOcean {
             );
             let resp: DropletResponse = agent
                 .get(&url)
-                .header("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &super::bearer_auth(token))
                 .call()
                 .map_err(map_ureq_error)?
                 .body_mut()
@@ -50,14 +50,14 @@ impl DigitalOcean {
                     .or_else(|| droplet.networks.v6.iter().find(|n| n.net_type == "public"))
                     .map(|n| n.ip_address.clone());
                 if let Some(ip) = ip {
-                    let mut metadata = Vec::new();
+                    let mut metadata = super::ProviderMetadata::new();
                     if let Some(ref region) = droplet.region {
                         if !region.slug.is_empty() {
-                            metadata.push(("region".to_string(), region.slug.clone()));
+                            metadata.push("region", &region.slug);
                         }
                     }
                     if !droplet.size_slug.is_empty() {
-                        metadata.push(("size".to_string(), droplet.size_slug.clone()));
+                        metadata.push("size", &droplet.size_slug);
                     }
                     if let Some(ref image) = droplet.image {
                         let label = match (&image.distribution, &image.name) {
@@ -69,18 +69,18 @@ impl DigitalOcean {
                             _ => String::new(),
                         };
                         if !label.is_empty() {
-                            metadata.push(("image".to_string(), label));
+                            metadata.push("image", label);
                         }
                     }
                     if !droplet.status.is_empty() {
-                        metadata.push(("status".to_string(), droplet.status.clone()));
+                        metadata.push("status", &droplet.status);
                     }
                     hosts.push(ProviderHost {
                         server_id: droplet.id.to_string(),
                         name: droplet.name.clone(),
                         ip,
                         tags: droplet.tags.clone(),
-                        metadata,
+                        metadata: metadata.finish(),
                     });
                 }
             }

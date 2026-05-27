@@ -361,10 +361,7 @@ pub(super) fn handle_provider_list_key(
             }
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut app.screen, Screen::HostList);
-            app.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            app.push_help_overlay();
         }
         KeyCode::Char('X') => {
             // The list state indexes the FULL row list (headers + leaves),
@@ -424,10 +421,11 @@ pub(super) fn handle_provider_list_key(
             } else {
                 let aliases: Vec<String> =
                     provider_stale.into_iter().map(|(a, _)| a.clone()).collect();
-                app.set_screen(Screen::ConfirmPurgeStale {
+                app.providers.set_pending_purge(crate::app::PendingPurge {
                     aliases,
                     provider: scope_provider,
                 });
+                app.set_screen(Screen::ConfirmPurgeStale);
             }
         }
         _ => {}

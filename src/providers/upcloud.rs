@@ -169,7 +169,7 @@ impl UpCloud {
             let url = format!("{}/1.3/server?limit={}&offset={}", base_url, limit, offset);
             let resp: ServerListResponse = agent
                 .get(&url)
-                .header("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &super::bearer_auth(token))
                 .call()
                 .map_err(map_ureq_error)?
                 .body_mut()
@@ -202,7 +202,7 @@ impl UpCloud {
             let url = format!("{}/1.3/server/{}", base_url, server.uuid);
             let detail: ServerDetailResponse = match agent
                 .get(&url)
-                .header("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &super::bearer_auth(token))
                 .call()
             {
                 Ok(mut resp) => match resp.body_mut().read_json() {
@@ -247,12 +247,12 @@ impl UpCloud {
             }
             tags.sort();
 
-            let mut metadata = Vec::new();
+            let mut metadata = super::ProviderMetadata::new();
             if !server.zone.is_empty() {
-                metadata.push(("zone".to_string(), server.zone.clone()));
+                metadata.push("zone", server.zone.clone());
             }
             if !server.plan.is_empty() {
-                metadata.push(("plan".to_string(), server.plan.clone()));
+                metadata.push("plan", server.plan.clone());
             }
             if let Some(ref sd) = detail.server.storage_devices {
                 // Prefer boot disk, fall back to first device
@@ -263,19 +263,19 @@ impl UpCloud {
                     .or_else(|| sd.storage_device.first());
                 if let Some(disk) = boot {
                     if !disk.storage_title.is_empty() {
-                        metadata.push(("image".to_string(), disk.storage_title.clone()));
+                        metadata.push("image", disk.storage_title.clone());
                     }
                 }
             }
             if !server.state.is_empty() {
-                metadata.push(("status".to_string(), server.state.clone()));
+                metadata.push("status", server.state.clone());
             }
             all_hosts.push(ProviderHost {
                 server_id: server.uuid.clone(),
                 name,
                 ip,
                 tags,
-                metadata,
+                metadata: metadata.finish(),
             });
         }
 

@@ -192,7 +192,7 @@ impl ContainersActionCtx<'_> {
                 container_id: row.id.clone(),
                 container_name: row.name.clone(),
             });
-        self.set_screen(Screen::ContainerLogs {
+        self.container_state.set_logs_view(crate::app::LogsView {
             alias: row.alias,
             container_id: row.id,
             container_name: row.name,
@@ -203,6 +203,7 @@ impl ContainersActionCtx<'_> {
             last_render_height: 0,
             search: None,
         });
+        self.set_screen(Screen::ContainerLogs);
     }
 
     /// Demo-guard + validate `row`, then open the restart confirm dialog.
@@ -271,10 +272,14 @@ impl ContainersActionCtx<'_> {
             alias,
             members.len()
         );
-        self.set_screen(Screen::ConfirmHostRestartAll {
-            alias: alias.to_string(),
-            members,
-        });
+        self.containers_overview
+            .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+                kind: crate::app::BulkConfirmKind::HostRestartAll,
+                alias: alias.to_string(),
+                project: None,
+                members,
+            });
+        self.set_screen(Screen::ConfirmHostRestartAll);
     }
 
     /// `S` on a host-divider row: confirm-then-queue a Stop for every running
@@ -294,10 +299,14 @@ impl ContainersActionCtx<'_> {
             alias,
             members.len()
         );
-        self.set_screen(Screen::ConfirmHostStopAll {
-            alias: alias.to_string(),
-            members,
-        });
+        self.containers_overview
+            .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+                kind: crate::app::BulkConfirmKind::HostStopAll,
+                alias: alias.to_string(),
+                project: None,
+                members,
+            });
+        self.set_screen(Screen::ConfirmHostStopAll);
     }
 
     /// `Ctrl-K` on a container row: confirm-then-queue a Restart for every
@@ -353,11 +362,14 @@ impl ContainersActionCtx<'_> {
             project,
             members.len()
         );
-        self.set_screen(Screen::ConfirmStackRestart {
-            alias: row.alias,
-            project,
-            members,
-        });
+        self.containers_overview
+            .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+                kind: crate::app::BulkConfirmKind::StackRestart,
+                alias: row.alias,
+                project: Some(project),
+                members,
+            });
+        self.set_screen(Screen::ConfirmStackRestart);
     }
 
     /// Demo-guard + validate `row`, then open the exec command prompt.

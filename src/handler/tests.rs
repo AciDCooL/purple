@@ -3164,6 +3164,36 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
     app.containers_overview
         .mark_auto_list_pending("web-old".to_string());
     app.vault.mark_cert_check_started("web-old".to_string());
+    app.vault
+        .note_cert_stat("web-old".to_string(), std::time::Instant::now());
+    // Seed an open bulk-confirm dialog and a logs overlay scoped to the
+    // old alias so the rename migration is exercised end-to-end.
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::HostRestartAll,
+            alias: "web-old".to_string(),
+            project: None,
+            members: vec![],
+        });
+    app.container_state.set_logs_view(crate::app::LogsView {
+        alias: "web-old".to_string(),
+        container_id: "c1".to_string(),
+        container_name: "nginx".to_string(),
+        body: vec![],
+        fetched_at: 0,
+        error: None,
+        scroll: 0,
+        last_render_height: 0,
+        search: None,
+    });
+    app.vault
+        .set_pending_sign(vec![crate::vault_ssh::VaultSignTarget {
+            alias: "web-old".to_string(),
+            role: "ssh-client/sign/role".to_string(),
+            certificate_file: String::new(),
+            pubkey: std::path::PathBuf::from("/tmp/id_ed25519.pub"),
+            vault_addr: None,
+        }]);
 
     app.screen = Screen::EditHost {
         alias: "web-old".to_string(),
@@ -3215,6 +3245,37 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
         !app.vault.is_cert_check_in_flight("web-old")
             && app.vault.is_cert_check_in_flight("web-new"),
         "vault.cert_checks_in_flight must follow the rename"
+    );
+    assert!(
+        app.vault.last_cert_stat("web-old").is_none()
+            && app.vault.last_cert_stat("web-new").is_some(),
+        "vault.cert_stat_throttle must follow the rename"
+    );
+    // Open dialog payloads must follow the rename so a worker spawned
+    // post-rename does not act on the stale alias.
+    let pending_bulk = app
+        .containers_overview
+        .pending_bulk_confirm()
+        .expect("pending_bulk_confirm survives rename");
+    assert_eq!(
+        pending_bulk.alias, "web-new",
+        "containers_overview.pending_bulk_confirm.alias must follow the rename"
+    );
+    let pending_sign = app
+        .vault
+        .pending_sign()
+        .expect("pending_sign survives rename");
+    assert_eq!(
+        pending_sign[0].alias, "web-new",
+        "vault.pending_sign[].alias must follow the rename"
+    );
+    let logs = app
+        .container_state
+        .logs_view()
+        .expect("logs_view survives rename");
+    assert_eq!(
+        logs.alias, "web-new",
+        "container_state.logs_view.alias must follow the rename"
     );
 }
 
@@ -3274,9 +3335,8 @@ fn make_snippet_app() -> App {
     ];
     let _ = app.snippets.store_mut().save();
     app.ui.snippet_picker_state_mut().select(Some(0));
-    app.screen = Screen::SnippetPicker {
-        target_aliases: vec!["myserver".to_string()],
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.screen = Screen::SnippetPicker;
     app
 }
 
@@ -3316,16 +3376,13 @@ fn test_snippet_picker_enter_starts_output() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    match &app.screen {
-        Screen::SnippetOutput {
-            snippet_name,
-            target_aliases,
-        } => {
-            assert_eq!(snippet_name, "check-disk");
-            assert_eq!(target_aliases, &vec!["myserver".to_string()]);
-        }
-        _ => panic!("Expected SnippetOutput screen, got {:?}", app.screen),
-    }
+    assert!(
+        matches!(app.screen, Screen::SnippetOutput),
+        "Expected SnippetOutput screen, got {:?}",
+        app.screen
+    );
+    assert_eq!(app.snippets.output_snippet_name(), Some("check-disk"));
+    assert_eq!(app.snippets.flow_targets(), &["myserver".to_string()][..]);
     assert!(app.snippets.output().is_some());
 }
 
@@ -3345,10 +3402,8 @@ fn test_snippet_picker_a_opens_add_form() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
-    assert!(matches!(
-        app.screen,
-        Screen::SnippetForm { editing: None, .. }
-    ));
+    assert!(matches!(app.screen, Screen::SnippetForm));
+    assert!(app.snippets.form_editing().is_none());
     assert!(app.snippets.form_mut().name.is_empty());
 }
 
@@ -3358,13 +3413,8 @@ fn test_snippet_picker_e_opens_edit_form() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('e')), &tx);
-    assert!(matches!(
-        app.screen,
-        Screen::SnippetForm {
-            editing: Some(0),
-            ..
-        }
-    ));
+    assert!(matches!(app.screen, Screen::SnippetForm));
+    assert_eq!(app.snippets.form_editing(), Some(0));
     assert_eq!(app.snippets.form_mut().name, "check-disk");
     assert_eq!(app.snippets.form_mut().command, "df -h");
 }
@@ -3441,24 +3491,22 @@ fn test_snippet_picker_d_rollback_on_save_failure() {
 fn test_snippet_form_esc_returns_to_picker() {
     let mut app = make_snippet_app();
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+    assert!(matches!(app.screen, Screen::SnippetPicker));
 }
 
 #[test]
 fn test_snippet_form_tab_cycles_fields() {
     let mut app = make_snippet_app();
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     assert_eq!(
@@ -3489,10 +3537,9 @@ fn test_snippet_form_tab_cycles_fields() {
 fn test_snippet_form_char_insert() {
     let mut app = make_snippet_app();
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('a')), &tx);
@@ -3507,10 +3554,9 @@ fn test_snippet_form_backspace() {
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.snippets.form_mut().name = "abc".to_string();
     app.snippets.form_mut().cursor_pos = 3;
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
@@ -3526,14 +3572,13 @@ fn test_snippet_form_submit_add() {
     app.snippets.form_mut().name = "new-cmd".to_string();
     app.snippets.form_mut().command = "whoami".to_string();
     app.snippets.form_mut().cursor_pos = 6;
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+    assert!(matches!(app.screen, Screen::SnippetPicker));
     assert_eq!(app.snippets.store().snippets.len(), 3);
     assert!(app.snippets.store().get("new-cmd").is_some());
 }
@@ -3545,14 +3590,13 @@ fn test_snippet_form_submit_edit() {
     *app.snippets.form_mut() =
         crate::app::SnippetForm::from_snippet(&app.snippets.store().snippets[0].clone());
     app.snippets.form_mut().command = "df -hT".to_string();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: Some(0),
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(Some(0));
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+    assert!(matches!(app.screen, Screen::SnippetPicker));
     assert_eq!(app.snippets.store().snippets[0].command, "df -hT");
 }
 
@@ -3561,15 +3605,14 @@ fn test_snippet_form_submit_rejects_empty_name() {
     let mut app = make_snippet_app();
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
     app.snippets.form_mut().command = "ls".to_string();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Should stay on the form with an error
-    assert!(matches!(app.screen, Screen::SnippetForm { .. }));
+    assert!(matches!(app.screen, Screen::SnippetForm));
     assert!(app.status_center.toast().unwrap().is_error());
 }
 
@@ -3581,14 +3624,13 @@ fn test_snippet_form_submit_rejects_duplicate_name() {
     app.snippets.form_mut().name = "uptime".to_string();
     app.snippets.form_mut().command = "uptime -s".to_string();
     app.snippets.form_mut().cursor_pos = 9;
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(matches!(app.screen, Screen::SnippetForm { .. }));
+    assert!(matches!(app.screen, Screen::SnippetForm));
     assert!(app.status_center.toast().unwrap().is_error());
 }
 
@@ -3607,10 +3649,9 @@ fn test_snippet_form_submit_rollback_on_save_failure() {
     app.snippets.form_mut().name = "new-cmd".to_string();
     app.snippets.form_mut().command = "whoami".to_string();
     app.snippets.form_mut().cursor_pos = 6;
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
@@ -3635,10 +3676,9 @@ fn test_snippet_form_edit_rename_rollback_on_save_failure() {
         crate::app::SnippetForm::from_snippet(&app.snippets.store().snippets[0].clone());
     app.snippets.form_mut().name = "renamed".to_string();
     app.snippets.form_mut().cursor_pos = 7;
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: Some(0),
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(Some(0));
+    app.screen = Screen::SnippetForm;
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
@@ -3657,7 +3697,7 @@ fn test_snippet_picker_enter_with_no_selection() {
 
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
     // Should remain on picker, no pending snippet
-    assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+    assert!(matches!(app.screen, Screen::SnippetPicker));
     assert!(app.snippets.pending().is_none());
 }
 
@@ -3670,12 +3710,12 @@ fn test_host_list_r_opens_snippet_picker() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
-    match &app.screen {
-        Screen::SnippetPicker { target_aliases } => {
-            assert_eq!(target_aliases, &vec!["myserver".to_string()]);
-        }
-        _ => panic!("Expected SnippetPicker screen"),
-    }
+    assert!(
+        matches!(app.screen, Screen::SnippetPicker),
+        "Expected SnippetPicker screen, got {:?}",
+        app.screen
+    );
+    assert_eq!(app.snippets.flow_targets(), &["myserver".to_string()][..]);
 }
 
 #[test]
@@ -3687,12 +3727,12 @@ fn test_host_list_r_shift_opens_snippet_picker_all() {
     let (tx, _rx) = mpsc::channel();
 
     let _ = handle_key_event(&mut app, key(KeyCode::Char('R')), &tx);
-    match &app.screen {
-        Screen::SnippetPicker { target_aliases } => {
-            assert_eq!(target_aliases.len(), 2);
-        }
-        _ => panic!("Expected SnippetPicker screen"),
-    }
+    assert!(
+        matches!(app.screen, Screen::SnippetPicker),
+        "Expected SnippetPicker screen, got {:?}",
+        app.screen
+    );
+    assert_eq!(app.snippets.flow_targets().len(), 2);
 }
 
 // --- Tunnel form Space/arrow tests ---
@@ -3986,7 +4026,7 @@ fn test_host_detail_r_opens_snippet_picker() {
     app.screen = Screen::HostDetail { index: 0 };
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('r')), &tx);
-    assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+    assert!(matches!(app.screen, Screen::SnippetPicker));
 }
 
 #[test]
@@ -4091,14 +4131,13 @@ fn test_provider_form_dirty_esc_n_stays() {
 fn test_snippet_form_clean_esc_with_baseline_closes() {
     let mut app = make_snippet_app();
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     app.capture_snippet_form_baseline();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+    assert!(matches!(app.screen, Screen::SnippetPicker));
     assert!(!app.forms.is_discard_pending());
 }
 
@@ -4106,15 +4145,14 @@ fn test_snippet_form_clean_esc_with_baseline_closes() {
 fn test_snippet_form_dirty_esc_shows_confirmation() {
     let mut app = make_snippet_app();
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     app.capture_snippet_form_baseline();
     app.snippets.form_mut().name = "dirty".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(matches!(app.screen, Screen::SnippetForm { .. }));
+    assert!(matches!(app.screen, Screen::SnippetForm));
     assert!(app.forms.is_discard_pending());
 }
 
@@ -4122,16 +4160,15 @@ fn test_snippet_form_dirty_esc_shows_confirmation() {
 fn test_snippet_form_dirty_esc_y_closes() {
     let mut app = make_snippet_app();
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     app.capture_snippet_form_baseline();
     app.snippets.form_mut().name = "dirty".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
-    assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+    assert!(matches!(app.screen, Screen::SnippetPicker));
     assert!(app.snippets.form_baseline().is_none());
 }
 
@@ -4231,16 +4268,15 @@ fn test_host_form_dirty_esc_uppercase_y_closes() {
 fn test_snippet_form_dirty_esc_n_stays() {
     let mut app = make_snippet_app();
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     app.capture_snippet_form_baseline();
     app.snippets.form_mut().command = "changed".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
-    assert!(matches!(app.screen, Screen::SnippetForm { .. }));
+    assert!(matches!(app.screen, Screen::SnippetForm));
     assert!(!app.forms.is_discard_pending());
 }
 
@@ -4251,16 +4287,15 @@ fn test_snippet_form_dirty_esc_n_stays() {
 fn test_snippet_form_dirty_esc_other_key_ignored() {
     let mut app = make_snippet_app();
     *app.snippets.form_mut() = crate::app::SnippetForm::new();
-    app.screen = Screen::SnippetForm {
-        target_aliases: vec!["myserver".to_string()],
-        editing: None,
-    };
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
+    app.snippets.set_form_editing(None);
+    app.screen = Screen::SnippetForm;
     app.capture_snippet_form_baseline();
     app.snippets.form_mut().command = "changed".to_string();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('x')), &tx);
-    assert!(matches!(app.screen, Screen::SnippetForm { .. }));
+    assert!(matches!(app.screen, Screen::SnippetForm));
     assert!(app.forms.is_discard_pending());
 }
 
@@ -4339,14 +4374,18 @@ fn test_x_key_opens_confirm_purge_stale() {
     );
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('X')), &tx);
-    match &app.screen {
-        Screen::ConfirmPurgeStale { aliases, provider } => {
-            assert_eq!(aliases.len(), 1);
-            assert_eq!(aliases[0], "do-web");
-            assert!(provider.is_none());
-        }
-        other => panic!("expected ConfirmPurgeStale, got {:?}", other),
-    }
+    assert!(
+        matches!(app.screen, Screen::ConfirmPurgeStale),
+        "expected ConfirmPurgeStale, got {:?}",
+        app.screen
+    );
+    let payload = app
+        .providers
+        .pending_purge()
+        .expect("pending_purge payload must be set");
+    assert_eq!(payload.aliases.len(), 1);
+    assert_eq!(payload.aliases[0], "do-web");
+    assert!(payload.provider.is_none());
 }
 
 #[test]
@@ -4368,10 +4407,11 @@ fn test_confirm_purge_stale_y_deletes() {
     let mut app = make_app(
         "Host do-web\n  HostName 1.2.3.4\n  # purple:provider digitalocean:123\n  # purple:stale 1711900000\n\nHost keep\n  HostName 5.6.7.8\n",
     );
-    app.screen = Screen::ConfirmPurgeStale {
+    app.providers.set_pending_purge(crate::app::PendingPurge {
         aliases: vec!["do-web".to_string()],
         provider: None,
-    };
+    });
+    app.screen = Screen::ConfirmPurgeStale;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
@@ -4384,6 +4424,10 @@ fn test_confirm_purge_stale_y_deletes() {
         .collect();
     assert!(!aliases.contains(&"do-web"), "stale host should be removed");
     assert!(aliases.contains(&"keep"), "non-stale host should remain");
+    assert!(
+        app.providers.pending_purge().is_none(),
+        "yes path must clear the pending purge payload"
+    );
 }
 
 #[test]
@@ -4391,16 +4435,23 @@ fn test_confirm_purge_stale_esc_cancels() {
     let mut app = make_app(
         "Host do-web\n  HostName 1.2.3.4\n  # purple:provider digitalocean:123\n  # purple:stale 1711900000\n",
     );
-    app.screen = Screen::ConfirmPurgeStale {
+    app.providers.set_pending_purge(crate::app::PendingPurge {
         aliases: vec!["do-web".to_string()],
         provider: None,
-    };
+    });
+    app.screen = Screen::ConfirmPurgeStale;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::HostList));
     // Host should still exist
     assert_eq!(app.hosts_state.list().len(), 1);
     assert_eq!(app.hosts_state.list()[0].alias, "do-web");
+    // Esc must also drop the pending payload so a re-opened dialog
+    // starts from a clean slot.
+    assert!(
+        app.providers.pending_purge().is_none(),
+        "Esc must clear pending_purge"
+    );
 }
 
 #[test]
@@ -4553,13 +4604,17 @@ fn test_provider_x_key_opens_scoped_purge() {
     app.ui.provider_list_state_mut().select(Some(idx));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('X')), &tx);
-    match &app.screen {
-        Screen::ConfirmPurgeStale { aliases, provider } => {
-            assert_eq!(aliases, &vec!["do-web".to_string()]);
-            assert_eq!(provider.as_deref(), Some("digitalocean"));
-        }
-        other => panic!("expected ConfirmPurgeStale, got {:?}", other),
-    }
+    assert!(
+        matches!(app.screen, Screen::ConfirmPurgeStale),
+        "expected ConfirmPurgeStale, got {:?}",
+        app.screen
+    );
+    let payload = app
+        .providers
+        .pending_purge()
+        .expect("pending_purge payload must be set");
+    assert_eq!(payload.aliases, vec!["do-web".to_string()]);
+    assert_eq!(payload.provider.as_deref(), Some("digitalocean"));
 }
 
 #[test]
@@ -4567,10 +4622,11 @@ fn test_provider_purge_y_returns_to_providers() {
     let mut app = make_app(
         "Host do-web\n  HostName 1.2.3.4\n  # purple:provider digitalocean:123\n  # purple:stale 1711900000\n",
     );
-    app.screen = Screen::ConfirmPurgeStale {
+    app.providers.set_pending_purge(crate::app::PendingPurge {
         aliases: vec!["do-web".to_string()],
         provider: Some("digitalocean".to_string()),
-    };
+    });
+    app.screen = Screen::ConfirmPurgeStale;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(
@@ -4585,10 +4641,11 @@ fn test_provider_purge_esc_returns_to_providers() {
     let mut app = make_app(
         "Host do-web\n  HostName 1.2.3.4\n  # purple:provider digitalocean:123\n  # purple:stale 1711900000\n",
     );
-    app.screen = Screen::ConfirmPurgeStale {
+    app.providers.set_pending_purge(crate::app::PendingPurge {
         aliases: vec!["do-web".to_string()],
         provider: Some("digitalocean".to_string()),
-    };
+    });
+    app.screen = Screen::ConfirmPurgeStale;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(
@@ -5618,7 +5675,7 @@ fn test_snippet_picker_question_opens_help() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('?')), &tx);
     match &app.screen {
         Screen::Help { return_screen } => {
-            assert!(matches!(**return_screen, Screen::SnippetPicker { .. }));
+            assert!(matches!(**return_screen, Screen::SnippetPicker));
         }
         other => panic!("Expected Help screen, got {:?}", other),
     }
@@ -5627,14 +5684,13 @@ fn test_snippet_picker_question_opens_help() {
 #[test]
 fn test_snippet_picker_help_esc_returns() {
     let mut app = make_snippet_app();
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
     app.screen = Screen::Help {
-        return_screen: Box::new(Screen::SnippetPicker {
-            target_aliases: vec!["myserver".to_string()],
-        }),
+        return_screen: Box::new(Screen::SnippetPicker),
     };
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(matches!(app.screen, Screen::SnippetPicker { .. }));
+    assert!(matches!(app.screen, Screen::SnippetPicker));
 }
 
 #[test]
@@ -5643,13 +5699,13 @@ fn test_snippet_output_question_opens_help() {
     // First enter snippet output by pressing Enter
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
-    assert!(matches!(app.screen, Screen::SnippetOutput { .. }));
+    assert!(matches!(app.screen, Screen::SnippetOutput));
 
     // Now press ? to open help
     let _ = handle_key_event(&mut app, key(KeyCode::Char('?')), &tx);
     match &app.screen {
         Screen::Help { return_screen } => {
-            assert!(matches!(**return_screen, Screen::SnippetOutput { .. }));
+            assert!(matches!(**return_screen, Screen::SnippetOutput));
         }
         other => panic!("Expected Help screen, got {:?}", other),
     }
@@ -5658,15 +5714,15 @@ fn test_snippet_output_question_opens_help() {
 #[test]
 fn test_snippet_output_help_esc_returns() {
     let mut app = make_snippet_app();
+    app.snippets
+        .set_output_snippet_name(Some("check-disk".to_string()));
+    app.snippets.set_flow_targets(vec!["myserver".to_string()]);
     app.screen = Screen::Help {
-        return_screen: Box::new(Screen::SnippetOutput {
-            snippet_name: "check-disk".to_string(),
-            target_aliases: vec!["myserver".to_string()],
-        }),
+        return_screen: Box::new(Screen::SnippetOutput),
     };
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    assert!(matches!(app.screen, Screen::SnippetOutput { .. }));
+    assert!(matches!(app.screen, Screen::SnippetOutput));
 }
 
 #[test]
@@ -5798,7 +5854,7 @@ fn test_snippet_picker_pending_delete_question_opens_help() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('?')), &tx);
     match &app.screen {
         Screen::Help { return_screen } => {
-            assert!(matches!(**return_screen, Screen::SnippetPicker { .. }));
+            assert!(matches!(**return_screen, Screen::SnippetPicker));
         }
         other => panic!("Expected Help screen, got {:?}", other),
     }
@@ -5920,24 +5976,27 @@ fn test_file_browser_help_return_preserves_alias() {
 #[test]
 fn test_snippet_output_help_return_preserves_fields() {
     let mut app = make_app("Host a\n  HostName 1.2.3.4\nHost b\n  HostName 5.6.7.8\n");
+    app.snippets
+        .set_output_snippet_name(Some("check-disk".to_string()));
+    app.snippets
+        .set_flow_targets(vec!["a".to_string(), "b".to_string()]);
     app.screen = Screen::Help {
-        return_screen: Box::new(Screen::SnippetOutput {
-            snippet_name: "check-disk".to_string(),
-            target_aliases: vec!["a".to_string(), "b".to_string()],
-        }),
+        return_screen: Box::new(Screen::SnippetOutput),
     };
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
-    match &app.screen {
-        Screen::SnippetOutput {
-            snippet_name,
-            target_aliases,
-        } => {
-            assert_eq!(snippet_name, "check-disk");
-            assert_eq!(target_aliases, &vec!["a".to_string(), "b".to_string()]);
-        }
-        other => panic!("Expected SnippetOutput, got {:?}", other),
-    }
+    assert!(
+        matches!(app.screen, Screen::SnippetOutput),
+        "Expected SnippetOutput, got {:?}",
+        app.screen
+    );
+    // Snippet name and flow targets survive the Help round-trip because
+    // they live on `app.snippets`, not inside the Screen variant.
+    assert_eq!(app.snippets.output_snippet_name(), Some("check-disk"));
+    assert_eq!(
+        app.snippets.flow_targets(),
+        &["a".to_string(), "b".to_string()][..]
+    );
 }
 
 #[test]
@@ -7553,7 +7612,7 @@ fn jump_enter_on_snippet_hit_with_no_host_warns() {
     }
     let (tx, _rx) = mpsc::channel();
     handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
-    assert!(!matches!(app.screen, Screen::SnippetPicker { .. }));
+    assert!(!matches!(app.screen, Screen::SnippetPicker));
     let toast = app.status_center.toast();
     assert!(
         toast.is_some(),
@@ -8416,7 +8475,8 @@ fn vault_sign_confirm_app() -> App {
         pubkey: path,
         vault_addr: None,
     }];
-    app.screen = Screen::ConfirmVaultSign { signable };
+    app.vault.set_pending_sign(signable);
+    app.screen = Screen::ConfirmVaultSign;
     app
 }
 
@@ -8438,8 +8498,13 @@ fn vault_sign_confirm_stray_key_does_not_cancel() {
         let (tx, _rx) = mpsc::channel();
         let _ = handle_key_event(&mut app, key(stray), &tx);
         assert!(
-            matches!(app.screen, Screen::ConfirmVaultSign { .. }),
+            matches!(app.screen, Screen::ConfirmVaultSign),
             "stray key {:?} must not cancel Vault Sign confirm",
+            stray
+        );
+        assert!(
+            app.vault.pending_sign().is_some(),
+            "stray key {:?} must not drop the pending_sign payload",
             stray
         );
     }
@@ -8451,6 +8516,10 @@ fn vault_sign_confirm_n_cancels() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('n')), &tx);
     assert_eq!(app.screen, Screen::HostList);
+    assert!(
+        app.vault.pending_sign().is_none(),
+        "n must clear pending_sign"
+    );
 }
 
 #[test]
@@ -8459,6 +8528,10 @@ fn vault_sign_confirm_esc_cancels() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert_eq!(app.screen, Screen::HostList);
+    assert!(
+        app.vault.pending_sign().is_none(),
+        "Esc must clear pending_sign"
+    );
 }
 
 // ── Picker-field parity (Enter submits, Space-on-empty opens, Space-on-populated literal) ──
@@ -9926,7 +9999,7 @@ fn containers_overview_l_in_demo_mode_opens_logs_view() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('l')), &tx);
     assert!(
-        matches!(app.screen, Screen::ContainerLogs { .. }),
+        matches!(app.screen, Screen::ContainerLogs),
         "logs overlay must open in demo mode, got {:?}",
         app.screen
     );
@@ -10889,6 +10962,8 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
         ),
     );
     app.vault.mark_cert_check_started(ghost.clone());
+    app.vault
+        .note_cert_stat(ghost.clone(), std::time::Instant::now());
     {
         let mut sign = app.vault.sign_in_flight().lock().expect("lock");
         sign.insert(ghost.clone());
@@ -10927,6 +11002,36 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
     app.tunnels
         .demo_live_snapshots_mut()
         .insert(ghost.clone(), empty_tunnel_live_snapshot());
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::StackRestart,
+            alias: ghost.clone(),
+            project: Some("ghost-stack".to_string()),
+            members: vec![],
+        });
+    app.container_state.set_logs_view(crate::app::LogsView {
+        alias: ghost.clone(),
+        container_id: "abc123".to_string(),
+        container_name: "nginx".to_string(),
+        body: vec!["line".to_string()],
+        fetched_at: 0,
+        error: None,
+        scroll: 0,
+        last_render_height: 0,
+        search: None,
+    });
+    app.vault
+        .set_pending_sign(vec![crate::vault_ssh::VaultSignTarget {
+            alias: ghost.clone(),
+            role: "ssh-client/sign/role".to_string(),
+            certificate_file: String::new(),
+            pubkey: std::path::PathBuf::from("/tmp/id_ed25519.pub"),
+            vault_addr: None,
+        }]);
+    app.providers.set_pending_purge(crate::app::PendingPurge {
+        aliases: vec![ghost.clone()],
+        provider: None,
+    });
 
     app.reload_hosts();
 
@@ -10938,6 +11043,10 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
     assert!(
         !app.vault.is_cert_check_in_flight(&ghost),
         "vault.cert_checks_in_flight"
+    );
+    assert!(
+        app.vault.last_cert_stat(&ghost).is_none(),
+        "vault.cert_stat_throttle"
     );
     {
         let sign = app.vault.sign_in_flight().lock().expect("lock");
@@ -10974,6 +11083,23 @@ fn reload_hosts_ghost_sweep_clears_every_alias_keyed_collection() {
         !app.tunnels.demo_live_snapshots().contains_key(&ghost),
         "tunnels.demo_live_snapshots"
     );
+    assert!(
+        app.containers_overview.pending_bulk_confirm().is_none(),
+        "containers_overview.pending_bulk_confirm targeting a deleted host must be cleared"
+    );
+    assert!(
+        app.container_state.logs_view().is_none(),
+        "container_state.logs_view targeting a deleted host must be cleared"
+    );
+    assert!(
+        app.vault.pending_sign().is_none(),
+        "vault.pending_sign with only deleted-host targets must be cleared"
+    );
+    // pending_purge is not pruned by reload_hosts (the purge worker
+    // recomputes stale_hosts on yes), but stale entries should not
+    // prevent the dialog from running. The assertion intentionally
+    // does not require pruning here.
+    let _ = app.providers.pending_purge();
 }
 
 #[test]
@@ -11520,16 +11646,22 @@ fn containers_overview_K_on_header_opens_host_restart_all() {
     app.ui.containers_overview_state_mut().select(Some(0));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('K')), &tx);
-    let Screen::ConfirmHostRestartAll {
-        ref alias,
-        ref members,
-    } = app.screen
-    else {
-        panic!("expected ConfirmHostRestartAll, got {:?}", app.screen);
-    };
-    assert_eq!(alias, "db");
-    assert_eq!(members.len(), 1, "only postgres is running on db");
-    assert_eq!(members[0].container_name, "postgres");
+    assert!(
+        matches!(app.screen, Screen::ConfirmHostRestartAll),
+        "expected ConfirmHostRestartAll, got {:?}",
+        app.screen
+    );
+    let payload = app
+        .containers_overview
+        .pending_bulk_confirm()
+        .expect("bulk confirm payload must be set");
+    assert_eq!(payload.alias, "db");
+    assert!(matches!(
+        payload.kind,
+        crate::app::BulkConfirmKind::HostRestartAll
+    ));
+    assert_eq!(payload.members.len(), 1, "only postgres is running on db");
+    assert_eq!(payload.members[0].container_name, "postgres");
 }
 
 #[test]
@@ -11540,20 +11672,26 @@ fn containers_overview_S_on_header_opens_host_stop_all() {
     app.ui.containers_overview_state_mut().select(Some(2));
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('S')), &tx);
-    let Screen::ConfirmHostStopAll {
-        ref alias,
-        ref members,
-    } = app.screen
-    else {
-        panic!("expected ConfirmHostStopAll, got {:?}", app.screen);
-    };
-    assert_eq!(alias, "web");
+    assert!(
+        matches!(app.screen, Screen::ConfirmHostStopAll),
+        "expected ConfirmHostStopAll, got {:?}",
+        app.screen
+    );
+    let payload = app
+        .containers_overview
+        .pending_bulk_confirm()
+        .expect("bulk confirm payload must be set");
+    assert_eq!(payload.alias, "web");
+    assert!(matches!(
+        payload.kind,
+        crate::app::BulkConfirmKind::HostStopAll
+    ));
     assert_eq!(
-        members.len(),
+        payload.members.len(),
         1,
         "exited containers must not be queued for stop"
     );
-    assert_eq!(members[0].container_name, "nginx");
+    assert_eq!(payload.members[0].container_name, "nginx");
 }
 
 #[test]
@@ -11634,7 +11772,7 @@ fn containers_overview_l_queues_logs_fetch_and_opens_overlay() {
     let mut app = make_containers_overview_app();
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('l')), &tx);
-    assert!(matches!(app.screen, Screen::ContainerLogs { .. }));
+    assert!(matches!(app.screen, Screen::ContainerLogs));
     assert!(
         app.container_state.pending_logs_request().is_some(),
         "expected pending fetch request"
@@ -11706,7 +11844,7 @@ fn containers_overview_ctrl_k_with_compose_label_opens_stack_confirm() {
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, ctrl_key('k'), &tx);
     assert!(
-        matches!(app.screen, Screen::ConfirmStackRestart { .. }),
+        matches!(app.screen, Screen::ConfirmStackRestart),
         "expected ConfirmStackRestart, got {:?}",
         app.screen
     );
@@ -11825,22 +11963,25 @@ fn confirm_container_stop_stray_key_ignored() {
 #[test]
 fn confirm_stack_restart_y_enqueues_one_action_per_member() {
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ConfirmStackRestart {
-        alias: "web".to_string(),
-        project: "web-stack".to_string(),
-        members: vec![
-            crate::app::StackMember {
-                container_id: "c1".to_string(),
-                container_name: "nginx".to_string(),
-                uptime: Some("5d".to_string()),
-            },
-            crate::app::StackMember {
-                container_id: "cextra".to_string(),
-                container_name: "sidecar".to_string(),
-                uptime: Some("5d".to_string()),
-            },
-        ],
-    };
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::StackRestart,
+            alias: "web".to_string(),
+            project: Some("web-stack".to_string()),
+            members: vec![
+                crate::app::StackMember {
+                    container_id: "c1".to_string(),
+                    container_name: "nginx".to_string(),
+                    uptime: Some("5d".to_string()),
+                },
+                crate::app::StackMember {
+                    container_id: "cextra".to_string(),
+                    container_name: "sidecar".to_string(),
+                    uptime: Some("5d".to_string()),
+                },
+            ],
+        });
+    app.screen = Screen::ConfirmStackRestart;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
@@ -11861,39 +12002,52 @@ fn confirm_stack_restart_y_enqueues_one_action_per_member() {
             .container_id,
         "cextra"
     );
+    // Pending payload must be taken on yes so a re-entry to the dialog
+    // starts from a clean slate.
+    assert!(app.containers_overview.pending_bulk_confirm().is_none());
 }
 
 #[test]
 fn confirm_stack_restart_stray_key_ignored() {
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ConfirmStackRestart {
-        alias: "web".to_string(),
-        project: "web-stack".to_string(),
-        members: vec![],
-    };
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::StackRestart,
+            alias: "web".to_string(),
+            project: Some("web-stack".to_string()),
+            members: vec![],
+        });
+    app.screen = Screen::ConfirmStackRestart;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
-    assert!(matches!(app.screen, Screen::ConfirmStackRestart { .. }));
+    assert!(matches!(app.screen, Screen::ConfirmStackRestart));
+    // Ignored key must NOT take the payload; the dialog stays open and
+    // the next valid key still has the data to act on.
+    assert!(app.containers_overview.pending_bulk_confirm().is_some());
 }
 
 #[test]
 fn confirm_host_restart_all_y_enqueues_restart_per_member() {
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ConfirmHostRestartAll {
-        alias: "web".to_string(),
-        members: vec![
-            crate::app::StackMember {
-                container_id: "c1".to_string(),
-                container_name: "nginx".to_string(),
-                uptime: Some("5d".to_string()),
-            },
-            crate::app::StackMember {
-                container_id: "cextra".to_string(),
-                container_name: "sidecar".to_string(),
-                uptime: None,
-            },
-        ],
-    };
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::HostRestartAll,
+            alias: "web".to_string(),
+            project: None,
+            members: vec![
+                crate::app::StackMember {
+                    container_id: "c1".to_string(),
+                    container_name: "nginx".to_string(),
+                    uptime: Some("5d".to_string()),
+                },
+                crate::app::StackMember {
+                    container_id: "cextra".to_string(),
+                    container_name: "sidecar".to_string(),
+                    uptime: None,
+                },
+            ],
+        });
+    app.screen = Screen::ConfirmHostRestartAll;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
@@ -11918,26 +12072,34 @@ fn confirm_host_restart_all_y_enqueues_restart_per_member() {
             .container_id,
         "cextra"
     );
+    assert!(
+        app.containers_overview.pending_bulk_confirm().is_none(),
+        "yes must clear pending_bulk_confirm"
+    );
 }
 
 #[test]
 fn confirm_host_stop_all_y_enqueues_stop_per_member() {
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ConfirmHostStopAll {
-        alias: "web".to_string(),
-        members: vec![
-            crate::app::StackMember {
-                container_id: "c1".to_string(),
-                container_name: "nginx".to_string(),
-                uptime: Some("5d".to_string()),
-            },
-            crate::app::StackMember {
-                container_id: "c2".to_string(),
-                container_name: "redis".to_string(),
-                uptime: None,
-            },
-        ],
-    };
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::HostStopAll,
+            alias: "web".to_string(),
+            project: None,
+            members: vec![
+                crate::app::StackMember {
+                    container_id: "c1".to_string(),
+                    container_name: "nginx".to_string(),
+                    uptime: Some("5d".to_string()),
+                },
+                crate::app::StackMember {
+                    container_id: "c2".to_string(),
+                    container_name: "redis".to_string(),
+                    uptime: None,
+                },
+            ],
+        });
+    app.screen = Screen::ConfirmHostStopAll;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
@@ -11948,6 +12110,135 @@ fn confirm_host_stop_all_y_enqueues_stop_per_member() {
             crate::containers::ContainerAction::Stop
         );
     }
+    assert!(
+        app.containers_overview.pending_bulk_confirm().is_none(),
+        "yes must clear pending_bulk_confirm"
+    );
+}
+
+#[test]
+fn confirm_host_restart_all_stray_key_ignored() {
+    let mut app = make_containers_overview_app();
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::HostRestartAll,
+            alias: "web".to_string(),
+            project: None,
+            members: vec![],
+        });
+    app.screen = Screen::ConfirmHostRestartAll;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+    assert!(matches!(app.screen, Screen::ConfirmHostRestartAll));
+    assert!(
+        app.containers_overview.pending_bulk_confirm().is_some(),
+        "stray key must not consume the bulk-confirm payload"
+    );
+}
+
+#[test]
+fn confirm_host_stop_all_stray_key_ignored() {
+    let mut app = make_containers_overview_app();
+    app.containers_overview
+        .set_pending_bulk_confirm(crate::app::BulkConfirmContext {
+            kind: crate::app::BulkConfirmKind::HostStopAll,
+            alias: "web".to_string(),
+            project: None,
+            members: vec![],
+        });
+    app.screen = Screen::ConfirmHostStopAll;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
+    assert!(matches!(app.screen, Screen::ConfirmHostStopAll));
+    assert!(
+        app.containers_overview.pending_bulk_confirm().is_some(),
+        "stray key must not consume the bulk-confirm payload"
+    );
+}
+
+#[test]
+fn bulk_confirm_with_pruned_payload_recovers_to_host_list() {
+    // Regression: prune_orphans clears pending_bulk_confirm when the
+    // target host disappears, but leaves `app.screen` on the matching
+    // Confirm variant. The handler must recognise the missing payload
+    // and drop to HostList instead of being a silent no-op (which
+    // would strand the user on a header-only Confirm screen).
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ConfirmStackRestart;
+    // pending_bulk_confirm intentionally left empty.
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    assert!(
+        matches!(app.screen, Screen::HostList),
+        "missing payload must trigger transition to HostList"
+    );
+}
+
+#[test]
+fn purge_stale_with_pruned_payload_recovers_to_host_list() {
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    app.screen = Screen::ConfirmPurgeStale;
+    // pending_purge intentionally left empty (simulating reload_hosts
+    // having cleared it from under the user).
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    assert!(
+        matches!(app.screen, Screen::HostList),
+        "missing payload must trigger transition to HostList"
+    );
+}
+
+#[test]
+fn vault_sign_with_pruned_payload_recovers_to_host_list() {
+    let mut app = make_app("Host alive\n  HostName 1.2.3.4\n");
+    app.screen = Screen::ConfirmVaultSign;
+    // pending_sign intentionally left empty.
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    assert!(
+        matches!(app.screen, Screen::HostList),
+        "missing payload must trigger transition to HostList"
+    );
+}
+
+#[test]
+fn container_logs_with_pruned_payload_recovers_to_host_list() {
+    let mut app = make_containers_overview_app();
+    app.screen = Screen::ContainerLogs;
+    // logs_view intentionally left empty.
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(
+        matches!(app.screen, Screen::HostList),
+        "missing logs_view must trigger transition to HostList"
+    );
+}
+
+#[test]
+fn container_logs_esc_clears_logs_view() {
+    // Memory-retention regression: Esc/q must drop the (possibly large)
+    // logs body so it does not linger on container_state until the next
+    // `l` overwrites it.
+    let mut app = make_containers_overview_app();
+    app.container_state.set_logs_view(crate::app::LogsView {
+        alias: "db".to_string(),
+        container_id: "c1".to_string(),
+        container_name: "postgres".to_string(),
+        body: vec!["line".to_string(); 200],
+        fetched_at: 0,
+        error: None,
+        scroll: 0,
+        last_render_height: 24,
+        search: None,
+    });
+    app.screen = Screen::ContainerLogs;
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
+    assert!(matches!(app.screen, Screen::HostList));
+    assert!(
+        app.container_state.logs_view().is_none(),
+        "Esc must free the LogsView body"
+    );
 }
 
 // --- Exec prompt -----------------------------------------------------
@@ -12030,7 +12321,7 @@ fn exec_prompt_char_input_capped_at_512() {
 #[test]
 fn logs_overlay_esc_closes_to_host_list() {
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "db".to_string(),
         container_id: "c3".to_string(),
         container_name: "postgres".to_string(),
@@ -12040,7 +12331,8 @@ fn logs_overlay_esc_closes_to_host_list() {
         scroll: 0,
         last_render_height: 0,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(matches!(app.screen, Screen::HostList));
@@ -12049,7 +12341,7 @@ fn logs_overlay_esc_closes_to_host_list() {
 #[test]
 fn logs_overlay_q_closes_to_host_list() {
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "db".to_string(),
         container_id: "c3".to_string(),
         container_name: "postgres".to_string(),
@@ -12059,7 +12351,8 @@ fn logs_overlay_q_closes_to_host_list() {
         scroll: 0,
         last_render_height: 0,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
     assert!(matches!(app.screen, Screen::HostList));
@@ -12072,7 +12365,7 @@ fn logs_overlay_g_resets_scroll_and_capital_g_jumps_to_tail() {
     // viewport, so scroll lands at 100 - 24 = 76.
     let mut app = make_containers_overview_app();
     let body: Vec<String> = (0..100).map(|i| format!("line {}", i)).collect();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "db".to_string(),
         container_id: "c3".to_string(),
         container_name: "postgres".to_string(),
@@ -12082,16 +12375,19 @@ fn logs_overlay_g_resets_scroll_and_capital_g_jumps_to_tail() {
         scroll: 50,
         last_render_height: 24,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('g')), &tx);
-    if let Screen::ContainerLogs { scroll, .. } = &app.screen {
+    if let Some(scroll) = app.container_state.logs_view().map(|v| v.scroll) {
+        let scroll = &scroll;
         assert_eq!(*scroll, 0);
     } else {
         panic!("expected ContainerLogs");
     }
     let _ = handle_key_event(&mut app, key(KeyCode::Char('G')), &tx);
-    if let Screen::ContainerLogs { scroll, .. } = &app.screen {
+    if let Some(scroll) = app.container_state.logs_view().map(|v| v.scroll) {
+        let scroll = &scroll;
         assert_eq!(*scroll, 76, "G must tail-anchor: body.len() - height");
     } else {
         panic!("expected ContainerLogs");
@@ -12103,7 +12399,7 @@ fn logs_overlay_capital_g_clamps_when_body_fits_in_viewport() {
     // 3-line body in a 24-row viewport: scroll stays at 0 because the
     // tail position (3 - 24 saturating) is 0.
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "db".to_string(),
         container_id: "c3".to_string(),
         container_name: "postgres".to_string(),
@@ -12113,10 +12409,12 @@ fn logs_overlay_capital_g_clamps_when_body_fits_in_viewport() {
         scroll: 1,
         last_render_height: 24,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     let (tx, _rx) = mpsc::channel();
     let _ = handle_key_event(&mut app, key(KeyCode::Char('G')), &tx);
-    if let Screen::ContainerLogs { scroll, .. } = &app.screen {
+    if let Some(scroll) = app.container_state.logs_view().map(|v| v.scroll) {
+        let scroll = &scroll;
         assert_eq!(*scroll, 0);
     } else {
         panic!("expected ContainerLogs");
@@ -12131,7 +12429,7 @@ fn logs_complete_ok_populates_body_and_anchors_to_tail() {
     // the last log line sits at the bottom of the visible area instead
     // of being painted alone at the top.
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "db".to_string(),
         container_id: "c3".to_string(),
         container_name: "postgres".to_string(),
@@ -12141,7 +12439,8 @@ fn logs_complete_ok_populates_body_and_anchors_to_tail() {
         scroll: 0,
         last_render_height: 24,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     let lines: Vec<String> = (0..100).map(|i| format!("line {}", i)).collect();
     crate::handler::event_loop::handle_container_logs_complete(
         &mut app,
@@ -12150,20 +12449,16 @@ fn logs_complete_ok_populates_body_and_anchors_to_tail() {
         "postgres".to_string(),
         Ok(lines),
     );
-    if let Screen::ContainerLogs {
-        body,
-        scroll,
-        error,
-        fetched_at,
-        ..
-    } = &app.screen
-    {
-        assert_eq!(body.len(), 100);
-        assert_eq!(*scroll, 76, "scroll must tail-anchor (body.len() - height)");
-        assert!(error.is_none());
-        assert!(*fetched_at > 0, "fetched_at must be set");
+    if let Some(view) = app.container_state.logs_view() {
+        assert_eq!(view.body.len(), 100);
+        assert_eq!(
+            view.scroll, 76,
+            "scroll must tail-anchor (body.len() - height)"
+        );
+        assert!(view.error.is_none());
+        assert!(view.fetched_at > 0, "fetched_at must be set");
     } else {
-        panic!("expected ContainerLogs, got {:?}", app.screen);
+        panic!("expected ContainerLogs view, got {:?}", app.screen);
     }
 }
 
@@ -12171,7 +12466,7 @@ fn logs_complete_ok_populates_body_and_anchors_to_tail() {
 fn logs_complete_ok_keeps_scroll_zero_when_body_fits_viewport() {
     // 3-line body in a 24-row viewport saturates to scroll = 0.
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "db".to_string(),
         container_id: "c3".to_string(),
         container_name: "postgres".to_string(),
@@ -12181,7 +12476,8 @@ fn logs_complete_ok_keeps_scroll_zero_when_body_fits_viewport() {
         scroll: 0,
         last_render_height: 24,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     crate::handler::event_loop::handle_container_logs_complete(
         &mut app,
         "db".to_string(),
@@ -12189,7 +12485,8 @@ fn logs_complete_ok_keeps_scroll_zero_when_body_fits_viewport() {
         "postgres".to_string(),
         Ok(vec!["a".to_string(), "b".to_string(), "c".to_string()]),
     );
-    if let Screen::ContainerLogs { scroll, .. } = &app.screen {
+    if let Some(scroll) = app.container_state.logs_view().map(|v| v.scroll) {
+        let scroll = &scroll;
         assert_eq!(*scroll, 0);
     } else {
         panic!("expected ContainerLogs");
@@ -12199,7 +12496,7 @@ fn logs_complete_ok_keeps_scroll_zero_when_body_fits_viewport() {
 #[test]
 fn logs_complete_err_clears_body_and_records_error() {
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "db".to_string(),
         container_id: "c3".to_string(),
         container_name: "postgres".to_string(),
@@ -12209,7 +12506,8 @@ fn logs_complete_err_clears_body_and_records_error() {
         scroll: 5,
         last_render_height: 24,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     crate::handler::event_loop::handle_container_logs_complete(
         &mut app,
         "db".to_string(),
@@ -12217,20 +12515,13 @@ fn logs_complete_err_clears_body_and_records_error() {
         "postgres".to_string(),
         Err("permission denied".to_string()),
     );
-    if let Screen::ContainerLogs {
-        body,
-        scroll,
-        error,
-        fetched_at,
-        ..
-    } = &app.screen
-    {
-        assert!(body.is_empty());
-        assert_eq!(*scroll, 0);
-        assert_eq!(error.as_deref(), Some("permission denied"));
-        assert!(*fetched_at > 0, "even on error, fetched_at must reset");
+    if let Some(view) = app.container_state.logs_view() {
+        assert!(view.body.is_empty());
+        assert_eq!(view.scroll, 0);
+        assert_eq!(view.error.as_deref(), Some("permission denied"));
+        assert!(view.fetched_at > 0, "even on error, fetched_at must reset");
     } else {
-        panic!("expected ContainerLogs");
+        panic!("expected ContainerLogs view");
     }
 }
 
@@ -12254,7 +12545,7 @@ fn logs_complete_dropped_when_screen_is_host_list() {
 #[test]
 fn logs_complete_dropped_when_container_id_differs() {
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "db".to_string(),
         container_id: "c3".to_string(),
         container_name: "postgres".to_string(),
@@ -12264,7 +12555,8 @@ fn logs_complete_dropped_when_container_id_differs() {
         scroll: 0,
         last_render_height: 0,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     crate::handler::event_loop::handle_container_logs_complete(
         &mut app,
         "db".to_string(),
@@ -12272,7 +12564,8 @@ fn logs_complete_dropped_when_container_id_differs() {
         "other".to_string(),
         Ok(vec!["wrong target".to_string()]),
     );
-    if let Screen::ContainerLogs { body, .. } = &app.screen {
+    if let Some(view) = app.container_state.logs_view() {
+        let body = &view.body;
         assert!(body.is_empty(), "stale fetch must not populate the overlay");
     } else {
         panic!("expected ContainerLogs to remain");
@@ -12283,7 +12576,7 @@ fn logs_complete_dropped_when_container_id_differs() {
 
 fn make_logs_app_with_body(body: Vec<String>) -> App {
     let mut app = make_containers_overview_app();
-    app.screen = Screen::ContainerLogs {
+    app.container_state.set_logs_view(crate::app::LogsView {
         alias: "db".to_string(),
         container_id: "c3".to_string(),
         container_name: "postgres".to_string(),
@@ -12293,12 +12586,14 @@ fn make_logs_app_with_body(body: Vec<String>) -> App {
         scroll: 0,
         last_render_height: 24,
         search: None,
-    };
+    });
+    app.screen = Screen::ContainerLogs;
     app
 }
 
 fn search_state(app: &App) -> Option<crate::app::ContainerLogsSearch> {
-    if let Screen::ContainerLogs { search, .. } = &app.screen {
+    if let Some(view) = app.container_state.logs_view() {
+        let search = &view.search;
         search.clone()
     } else {
         None
@@ -12354,7 +12649,7 @@ fn logs_overlay_esc_during_search_closes_search_only() {
     let _ = handle_key_event(&mut app, key(KeyCode::Esc), &tx);
     assert!(search_state(&app).is_none(), "Esc closes search");
     assert!(
-        matches!(app.screen, Screen::ContainerLogs { .. }),
+        matches!(app.screen, Screen::ContainerLogs),
         "viewer stays open"
     );
 }
@@ -12432,7 +12727,7 @@ fn logs_overlay_q_during_search_extends_query_not_quits() {
     let _ = handle_key_event(&mut app, key(KeyCode::Char('/')), &tx);
     let _ = handle_key_event(&mut app, key(KeyCode::Char('q')), &tx);
     assert!(
-        matches!(app.screen, Screen::ContainerLogs { .. }),
+        matches!(app.screen, Screen::ContainerLogs),
         "q during search must not close the viewer"
     );
     assert_eq!(search_state(&app).unwrap().query, "q");

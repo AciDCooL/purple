@@ -80,6 +80,32 @@ pub enum ProviderError {
 }
 
 /// Trait implemented by each cloud provider.
+///
+/// The trait deliberately stays narrow: every provider implements
+/// `fetch_hosts_cancellable` itself rather than overriding a uniform
+/// fetch loop. Variation is too wide for a single shape. Linode and
+/// DigitalOcean use `?page=N&per_page=N`; GCP uses `?maxResults=N`
+/// plus a `pageToken` cursor across an aggregated multi-zone listing;
+/// Azure paginates across multiple subscriptions; AWS uses SigV4 plus
+/// the EC2 query API; Tailscale mixes Basic and Bearer auth depending
+/// on key prefix; Oracle signs each request with a per-tenancy RSA
+/// key.
+///
+/// What is shared lives in this module as free helpers so every
+/// provider opts in to the parts that apply:
+///   - `bearer_auth`: `Authorization: Bearer <token>` formatter.
+///   - `ProviderMetadata`: typed builder for `ProviderHost::metadata`.
+///   - `paginate`: cancellable page-walk with `MAX_PAGES` guard.
+///   - `http_agent` / `http_agent_insecure`: ureq agent setup.
+///   - `map_ureq_error`: HTTP error to `ProviderError` mapping
+///     (401 to `AuthFailed`, 429 to `RateLimited`, etc).
+///   - `strip_cidr`, `percent_encode`, `epoch_to_date`: string and
+///     URL helpers.
+///
+/// Adding a new provider: implement `fetch_hosts_cancellable` and
+/// reach for the helpers above instead of reimplementing them. Do
+/// not invent provider-specific copies of these primitives; that is
+/// where past parity bugs have hidden.
 pub trait Provider {
     /// Full provider name (e.g. "digitalocean").
     fn name(&self) -> &str;
@@ -126,6 +152,59 @@ fn parse_csv(s: &str) -> Vec<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+/// Format an `Authorization: Bearer <token>` header value. Centralised so
+/// the literal lives in one place across the 9-plus providers that use
+/// bearer auth; a typo in any of them would silently break sync.
+pub(crate) fn bearer_auth(token: &str) -> String {
+    format!("Bearer {token}")
+}
+
+/// Builder for `ProviderHost::metadata`. Replaces the
+/// `metadata.push(("region".to_string(), value.clone()))` boilerplate
+/// that repeated across every provider with a typed builder so callers
+/// only spell the value once and never clone strings by hand.
+///
+/// Conventions: keys are spelled as `&'static str` literals on each
+/// call so a typo is a compile error rather than a silent runtime
+/// mismatch downstream. The canonical key set (`region`, `status`,
+/// `plan`, `image`, `os`, `location`, `type`, `zone`, `size`, `instance`,
+/// `project`, `compartment`, `tenancy`) lives in the trait docs.
+#[derive(Debug, Default)]
+pub(crate) struct ProviderMetadata(Vec<(String, String)>);
+
+impl ProviderMetadata {
+    pub(crate) fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    /// Append `(key, value)` and return the builder for chaining.
+    /// `value: impl Into<String>` accepts both `String` and `&str`, so
+    /// callers do not have to `.to_string()` their fields by hand.
+    pub(crate) fn push(&mut self, key: &'static str, value: impl Into<String>) -> &mut Self {
+        self.0.push((key.to_string(), value.into()));
+        self
+    }
+
+    /// Append `(key, value)` only when `value` is `Some`. Saves the
+    /// repeated `if let Some(v) = ... { metadata.push(...) }` wrapper.
+    pub(crate) fn push_opt<S: Into<String>>(
+        &mut self,
+        key: &'static str,
+        value: Option<S>,
+    ) -> &mut Self {
+        if let Some(v) = value {
+            self.0.push((key.to_string(), v.into()));
+        }
+        self
+    }
+
+    /// Consume the builder, yielding the canonical `Vec<(String,
+    /// String)>` shape that `ProviderHost::metadata` expects.
+    pub(crate) fn finish(self) -> Vec<(String, String)> {
+        self.0
+    }
 }
 
 /// Factory for a provider implementation from an optional config section.

@@ -47,10 +47,7 @@ fn tag_key(ctx: &mut TagCtx, key: KeyEvent) {
             ctx.set_screen(Screen::HostList);
         }
         KeyCode::Char('?') => {
-            let old = std::mem::replace(&mut *ctx.screen, Screen::HostList);
-            ctx.set_screen(Screen::Help {
-                return_screen: Box::new(old),
-            });
+            ctx.push_help_overlay();
         }
         KeyCode::Char('j') | KeyCode::Down => {
             crate::app::cycle_selection(ctx.ui.tag_picker_state_mut(), ctx.tags.list().len(), true);

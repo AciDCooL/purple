@@ -64,11 +64,12 @@ mod update;
 mod vault;
 
 pub use baselines::{FormBaseline, ProviderFormBaseline, SnippetFormBaseline, TunnelFormBaseline};
-pub use container_state::{ContainerSession, ContainerState};
+pub use container_state::{ContainerSession, ContainerState, LogsView};
 pub use containers_overview::{
-    ContainerActionRequest, ContainerExecRequest, ContainerLogsRequest, ContainersOverviewState,
-    ContainersSortMode, InspectCacheEntry, LIST_CACHE_TTL_SECS, LOGS_TAIL, LogsCacheEntry,
-    REFRESH_MAX_PARALLEL, RefreshBatch, RefreshQueueItem,
+    BulkConfirmContext, BulkConfirmKind, ContainerActionRequest, ContainerExecRequest,
+    ContainerLogsRequest, ContainersOverviewState, ContainersSortMode, InspectCacheEntry,
+    LIST_CACHE_TTL_SECS, LOGS_TAIL, LogsCacheEntry, REFRESH_MAX_PARALLEL, RefreshBatch,
+    RefreshQueueItem,
 };
 pub use file_browser_state::FileBrowserState;
 pub use form_state::FormState;
@@ -87,7 +88,8 @@ pub use ping::{
     PingState, PingStatus, classify_ping, ping_sort_key, propagate_ping_to_dependents, status_glyph,
 };
 pub use provider_state::{
-    LabelMigrationField, PendingLabelMigration, ProviderRow, ProviderState, SyncRecord,
+    LabelMigrationField, PendingLabelMigration, PendingPurge, ProviderRow, ProviderState,
+    SyncRecord,
 };
 pub(crate) use reload_state::config_changed;
 pub use reload_state::{ConflictState, ReloadState};
@@ -182,7 +184,7 @@ pub struct App {
     pub(crate) update: UpdateState,
 
     /// askpass session token; not Keys-tab state.
-    pub bw_session: Option<String>,
+    pub(crate) bw_session: Option<String>,
 
     // File browser
     /// Persistent per-host last-visited paths; always present.
@@ -1046,17 +1048,17 @@ impl App {
                 | Screen::TunnelList { .. }
                 | Screen::TunnelForm { .. }
                 | Screen::HostDetail { .. }
-                | Screen::SnippetPicker { .. }
-                | Screen::SnippetForm { .. }
-                | Screen::SnippetOutput { .. }
-                | Screen::SnippetParamForm { .. }
+                | Screen::SnippetPicker
+                | Screen::SnippetForm
+                | Screen::SnippetOutput
+                | Screen::SnippetParamForm
                 | Screen::FileBrowser { .. }
                 | Screen::Containers { .. }
                 | Screen::ConfirmDelete { .. }
                 | Screen::ConfirmHostKeyReset { .. }
-                | Screen::ConfirmPurgeStale { .. }
+                | Screen::ConfirmPurgeStale
                 | Screen::ConfirmImport { .. }
-                | Screen::ConfirmVaultSign { .. }
+                | Screen::ConfirmVaultSign
                 | Screen::TagPicker
                 | Screen::BulkTagEditor
                 | Screen::ThemePicker

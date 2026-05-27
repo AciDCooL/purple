@@ -286,18 +286,18 @@ impl Tailscale {
                 None => "unknown",
             };
 
-            let mut metadata = Vec::new();
+            let mut metadata = super::ProviderMetadata::new();
             if !peer.os.is_empty() {
-                metadata.push(("os".to_string(), peer.os.clone()));
+                metadata.push("os", peer.os.clone());
             }
-            metadata.push(("status".to_string(), status_str.to_string()));
+            metadata.push("status", status_str.to_string());
 
             hosts.push(ProviderHost {
                 server_id: peer.id,
                 name: peer.host_name,
                 ip,
                 tags,
-                metadata,
+                metadata: metadata.finish(),
             });
         }
 
@@ -333,7 +333,7 @@ impl Tailscale {
             let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:", token));
             format!("Basic {}", encoded)
         } else {
-            format!("Bearer {}", token)
+            super::bearer_auth(token)
         };
 
         let url = format!("{}/api/v2/tailnet/-/devices?fields=all", base_url);
@@ -377,23 +377,23 @@ impl Tailscale {
 
             let tags: Vec<String> = device.tags.iter().map(|t| strip_tag_prefix(t)).collect();
 
-            let mut metadata = Vec::new();
+            let mut metadata = super::ProviderMetadata::new();
             if !device.os.is_empty() {
-                metadata.push(("os".to_string(), device.os.clone()));
+                metadata.push("os", device.os.clone());
             }
             let status_str = if device.connected_to_control {
                 "online"
             } else {
                 "offline"
             };
-            metadata.push(("status".to_string(), status_str.to_string()));
+            metadata.push("status", status_str.to_string());
 
             hosts.push(ProviderHost {
                 server_id: device.node_id,
                 name,
                 ip,
                 tags,
-                metadata,
+                metadata: metadata.finish(),
             });
         }
 

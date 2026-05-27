@@ -16,6 +16,10 @@ pub struct VaultState {
     >,
     /// Aliases currently being checked for cert status (prevent duplicate checks).
     pub(in crate::app) cert_checks_in_flight: HashSet<String>,
+    /// When the cert file was last `stat()`-ed per alias. Lets the per-frame
+    /// freshness probe throttle its syscall while still detecting external
+    /// writes within the throttle window.
+    pub(in crate::app) cert_stat_throttle: HashMap<String, std::time::Instant>,
     /// Side-channel warning from cert-cache cleanup.
     pub(in crate::app) cleanup_warning: Option<String>,
     /// Cancel flag for the V-key vault signing background thread.
@@ -26,6 +30,10 @@ pub struct VaultState {
     pub(in crate::app) sign_in_flight: Arc<Mutex<HashSet<String>>>,
     /// Deferred config write from VaultSignAllDone (guarded while forms are open).
     pub(in crate::app) pending_config_write: bool,
+    /// Payload of an open `Screen::ConfirmVaultSign` dialog. The Screen
+    /// variant is data-less; the precomputed signable list lives here
+    /// so the dialog transitions never clone the `VaultSignTarget` vec.
+    pub(in crate::app) pending_sign: Option<Vec<crate::vault_ssh::VaultSignTarget>>,
 }
 
 impl Default for VaultState {
@@ -33,11 +41,13 @@ impl Default for VaultState {
         Self {
             cert_cache: HashMap::new(),
             cert_checks_in_flight: HashSet::new(),
+            cert_stat_throttle: HashMap::new(),
             cleanup_warning: None,
             signing_cancel: None,
             sign_thread: None,
             sign_in_flight: Arc::new(Mutex::new(HashSet::new())),
             pending_config_write: false,
+            pending_sign: None,
         }
     }
 }
@@ -120,6 +130,34 @@ impl VaultState {
         self.cert_checks_in_flight.insert(alias);
     }
 
+    /// Last time the per-frame freshness probe stat-ed this alias.
+    pub(crate) fn last_cert_stat(&self, alias: &str) -> Option<std::time::Instant> {
+        self.cert_stat_throttle.get(alias).copied()
+    }
+
+    /// Read the precomputed signable list for an open
+    /// `Screen::ConfirmVaultSign` dialog. `None` when no dialog is
+    /// open.
+    pub fn pending_sign(&self) -> Option<&[crate::vault_ssh::VaultSignTarget]> {
+        self.pending_sign.as_deref()
+    }
+
+    /// Install a fresh signable list. Caller transitions the screen.
+    pub fn set_pending_sign(&mut self, signable: Vec<crate::vault_ssh::VaultSignTarget>) {
+        self.pending_sign = Some(signable);
+    }
+
+    /// Drop the signable list, returning it for use by the confirm-yes
+    /// handler.
+    pub fn take_pending_sign(&mut self) -> Option<Vec<crate::vault_ssh::VaultSignTarget>> {
+        self.pending_sign.take()
+    }
+
+    /// Record that the per-frame freshness probe just stat-ed this alias.
+    pub(crate) fn note_cert_stat(&mut self, alias: String, when: std::time::Instant) {
+        self.cert_stat_throttle.insert(alias, when);
+    }
+
     /// Land a finished cert-status check. Clears the in-flight reservation
     /// and writes the result to `cert_cache` in one step so the two fields
     /// cannot drift (a missed remove would dedupe the next lazy check
@@ -170,6 +208,8 @@ impl VaultState {
             .retain(|alias, _| valid_aliases.contains(alias.as_str()));
         self.cert_checks_in_flight
             .retain(|alias| valid_aliases.contains(alias.as_str()));
+        self.cert_stat_throttle
+            .retain(|alias, _| valid_aliases.contains(alias.as_str()));
         let dropped_cert = pre_cert.saturating_sub(self.cert_cache.len());
         if dropped_cert > 0 {
             log::debug!(
@@ -193,6 +233,25 @@ impl VaultState {
         if dropped > 0 {
             log::debug!("[purple] reload_hosts: dropped {dropped} orphan sign_in_flight alias(es)");
         }
+
+        // Open bulk-sign confirm payload: drop targets whose host was
+        // removed. The next yes path then never tries to sign a cert
+        // for a deleted alias. When every target is gone, drop the
+        // whole list so the confirm handler can detect the empty state
+        // and return to HostList.
+        if let Some(list) = self.pending_sign.as_mut() {
+            let pre = list.len();
+            list.retain(|t| valid_aliases.contains(t.alias.as_str()));
+            let dropped = pre.saturating_sub(list.len());
+            if dropped > 0 {
+                log::debug!(
+                    "[purple] reload_hosts: dropped {dropped} orphan pending_sign target(s)"
+                );
+            }
+            if list.is_empty() {
+                self.pending_sign = None;
+            }
+        }
     }
 
     /// Move `cert_checks_in_flight` and `sign_in_flight` entries from
@@ -207,6 +266,19 @@ impl VaultState {
         }
         if self.cert_checks_in_flight.remove(old) {
             self.cert_checks_in_flight.insert(new.to_string());
+        }
+        if let Some(when) = self.cert_stat_throttle.remove(old) {
+            self.cert_stat_throttle.insert(new.to_string(), when);
+        }
+        // Open bulk-sign confirm payload: rename any target that still
+        // points at the old alias. Without this, the worker would sign
+        // and write the cert under the stale path after the rename.
+        if let Some(list) = self.pending_sign.as_mut() {
+            for target in list.iter_mut() {
+                if target.alias == old {
+                    target.alias = new.to_string();
+                }
+            }
         }
         let mut sign = match self.sign_in_flight.lock() {
             Ok(g) => g,
@@ -410,5 +482,50 @@ mod tests {
         let sign = v.sign_in_flight.lock().unwrap();
         assert!(!sign.contains("old"));
         assert!(sign.contains("new"));
+    }
+
+    #[test]
+    fn note_cert_stat_records_and_last_returns_it() {
+        let mut v = VaultState::default();
+        assert!(v.last_cert_stat("web").is_none());
+        let when = std::time::Instant::now();
+        v.note_cert_stat("web".to_string(), when);
+        assert_eq!(v.last_cert_stat("web"), Some(when));
+    }
+
+    #[test]
+    fn note_cert_stat_overwrites_prior_entry() {
+        let mut v = VaultState::default();
+        let earlier = std::time::Instant::now();
+        v.note_cert_stat("web".to_string(), earlier);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let later = std::time::Instant::now();
+        v.note_cert_stat("web".to_string(), later);
+        assert_eq!(v.last_cert_stat("web"), Some(later));
+    }
+
+    #[test]
+    fn prune_orphans_drops_stale_throttle_entries() {
+        let mut v = VaultState::default();
+        v.note_cert_stat("keep".to_string(), std::time::Instant::now());
+        v.note_cert_stat("drop".to_string(), std::time::Instant::now());
+
+        let valid: HashSet<&str> = ["keep"].into_iter().collect();
+        v.prune_orphans(&valid);
+
+        assert!(v.last_cert_stat("keep").is_some());
+        assert!(v.last_cert_stat("drop").is_none());
+    }
+
+    #[test]
+    fn migrate_alias_moves_throttle_entry() {
+        let mut v = VaultState::default();
+        let when = std::time::Instant::now();
+        v.note_cert_stat("old".to_string(), when);
+
+        v.migrate_alias("old", "new");
+
+        assert!(v.last_cert_stat("old").is_none());
+        assert_eq!(v.last_cert_stat("new"), Some(when));
     }
 }

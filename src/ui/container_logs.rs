@@ -26,28 +26,21 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     // are cheap to clone for a single-shot overlay (200 lines max,
     // short query string), and the alternative — threading the
     // mutable borrow through every helper — would balloon the API.
+    if !matches!(app.screen, Screen::ContainerLogs) {
+        return;
+    }
     let (alias, container_name, body, fetched_at, error, scroll, search) = {
-        let Screen::ContainerLogs {
-            alias,
-            container_name,
-            body,
-            fetched_at,
-            error,
-            scroll,
-            search,
-            ..
-        } = &app.screen
-        else {
+        let Some(view) = app.container_state.logs_view() else {
             return;
         };
         (
-            alias.clone(),
-            container_name.clone(),
-            body.clone(),
-            *fetched_at,
-            error.clone(),
-            *scroll,
-            search.clone(),
+            view.alias.clone(),
+            view.container_name.clone(),
+            view.body.clone(),
+            view.fetched_at,
+            view.error.clone(),
+            view.scroll,
+            view.search.clone(),
         )
     };
 
@@ -103,11 +96,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     // Stash the rendered area height so the next logs-arrival or `G`
     // keypress can compute the tail-anchored scroll.
-    if let Screen::ContainerLogs {
-        last_render_height, ..
-    } = &mut app.screen
-    {
-        *last_render_height = inner.height;
+    if let Some(view) = app.container_state.logs_view_mut() {
+        view.last_render_height = inner.height;
     }
 
     let footer_spans = build_footer_spans(search.as_ref());

@@ -9,10 +9,8 @@ use super::theme;
 use crate::app::{App, Screen, SnippetFormField};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let title = match &app.screen {
-        Screen::SnippetForm {
-            editing: Some(_), ..
-        } => "Snippets > Edit",
+    let title = match (&app.screen, app.snippets.form_editing()) {
+        (Screen::SnippetForm, Some(_)) => "Snippets > Edit",
         _ => "Snippets > Add",
     };
 

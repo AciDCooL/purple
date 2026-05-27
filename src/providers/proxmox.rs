@@ -781,15 +781,15 @@ impl Proxmox {
             tags.sort();
             tags.dedup();
 
-            let mut metadata = Vec::new();
+            let mut metadata = super::ProviderMetadata::new();
             if !resource.node.is_empty() {
-                metadata.push(("node".to_string(), resource.node.clone()));
+                metadata.push("node", resource.node.clone());
             }
             if !resource.resource_type.is_empty() {
-                metadata.push(("type".to_string(), resource.resource_type.clone()));
+                metadata.push("type", resource.resource_type.clone());
             }
             if let Some(plan) = format_plan(resource.maxcpu, resource.maxmem) {
-                metadata.push(("specs".to_string(), plan));
+                metadata.push("specs", plan);
             }
             if let Some(os) = ostype {
                 let label = if resource.resource_type == "qemu" {
@@ -797,10 +797,10 @@ impl Proxmox {
                 } else {
                     os
                 };
-                metadata.push(("os".to_string(), label));
+                metadata.push("os", label);
             }
             if !resource.status.is_empty() {
-                metadata.push(("status".to_string(), resource.status.clone()));
+                metadata.push("status", resource.status.clone());
             }
 
             hosts.push(ProviderHost {
@@ -812,7 +812,7 @@ impl Proxmox {
                 },
                 ip,
                 tags,
-                metadata,
+                metadata: metadata.finish(),
             });
         }
 

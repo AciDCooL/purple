@@ -162,7 +162,9 @@ impl App {
             target_aliases.len()
         );
         self.snippets.form_baseline = None;
-        self.set_screen(Screen::SnippetPicker { target_aliases });
+        self.snippets.set_flow_targets(target_aliases);
+        self.snippets.set_form_editing(None);
+        self.set_screen(Screen::SnippetPicker);
     }
 
     /// Open a blank host add form. Mirror is `close_host_form`.
@@ -273,10 +275,9 @@ impl App {
             target_aliases.len()
         );
         self.snippets.form = SnippetForm::new();
-        self.set_screen(Screen::SnippetForm {
-            target_aliases,
-            editing: None,
-        });
+        self.snippets.set_flow_targets(target_aliases);
+        self.snippets.set_form_editing(None);
+        self.set_screen(Screen::SnippetForm);
         self.capture_snippet_form_baseline();
     }
 
@@ -294,10 +295,9 @@ impl App {
             editing
         );
         self.snippets.form = SnippetForm::from_snippet(snippet);
-        self.set_screen(Screen::SnippetForm {
-            target_aliases,
-            editing: Some(editing),
-        });
+        self.snippets.set_flow_targets(target_aliases);
+        self.snippets.set_form_editing(Some(editing));
+        self.set_screen(Screen::SnippetForm);
         self.capture_snippet_form_baseline();
     }
 

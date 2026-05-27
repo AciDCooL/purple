@@ -1635,3 +1635,77 @@ fn test_paginate_runaway_guard_caps_pages() {
     assert_eq!(out.len() as u64, MAX_PAGES);
     assert_eq!(calls.get(), MAX_PAGES);
 }
+
+#[test]
+fn bearer_auth_prefixes_with_bearer_space() {
+    assert_eq!(bearer_auth("tk-abc"), "Bearer tk-abc");
+}
+
+#[test]
+fn bearer_auth_with_empty_token_still_emits_prefix() {
+    // The caller is responsible for empty-token checks. The helper itself
+    // must remain trivial so every provider produces the same shape.
+    assert_eq!(bearer_auth(""), "Bearer ");
+}
+
+#[test]
+fn bearer_auth_preserves_token_verbatim() {
+    // JWTs and some provider tokens contain dots and dashes. The helper
+    // must not re-encode them.
+    let jwt = "eyJ.payload-thing.sig_ABC";
+    assert_eq!(bearer_auth(jwt), format!("Bearer {jwt}"));
+}
+
+#[test]
+fn metadata_builder_preserves_insertion_order() {
+    // Insertion order matters for downstream column rendering, so the
+    // builder must be a Vec, not a HashMap.
+    let mut m = ProviderMetadata::new();
+    m.push("region", "ams3")
+        .push("status", "active")
+        .push("plan", "s-1vcpu-1gb");
+    let pairs = m.finish();
+    assert_eq!(
+        pairs,
+        vec![
+            ("region".to_string(), "ams3".to_string()),
+            ("status".to_string(), "active".to_string()),
+            ("plan".to_string(), "s-1vcpu-1gb".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn metadata_builder_push_opt_skips_none() {
+    let mut m = ProviderMetadata::new();
+    m.push("region", "ams3")
+        .push_opt::<&str>("image", None)
+        .push("status", "active");
+    let pairs = m.finish();
+    assert_eq!(pairs.len(), 2);
+    assert_eq!(pairs[0].0, "region");
+    assert_eq!(pairs[1].0, "status");
+}
+
+#[test]
+fn metadata_builder_push_opt_includes_some() {
+    let mut m = ProviderMetadata::new();
+    m.push_opt("image", Some("ubuntu-22-04-x64"))
+        .push_opt::<String>("project", None);
+    let pairs = m.finish();
+    assert_eq!(
+        pairs,
+        vec![("image".to_string(), "ubuntu-22-04-x64".to_string())]
+    );
+}
+
+#[test]
+fn metadata_builder_accepts_both_str_and_string() {
+    // Callers should be able to pass either &str or String without
+    // adding .to_string() everywhere.
+    let owned = String::from("active");
+    let mut m = ProviderMetadata::new();
+    m.push("status", &owned).push("region", owned.clone());
+    let pairs = m.finish();
+    assert_eq!(pairs.len(), 2);
+}

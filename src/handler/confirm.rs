@@ -178,21 +178,34 @@ pub(super) fn handle_import_key(app: &mut App, key: KeyEvent) {
 }
 
 pub(super) fn handle_purge_stale_key(app: &mut App, key: KeyEvent) {
+    if !matches!(app.screen, Screen::ConfirmPurgeStale) {
+        return;
+    }
+    let route = route_confirm_key(key);
+    if route == ConfirmAction::Ignored {
+        return;
+    }
+    // Take the payload up front: yes/no both transition away, so the
+    // pending slot must clear in either case to avoid stale reads if
+    // the user opens a fresh purge dialog later.
+    let Some(payload) = app.providers.take_pending_purge() else {
+        // State pruned out from under us. Drop to HostList so the user
+        // is not stranded on an empty purge dialog.
+        app.set_screen(Screen::HostList);
+        return;
+    };
+    let provider = payload.provider;
+    let return_screen = if provider.is_some() {
+        Screen::Providers
+    } else {
+        Screen::HostList
+    };
     let effects = {
         let mut ctx = ConfirmCtx {
             screen: &mut app.screen,
             effects: Effects::default(),
         };
-        let Screen::ConfirmPurgeStale { provider: p, .. } = &*ctx.screen else {
-            return;
-        };
-        let provider = p.clone();
-        let return_screen = if provider.is_some() {
-            Screen::Providers
-        } else {
-            Screen::HostList
-        };
-        match route_confirm_key(key) {
+        match route {
             ConfirmAction::Yes => {
                 // Defer the purge (a whole-App op: deletes hosts, kills tunnels,
                 // reloads). It is the terminal action. moving it past the screen
@@ -204,7 +217,7 @@ pub(super) fn handle_purge_stale_key(app: &mut App, key: KeyEvent) {
             ConfirmAction::No => {
                 ctx.set_screen(return_screen);
             }
-            ConfirmAction::Ignored => {}
+            ConfirmAction::Ignored => unreachable!(),
         }
         ctx.effects
     };
@@ -390,23 +403,33 @@ pub(super) fn handle_vault_sign_key(
     // History: an earlier `_ => app.screen = Screen::HostList` catch-all
     // could be triggered by any keypress next to `y` (e.g. fat-fingered
     // `t` or `u`), silently aborting a bulk sign.
+    if !matches!(app.screen, Screen::ConfirmVaultSign) {
+        return;
+    }
+    let route = route_confirm_key(key);
+    if route == ConfirmAction::Ignored {
+        return;
+    }
+    // Take the signable list up front so both yes and no paths leave
+    // the slot clean.
+    let Some(signable) = app.vault.take_pending_sign() else {
+        // State pruned (target host removed during the dialog). Drop to
+        // HostList so the confirm screen is not orphaned.
+        app.set_screen(Screen::HostList);
+        return;
+    };
     let effects = {
         let mut ctx = ConfirmCtx {
             screen: &mut app.screen,
             effects: Effects::default(),
         };
-        match route_confirm_key(key) {
+        match route {
             ConfirmAction::Yes => {
-                // Extract the precomputed signable list, then transition back to
-                // the host list and kick off the background signing loop. The
-                // signing loop is the terminal whole-App op (touches vault, env,
-                // status), so it runs deferred after the screen transition. its
-                // first action is the progress toast, with no intervening toast.
-                let signable = if let Screen::ConfirmVaultSign { signable } = &*ctx.screen {
-                    signable.clone()
-                } else {
-                    return;
-                };
+                // Transition back to the host list and kick off the background
+                // signing loop. The signing loop is the terminal whole-App op
+                // (touches vault, env, status), so it runs deferred after the
+                // screen transition. Its first action is the progress toast,
+                // with no intervening toast.
                 ctx.set_screen(Screen::HostList);
                 let tx = events_tx.clone();
                 ctx.defer(move |app| start_vault_bulk_sign(app, signable, &tx));
@@ -414,7 +437,7 @@ pub(super) fn handle_vault_sign_key(
             ConfirmAction::No => {
                 ctx.set_screen(Screen::HostList);
             }
-            ConfirmAction::Ignored => {}
+            ConfirmAction::Ignored => unreachable!(),
         }
         ctx.effects
     };
@@ -760,54 +783,71 @@ pub(super) fn handle_container_stop_key(app: &mut App, key: KeyEvent) {
 /// compose stack. The drain queue processes one request per tick, so the
 /// restarts run sequentially.
 pub(super) fn handle_stack_restart_key(app: &mut App, key: KeyEvent) {
-    let mut ctx = container_confirm_ctx(app);
-    let Screen::ConfirmStackRestart { alias, members, .. } = &*ctx.screen else {
-        return;
-    };
-    let confirm = ContainerConfirm {
-        alias: alias.clone(),
-        targets: members
-            .iter()
-            .map(|m| (m.container_id.clone(), m.container_name.clone()))
-            .collect(),
-        action: crate::containers::ContainerAction::Restart,
-    };
-    apply_container_confirm(&mut ctx, key, confirm);
+    bulk_confirm_key(
+        app,
+        key,
+        Screen::ConfirmStackRestart,
+        crate::containers::ContainerAction::Restart,
+    );
 }
 
 /// Confirm handler for `K` on a host-divider row: restart every running
 /// container on the host, ignoring compose-project boundaries.
 pub(super) fn handle_host_restart_all_key(app: &mut App, key: KeyEvent) {
-    let mut ctx = container_confirm_ctx(app);
-    let Screen::ConfirmHostRestartAll { alias, members } = &*ctx.screen else {
-        return;
-    };
-    let confirm = ContainerConfirm {
-        alias: alias.clone(),
-        targets: members
-            .iter()
-            .map(|m| (m.container_id.clone(), m.container_name.clone()))
-            .collect(),
-        action: crate::containers::ContainerAction::Restart,
-    };
-    apply_container_confirm(&mut ctx, key, confirm);
+    bulk_confirm_key(
+        app,
+        key,
+        Screen::ConfirmHostRestartAll,
+        crate::containers::ContainerAction::Restart,
+    );
 }
 
 /// Confirm handler for `S` on a host-divider row: stop every running
 /// container on the host.
 pub(super) fn handle_host_stop_all_key(app: &mut App, key: KeyEvent) {
-    let mut ctx = container_confirm_ctx(app);
-    let Screen::ConfirmHostStopAll { alias, members } = &*ctx.screen else {
+    bulk_confirm_key(
+        app,
+        key,
+        Screen::ConfirmHostStopAll,
+        crate::containers::ContainerAction::Stop,
+    );
+}
+
+/// Shared dispatcher for the three bulk container confirm dialogs.
+/// `expected_screen` guards against firing the wrong action if the
+/// screen has drifted from `pending_bulk_confirm`. An ignored key
+/// leaves the payload in place so the dialog stays open; yes/no take
+/// the payload because `apply_container_confirm` transitions away.
+fn bulk_confirm_key(
+    app: &mut App,
+    key: KeyEvent,
+    expected_screen: Screen,
+    action: crate::containers::ContainerAction,
+) {
+    if app.screen != expected_screen {
+        return;
+    }
+    if route_confirm_key(key) == ConfirmAction::Ignored {
+        return;
+    }
+    let Some(payload) = app.containers_overview.take_pending_bulk_confirm() else {
+        // State pruned (host removed via reload_hosts while the dialog was
+        // open). Drop to HostList so the user is not stuck on an empty
+        // confirm screen with a non-functional Esc.
+        app.set_screen(Screen::HostList);
         return;
     };
+    let targets: Vec<(String, String)> = payload
+        .members
+        .iter()
+        .map(|m| (m.container_id.clone(), m.container_name.clone()))
+        .collect();
     let confirm = ContainerConfirm {
-        alias: alias.clone(),
-        targets: members
-            .iter()
-            .map(|m| (m.container_id.clone(), m.container_name.clone()))
-            .collect(),
-        action: crate::containers::ContainerAction::Stop,
+        alias: payload.alias,
+        targets,
+        action,
     };
+    let mut ctx = container_confirm_ctx(app);
     apply_container_confirm(&mut ctx, key, confirm);
 }
 

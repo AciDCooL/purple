@@ -28,6 +28,34 @@ impl App {
         self.screen = screen;
     }
 
+    /// Open the Help overlay over the current screen, moving the previous
+    /// screen into the `return_screen` slot instead of cloning it. No-op
+    /// when Help is already open.
+    pub fn push_help_overlay(&mut self) {
+        if matches!(self.screen, Screen::Help { .. }) {
+            return;
+        }
+        log::debug!("screen: {} → Help", self.screen.variant_name());
+        let old = std::mem::replace(&mut self.screen, Screen::HostList);
+        self.screen = Screen::Help {
+            return_screen: Box::new(old),
+        };
+    }
+
+    /// Close the Help overlay and restore the previous screen. The boxed
+    /// screen is moved back into place rather than cloned. No-op when the
+    /// current screen is not Help.
+    pub fn pop_help_overlay(&mut self) {
+        let returned = {
+            let Screen::Help { return_screen } = &mut self.screen else {
+                return;
+            };
+            std::mem::replace(&mut **return_screen, Screen::HostList)
+        };
+        log::debug!("screen: Help → {}", returned.variant_name());
+        self.screen = returned;
+    }
+
     /// Cycle to the next top page. Logs the transition so Tab-cycle
     /// confusion ("I keep landing on the wrong page after Tab") leaves a
     /// breadcrumb in `~/.purple/purple.log`. Callers should prefer this

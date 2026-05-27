@@ -195,7 +195,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         Screen::ContainerHostPicker => {
             render_overlay(frame, app, anim, container_host_picker::render);
         }
-        Screen::ContainerLogs { .. } => {
+        Screen::ContainerLogs => {
             render_overlay(frame, app, anim, container_logs::render);
         }
         Screen::ConfirmContainerRestart { .. } => {
@@ -207,10 +207,10 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         Screen::ContainerExecPrompt { .. } => {
             render_overlay(frame, app, anim, container_exec_prompt::render);
         }
-        Screen::ConfirmStackRestart { .. } => {
+        Screen::ConfirmStackRestart => {
             render_overlay(frame, app, anim, container_action_confirm::render_stack);
         }
-        Screen::ConfirmHostRestartAll { .. } => {
+        Screen::ConfirmHostRestartAll => {
             render_overlay(
                 frame,
                 app,
@@ -218,7 +218,7 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
                 container_action_confirm::render_host_restart_all,
             );
         }
-        Screen::ConfirmHostStopAll { .. } => {
+        Screen::ConfirmHostStopAll => {
             render_overlay(
                 frame,
                 app,
@@ -226,10 +226,10 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
                 container_action_confirm::render_host_stop_all,
             );
         }
-        Screen::SnippetPicker { .. } => {
+        Screen::SnippetPicker => {
             render_overlay(frame, app, anim, snippet_picker::render);
         }
-        Screen::SnippetForm { .. } => {
+        Screen::SnippetForm => {
             render_overlay(frame, app, anim, |frame, app| {
                 snippet_picker::render(frame, app);
                 snippet_form::render(frame, app);
@@ -244,10 +244,10 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         Screen::FileBrowser { .. } => {
             render_overlay(frame, app, anim, file_browser::render);
         }
-        Screen::SnippetOutput { .. } => {
+        Screen::SnippetOutput => {
             render_overlay(frame, app, anim, snippet_output::render);
         }
-        Screen::SnippetParamForm { .. } => {
+        Screen::SnippetParamForm => {
             render_overlay(frame, app, anim, |frame, app| {
                 snippet_picker::render(frame, app);
                 snippet_param_form::render(frame, app);
@@ -262,15 +262,22 @@ pub fn render(frame: &mut Frame, app: &mut App, anim: &mut crate::animation::Ani
         Screen::Containers { .. } => {
             render_overlay(frame, app, anim, containers::render);
         }
-        Screen::ConfirmVaultSign { signable } => {
-            let aliases: Vec<String> = signable.iter().map(|t| t.alias.clone()).collect();
+        Screen::ConfirmVaultSign => {
+            let aliases: Vec<String> = app
+                .vault
+                .pending_sign()
+                .map(|s| s.iter().map(|t| t.alias.clone()).collect())
+                .unwrap_or_default();
             render_overlay(frame, app, anim, move |frame, app| {
                 confirm_dialog::render_confirm_vault_sign(frame, app, &aliases)
             });
         }
-        Screen::ConfirmPurgeStale { aliases, provider } => {
-            let aliases = aliases.clone();
-            let provider = provider.clone();
+        Screen::ConfirmPurgeStale => {
+            let Some(payload) = app.providers.pending_purge() else {
+                return;
+            };
+            let aliases = payload.aliases.clone();
+            let provider = payload.provider.clone();
             render_overlay(frame, app, anim, |frame, app| {
                 confirm_dialog::render_confirm_purge_stale(frame, app, &aliases, &provider)
             });

@@ -43,28 +43,30 @@ pub fn render_restart(frame: &mut Frame, app: &mut App) {
 /// member that will be cycled. Sized larger than the per-container
 /// confirms so the member list fits without scrolling.
 pub fn render_stack(frame: &mut Frame, app: &mut App) {
-    let Screen::ConfirmStackRestart {
-        alias,
-        project,
-        members,
-    } = &app.screen
-    else {
+    if !matches!(app.screen, Screen::ConfirmStackRestart) {
+        return;
+    }
+    let app_ref: &App = app;
+    let Some(payload) = app_ref.containers_overview.pending_bulk_confirm() else {
         return;
     };
     let identity = Line::from(vec![
         Span::raw("  "),
-        Span::styled(project.clone(), theme::bold()),
+        Span::styled(payload.project.clone().unwrap_or_default(), theme::bold()),
         Span::raw("  "),
-        Span::styled(format!("on  {}", alias), theme::muted()),
+        Span::styled(format!("on  {}", payload.alias), theme::muted()),
         Span::raw("  "),
-        Span::styled(format!("· {} running", members.len()), theme::muted()),
+        Span::styled(
+            format!("· {} running", payload.members.len()),
+            theme::muted(),
+        ),
     ]);
     render_bulk_dialog(
         frame,
-        app,
+        app_ref,
         " Restart stack? ",
         identity,
-        members,
+        &payload.members,
         crate::messages::CONTAINER_STACK_RESTART_BODY,
         ("restart", "keep"),
     );
@@ -74,21 +76,28 @@ pub fn render_stack(frame: &mut Frame, app: &mut App) {
 /// container on the host that will be cycled. Same layout as
 /// `render_stack` so users on the divider see a familiar sheet.
 pub fn render_host_restart_all(frame: &mut Frame, app: &mut App) {
-    let Screen::ConfirmHostRestartAll { alias, members } = &app.screen else {
+    if !matches!(app.screen, Screen::ConfirmHostRestartAll) {
+        return;
+    }
+    let app_ref: &App = app;
+    let Some(payload) = app_ref.containers_overview.pending_bulk_confirm() else {
         return;
     };
     let identity = Line::from(vec![
         Span::raw("  "),
-        Span::styled(alias.clone(), theme::bold()),
+        Span::styled(payload.alias.clone(), theme::bold()),
         Span::raw("  "),
-        Span::styled(format!("· {} running", members.len()), theme::muted()),
+        Span::styled(
+            format!("· {} running", payload.members.len()),
+            theme::muted(),
+        ),
     ]);
     render_bulk_dialog(
         frame,
-        app,
+        app_ref,
         " Restart all containers on host? ",
         identity,
-        members,
+        &payload.members,
         crate::messages::CONTAINER_HOST_RESTART_ALL_BODY,
         ("restart", "keep"),
     );
@@ -96,21 +105,28 @@ pub fn render_host_restart_all(frame: &mut Frame, app: &mut App) {
 
 /// Render the bulk-stop-host confirm dialog.
 pub fn render_host_stop_all(frame: &mut Frame, app: &mut App) {
-    let Screen::ConfirmHostStopAll { alias, members } = &app.screen else {
+    if !matches!(app.screen, Screen::ConfirmHostStopAll) {
+        return;
+    }
+    let app_ref: &App = app;
+    let Some(payload) = app_ref.containers_overview.pending_bulk_confirm() else {
         return;
     };
     let identity = Line::from(vec![
         Span::raw("  "),
-        Span::styled(alias.clone(), theme::bold()),
+        Span::styled(payload.alias.clone(), theme::bold()),
         Span::raw("  "),
-        Span::styled(format!("· {} running", members.len()), theme::muted()),
+        Span::styled(
+            format!("· {} running", payload.members.len()),
+            theme::muted(),
+        ),
     ]);
     render_bulk_dialog(
         frame,
-        app,
+        app_ref,
         " Stop all containers on host? ",
         identity,
-        members,
+        &payload.members,
         crate::messages::CONTAINER_HOST_STOP_ALL_BODY,
         ("stop", "keep"),
     );

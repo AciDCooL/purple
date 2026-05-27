@@ -9,9 +9,12 @@ use super::theme;
 use crate::app::{App, Screen};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let snippet = match &app.screen {
-        Screen::SnippetParamForm { snippet, .. } => snippet.clone(),
-        _ => return,
+    if !matches!(app.screen, Screen::SnippetParamForm) {
+        return;
+    }
+    let snippet = match app.snippets.param_snippet() {
+        Some(s) => s.clone(),
+        None => return,
     };
 
     let form = match app.snippets.param_form() {

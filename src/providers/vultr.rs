@@ -65,7 +65,7 @@ impl Vultr {
             };
             let resp: InstanceResponse = agent
                 .get(&url)
-                .header("Authorization", &format!("Bearer {}", token))
+                .header("Authorization", &super::bearer_auth(token))
                 .call()
                 .map_err(map_ureq_error)?
                 .body_mut()
@@ -82,25 +82,25 @@ impl Vultr {
                 } else {
                     continue;
                 };
-                let mut metadata = Vec::new();
+                let mut metadata = super::ProviderMetadata::new();
                 if !instance.region.is_empty() {
-                    metadata.push(("region".to_string(), instance.region.clone()));
+                    metadata.push("region", instance.region.clone());
                 }
                 if !instance.plan.is_empty() {
-                    metadata.push(("plan".to_string(), instance.plan.clone()));
+                    metadata.push("plan", instance.plan.clone());
                 }
                 if !instance.os.is_empty() {
-                    metadata.push(("os".to_string(), instance.os.clone()));
+                    metadata.push("os", instance.os.clone());
                 }
                 if !instance.power_status.is_empty() {
-                    metadata.push(("status".to_string(), instance.power_status.clone()));
+                    metadata.push("status", instance.power_status.clone());
                 }
                 hosts.push(ProviderHost {
                     server_id: instance.id.clone(),
                     name: instance.label.clone(),
                     ip,
                     tags: instance.tags.clone(),
-                    metadata,
+                    metadata: metadata.finish(),
                 });
             }
 

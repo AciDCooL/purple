@@ -182,31 +182,31 @@ impl Ovh {
         let mut hosts = Vec::with_capacity(instances.len());
         for instance in &instances {
             if let Some(ip) = select_ip(&instance.ip_addresses) {
-                let mut metadata = Vec::with_capacity(4);
+                let mut metadata = super::ProviderMetadata::new();
                 if !instance.region.is_empty() {
-                    metadata.push(("region".to_string(), instance.region.clone()));
+                    metadata.push("region", instance.region.clone());
                 }
                 if let Some(ref flavor) = instance.flavor {
                     if !flavor.name.is_empty() {
-                        metadata.push(("type".to_string(), flavor.name.clone()));
+                        metadata.push("type", flavor.name.clone());
                     }
                 }
                 if let Some(ref image) = instance.image {
                     if let Some(ref name) = image.name {
                         if !name.is_empty() {
-                            metadata.push(("image".to_string(), name.clone()));
+                            metadata.push("image", name.clone());
                         }
                     }
                 }
                 if !instance.status.is_empty() {
-                    metadata.push(("status".to_string(), instance.status.clone()));
+                    metadata.push("status", instance.status.clone());
                 }
                 hosts.push(ProviderHost {
                     server_id: instance.id.clone(),
                     name: instance.name.clone(),
                     ip,
                     tags: Vec::new(),
-                    metadata,
+                    metadata: metadata.finish(),
                 });
             }
         }
@@ -684,25 +684,26 @@ mod tests {
         let instances: Vec<OvhInstance> = serde_json::from_str(json).unwrap();
         let inst = &instances[0];
         // Simulate the metadata assembly from fetch_hosts_cancellable
-        let mut metadata = Vec::with_capacity(4);
+        let mut metadata = super::super::ProviderMetadata::new();
         if !inst.region.is_empty() {
-            metadata.push(("region".to_string(), inst.region.clone()));
+            metadata.push("region", inst.region.clone());
         }
         if let Some(ref flavor) = inst.flavor {
             if !flavor.name.is_empty() {
-                metadata.push(("type".to_string(), flavor.name.clone()));
+                metadata.push("type", flavor.name.clone());
             }
         }
         if let Some(ref image) = inst.image {
             if let Some(ref name) = image.name {
                 if !name.is_empty() {
-                    metadata.push(("image".to_string(), name.clone()));
+                    metadata.push("image", name.clone());
                 }
             }
         }
         if !inst.status.is_empty() {
-            metadata.push(("status".to_string(), inst.status.clone()));
+            metadata.push("status", inst.status.clone());
         }
+        let metadata = metadata.finish();
         assert_eq!(metadata.len(), 4);
         assert_eq!(metadata[0], ("region".to_string(), "GRA11".to_string()));
         assert_eq!(metadata[1], ("type".to_string(), "b2-7".to_string()));
@@ -718,19 +719,19 @@ mod tests {
         let json = r#"[{"id": "i-1", "name": "web", "status": "", "region": ""}]"#;
         let instances: Vec<OvhInstance> = serde_json::from_str(json).unwrap();
         let inst = &instances[0];
-        let mut metadata = Vec::new();
+        let mut metadata = super::super::ProviderMetadata::new();
         if !inst.region.is_empty() {
-            metadata.push(("region".to_string(), inst.region.clone()));
+            metadata.push("region", inst.region.clone());
         }
         if let Some(ref flavor) = inst.flavor {
             if !flavor.name.is_empty() {
-                metadata.push(("type".to_string(), flavor.name.clone()));
+                metadata.push("type", flavor.name.clone());
             }
         }
         if !inst.status.is_empty() {
-            metadata.push(("status".to_string(), inst.status.clone()));
+            metadata.push("status", inst.status.clone());
         }
-        assert!(metadata.is_empty());
+        assert!(metadata.finish().is_empty());
     }
 
     #[test]

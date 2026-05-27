@@ -15,6 +15,19 @@ pub struct SnippetState {
     pub(in crate::app) pending_terminal: bool,
     pub(in crate::app) form_baseline: Option<SnippetFormBaseline>,
     pub(in crate::app) pending_delete: Option<usize>,
+    /// Target host aliases for the currently-open snippet flow
+    /// (`Screen::SnippetPicker`, `SnippetForm`, `SnippetOutput`,
+    /// `SnippetParamForm`). The Screen variants are data-less; the
+    /// alias list lives here so screen transitions never clone it.
+    pub(in crate::app) flow_targets: Vec<String>,
+    /// `editing` payload for an open `Screen::SnippetForm`. `None`
+    /// when adding a new snippet, `Some(index)` when editing an
+    /// existing one. Set alongside the screen transition.
+    pub(in crate::app) form_editing: Option<usize>,
+    /// Snippet currently displayed by `Screen::SnippetParamForm`.
+    pub(in crate::app) param_snippet: Option<Snippet>,
+    /// Snippet name shown by `Screen::SnippetOutput` in its title.
+    pub(in crate::app) output_snippet_name: Option<String>,
 }
 
 impl Default for SnippetState {
@@ -28,6 +41,10 @@ impl Default for SnippetState {
             pending_terminal: false,
             form_baseline: None,
             pending_delete: None,
+            flow_targets: Vec::new(),
+            form_editing: None,
+            param_snippet: None,
+            output_snippet_name: None,
         }
     }
 }
@@ -95,6 +112,42 @@ impl SnippetState {
 
     pub fn set_pending(&mut self, value: Option<(Snippet, Vec<String>)>) {
         self.pending = value;
+    }
+
+    pub fn flow_targets(&self) -> &[String] {
+        &self.flow_targets
+    }
+
+    pub fn set_flow_targets(&mut self, targets: Vec<String>) {
+        self.flow_targets = targets;
+    }
+
+    pub fn clear_flow_targets(&mut self) {
+        self.flow_targets.clear();
+    }
+
+    pub fn form_editing(&self) -> Option<usize> {
+        self.form_editing
+    }
+
+    pub fn set_form_editing(&mut self, editing: Option<usize>) {
+        self.form_editing = editing;
+    }
+
+    pub fn param_snippet(&self) -> Option<&Snippet> {
+        self.param_snippet.as_ref()
+    }
+
+    pub fn set_param_snippet(&mut self, snippet: Option<Snippet>) {
+        self.param_snippet = snippet;
+    }
+
+    pub fn output_snippet_name(&self) -> Option<&str> {
+        self.output_snippet_name.as_deref()
+    }
+
+    pub fn set_output_snippet_name(&mut self, name: Option<String>) {
+        self.output_snippet_name = name;
     }
 
     pub fn pending_terminal(&self) -> bool {
