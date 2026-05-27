@@ -126,6 +126,7 @@ impl Provider for Ovh {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let (app_key, app_secret, consumer_key) = parse_token(token)?;
         let agent = super::http_agent();
@@ -497,7 +498,8 @@ mod tests {
             endpoint: String::new(),
         };
         let cancel = AtomicBool::new(false);
-        let result = ovh.fetch_hosts_cancellable("ak:as:ck", &cancel);
+        let result =
+            ovh.fetch_hosts_cancellable("ak:as:ck", &cancel, &crate::runtime::env::Env::empty());
         let msg = result.unwrap_err().to_string();
         assert!(msg.contains("project ID is required"));
     }
@@ -509,7 +511,8 @@ mod tests {
             endpoint: String::new(),
         };
         let cancel = AtomicBool::new(false);
-        let result = ovh.fetch_hosts_cancellable("bad-token", &cancel);
+        let result =
+            ovh.fetch_hosts_cancellable("bad-token", &cancel, &crate::runtime::env::Env::empty());
         assert!(matches!(result.unwrap_err(), ProviderError::AuthFailed));
     }
 
@@ -749,7 +752,8 @@ mod tests {
             project: "test-project".to_string(),
             endpoint: String::new(),
         };
-        let result = ovh.fetch_hosts_cancellable("AK:AS:CK", &cancel);
+        let result =
+            ovh.fetch_hosts_cancellable("AK:AS:CK", &cancel, &crate::runtime::env::Env::empty());
         assert!(matches!(result, Err(ProviderError::Cancelled)));
     }
 }

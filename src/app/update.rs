@@ -15,9 +15,9 @@ pub struct UpdateState {
 
 impl UpdateState {
     /// Construct with the current install-method hint detected at runtime.
-    pub fn with_current_hint() -> Self {
+    pub fn with_current_hint(env: &crate::runtime::env::Env) -> Self {
         Self {
-            hint: crate::update::update_hint(),
+            hint: crate::update::update_hint(env),
             ..Self::default()
         }
     }

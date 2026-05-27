@@ -354,11 +354,11 @@ pub fn read_pubkey_file(path: &Path) -> Result<String, PubkeyValidationError> {
 /// Resolve the local public-key path for a key whose `display_path` is
 /// `~/.ssh/id_ed25519`. Expands the tilde and appends `.pub`. The caller
 /// is expected to validate the file exists before reading.
-pub fn pubkey_path_for(display_path: &str) -> PathBuf {
+pub fn pubkey_path_for(paths: Option<&crate::runtime::env::Paths>, display_path: &str) -> PathBuf {
     let with_pub = format!("{}.pub", display_path);
     if let Some(rest) = with_pub.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
+        if let Some(p) = paths {
+            return p.home().join(rest);
         }
     }
     PathBuf::from(with_pub)
@@ -459,13 +459,14 @@ mod tests {
 
     #[test]
     fn pubkey_path_appends_pub_suffix() {
-        let p = pubkey_path_for("/tmp/id_ed25519");
+        let p = pubkey_path_for(None, "/tmp/id_ed25519");
         assert_eq!(p.to_string_lossy(), "/tmp/id_ed25519.pub");
     }
 
     #[test]
     fn pubkey_path_expands_tilde() {
-        let p = pubkey_path_for("~/.ssh/id_ed25519");
+        let paths = crate::runtime::env::Paths::new("/home/u");
+        let p = pubkey_path_for(Some(&paths), "~/.ssh/id_ed25519");
         assert!(!p.to_string_lossy().starts_with('~'));
         assert!(p.to_string_lossy().ends_with(".ssh/id_ed25519.pub"));
     }

@@ -30,6 +30,7 @@ struct ContainersCtx<'a> {
     demo_mode: bool,
     bw_session: Option<&'a str>,
     config_path: &'a Path,
+    env: std::sync::Arc<crate::runtime::env::Env>,
 }
 
 impl Nav for ContainersCtx<'_> {
@@ -56,6 +57,7 @@ impl ContainersCtx<'_> {
             demo_mode: app.demo_mode,
             bw_session: app.bw_session.as_deref(),
             config_path: app.reload.config_path(),
+            env: std::sync::Arc::clone(&app.env),
         }
     }
 
@@ -73,6 +75,7 @@ impl ContainersCtx<'_> {
             askpass,
             bw_session: self.bw_session.map(|s| s.to_string()),
             has_tunnel: self.tunnels.active_contains(alias),
+            env: std::sync::Arc::clone(&self.env),
         }
     }
 
@@ -162,6 +165,7 @@ impl ContainersCtx<'_> {
             askpass: state.askpass.clone(),
             bw_session: self.bw_session.map(|s| s.to_string()),
             has_tunnel: self.tunnels.active_contains(&alias),
+            env: std::sync::Arc::clone(&self.env),
         };
         let tx = events_tx.clone();
         crate::containers::spawn_container_action(

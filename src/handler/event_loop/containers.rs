@@ -29,7 +29,7 @@ pub(crate) fn handle_container_listing(
             "[purple] container_listing dropped: alias={} no longer in config",
             alias
         );
-        crate::askpass::cleanup_marker(&alias);
+        crate::askpass::cleanup_marker(app.env.paths(), &alias);
         app.containers_overview.clear_auto_list_pending(&alias);
         drive_refresh_batch(app, &alias, events_tx);
         return;
@@ -99,7 +99,7 @@ pub(crate) fn handle_container_listing(
             }
         }
     }
-    crate::askpass::cleanup_marker(&alias);
+    crate::askpass::cleanup_marker(app.env.paths(), &alias);
     app.containers_overview.clear_auto_list_pending(&alias);
 
     // Drive the `R` batch refresh: a listing whose alias is in the
@@ -148,6 +148,7 @@ pub(crate) fn drive_refresh_batch(app: &mut App, alias: &str, events_tx: &mpsc::
             askpass: item.askpass,
             bw_session,
             has_tunnel: item.has_tunnel,
+            env: std::sync::Arc::clone(&app.env),
         };
         let tx = events_tx.clone();
         containers::spawn_container_listing(ctx, item.cached_runtime, move |a, r| {
@@ -428,6 +429,7 @@ pub(crate) fn handle_container_action_complete(
             askpass,
             bw_session: app.bw_session.clone(),
             has_tunnel,
+            env: std::sync::Arc::clone(&app.env),
         };
         let tx = events_tx.clone();
         containers::spawn_container_listing(ctx, cached_runtime, move |a, r| {
@@ -437,5 +439,5 @@ pub(crate) fn handle_container_action_complete(
             });
         });
     }
-    crate::askpass::cleanup_marker(&alias);
+    crate::askpass::cleanup_marker(app.env.paths(), &alias);
 }

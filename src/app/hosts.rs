@@ -370,6 +370,7 @@ impl App {
     /// `pub(crate)` only to keep whitebox unit tests possible.
     pub(crate) fn apply_alias_renames(&mut self, renames: &[(String, String)]) {
         let mut applied = false;
+        let paths = self.env.paths().cloned();
         for (old_alias, new_alias) in renames {
             if old_alias == new_alias {
                 continue;
@@ -377,9 +378,9 @@ impl App {
             applied = true;
             log::debug!("[purple] apply_alias_renames: {old_alias} -> {new_alias}");
             self.history.rename(old_alias, new_alias);
-            let mut recents = crate::app::jump::load_recents();
+            let mut recents = crate::app::jump::load_recents(paths.as_ref());
             if crate::app::jump::rename_host_recent(&mut recents, old_alias, new_alias) {
-                if let Err(e) = crate::app::jump::save_recents(&recents) {
+                if let Err(e) = crate::app::jump::save_recents(&recents, paths.as_ref()) {
                     log::warn!("[config] failed to save recents after rename: {e}");
                 }
             }
@@ -652,12 +653,12 @@ pub fn migrate_renames_persistent_state(
             continue;
         }
         // ConnectionHistory::rename calls save() internally.
-        let mut history = crate::history::ConnectionHistory::load();
+        let mut history = crate::history::ConnectionHistory::load(paths);
         history.rename(old_alias, new_alias);
 
-        let mut recents = crate::app::jump::load_recents();
+        let mut recents = crate::app::jump::load_recents(paths);
         if crate::app::jump::rename_host_recent(&mut recents, old_alias, new_alias) {
-            if let Err(e) = crate::app::jump::save_recents(&recents) {
+            if let Err(e) = crate::app::jump::save_recents(&recents, paths) {
                 log::warn!("[config] failed to save recents after cli sync rename: {e}");
             }
         }

@@ -103,6 +103,7 @@ impl Provider for I3d {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let agent = super::http_agent();
         let results_per_page = 50u32;
@@ -854,7 +855,11 @@ mod tests {
     fn test_cancellation_returns_cancelled() {
         let cancel = AtomicBool::new(true);
         let provider = I3d;
-        let result = provider.fetch_hosts_cancellable("any-token", &cancel);
+        let result = provider.fetch_hosts_cancellable(
+            "any-token",
+            &cancel,
+            &crate::runtime::env::Env::empty(),
+        );
         assert!(matches!(result, Err(ProviderError::Cancelled)));
     }
 

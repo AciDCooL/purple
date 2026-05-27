@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use log::warn;
 
 use crate::fs_util;
+use crate::runtime::env::Paths;
 
 /// Timestamps older than this are pruned on load and after each record().
 const RETENTION_SECS: u64 = 365 * 86400;
@@ -32,8 +33,8 @@ pub struct ConnectionHistory {
 
 impl ConnectionHistory {
     /// Load connection history from disk.
-    pub fn load() -> Self {
-        let path = match Self::history_path() {
+    pub fn load(paths: Option<&Paths>) -> Self {
+        let path = match Self::history_path(paths) {
             Some(p) => p,
             None => return Self::default(),
         };
@@ -264,41 +265,8 @@ impl ConnectionHistory {
         fs_util::atomic_write(&self.path, content.as_bytes())
     }
 
-    fn history_path() -> Option<PathBuf> {
-        #[cfg(test)]
-        {
-            if let Some(p) = test_path::get() {
-                return Some(p);
-            }
-        }
-        dirs::home_dir().map(|h| h.join(".purple/history.tsv"))
-    }
-}
-
-/// Thread-local path override for tests. Mirrors the pattern in
-/// `crate::app::jump::test_path` so a test can isolate
-/// `ConnectionHistory::load()` from `~/.purple/history.tsv` without
-/// mutating `HOME`. Thread-local so parallel `cargo test` threads
-/// cannot see each other's overrides.
-#[cfg(test)]
-pub mod test_path {
-    use std::cell::RefCell;
-    use std::path::PathBuf;
-
-    thread_local! {
-        static OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    }
-
-    pub fn set(path: PathBuf) {
-        OVERRIDE.with(|cell| *cell.borrow_mut() = Some(path));
-    }
-
-    pub fn clear() {
-        OVERRIDE.with(|cell| *cell.borrow_mut() = None);
-    }
-
-    pub fn get() -> Option<PathBuf> {
-        OVERRIDE.with(|cell| cell.borrow().clone())
+    fn history_path(paths: Option<&Paths>) -> Option<PathBuf> {
+        paths.map(Paths::history)
     }
 }
 

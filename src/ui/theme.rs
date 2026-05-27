@@ -1284,11 +1284,10 @@ impl ThemeDef {
         })
     }
 
-    pub fn load_custom() -> Vec<ThemeDef> {
-        let Some(home) = dirs::home_dir() else {
+    pub fn load_custom(paths: Option<&crate::runtime::env::Paths>) -> Vec<ThemeDef> {
+        let Some(dir) = paths.map(crate::runtime::env::Paths::themes_dir) else {
             return Vec::new();
         };
-        let dir = home.join(".purple").join("themes");
         let Ok(entries) = std::fs::read_dir(&dir) else {
             return Vec::new();
         };
@@ -1464,7 +1463,7 @@ pub fn init(env: &crate::runtime::env::Env) {
         if let Some(theme) = ThemeDef::find_builtin(&name) {
             set_theme(theme);
         } else {
-            let custom = ThemeDef::load_custom();
+            let custom = ThemeDef::load_custom(env.paths());
             if let Some(theme) = custom
                 .into_iter()
                 .find(|t| t.name.eq_ignore_ascii_case(&name))

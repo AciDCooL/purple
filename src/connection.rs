@@ -271,6 +271,7 @@ pub fn connect(
 pub fn connect_with_remote_command(
     alias: &str,
     config_path: &Path,
+    env: &crate::runtime::env::Env,
     askpass: Option<&str>,
     bw_session: Option<&str>,
     has_active_tunnel: bool,
@@ -286,11 +287,7 @@ pub fn connect_with_remote_command(
     // Renew the Vault SSH cert before exec'ing into a container so an
     // expired cert is refreshed, mirroring the interactive connect path.
     // No-op for non-vault hosts.
-    crate::runtime::helpers::ensure_vault_cert_for_alias(
-        &crate::runtime::env::Env::from_process(),
-        alias,
-        config_path,
-    );
+    crate::runtime::helpers::ensure_vault_cert_for_alias(env, alias, config_path);
 
     let mut cmd = Command::new("ssh");
     cmd.arg("-F").arg(config_path).arg("-t");
@@ -319,6 +316,7 @@ pub fn connect_with_remote_command(
 pub fn connect_tmux_window_with_remote_command(
     alias: &str,
     config_path: &Path,
+    env: &crate::runtime::env::Env,
     has_active_tunnel: bool,
     remote_command: &str,
     window_label: &str,
@@ -328,11 +326,7 @@ pub fn connect_tmux_window_with_remote_command(
     // Renew the Vault SSH cert before exec'ing into a container so an
     // expired cert is refreshed, mirroring the interactive connect path.
     // No-op for non-vault hosts.
-    crate::runtime::helpers::ensure_vault_cert_for_alias(
-        &crate::runtime::env::Env::from_process(),
-        alias,
-        config_path,
-    );
+    crate::runtime::helpers::ensure_vault_cert_for_alias(env, alias, config_path);
 
     let config_str = config_path
         .to_str()

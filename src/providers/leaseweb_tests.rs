@@ -783,7 +783,8 @@ fn test_pagination_exact_multiple_no_extra_request() {
 fn test_cancellation_returns_cancelled() {
     let cancel = AtomicBool::new(true);
     let lsw = Leaseweb;
-    let result = lsw.fetch_hosts_cancellable("any-token", &cancel);
+    let result =
+        lsw.fetch_hosts_cancellable("any-token", &cancel, &crate::runtime::env::Env::empty());
     assert!(matches!(result, Err(ProviderError::Cancelled)));
 }
 

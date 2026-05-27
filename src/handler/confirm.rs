@@ -940,7 +940,7 @@ fn start_key_push(
         app.notify_error(crate::messages::KEY_PUSH_CERT_NOT_PUSHABLE);
         return;
     }
-    let pub_path = crate::key_push::pubkey_path_for(&key_info.display_path);
+    let pub_path = crate::key_push::pubkey_path_for(app.env.paths(), &key_info.display_path);
     let raw = match crate::key_push::read_pubkey_file(&pub_path) {
         Ok(s) => s,
         Err(crate::key_push::PubkeyValidationError::TooLarge(n)) => {

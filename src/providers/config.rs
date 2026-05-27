@@ -205,28 +205,41 @@ pub struct ProviderConfig {
     pub path_override: Option<PathBuf>,
 }
 
-fn config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".purple/providers"))
+fn config_path(paths: Option<&crate::runtime::env::Paths>) -> Option<PathBuf> {
+    paths.map(crate::runtime::env::Paths::providers_config)
 }
 
 impl ProviderConfig {
-    /// Load provider config from ~/.purple/providers.
-    /// Returns empty config if file doesn't exist (normal first-use).
-    /// Prints a warning to stderr on real IO errors (permissions, etc.).
-    pub fn load() -> Self {
-        let path = match config_path() {
+    /// Load provider config from `~/.purple/providers`, resolved from the
+    /// injected `paths`. The resolved path is stored as `path_override` so
+    /// a later `save()` writes back to the same location. Returns an empty
+    /// config when the file does not exist (normal first-use) or when no
+    /// home directory is known. Logs a warning on real IO errors.
+    pub fn load(paths: Option<&crate::runtime::env::Paths>) -> Self {
+        let path = match config_path(paths) {
             Some(p) => p,
             None => return Self::default(),
         };
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Self::default(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Self {
+                    path_override: Some(path),
+                    ..Self::default()
+                };
+            }
             Err(e) => {
                 log::warn!("[config] Could not read {}: {}", path.display(), e);
-                return Self::default();
+                return Self {
+                    path_override: Some(path),
+                    ..Self::default()
+                };
             }
         };
-        Self::parse(&content)
+        Self {
+            path_override: Some(path),
+            ..Self::parse(&content)
+        }
     }
 
     /// Parse INI-style provider config.
@@ -374,22 +387,20 @@ impl ProviderConfig {
             log::warn!("[config] Refusing to save invalid provider config: {}", e);
             return Err(io::Error::new(io::ErrorKind::InvalidData, e));
         }
-        // Skip demo guard when path_override is set (test-only paths should
-        // always write, even when a parallel demo test has enabled the flag).
-        if self.path_override.is_none() && crate::demo_flag::is_demo() {
+        // Demo mode never writes to the user's real config. In production
+        // builds that means an unconditional skip; under `#[cfg(test)]` the
+        // resolved path is always an isolated sandbox or explicit override,
+        // so tests write regardless of a parallel test toggling the global
+        // demo flag.
+        if crate::demo_flag::is_demo() {
+            #[cfg(not(test))]
             return Ok(());
         }
-        let path = match &self.path_override {
-            Some(p) => p.clone(),
-            None => match config_path() {
-                Some(p) => p,
-                None => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        "Could not determine home directory",
-                    ));
-                }
-            },
+        let Some(path) = self.path_override.clone() else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Could not determine home directory",
+            ));
         };
 
         let mut content = String::new();

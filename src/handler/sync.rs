@@ -10,6 +10,7 @@ pub fn spawn_provider_sync(
     section: &crate::providers::config::ProviderSection,
     tx: mpsc::Sender<AppEvent>,
     cancel: Arc<AtomicBool>,
+    env: Arc<crate::runtime::env::Env>,
 ) {
     // Use full ProviderConfigId (provider[:label]) as the event/sync key so
     // two labeled configs of the same provider don't collide on the syncing
@@ -43,7 +44,7 @@ pub fn spawn_provider_sync(
                     message: msg.to_string(),
                 });
             };
-            match provider.fetch_hosts_with_progress(&token, &cancel, &progress) {
+            match provider.fetch_hosts_with_progress(&token, &cancel, &env, &progress) {
                 Ok(hosts) => {
                     if hosts.is_empty() {
                         warn!("[config] Provider sync returned 0 hosts: {name} (check API token permissions)");

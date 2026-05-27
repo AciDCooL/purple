@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 
 use crate::fs_util::atomic_write;
+use crate::runtime::env::Paths;
 
 /// What kind of thing a jump hit represents. Drives the type-marker glyph
 /// rendered in the left column and the section grouping.
@@ -235,63 +236,14 @@ impl Default for RecentsFile {
 const RECENTS_VERSION: u32 = 1;
 const RECENTS_CAP: usize = 50;
 
-/// Resolve the recents file path. Honors `purple_recents_path_override`
-/// for tests; otherwise lives at `~/.purple/recents.json`.
-pub fn recents_path() -> Option<PathBuf> {
-    if let Some(p) = recents_path_override() {
-        return Some(p);
-    }
-    let home = dirs::home_dir()?;
-    Some(home.join(".purple").join("recents.json"))
+/// Resolve the recents file path from the injected paths
+/// (`~/.purple/recents.json`). `None` when the home directory is unknown.
+pub fn recents_path(paths: Option<&Paths>) -> Option<PathBuf> {
+    paths.map(Paths::recents)
 }
 
-// Test-only override pattern. **Thread-local** so parallel `cargo test`
-// threads do not see each other's overrides. The previous `Mutex` shape
-// caused contamination: any test that triggered a record dispatch on
-// thread A would observe an override set by an unrelated test on thread B
-// and write into B's tempdir, breaking B's roundtrip assertions.
-#[cfg(test)]
-pub mod test_path {
-    use std::cell::RefCell;
-    use std::path::PathBuf;
-
-    thread_local! {
-        static OVERRIDE: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
-    }
-
-    pub fn set(path: PathBuf) {
-        OVERRIDE.with(|cell| *cell.borrow_mut() = Some(path));
-    }
-
-    pub fn clear() {
-        OVERRIDE.with(|cell| *cell.borrow_mut() = None);
-    }
-
-    pub fn get() -> Option<PathBuf> {
-        OVERRIDE.with(|cell| cell.borrow().clone())
-    }
-}
-
-#[cfg(test)]
-fn recents_path_override() -> Option<PathBuf> {
-    test_path::get()
-}
-
-#[cfg(not(test))]
-fn recents_path_override() -> Option<PathBuf> {
-    None
-}
-
-pub fn load_recents() -> RecentsFile {
-    #[cfg(test)]
-    {
-        // Test builds only read recents when a tempdir override is set. See
-        // the matching guard in `save_recents` for the rationale.
-        if test_path::get().is_none() {
-            return RecentsFile::default();
-        }
-    }
-    let Some(path) = recents_path() else {
+pub fn load_recents(paths: Option<&Paths>) -> RecentsFile {
+    let Some(path) = recents_path(paths) else {
         return RecentsFile::default();
     };
     let bytes = match std::fs::read(&path) {
@@ -301,19 +253,8 @@ pub fn load_recents() -> RecentsFile {
     serde_json::from_slice(&bytes).unwrap_or_default()
 }
 
-pub fn save_recents(file: &RecentsFile) -> std::io::Result<()> {
-    // In test builds, only persist when a test has explicitly set a
-    // tempdir override. This keeps tests that exercise the dispatch path
-    // (which calls `record_jump_hit`) from contaminating either the
-    // user's real `~/.purple/recents.json` or other tests' tempdirs via
-    // the shared override slot.
-    #[cfg(test)]
-    {
-        if test_path::get().is_none() {
-            return Ok(());
-        }
-    }
-    let Some(path) = recents_path() else {
+pub fn save_recents(file: &RecentsFile, paths: Option<&Paths>) -> std::io::Result<()> {
+    let Some(path) = recents_path(paths) else {
         return Ok(());
     };
     if let Some(parent) = path.parent() {
@@ -835,12 +776,10 @@ pub mod tests {
 
     // `test_path` is thread-local, so each test thread gets an isolated
     // recents file with no shared state. No process-wide lock is needed.
-    fn with_temp<F: FnOnce(&std::path::Path)>(f: F) {
+    fn with_temp<F: FnOnce(&Paths)>(f: F) {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("recents.json");
-        test_path::set(path.clone());
-        f(&path);
-        test_path::clear();
+        let paths = Paths::new(dir.path());
+        f(&paths);
     }
 
     #[test]
@@ -919,12 +858,12 @@ pub mod tests {
 
     #[test]
     fn save_then_load_roundtrip() {
-        with_temp(|_path| {
+        with_temp(|paths| {
             let mut f = RecentsFile::default();
             touch_recent(&mut f, RecentRef::new(SourceKind::Action, "F".into()));
             touch_recent(&mut f, RecentRef::new(SourceKind::Host, "web-01".into()));
-            save_recents(&f).expect("save");
-            let loaded = load_recents();
+            save_recents(&f, Some(paths)).expect("save");
+            let loaded = load_recents(Some(paths));
             assert_eq!(loaded.version, RECENTS_VERSION);
             assert_eq!(loaded.entries.len(), 2);
             assert_eq!(loaded.entries[0].target.key, "web-01");
@@ -934,17 +873,19 @@ pub mod tests {
 
     #[test]
     fn missing_file_loads_empty() {
-        with_temp(|_path| {
-            let loaded = load_recents();
+        with_temp(|paths| {
+            let loaded = load_recents(Some(paths));
             assert!(loaded.entries.is_empty());
         });
     }
 
     #[test]
     fn corrupt_file_loads_empty() {
-        with_temp(|path| {
-            std::fs::write(path, b"not json").unwrap();
-            let loaded = load_recents();
+        with_temp(|paths| {
+            let path = paths.recents();
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"not json").unwrap();
+            let loaded = load_recents(Some(paths));
             assert!(loaded.entries.is_empty());
         });
     }

@@ -2990,7 +2990,15 @@ fn ssh_command_quotes_alias() {
         alias: "myserver".to_string(),
         ..Default::default()
     };
-    assert_eq!(entry.ssh_command(&default_path), "ssh -- 'myserver'");
+    assert_eq!(
+        entry.ssh_command(
+            Some(&purple_ssh::runtime::env::Paths::new(
+                dirs::home_dir().unwrap()
+            )),
+            &default_path
+        ),
+        "ssh -- 'myserver'"
+    );
 }
 
 #[test]
@@ -3000,7 +3008,15 @@ fn ssh_command_escapes_single_quotes() {
         alias: "it's-a-host".to_string(),
         ..Default::default()
     };
-    assert_eq!(entry.ssh_command(&default_path), "ssh -- 'it'\\''s-a-host'");
+    assert_eq!(
+        entry.ssh_command(
+            Some(&purple_ssh::runtime::env::Paths::new(
+                dirs::home_dir().unwrap()
+            )),
+            &default_path
+        ),
+        "ssh -- 'it'\\''s-a-host'"
+    );
 }
 
 #[test]
@@ -3010,7 +3026,15 @@ fn ssh_command_escapes_shell_metacharacters() {
         alias: "prod;rm -rf /".to_string(),
         ..Default::default()
     };
-    assert_eq!(entry.ssh_command(&default_path), "ssh -- 'prod;rm -rf /'");
+    assert_eq!(
+        entry.ssh_command(
+            Some(&purple_ssh::runtime::env::Paths::new(
+                dirs::home_dir().unwrap()
+            )),
+            &default_path
+        ),
+        "ssh -- 'prod;rm -rf /'"
+    );
 }
 
 // ============================================================================
@@ -3964,6 +3988,7 @@ impl Provider for TestProvider {
         &self,
         _token: &str,
         _cancel: &std::sync::atomic::AtomicBool,
+        _env: &purple_ssh::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         Ok(Vec::new())
     }

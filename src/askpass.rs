@@ -62,17 +62,16 @@ pub const PASSWORD_SOURCES: &[PasswordSourceOption] = &[
 
 /// Handle an SSH_ASKPASS invocation. Called when purple is invoked as an askpass program.
 /// Reads the password source from the host's `# purple:askpass` comment and retrieves it.
-pub fn handle() -> Result<()> {
+pub fn handle(env: &crate::runtime::env::Env) -> Result<()> {
     // Initialize file-only logging for askpass subprocess
     // verbose is determined by PURPLE_LOG env var only (no CLI flag in subprocess)
-    crate::logging::init(false, false);
+    crate::logging::init(false, false, env);
 
-    // The askpass subprocess runs in its own process, so it captures the real
-    // environment here rather than inheriting an Env from the parent.
-    let env = crate::runtime::env::Env::from_process();
-
-    let alias = std::env::var("PURPLE_HOST_ALIAS").unwrap_or_default();
-    let config_path = std::env::var("PURPLE_CONFIG_PATH").unwrap_or_default();
+    let alias = env.var("PURPLE_HOST_ALIAS").unwrap_or_default().to_string();
+    let config_path = env
+        .var("PURPLE_CONFIG_PATH")
+        .unwrap_or_default()
+        .to_string();
 
     // Check the prompt (argv[1]) to skip passphrase and host key verification prompts
     let prompt = std::env::args().nth(1).unwrap_or_default();
@@ -94,8 +93,8 @@ pub fn handle() -> Result<()> {
     // which hop is being authenticated; PURPLE_HOST_ALIAS only knows the final
     // target. Resolving the prompt host to its own alias scopes the keychain
     // lookup to the correct entry per hop.
-    let config =
-        SshConfigFile::parse(&PathBuf::from(&config_path)).context("Failed to parse SSH config")?;
+    let config = SshConfigFile::parse_with_env(&PathBuf::from(&config_path), env)
+        .context("Failed to parse SSH config")?;
 
     // Restrict prompt-based resolution to PURPLE_HOST_ALIAS and the hosts
     // reachable via its ProxyJump chain. Without this scope, a malicious
@@ -113,7 +112,7 @@ pub fn handle() -> Result<()> {
     // the password was wrong. Exit with error so SSH falls back to interactive.
     // The marker is keyed on the resolved alias so retries on one ProxyJump hop
     // do not block askpass on the next hop.
-    let marker = marker_path(&resolved_alias);
+    let marker = marker_path(env.paths(), &resolved_alias);
     if let Some(marker_path) = &marker {
         if is_recent_marker(marker_path) {
             debug!("Askpass retry detected for {resolved_alias}");
@@ -128,7 +127,7 @@ pub fn handle() -> Result<()> {
         }
     }
 
-    let source = find_askpass_source(&config, &resolved_alias);
+    let source = find_askpass_source(&config, env.paths(), &resolved_alias);
 
     let source = match source {
         Some(s) => s,
@@ -138,7 +137,7 @@ pub fn handle() -> Result<()> {
     debug!("Askpass invoked for alias={resolved_alias} source={source}");
 
     let hostname = find_hostname(&config, &resolved_alias);
-    match retrieve_password(&env, &source, &resolved_alias, &hostname) {
+    match retrieve_password(env, &source, &resolved_alias, &hostname) {
         Ok(password) => {
             debug!("Askpass retrieved password for {resolved_alias} via {source}");
             print!("{}", password);
@@ -247,7 +246,11 @@ fn parse_proxy_jump_host(jump: &str) -> &str {
 }
 
 /// Find the askpass source for a host. Checks per-host config, then global default.
-fn find_askpass_source(config: &SshConfigFile, alias: &str) -> Option<String> {
+fn find_askpass_source(
+    config: &SshConfigFile,
+    paths: Option<&crate::runtime::env::Paths>,
+    alias: &str,
+) -> Option<String> {
     // Per-host source
     for entry in config.host_entries() {
         if entry.alias == alias {
@@ -257,13 +260,13 @@ fn find_askpass_source(config: &SshConfigFile, alias: &str) -> Option<String> {
         }
     }
     // Global default from preferences file
-    load_askpass_default_direct()
+    load_askpass_default_direct(paths)
 }
 
 /// Read askpass default directly from ~/.purple/preferences without depending on the
 /// preferences module (which requires crate::app and isn't available in askpass subprocess).
-fn load_askpass_default_direct() -> Option<String> {
-    let path = dirs::home_dir()?.join(".purple/preferences");
+fn load_askpass_default_direct(paths: Option<&crate::runtime::env::Paths>) -> Option<String> {
+    let path = paths?.preferences();
     let content = std::fs::read_to_string(path).ok()?;
     for line in content.lines() {
         let line = line.trim();
@@ -606,9 +609,8 @@ fn retrieve_from_command(
 
 /// Get the path for the retry marker file.
 /// Sanitizes the alias to prevent path traversal (replaces `/` and `\` with `_`).
-fn marker_path(alias: &str) -> Option<PathBuf> {
-    let safe = alias.replace(['/', '\\', '.'], "_");
-    dirs::home_dir().map(|h| h.join(format!(".purple/.askpass_{}", safe)))
+fn marker_path(paths: Option<&crate::runtime::env::Paths>, alias: &str) -> Option<PathBuf> {
+    paths.map(|p| p.askpass_marker(alias))
 }
 
 /// Check if a marker file exists and is recent (< 60 seconds old).
@@ -628,11 +630,11 @@ fn is_recent_marker(path: &PathBuf) -> bool {
 /// target alias, so we clear every `~/.purple/.askpass_*` file on success.
 /// Each marker has a 60s expiry; this just keeps rapid reconnects snappy and
 /// prevents a stranded bastion marker from blocking the next attempt.
-pub fn cleanup_marker(_alias: &str) {
-    let Some(home) = dirs::home_dir() else {
+pub fn cleanup_marker(paths: Option<&crate::runtime::env::Paths>, _alias: &str) {
+    let Some(paths) = paths else {
         return;
     };
-    let Ok(read) = std::fs::read_dir(home.join(".purple")) else {
+    let Ok(read) = std::fs::read_dir(paths.purple_dir()) else {
         return;
     };
     for entry in read.flatten() {

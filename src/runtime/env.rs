@@ -56,6 +56,36 @@ impl Paths {
         self.purple_dir().join("history.tsv")
     }
 
+    /// `~/.purple/key_activity.json`.
+    pub fn key_activity(&self) -> PathBuf {
+        self.purple_dir().join("key_activity.json")
+    }
+
+    /// `~/.purple/sync_history.tsv`.
+    pub fn sync_history(&self) -> PathBuf {
+        self.purple_dir().join("sync_history.tsv")
+    }
+
+    /// `~/.purple/recents.json`.
+    pub fn recents(&self) -> PathBuf {
+        self.purple_dir().join("recents.json")
+    }
+
+    /// `~/.purple/providers`, the provider config file.
+    pub fn providers_config(&self) -> PathBuf {
+        self.purple_dir().join("providers")
+    }
+
+    /// `~/.purple/themes`, the custom theme directory.
+    pub fn themes_dir(&self) -> PathBuf {
+        self.purple_dir().join("themes")
+    }
+
+    /// `~/.aws/credentials`, the shared AWS credentials file.
+    pub fn aws_credentials_file(&self) -> PathBuf {
+        self.home.join(".aws").join("credentials")
+    }
+
     /// `~/.purple/last_version_check`.
     pub fn last_version_check(&self) -> PathBuf {
         self.purple_dir().join("last_version_check")

@@ -399,14 +399,16 @@ impl Provider for Oracle {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_with_progress(token, cancel, &|_| {})
+        self.fetch_hosts_with_progress(token, cancel, env, &|_| {})
     }
 
     fn fetch_hosts_with_progress(
         &self,
         token: &str,
         cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
         progress: &dyn Fn(&str),
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         if self.compartment.is_empty() {
@@ -420,11 +422,10 @@ impl Provider for Oracle {
             ProviderError::Http(format!("Cannot read OCI config file '{}': {}", token, e))
         })?;
         let key_file = extract_key_file(&config_content)?;
-        let expanded = if key_file.starts_with("~/") {
-            if let Some(home) = dirs::home_dir() {
-                format!("{}{}", home.display(), &key_file[1..])
-            } else {
-                key_file.clone()
+        let expanded = if let Some(rest) = key_file.strip_prefix("~/") {
+            match env.paths() {
+                Some(p) => p.home().join(rest).to_string_lossy().into_owned(),
+                None => key_file.clone(),
             }
         } else {
             key_file.clone()

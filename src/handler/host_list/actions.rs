@@ -76,7 +76,7 @@ pub(crate) fn initiate_bulk_vault_sign(app: &mut App) {
         app.notify(crate::messages::VAULT_SIGNING_CANCELLED);
         return;
     }
-    let provider_config = crate::providers::config::ProviderConfig::load();
+    let provider_config = crate::providers::config::ProviderConfig::load(app.env.paths());
     let entries = app.hosts_state.ssh_config().host_entries();
     let mut signable: Vec<crate::vault_ssh::VaultSignTarget> = Vec::new();
     let mut pubkey_error: Option<String> = None;
@@ -236,12 +236,14 @@ pub(super) fn open_file_browser(app: &mut App, events_tx: &mpsc::Sender<AppEvent
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
+        env: std::sync::Arc::clone(&app.env),
     };
     std::thread::spawn(move || {
         let home = if remote.is_empty() {
             match crate::file_browser::get_remote_home(
                 &ctx.alias,
                 &ctx.config_path,
+                &ctx.env,
                 ctx.askpass.as_deref(),
                 ctx.bw_session.as_deref(),
                 ctx.has_tunnel,
@@ -435,7 +437,7 @@ pub(super) fn undo_last(app: &mut App) {
 pub(super) fn open_theme_picker(app: &mut App) {
     let current = crate::ui::theme::current_theme().name;
     let builtins = crate::ui::theme::ThemeDef::builtins();
-    let custom = crate::ui::theme::ThemeDef::load_custom();
+    let custom = crate::ui::theme::ThemeDef::load_custom(app.env.paths());
     let idx = builtins
         .iter()
         .position(|t| t.name.eq_ignore_ascii_case(&current))

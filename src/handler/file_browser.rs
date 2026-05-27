@@ -22,6 +22,7 @@ struct FileBrowserCtx<'a> {
     screen: &'a mut Screen,
     bw_session: Option<&'a str>,
     config_path: &'a std::path::Path,
+    env: std::sync::Arc<crate::runtime::env::Env>,
     effects: Effects,
 }
 
@@ -45,6 +46,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             screen: &mut app.screen,
             bw_session: app.bw_session.as_deref(),
             config_path: app.reload.config_path(),
+            env: std::sync::Arc::clone(&app.env),
             effects: Effects::default(),
         };
         file_browser_key(&mut ctx, key, events_tx);
@@ -124,6 +126,7 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
                     remote_path
                 );
                 let config_path = ctx.config_path.to_path_buf();
+                let env = std::sync::Arc::clone(&ctx.env);
                 let bw = ctx.bw_session.map(str::to_string);
                 let tx = events_tx.clone();
                 let direction_str = direction.to_string();
@@ -132,6 +135,7 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
                     let result = crate::file_browser::run_scp(
                         &alias,
                         &config_path,
+                        &env,
                         askpass.as_deref(),
                         bw.as_deref(),
                         has_active_tunnel,
@@ -230,11 +234,13 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
         },
         KeyCode::Enter => {
             let config_path = ctx.config_path.to_path_buf();
+            let env = std::sync::Arc::clone(&ctx.env);
             let bw_session = ctx.bw_session.map(str::to_string);
             let has_tunnel = ctx.tunnels.active_contains(&fb.alias);
             fb_enter(
                 fb,
                 &config_path,
+                env,
                 bw_session.as_deref(),
                 has_tunnel,
                 events_tx,
@@ -290,6 +296,7 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
                             askpass: fb.askpass.clone(),
                             bw_session: ctx.bw_session.map(str::to_string),
                             has_tunnel: ctx.tunnels.active_contains(&fb.alias),
+                            env: std::sync::Arc::clone(&ctx.env),
                         };
                         let show_hidden = fb.show_hidden;
                         let sort = fb.sort;
@@ -395,6 +402,7 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
                     askpass: fb.askpass.clone(),
                     bw_session: ctx.bw_session.map(str::to_string),
                     has_tunnel: ctx.tunnels.active_contains(&fb.alias),
+                    env: std::sync::Arc::clone(&ctx.env),
                 };
                 let path = fb.remote_path.clone();
                 let show_hidden = fb.show_hidden;
@@ -435,6 +443,7 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
                     askpass: fb.askpass.clone(),
                     bw_session: ctx.bw_session.map(str::to_string),
                     has_tunnel: ctx.tunnels.active_contains(&fb.alias),
+                    env: std::sync::Arc::clone(&ctx.env),
                 };
                 let path = fb.remote_path.clone();
                 let show_hidden = fb.show_hidden;
@@ -491,6 +500,7 @@ pub(super) fn fb_send(
 fn fb_enter(
     fb: &mut crate::file_browser::FileBrowserSession,
     config_path: &std::path::Path,
+    env: std::sync::Arc<crate::runtime::env::Env>,
     bw_session: Option<&str>,
     has_tunnel: bool,
     events_tx: &mpsc::Sender<AppEvent>,
@@ -591,6 +601,7 @@ fn fb_enter(
                         askpass: fb.askpass.clone(),
                         bw_session: bw_session.map(str::to_string),
                         has_tunnel,
+                        env: std::sync::Arc::clone(&env),
                     };
                     let show_hidden = fb.show_hidden;
                     let sort = fb.sort;
@@ -634,6 +645,7 @@ fn fb_enter(
                         askpass: fb.askpass.clone(),
                         bw_session: bw_session.map(str::to_string),
                         has_tunnel,
+                        env: std::sync::Arc::clone(&env),
                     };
                     let show_hidden = fb.show_hidden;
                     let sort = fb.sort;

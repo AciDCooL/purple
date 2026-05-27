@@ -248,7 +248,7 @@ fn test_parse_credentials_empty_content() {
 
 #[test]
 fn test_resolve_credentials_token_format() {
-    let creds = resolve_credentials("AKID:SECRET", "").unwrap();
+    let creds = resolve_credentials("AKID:SECRET", "", &crate::runtime::env::Env::empty()).unwrap();
     assert_eq!(creds.access_key, "AKID");
     assert_eq!(creds.secret_key, "SECRET");
 }
@@ -256,16 +256,16 @@ fn test_resolve_credentials_token_format() {
 #[test]
 fn test_resolve_credentials_empty_parts() {
     // Empty access key
-    assert!(resolve_credentials(":SECRET", "").is_err());
+    assert!(resolve_credentials(":SECRET", "", &crate::runtime::env::Env::empty()).is_err());
     // Empty secret key
-    assert!(resolve_credentials("AKID:", "").is_err());
+    assert!(resolve_credentials("AKID:", "", &crate::runtime::env::Env::empty()).is_err());
 }
 
 #[test]
 fn test_resolve_credentials_no_colon() {
     // No colon in token: split_once fails, falls through to env vars
     // Token-only (no colon) should not produce valid credentials from token path
-    let result = resolve_credentials("just-a-token", "");
+    let result = resolve_credentials("just-a-token", "", &crate::runtime::env::Env::empty());
     // Result depends on env vars. Verify token path was skipped by
     // confirming credentials (if any) don't contain the raw token string.
     if let Ok(ref creds) = result {
@@ -567,7 +567,7 @@ fn test_aws_no_regions_error() {
         regions: vec![],
         profile: String::new(),
     };
-    let result = aws.fetch_hosts("fake");
+    let result = aws.fetch_hosts("fake", &crate::runtime::env::Env::empty());
     match result {
         Err(ProviderError::Http(msg)) => assert!(msg.contains("No AWS regions")),
         other => panic!("Expected Http error, got: {:?}", other),
@@ -595,7 +595,7 @@ fn test_aws_invalid_region_error() {
         regions: vec!["xx-invalid-1".to_string()],
         profile: String::new(),
     };
-    let result = aws.fetch_hosts("AKID:SECRET");
+    let result = aws.fetch_hosts("AKID:SECRET", &crate::runtime::env::Env::empty());
     match result {
         Err(ProviderError::Http(msg)) => assert!(msg.contains("Unknown AWS region")),
         other => panic!("Expected Http error for invalid region, got: {:?}", other),
@@ -608,7 +608,7 @@ fn test_aws_mixed_valid_invalid_region_error() {
         regions: vec!["us-east-1".to_string(), "xx-fake-9".to_string()],
         profile: String::new(),
     };
-    let result = aws.fetch_hosts("AKID:SECRET");
+    let result = aws.fetch_hosts("AKID:SECRET", &crate::runtime::env::Env::empty());
     match result {
         Err(ProviderError::Http(msg)) => assert!(msg.contains("xx-fake-9")),
         other => panic!("Expected Http error for invalid region, got: {:?}", other),
@@ -622,7 +622,10 @@ fn test_aws_mixed_valid_invalid_region_error() {
 #[test]
 fn test_resolve_credentials_bad_profile_returns_auth_failed() {
     // Non-existent profile should return AuthFailed (not Http)
-    let result = read_credentials_file("nonexistent-profile-xyz");
+    let result = read_credentials_file(
+        "nonexistent-profile-xyz",
+        &crate::runtime::env::Env::empty(),
+    );
     assert!(matches!(result, Err(ProviderError::AuthFailed)));
 }
 

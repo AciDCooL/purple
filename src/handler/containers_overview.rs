@@ -487,6 +487,7 @@ fn selected_container_row(app: &App) -> Option<crate::ui::containers_overview::C
 /// pop.
 fn spawn_refresh(
     config_path: std::path::PathBuf,
+    env: std::sync::Arc<crate::runtime::env::Env>,
     bw_session: Option<String>,
     item: crate::app::RefreshQueueItem,
     events_tx: &mpsc::Sender<AppEvent>,
@@ -497,6 +498,7 @@ fn spawn_refresh(
         askpass: item.askpass,
         bw_session,
         has_tunnel: item.has_tunnel,
+        env,
     };
     let tx = events_tx.clone();
     crate::containers::spawn_container_listing(ctx, item.cached_runtime, move |a, result| {
@@ -554,6 +556,7 @@ fn refresh_selected_host(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
         .mark_auto_list_pending(alias.clone());
     spawn_refresh(
         app.reload.config_path().to_path_buf(),
+        std::sync::Arc::clone(&app.env),
         app.bw_session.clone(),
         crate::app::RefreshQueueItem {
             alias,
@@ -641,7 +644,13 @@ pub(crate) fn auto_fetch_new_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEv
     let config_path = app.reload.config_path().to_path_buf();
     let bw_session = app.bw_session.clone();
     for item in initial {
-        spawn_refresh(config_path.clone(), bw_session.clone(), item, events_tx);
+        spawn_refresh(
+            config_path.clone(),
+            std::sync::Arc::clone(&app.env),
+            bw_session.clone(),
+            item,
+            events_tx,
+        );
     }
 }
 
@@ -752,7 +761,13 @@ fn refresh_all_hosts(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
     let config_path = app.reload.config_path().to_path_buf();
     let bw_session = app.bw_session.clone();
     for item in initial_batch {
-        spawn_refresh(config_path.clone(), bw_session.clone(), item, events_tx);
+        spawn_refresh(
+            config_path.clone(),
+            std::sync::Arc::clone(&app.env),
+            bw_session.clone(),
+            item,
+            events_tx,
+        );
     }
 }
 
@@ -1115,6 +1130,7 @@ pub(super) fn ensure_inspect_for_selected(app: &mut App, events_tx: &mpsc::Sende
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
+        env: std::sync::Arc::clone(&app.env),
     };
     let tx = events_tx.clone();
     crate::containers::spawn_container_inspect_listing(
@@ -1198,6 +1214,7 @@ pub(crate) fn prefetch_inspect_for_listing(
             askpass: askpass.clone(),
             bw_session: bw_session.clone(),
             has_tunnel,
+            env: std::sync::Arc::clone(&app.env),
         };
         let tx = events_tx.clone();
         crate::containers::spawn_container_inspect_listing(
@@ -1272,6 +1289,7 @@ pub(super) fn ensure_logs_for_selected(app: &mut App, events_tx: &mpsc::Sender<A
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
+        env: std::sync::Arc::clone(&app.env),
     };
     let tx = events_tx.clone();
     crate::containers::spawn_container_logs_fetch(
@@ -1377,6 +1395,7 @@ pub(super) fn ensure_inspect_for_host_header(app: &mut App, events_tx: &mpsc::Se
             askpass: askpass.clone(),
             bw_session: bw_session.clone(),
             has_tunnel,
+            env: std::sync::Arc::clone(&app.env),
         };
         let tx = events_tx.clone();
         crate::containers::spawn_container_inspect_listing(
@@ -1453,6 +1472,7 @@ pub(super) fn ensure_list_for_selected_host(app: &mut App, events_tx: &mpsc::Sen
     log::debug!("[purple] auto-list refresh: alias={}", alias);
     spawn_refresh(
         app.reload.config_path().to_path_buf(),
+        std::sync::Arc::clone(&app.env),
         app.bw_session.clone(),
         crate::app::RefreshQueueItem {
             alias,

@@ -128,7 +128,10 @@ pub(super) fn handle_provider_list_key(
                         app.notify_error(crate::messages::failed_to_save(&e));
                     } else {
                         app.providers.sync_history_mut().remove(&id.to_string());
-                        crate::app::SyncRecord::save_all(app.providers.sync_history());
+                        crate::app::SyncRecord::save_all(
+                            app.providers.sync_history(),
+                            app.env.paths(),
+                        );
                         // Drop the expand-state if this was the last config of
                         // its provider; otherwise a re-add would reopen expanded.
                         if app
@@ -151,7 +154,10 @@ pub(super) fn handle_provider_list_key(
                         app.notify_error(crate::messages::failed_to_save(&e));
                     } else {
                         app.providers.sync_history_mut().remove(name.as_str());
-                        crate::app::SyncRecord::save_all(app.providers.sync_history());
+                        crate::app::SyncRecord::save_all(
+                            app.providers.sync_history(),
+                            app.env.paths(),
+                        );
                         app.providers.expanded_providers_mut().remove(&name);
                         let display_name = crate::providers::provider_display_name(name.as_str());
                         app.notify(crate::messages::provider_removed(display_name));
@@ -312,7 +318,12 @@ pub(super) fn handle_provider_list_key(
                 let cancel = Arc::new(AtomicBool::new(false));
                 app.providers.syncing_mut().insert(key, cancel.clone());
                 app.providers.bump_batch_total();
-                super::sync::spawn_provider_sync(&section, events_tx.clone(), cancel);
+                super::sync::spawn_provider_sync(
+                    &section,
+                    events_tx.clone(),
+                    cancel,
+                    std::sync::Arc::clone(&app.env),
+                );
             }
             crate::set_sync_summary(app);
         }
@@ -1167,7 +1178,12 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
             app.providers.syncing_mut().insert(sync_key, cancel.clone());
             app.providers.bump_batch_total();
             app.notify(crate::messages::provider_saved_syncing(display_name));
-            super::sync::spawn_provider_sync(&sync_section, events_tx.clone(), cancel);
+            super::sync::spawn_provider_sync(
+                &sync_section,
+                events_tx.clone(),
+                cancel,
+                std::sync::Arc::clone(&app.env),
+            );
             crate::set_sync_summary(app);
         }
     } else {

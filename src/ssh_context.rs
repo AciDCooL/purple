@@ -7,6 +7,7 @@ pub struct SshContext<'a> {
     pub askpass: Option<&'a str>,
     pub bw_session: Option<&'a str>,
     pub has_tunnel: bool,
+    pub env: &'a crate::runtime::env::Env,
 }
 
 /// Owned variant for spawning into threads.
@@ -16,4 +17,5 @@ pub struct OwnedSshContext {
     pub askpass: Option<String>,
     pub bw_session: Option<String>,
     pub has_tunnel: bool,
+    pub env: std::sync::Arc<crate::runtime::env::Env>,
 }

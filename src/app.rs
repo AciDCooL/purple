@@ -237,7 +237,7 @@ impl App {
             )
         });
 
-        let reload = ReloadState::from_config(&config);
+        let reload = ReloadState::from_config(&env, &config);
         let hosts_state = HostState::from_config(config, hosts, patterns, display_list);
 
         Self {
@@ -253,18 +253,18 @@ impl App {
             keys: KeysState {
                 list: Vec::new(),
                 list_state: ratatui::widgets::ListState::default(),
-                activity: crate::key_activity::KeyActivityLog::load(),
+                activity: crate::key_activity::KeyActivityLog::load(env.paths()),
                 push: KeyPushState::default(),
             },
             tags: TagState::default(),
             forms: FormState::default(),
-            history: ConnectionHistory::load(),
-            providers: ProviderState::load(),
+            history: ConnectionHistory::load(env.paths()),
+            providers: ProviderState::load(env.paths()),
             ping: PingState::from_preferences(env.paths()),
             vault: VaultState::default(),
             tunnels: TunnelState::default(),
-            snippets: SnippetState::with_store_loaded(),
-            update: UpdateState::with_current_hint(),
+            snippets: SnippetState::with_store_loaded(env.paths()),
+            update: UpdateState::with_current_hint(&env),
             bw_session: None,
             file_browser_state: FileBrowserState::default(),
             file_browser_session: None,
@@ -291,7 +291,8 @@ impl App {
     /// failure must never interrupt the user's connect flow. Caller
     /// passes `now`; production call sites pass `key_activity::now_secs()`.
     pub fn record_key_use(&mut self, alias: &str, now: u64) {
-        crate::key_activity::record_and_flush(&mut self.keys.activity, alias, now);
+        let paths = self.env.paths().cloned();
+        crate::key_activity::record_and_flush(&mut self.keys.activity, alias, now, paths.as_ref());
     }
 
     /// Snapshot the alias of every host currently loaded. Used as
@@ -574,7 +575,7 @@ impl App {
     pub fn open_jump(&mut self, mode: JumpMode) {
         log::debug!("jump: open mode={:?}", mode);
         let mut state = JumpState::for_mode(mode);
-        let recents_file = jump::load_recents();
+        let recents_file = jump::load_recents(self.env.paths());
         state.recents = self.resolve_recents(&recents_file);
         self.jump = Some(state);
         self.recompute_jump_hits();
@@ -872,9 +873,10 @@ impl App {
             log::debug!("jump: record skipped (demo mode)");
             return;
         }
-        let mut file = jump::load_recents();
+        let paths = self.env.paths().cloned();
+        let mut file = jump::load_recents(paths.as_ref());
         jump::touch_recent(&mut file, hit.identity());
-        if let Err(e) = jump::save_recents(&file) {
+        if let Err(e) = jump::save_recents(&file, paths.as_ref()) {
             log::warn!("[purple] failed to save recents: {e}");
         }
     }
@@ -1080,7 +1082,9 @@ impl App {
                 "[config] check_config_changed: mtime drift detected on {} -> reloading",
                 self.reload.config_path.display()
             );
-            if let Ok(new_config) = SshConfigFile::parse(&self.reload.config_path) {
+            if let Ok(new_config) =
+                SshConfigFile::parse_with_env(&self.reload.config_path, &self.env)
+            {
                 let before_aliases = self.snapshot_alias_set();
                 self.hosts_state.ssh_config = new_config;
                 // Invalidate undo state. config structure may have changed externally
@@ -1098,8 +1102,10 @@ impl App {
                 self.reload.last_modified = current_mtime;
                 self.reload.include_mtimes =
                     reload_state::snapshot_include_mtimes(&self.hosts_state.ssh_config);
-                self.reload.include_dir_mtimes =
-                    reload_state::snapshot_include_dir_mtimes(&self.hosts_state.ssh_config);
+                self.reload.include_dir_mtimes = reload_state::snapshot_include_dir_mtimes(
+                    &self.env,
+                    &self.hosts_state.ssh_config,
+                );
                 let count = self.hosts_state.list.len();
                 self.notify_background(crate::messages::config_reloaded(count));
                 self.queue_new_aliases_since(&before_aliases);
@@ -1196,7 +1202,7 @@ impl App {
         self.reload.include_mtimes =
             reload_state::snapshot_include_mtimes(&self.hosts_state.ssh_config);
         self.reload.include_dir_mtimes =
-            reload_state::snapshot_include_dir_mtimes(&self.hosts_state.ssh_config);
+            reload_state::snapshot_include_dir_mtimes(&self.env, &self.hosts_state.ssh_config);
     }
 
     /// Returns true if any host or provider has a vault role configured.

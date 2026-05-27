@@ -159,14 +159,16 @@ impl Provider for Scaleway {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_with_progress(token, cancel, &|_| {})
+        self.fetch_hosts_with_progress(token, cancel, _env, &|_| {})
     }
 
     fn fetch_hosts_with_progress(
         &self,
         token: &str,
         cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
         progress: &dyn Fn(&str),
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         if self.zones.is_empty() {
@@ -686,7 +688,7 @@ mod tests {
     #[test]
     fn test_scaleway_no_zones_error() {
         let scw = Scaleway { zones: vec![] };
-        let result = scw.fetch_hosts("fake-token");
+        let result = scw.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
         match result {
             Err(ProviderError::Http(msg)) => assert!(msg.contains("No Scaleway zones")),
             other => panic!("Expected Http error, got: {:?}", other),
@@ -698,7 +700,7 @@ mod tests {
         let scw = Scaleway {
             zones: vec!["xx-invalid-1".to_string()],
         };
-        let result = scw.fetch_hosts("fake-token");
+        let result = scw.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
         match result {
             Err(ProviderError::Http(msg)) => assert!(msg.contains("Unknown Scaleway zone")),
             other => panic!("Expected Http error for invalid zone, got: {:?}", other),
@@ -710,7 +712,7 @@ mod tests {
         let scw = Scaleway {
             zones: vec!["fr-par-1".to_string(), "xx-fake-9".to_string()],
         };
-        let result = scw.fetch_hosts("fake-token");
+        let result = scw.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
         match result {
             Err(ProviderError::Http(msg)) => assert!(msg.contains("xx-fake-9")),
             other => panic!("Expected Http error for invalid zone, got: {:?}", other),

@@ -35,10 +35,15 @@ pub struct McpContext {
     pub(crate) config_path: PathBuf,
     pub(crate) options: McpOptions,
     pub(crate) audit: Option<AuditLog>,
+    pub(crate) env: std::sync::Arc<crate::runtime::env::Env>,
 }
 
 impl McpContext {
-    pub fn new(config_path: PathBuf, options: McpOptions) -> Self {
+    pub fn new(
+        config_path: PathBuf,
+        options: McpOptions,
+        env: std::sync::Arc<crate::runtime::env::Env>,
+    ) -> Self {
         let audit = options
             .audit_log_path
             .as_deref()
@@ -55,6 +60,7 @@ impl McpContext {
             config_path,
             options,
             audit,
+            env,
         }
     }
 
@@ -237,8 +243,8 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /// Resolve the default audit log path (`~/.purple/mcp-audit.log`).
-pub fn default_audit_log_path() -> Option<PathBuf> {
-    audit_log_path_from_home(dirs::home_dir())
+pub fn default_audit_log_path(paths: Option<&crate::runtime::env::Paths>) -> Option<PathBuf> {
+    audit_log_path_from_home(paths.map(|p| p.home().to_path_buf()))
 }
 
 /// Helper extracted so the `home_dir = None` branch is unit-testable.
@@ -332,9 +338,13 @@ fn require_config_exists(config_path: &Path) -> Result<(), Value> {
 }
 
 /// Verify that an alias exists in the SSH config. Returns error Value if not found.
-fn verify_alias_exists(alias: &str, config_path: &Path) -> Result<(), Value> {
+fn verify_alias_exists(
+    alias: &str,
+    config_path: &Path,
+    env: &crate::runtime::env::Env,
+) -> Result<(), Value> {
     require_config_exists(config_path)?;
-    let config = match SshConfigFile::parse(config_path) {
+    let config = match SshConfigFile::parse_with_env(config_path, env) {
         Ok(c) => c,
         Err(e) => return Err(mcp_tool_error(&format!("Failed to parse SSH config: {e}"))),
     };
@@ -638,11 +648,11 @@ fn handle_tools_call(params: Option<Value>, ctx: &McpContext) -> JsonRpcResponse
     }
 
     let result = match tool_name {
-        "list_hosts" => tool_list_hosts(&args, &ctx.config_path),
-        "get_host" => tool_get_host(&args, &ctx.config_path),
-        "run_command" => tool_run_command(&args, &ctx.config_path),
-        "list_containers" => tool_list_containers(&args, &ctx.config_path),
-        "container_action" => tool_container_action(&args, &ctx.config_path),
+        "list_hosts" => tool_list_hosts(&args, &ctx.config_path, &ctx.env),
+        "get_host" => tool_get_host(&args, &ctx.config_path, &ctx.env),
+        "run_command" => tool_run_command(&args, &ctx.config_path, &ctx.env),
+        "list_containers" => tool_list_containers(&args, &ctx.config_path, &ctx.env),
+        "container_action" => tool_container_action(&args, &ctx.config_path, &ctx.env),
         _ => mcp_tool_error(&format!("Unknown tool: {tool_name}")),
     };
 
@@ -658,11 +668,11 @@ fn handle_tools_call(params: Option<Value>, ctx: &McpContext) -> JsonRpcResponse
     JsonRpcResponse::success(None, result)
 }
 
-fn tool_list_hosts(args: &Value, config_path: &Path) -> Value {
+fn tool_list_hosts(args: &Value, config_path: &Path, env: &crate::runtime::env::Env) -> Value {
     if let Err(e) = require_config_exists(config_path) {
         return e;
     }
-    let config = match SshConfigFile::parse(config_path) {
+    let config = match SshConfigFile::parse_with_env(config_path, env) {
         Ok(c) => c,
         Err(e) => return mcp_tool_error(&format!("Failed to parse SSH config: {e}")),
     };
@@ -718,7 +728,7 @@ fn tool_list_hosts(args: &Value, config_path: &Path) -> Value {
     mcp_tool_result(&json_str)
 }
 
-fn tool_get_host(args: &Value, config_path: &Path) -> Value {
+fn tool_get_host(args: &Value, config_path: &Path, env: &crate::runtime::env::Env) -> Value {
     let alias = match args.get("alias").and_then(|a| a.as_str()) {
         Some(a) if !a.is_empty() => a,
         _ => return mcp_tool_error("Missing required parameter: alias"),
@@ -727,7 +737,7 @@ fn tool_get_host(args: &Value, config_path: &Path) -> Value {
     if let Err(e) = require_config_exists(config_path) {
         return e;
     }
-    let config = match SshConfigFile::parse(config_path) {
+    let config = match SshConfigFile::parse_with_env(config_path, env) {
         Ok(c) => c,
         Err(e) => return mcp_tool_error(&format!("Failed to parse SSH config: {e}")),
     };
@@ -767,7 +777,7 @@ fn tool_get_host(args: &Value, config_path: &Path) -> Value {
     }
 }
 
-fn tool_run_command(args: &Value, config_path: &Path) -> Value {
+fn tool_run_command(args: &Value, config_path: &Path, env: &crate::runtime::env::Env) -> Value {
     let alias = match args.get("alias").and_then(|a| a.as_str()) {
         Some(a) if !a.is_empty() => a,
         _ => return mcp_tool_error("Missing required parameter: alias"),
@@ -785,7 +795,7 @@ fn tool_run_command(args: &Value, config_path: &Path) -> Value {
         .unwrap_or(30)
         .clamp(1, 300);
 
-    if let Err(e) = verify_alias_exists(alias, config_path) {
+    if let Err(e) = verify_alias_exists(alias, config_path, env) {
         return e;
     }
 
@@ -811,13 +821,13 @@ fn tool_run_command(args: &Value, config_path: &Path) -> Value {
     }
 }
 
-fn tool_list_containers(args: &Value, config_path: &Path) -> Value {
+fn tool_list_containers(args: &Value, config_path: &Path, env: &crate::runtime::env::Env) -> Value {
     let alias = match args.get("alias").and_then(|a| a.as_str()) {
         Some(a) if !a.is_empty() => a,
         _ => return mcp_tool_error("Missing required parameter: alias"),
     };
 
-    if let Err(e) = verify_alias_exists(alias, config_path) {
+    if let Err(e) = verify_alias_exists(alias, config_path, env) {
         return e;
     }
 
@@ -864,7 +874,11 @@ fn tool_list_containers(args: &Value, config_path: &Path) -> Value {
     }
 }
 
-fn tool_container_action(args: &Value, config_path: &Path) -> Value {
+fn tool_container_action(
+    args: &Value,
+    config_path: &Path,
+    env: &crate::runtime::env::Env,
+) -> Value {
     let alias = match args.get("alias").and_then(|a| a.as_str()) {
         Some(a) if !a.is_empty() => a,
         _ => return mcp_tool_error("Missing required parameter: alias"),
@@ -894,7 +908,7 @@ fn tool_container_action(args: &Value, config_path: &Path) -> Value {
         }
     };
 
-    if let Err(e) = verify_alias_exists(alias, config_path) {
+    if let Err(e) = verify_alias_exists(alias, config_path, env) {
         return e;
     }
 
@@ -951,7 +965,11 @@ fn tool_container_action(args: &Value, config_path: &Path) -> Value {
 
 /// Run the MCP server, reading JSON-RPC requests from stdin and writing
 /// responses to stdout. Blocks until stdin is closed.
-pub fn run(config_path: &Path, options: McpOptions) -> anyhow::Result<()> {
+pub fn run(
+    config_path: &Path,
+    options: McpOptions,
+    env: std::sync::Arc<crate::runtime::env::Env>,
+) -> anyhow::Result<()> {
     info!(
         "MCP server starting (read_only={}, audit_log={})",
         options.read_only,
@@ -961,7 +979,7 @@ pub fn run(config_path: &Path, options: McpOptions) -> anyhow::Result<()> {
             .map(|p| p.display().to_string())
             .unwrap_or_else(|| "disabled".to_string())
     );
-    let ctx = McpContext::new(config_path.to_path_buf(), options);
+    let ctx = McpContext::new(config_path.to_path_buf(), options, env);
 
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();

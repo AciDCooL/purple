@@ -84,6 +84,7 @@ pub(crate) fn handle_scp_complete(
                     app.keys.activity_mut(),
                     &alias,
                     crate::key_activity::now_secs(),
+                    app.env.paths().cloned().as_ref(),
                 );
                 // history_width depends on formatted timestamps; rebuild next render
                 app.hosts_state.invalidate_render_cache();
@@ -136,6 +137,7 @@ pub(crate) fn handle_scp_complete(
             askpass: askpass_fb,
             bw_session: app.bw_session.clone(),
             has_tunnel,
+            env: std::sync::Arc::clone(&app.env),
         };
         let tx = events_tx.clone();
         file_browser::spawn_remote_listing(ctx, path, show_hidden, sort, move |a, p, e| {
@@ -146,7 +148,7 @@ pub(crate) fn handle_scp_complete(
             });
         });
     }
-    crate::askpass::cleanup_marker(&alias);
+    crate::askpass::cleanup_marker(app.env.paths(), &alias);
     // Force full redraw: ssh may have written to /dev/tty
     terminal.force_redraw();
 }

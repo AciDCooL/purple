@@ -125,7 +125,12 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
             let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
             app.providers.syncing_mut().insert(key, cancel.clone());
             app.providers.bump_batch_total();
-            handler::spawn_provider_sync(&section, events_tx.clone(), cancel);
+            handler::spawn_provider_sync(
+                &section,
+                events_tx.clone(),
+                cancel,
+                std::sync::Arc::clone(&app.env),
+            );
             crate::set_sync_summary(app);
         }
     }
@@ -153,7 +158,7 @@ fn spawn_startup_tasks(app: &mut App, events_tx: &std::sync::mpsc::Sender<AppEve
         }
     }
 
-    update::spawn_version_check(events_tx.clone());
+    update::spawn_version_check(events_tx.clone(), std::sync::Arc::clone(&app.env));
 
     // Kick off a one-shot cert check for every vault-managed host so the
     // Keys-tab strip populates on startup without the user having to
@@ -617,12 +622,12 @@ fn handle_pending_connect(
             app.notify_error(crate::messages::connection_failed(&alias));
         }
     }
-    askpass::cleanup_marker(&alias);
+    askpass::cleanup_marker(app.env.paths(), &alias);
     terminal.enter()?;
     events.resume();
     *last_config_check = std::time::Instant::now();
-    app.hosts_state
-        .set_ssh_config(SshConfigFile::parse(app.reload.config_path())?);
+    let reloaded = SshConfigFile::parse_with_env(app.reload.config_path(), app.env())?;
+    app.hosts_state.set_ssh_config(reloaded);
     app.reload_hosts();
     app.update_last_modified();
     Ok(())
@@ -688,6 +693,7 @@ fn handle_pending_container_exec(
         match connection::connect_tmux_window_with_remote_command(
             &req.alias,
             app.reload.config_path(),
+            app.env(),
             has_active_tunnel,
             &remote_cmd,
             &label,
@@ -712,6 +718,7 @@ fn handle_pending_container_exec(
     let result = connection::connect_with_remote_command(
         &req.alias,
         app.reload.config_path(),
+        app.env(),
         askpass.as_deref(),
         app.bw_session.as_deref(),
         has_active_tunnel,
@@ -765,7 +772,7 @@ fn handle_pending_container_exec(
             ));
         }
     }
-    askpass::cleanup_marker(&req.alias);
+    askpass::cleanup_marker(app.env.paths(), &req.alias);
     terminal.enter()?;
     events.resume();
     *last_config_check = std::time::Instant::now();
@@ -791,6 +798,7 @@ fn handle_pending_container_logs(app: &mut App, events_tx: &std::sync::mpsc::Sen
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
+        env: std::sync::Arc::clone(&app.env),
     };
     let tx = events_tx.clone();
     log::debug!(
@@ -838,6 +846,7 @@ fn handle_pending_container_action(app: &mut App, events_tx: &std::sync::mpsc::S
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
+        env: std::sync::Arc::clone(&app.env),
     };
     let tx = events_tx.clone();
     log::info!(
@@ -906,6 +915,7 @@ fn handle_pending_snippet(
         match snippet::run_snippet(
             alias,
             app.reload.config_path(),
+            &env,
             &snip.command,
             askpass.as_deref(),
             app.bw_session.as_deref(),
@@ -950,8 +960,8 @@ fn handle_pending_snippet(
     events.resume();
     *last_config_check = std::time::Instant::now();
     // Reload so sort order (e.g. most recent) reflects the new history.
-    app.hosts_state
-        .set_ssh_config(SshConfigFile::parse(app.reload.config_path())?);
+    let reloaded = SshConfigFile::parse_with_env(app.reload.config_path(), app.env())?;
+    app.hosts_state.set_ssh_config(reloaded);
     app.reload_hosts();
     app.update_last_modified();
     Ok(())

@@ -236,7 +236,7 @@ fn test_cargo_rejects_prefix_overlap() {
 fn test_detect_homebrew_cellar() {
     let path = Path::new("/opt/homebrew/Cellar/purple/1.5.0/bin/purple");
     assert!(matches!(
-        detect_install_method(path),
+        detect_install_method(path, &crate::runtime::env::Env::empty()),
         InstallMethod::Homebrew
     ));
 }
@@ -245,7 +245,7 @@ fn test_detect_homebrew_cellar() {
 fn test_detect_homebrew_default_intel() {
     let path = Path::new("/usr/local/Cellar/purple/1.5.0/bin/purple");
     assert!(matches!(
-        detect_install_method(path),
+        detect_install_method(path, &crate::runtime::env::Env::empty()),
         InstallMethod::Homebrew
     ));
 }
@@ -254,7 +254,7 @@ fn test_detect_homebrew_default_intel() {
 fn test_detect_homebrew_default_linuxbrew() {
     let path = Path::new("/home/linuxbrew/.linuxbrew/Cellar/purple/2.3.0/bin/purple");
     assert!(matches!(
-        detect_install_method(path),
+        detect_install_method(path, &crate::runtime::env::Env::empty()),
         InstallMethod::Homebrew
     ));
 }
@@ -262,14 +262,17 @@ fn test_detect_homebrew_default_linuxbrew() {
 #[test]
 fn test_detect_cargo_default() {
     let path = Path::new("/Users/user/.cargo/bin/purple");
-    assert!(matches!(detect_install_method(path), InstallMethod::Cargo));
+    assert!(matches!(
+        detect_install_method(path, &crate::runtime::env::Env::empty()),
+        InstallMethod::Cargo
+    ));
 }
 
 #[test]
 fn test_detect_curl_usr_local_bin() {
     let path = Path::new("/usr/local/bin/purple");
     assert!(matches!(
-        detect_install_method(path),
+        detect_install_method(path, &crate::runtime::env::Env::empty()),
         InstallMethod::CurlOrManual
     ));
 }
@@ -278,7 +281,7 @@ fn test_detect_curl_usr_local_bin() {
 fn test_detect_curl_local_bin() {
     let path = Path::new("/Users/user/.local/bin/purple");
     assert!(matches!(
-        detect_install_method(path),
+        detect_install_method(path, &crate::runtime::env::Env::empty()),
         InstallMethod::CurlOrManual
     ));
 }
@@ -287,7 +290,7 @@ fn test_detect_curl_local_bin() {
 fn test_detect_no_false_positive_homebrew_in_name() {
     let path = Path::new("/Users/user/homebrew-tools/bin/purple");
     assert!(matches!(
-        detect_install_method(path),
+        detect_install_method(path, &crate::runtime::env::Env::empty()),
         InstallMethod::CurlOrManual
     ));
 }
@@ -298,7 +301,7 @@ fn test_detect_no_false_positive_homebrew_in_name() {
 fn test_detect_unknown_path() {
     let path = Path::new("/some/random/path/purple");
     assert!(matches!(
-        detect_install_method(path),
+        detect_install_method(path, &crate::runtime::env::Env::empty()),
         InstallMethod::CurlOrManual
     ));
 }
@@ -307,7 +310,7 @@ fn test_detect_unknown_path() {
 fn test_detect_root_path() {
     let path = Path::new("/purple");
     assert!(matches!(
-        detect_install_method(path),
+        detect_install_method(path, &crate::runtime::env::Env::empty()),
         InstallMethod::CurlOrManual
     ));
 }

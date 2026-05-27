@@ -74,12 +74,15 @@ impl App {
         self.conflict.form_mtime = get_mtime(&self.reload.config_path);
         self.conflict.form_include_mtimes = snapshot_include_mtimes(&self.hosts_state.ssh_config);
         self.conflict.form_include_dir_mtimes =
-            snapshot_include_dir_mtimes(&self.hosts_state.ssh_config);
+            snapshot_include_dir_mtimes(&self.env, &self.hosts_state.ssh_config);
     }
 
     /// Capture ~/.purple/providers mtime when opening a provider form.
     pub fn capture_provider_form_mtime(&mut self) {
-        let path = dirs::home_dir().map(|h| h.join(".purple/providers"));
+        let path = self
+            .env
+            .paths()
+            .map(crate::runtime::env::Paths::providers_config);
         self.conflict.provider_form_mtime = path.as_ref().and_then(|p| get_mtime(p));
     }
 
@@ -446,7 +449,10 @@ impl App {
 
     /// Check if ~/.purple/providers has changed since the provider form was opened.
     pub fn provider_config_changed_since_form_open(&self) -> bool {
-        let path = dirs::home_dir().map(|h| h.join(".purple/providers"));
+        let path = self
+            .env
+            .paths()
+            .map(crate::runtime::env::Paths::providers_config);
         let current_mtime = path.as_ref().and_then(|p| get_mtime(p));
         self.conflict.provider_form_mtime != current_mtime
     }

@@ -44,7 +44,7 @@ fn test_azure_rejects_invalid_subscription_id() {
     let az = Azure {
         subscriptions: vec!["not-a-uuid".to_string()],
     };
-    let result = az.fetch_hosts("fake-token");
+    let result = az.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     match result {
         Err(ProviderError::Http(msg)) => assert!(msg.contains("Invalid subscription ID")),
         other => panic!("Expected Http error, got: {:?}", other),
@@ -853,7 +853,7 @@ fn test_azure_no_subscriptions_error() {
     let az = Azure {
         subscriptions: vec![],
     };
-    let result = az.fetch_hosts("fake-token");
+    let result = az.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     match result {
         Err(ProviderError::Http(msg)) => assert!(msg.contains("No Azure subscriptions")),
         other => panic!("Expected Http error, got: {:?}", other),

@@ -194,6 +194,7 @@ fn spawn_initial_listing(app: &mut App, alias: String, events_tx: &mpsc::Sender<
         askpass,
         bw_session: app.bw_session.clone(),
         has_tunnel,
+        env: std::sync::Arc::clone(&app.env),
     };
     let tx = events_tx.clone();
     crate::containers::spawn_container_listing(ctx, None, move |a, result| {

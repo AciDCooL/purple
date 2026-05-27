@@ -1,3 +1,9 @@
+## 3.18.4 - 2026-05-27
+
+- change: Safer foundations under every sync, sign and connect.
+- change: purple now captures your environment and file locations once at startup and threads them through every operation, instead of reaching for them ad hoc across the app. Provider sync, Vault signing, askpass and file transfer all read the same consistent source.
+- change: Every keystroke and screen works exactly as before. This release is internal hardening that makes purple safer to build on, with no change to your daily flow.
+
 ## 3.18.3 - 2026-05-26
 
 - change: Every screen now runs on purple's safer core.

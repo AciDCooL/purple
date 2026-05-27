@@ -135,10 +135,14 @@ impl HostEntry {
     /// Includes `-F <config_path>` when the config is non-default so the alias
     /// resolves correctly when pasted into a terminal.
     /// Shell-quotes both the config path and alias to prevent injection.
-    pub fn ssh_command(&self, config_path: &std::path::Path) -> String {
+    pub fn ssh_command(
+        &self,
+        paths: Option<&crate::runtime::env::Paths>,
+        config_path: &std::path::Path,
+    ) -> String {
         let escaped = self.alias.replace('\'', "'\\''");
-        let default = dirs::home_dir()
-            .map(|h| h.join(".ssh/config"))
+        let default = paths
+            .map(|p| p.ssh_dir().join("config"))
             .unwrap_or_default();
         if config_path == default {
             format!("ssh -- '{}'", escaped)
@@ -399,8 +403,12 @@ impl SshConfigFile {
 
     /// Collect parent directories of Include glob patterns.
     /// When a file is added/removed under a glob dir, the directory's mtime changes.
+    /// Convenience wrapper that captures the process environment once for
+    /// `${VAR}` resolution; production paths call `include_glob_dirs_with`
+    /// with an injected lookup so they stay free of scattered ambient reads.
     pub fn include_glob_dirs(&self) -> Vec<PathBuf> {
-        self.include_glob_dirs_with(&|n| std::env::var(n).ok())
+        let env = crate::runtime::env::Env::from_process();
+        self.include_glob_dirs_with(&|n| env.var(n).map(str::to_string))
     }
 
     /// Like `include_glob_dirs` but resolves `${VAR}` from an injected lookup
@@ -424,7 +432,8 @@ impl SshConfigFile {
             if let ConfigElement::Include(include) = e {
                 // Split respecting quoted paths (same as resolve_include does)
                 for single in Self::split_include_patterns(&include.pattern) {
-                    let expanded = Self::expand_env_vars_with(&Self::expand_tilde(single), lookup);
+                    let expanded =
+                        Self::expand_env_vars_with(&Self::expand_tilde(single, lookup), lookup);
                     let resolved = if expanded.starts_with('/') {
                         PathBuf::from(&expanded)
                     } else if let Some(dir) = config_dir {

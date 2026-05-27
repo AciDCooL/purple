@@ -504,6 +504,7 @@ pub fn fetch_containers(
     let result = crate::snippet::run_snippet(
         ctx.alias,
         ctx.config_path,
+        ctx.env,
         &command,
         ctx.askpass,
         ctx.bw_session,
@@ -556,6 +557,7 @@ pub fn spawn_container_listing<F>(
             askpass: ctx.askpass.as_deref(),
             bw_session: ctx.bw_session.as_deref(),
             has_tunnel: ctx.has_tunnel,
+            env: &ctx.env,
         };
         let result = fetch_containers(&borrowed, cached_runtime);
         send(ctx.alias, result);
@@ -593,6 +595,7 @@ pub fn spawn_container_action<F>(
         let result = crate::snippet::run_snippet(
             alias,
             &ctx.config_path,
+            &ctx.env,
             &command,
             ctx.askpass.as_deref(),
             ctx.bw_session.as_deref(),
@@ -1004,6 +1007,7 @@ pub fn fetch_container_inspect(
     let result = crate::snippet::run_snippet(
         ctx.alias,
         ctx.config_path,
+        ctx.env,
         &command,
         ctx.askpass,
         ctx.bw_session,
@@ -1036,6 +1040,7 @@ pub fn spawn_container_inspect_listing<F>(
             askpass: ctx.askpass.as_deref(),
             bw_session: ctx.bw_session.as_deref(),
             has_tunnel: ctx.has_tunnel,
+            env: &ctx.env,
         };
         let result = fetch_container_inspect(&borrowed, runtime, &container_id);
         send(ctx.alias, container_id, result);
@@ -1067,6 +1072,7 @@ pub fn fetch_container_logs(
     let result = crate::snippet::run_snippet(
         ctx.alias,
         ctx.config_path,
+        ctx.env,
         &command,
         ctx.askpass,
         ctx.bw_session,
@@ -1134,6 +1140,7 @@ pub fn spawn_container_logs_fetch<F>(
             askpass: ctx.askpass.as_deref(),
             bw_session: ctx.bw_session.as_deref(),
             has_tunnel: ctx.has_tunnel,
+            env: &ctx.env,
         };
         let result = fetch_container_logs(&borrowed, runtime, &container_id, tail);
         send(ctx.alias, container_id, container_name, result);

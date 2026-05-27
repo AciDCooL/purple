@@ -224,7 +224,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
                 return;
             }
             if let Some(host) = app.selected_host() {
-                let cmd = host.ssh_command(app.reload.config_path());
+                let cmd = host.ssh_command(app.env.paths(), app.reload.config_path());
                 let alias = host.alias.clone();
                 match clipboard::copy_to_clipboard(&cmd) {
                     Ok(()) => {
@@ -375,7 +375,8 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
         }
         KeyCode::Char('S') => {
             if !app.demo_mode {
-                *app.providers.config_mut() = crate::providers::config::ProviderConfig::load();
+                let cfg = crate::providers::config::ProviderConfig::load(app.env.paths());
+                *app.providers.config_mut() = cfg;
             }
             *app.ui.provider_list_state_mut() = ratatui::widgets::ListState::default();
             app.ui.provider_list_state_mut().select(Some(0));

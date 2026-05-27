@@ -69,10 +69,14 @@ struct AwsCredentials {
     secret_key: String,
 }
 
-fn resolve_credentials(token: &str, profile: &str) -> Result<AwsCredentials, ProviderError> {
+fn resolve_credentials(
+    token: &str,
+    profile: &str,
+    env: &crate::runtime::env::Env,
+) -> Result<AwsCredentials, ProviderError> {
     // Profile takes priority: read from ~/.aws/credentials
     if !profile.is_empty() {
-        return read_credentials_file(profile);
+        return read_credentials_file(profile, env);
     }
     // Token field: ACCESS_KEY_ID:SECRET_ACCESS_KEY
     if let Some((ak, sk)) = token.split_once(':') {
@@ -83,15 +87,12 @@ fn resolve_credentials(token: &str, profile: &str) -> Result<AwsCredentials, Pro
             });
         }
     }
-    // Environment variables
-    if let (Ok(ak), Ok(sk)) = (
-        std::env::var("AWS_ACCESS_KEY_ID"),
-        std::env::var("AWS_SECRET_ACCESS_KEY"),
-    ) {
+    // Environment variables, from the injected snapshot.
+    if let Some((ak, sk)) = env.aws_credentials() {
         if !ak.is_empty() && !sk.is_empty() {
             return Ok(AwsCredentials {
-                access_key: ak,
-                secret_key: sk,
+                access_key: ak.to_string(),
+                secret_key: sk.to_string(),
             });
         }
     }
@@ -133,11 +134,14 @@ fn parse_credentials(content: &str, profile: &str) -> Option<AwsCredentials> {
     }
 }
 
-fn read_credentials_file(profile: &str) -> Result<AwsCredentials, ProviderError> {
-    let path = dirs::home_dir()
+fn read_credentials_file(
+    profile: &str,
+    env: &crate::runtime::env::Env,
+) -> Result<AwsCredentials, ProviderError> {
+    let path = env
+        .paths()
         .ok_or(ProviderError::AuthFailed)?
-        .join(".aws")
-        .join("credentials");
+        .aws_credentials_file();
     let content = std::fs::read_to_string(&path).map_err(|_| ProviderError::AuthFailed)?;
     parse_credentials(&content, profile).ok_or(ProviderError::AuthFailed)
 }
@@ -464,14 +468,16 @@ impl Provider for Aws {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_with_progress(token, cancel, &|_| {})
+        self.fetch_hosts_with_progress(token, cancel, env, &|_| {})
     }
 
     fn fetch_hosts_with_progress(
         &self,
         token: &str,
         cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
         progress: &dyn Fn(&str),
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         if self.regions.is_empty() {
@@ -490,7 +496,7 @@ impl Provider for Aws {
             }
         }
 
-        let creds = resolve_credentials(token, &self.profile)?;
+        let creds = resolve_credentials(token, &self.profile, env)?;
         let agent = super::http_agent();
         let total_regions = self.regions.len();
         let mut all_hosts = Vec::new();

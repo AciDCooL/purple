@@ -148,8 +148,10 @@ fn parse_version_cache(
 /// Returns `Some(Some(cached))` if cache is fresh and a newer version exists,
 /// `Some(None)` if cache is fresh and we are up-to-date,
 /// `None` if cache is missing, corrupt or expired.
-fn read_cached_version() -> Option<Option<CachedVersion>> {
-    let path = dirs::home_dir()?.join(".purple").join("last_version_check");
+fn read_cached_version(
+    paths: Option<&crate::runtime::env::Paths>,
+) -> Option<Option<CachedVersion>> {
+    let path = paths?.last_version_check();
     let content = std::fs::read_to_string(&path).ok()?;
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -159,10 +161,15 @@ fn read_cached_version() -> Option<Option<CachedVersion>> {
 }
 
 /// Write version check result to ~/.purple/last_version_check.
-fn write_version_cache(version: &str, headline: Option<&str>) {
-    let Some(dir) = dirs::home_dir().map(|h| h.join(".purple")) else {
+fn write_version_cache(
+    version: &str,
+    headline: Option<&str>,
+    paths: Option<&crate::runtime::env::Paths>,
+) {
+    let Some(paths) = paths else {
         return;
     };
+    let dir = paths.purple_dir();
     if let Err(e) = std::fs::create_dir_all(&dir) {
         debug!("[config] Failed to create version cache directory: {e}");
         return;
@@ -173,9 +180,7 @@ fn write_version_cache(version: &str, headline: Option<&str>) {
         .as_secs();
     let hl = headline.unwrap_or("");
     let content = format!("{}\n{}\n{}\n", now, version, hl);
-    if let Err(e) =
-        crate::fs_util::atomic_write(&dir.join("last_version_check"), content.as_bytes())
-    {
+    if let Err(e) = crate::fs_util::atomic_write(&paths.last_version_check(), content.as_bytes()) {
         debug!("[config] Failed to write version cache: {e}");
     }
 }
@@ -183,13 +188,16 @@ fn write_version_cache(version: &str, headline: Option<&str>) {
 /// Spawn a background thread to check for updates. Sends an event if a newer version exists.
 /// Uses a local cache (~/.purple/last_version_check) with a 1h TTL to avoid unnecessary
 /// GitHub API calls on frequent startup. Silently does nothing on any error.
-pub fn spawn_version_check(tx: mpsc::Sender<AppEvent>) {
+pub fn spawn_version_check(
+    tx: mpsc::Sender<AppEvent>,
+    env: std::sync::Arc<crate::runtime::env::Env>,
+) {
     let _ = std::thread::Builder::new()
         .name("version-check".to_string())
         .spawn(move || {
             debug!("Version check started");
             // Check cache first — skip API call if fresh result exists
-            match read_cached_version() {
+            match read_cached_version(env.paths()) {
                 Some(Some(cached)) => {
                     debug!(
                         "Version check: current={} latest={}",
@@ -218,7 +226,7 @@ pub fn spawn_version_check(tx: mpsc::Sender<AppEvent>) {
                     let current = current_version();
                     debug!("Version check: current={current} latest={}", info.version);
                     let headline = extract_headline(&info.notes);
-                    write_version_cache(&info.version, headline.as_deref());
+                    write_version_cache(&info.version, headline.as_deref(), env.paths());
                     if is_newer(current, &info.version) {
                         let _ = tx.send(AppEvent::UpdateAvailable {
                             version: info.version,
@@ -233,18 +241,18 @@ pub fn spawn_version_check(tx: mpsc::Sender<AppEvent>) {
         });
 }
 
-/// Format text as bold, respecting NO_COLOR.
-fn bold(text: &str) -> String {
-    if std::env::var_os("NO_COLOR").is_some() {
+/// Format text as bold, respecting NO_COLOR (resolved from the injected env).
+fn bold(text: &str, no_color: bool) -> String {
+    if no_color {
         text.to_string()
     } else {
         format!("\x1b[1m{}\x1b[0m", text)
     }
 }
 
-/// Format text as bold purple, respecting NO_COLOR.
-fn bold_purple(text: &str) -> String {
-    if std::env::var_os("NO_COLOR").is_some() {
+/// Format text as bold purple, respecting NO_COLOR (resolved from the env).
+fn bold_purple(text: &str, no_color: bool) -> String {
+    if no_color {
         text.to_string()
     } else {
         format!("\x1b[1;35m{}\x1b[0m", text)
@@ -288,17 +296,17 @@ fn is_cargo_path(exe_path: &Path, cargo_home: &Path) -> bool {
 /// Env vars (HOMEBREW_CELLAR, HOMEBREW_PREFIX, CARGO_HOME) are treated
 /// as hints and validated structurally before trusting. Falls back to
 /// well-known default paths. Fails open to CurlOrManual when uncertain.
-fn detect_install_method(exe_path: &Path) -> InstallMethod {
+fn detect_install_method(exe_path: &Path, env: &crate::runtime::env::Env) -> InstallMethod {
     // Homebrew: check HOMEBREW_CELLAR env var first (most specific),
     // then derive Cellar from HOMEBREW_PREFIX, then fall back to
     // well-known default Cellar locations
-    if let Ok(cellar) = std::env::var("HOMEBREW_CELLAR") {
-        if is_homebrew_path(exe_path, Path::new(&cellar)) {
+    if let Some(cellar) = env.var("HOMEBREW_CELLAR") {
+        if is_homebrew_path(exe_path, Path::new(cellar)) {
             return InstallMethod::Homebrew;
         }
     }
-    if let Ok(prefix) = std::env::var("HOMEBREW_PREFIX") {
-        let cellar = std::path::PathBuf::from(&prefix).join("Cellar");
+    if let Some(prefix) = env.var("HOMEBREW_PREFIX") {
+        let cellar = std::path::PathBuf::from(prefix).join("Cellar");
         if is_homebrew_path(exe_path, &cellar) {
             return InstallMethod::Homebrew;
         }
@@ -316,8 +324,8 @@ fn detect_install_method(exe_path: &Path) -> InstallMethod {
 
     // Cargo: check CARGO_HOME env var first, then check if parent
     // is a "bin" dir inside a ".cargo" dir (component-aware fallback)
-    if let Ok(cargo_home) = std::env::var("CARGO_HOME") {
-        if is_cargo_path(exe_path, Path::new(&cargo_home)) {
+    if let Some(cargo_home) = env.var("CARGO_HOME") {
+        if is_cargo_path(exe_path, Path::new(cargo_home)) {
             return InstallMethod::Cargo;
         }
     }
@@ -335,13 +343,13 @@ fn detect_install_method(exe_path: &Path) -> InstallMethod {
 }
 
 /// Detect the update command appropriate for how purple was installed.
-pub fn update_hint() -> &'static str {
+pub fn update_hint(env: &crate::runtime::env::Env) -> &'static str {
     if !matches!(std::env::consts::OS, "macos" | "linux") {
         return "cargo install purple-ssh";
     }
     if let Ok(exe) = std::env::current_exe() {
         let path = std::fs::canonicalize(&exe).unwrap_or(exe);
-        return match detect_install_method(&path) {
+        return match detect_install_method(&path, env) {
             InstallMethod::Homebrew => "brew upgrade erickochen/purple/purple",
             InstallMethod::Cargo => "cargo install purple-ssh",
             InstallMethod::CurlOrManual => "purple update",
@@ -351,7 +359,7 @@ pub fn update_hint() -> &'static str {
 }
 
 /// Self-update the purple binary to the latest release.
-pub fn self_update() -> Result<()> {
+pub fn self_update(env: &crate::runtime::env::Env) -> Result<()> {
     // macOS and Linux only
     if !matches!(std::env::consts::OS, "macos" | "linux") {
         anyhow::bail!(
@@ -360,7 +368,11 @@ pub fn self_update() -> Result<()> {
         );
     }
 
-    println!("{}", crate::messages::update::header(&bold("purple.")));
+    let no_color = env.no_color();
+    println!(
+        "{}",
+        crate::messages::update::header(&bold("purple.", no_color))
+    );
 
     // Resolve current binary path
     let exe_path = std::env::current_exe().context("Failed to detect binary path")?;
@@ -368,7 +380,7 @@ pub fn self_update() -> Result<()> {
     println!("{}", crate::messages::update::binary_path(&exe_path));
 
     // Detect package manager installations
-    match detect_install_method(&exe_path) {
+    match detect_install_method(&exe_path, env) {
         InstallMethod::Homebrew => {
             anyhow::bail!(
                 "purple appears to be installed via Homebrew.\n  \
@@ -417,8 +429,11 @@ pub fn self_update() -> Result<()> {
         .context("Binary has no parent directory")?;
 
     // Warn when running via sudo — creates root-owned cache files
-    if std::env::var_os("SUDO_USER").is_some() {
-        eprintln!("{}", crate::messages::update::sudo_warning_line(&bold("!")));
+    if env.var("SUDO_USER").is_some() {
+        eprintln!(
+            "{}",
+            crate::messages::update::sudo_warning_line(&bold("!", no_color))
+        );
     }
 
     if !is_writable(parent) {
@@ -533,7 +548,7 @@ pub fn self_update() -> Result<()> {
     println!(
         "{}",
         crate::messages::update::installed_at(
-            &bold_purple(&format!("purple v{}", latest)),
+            &bold_purple(&format!("purple v{}", latest), no_color),
             &exe_path,
         )
     );

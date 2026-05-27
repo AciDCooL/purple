@@ -69,11 +69,11 @@ impl ReloadState {
 
     /// Build from a loaded config: captures initial mtimes for the main file
     /// and every Include'd file and directory.
-    pub fn from_config(config: &SshConfigFile) -> Self {
+    pub fn from_config(env: &crate::runtime::env::Env, config: &SshConfigFile) -> Self {
         let config_path = config.path.clone();
         let last_modified = get_mtime(&config_path);
         let include_mtimes = snapshot_include_mtimes(config);
-        let include_dir_mtimes = snapshot_include_dir_mtimes(config);
+        let include_dir_mtimes = snapshot_include_dir_mtimes(env, config);
         Self {
             config_path,
             last_modified,
@@ -102,10 +102,14 @@ pub fn snapshot_include_mtimes(config: &SshConfigFile) -> Vec<(PathBuf, Option<S
         .collect()
 }
 
-/// Snapshot mtimes of parent directories of Include glob patterns.
-pub fn snapshot_include_dir_mtimes(config: &SshConfigFile) -> Vec<(PathBuf, Option<SystemTime>)> {
+/// Snapshot mtimes of parent directories of Include glob patterns. `${VAR}`
+/// references in Include patterns resolve from the injected `env`.
+pub fn snapshot_include_dir_mtimes(
+    env: &crate::runtime::env::Env,
+    config: &SshConfigFile,
+) -> Vec<(PathBuf, Option<SystemTime>)> {
     config
-        .include_glob_dirs()
+        .include_glob_dirs_with(&|n| env.var(n).map(str::to_string))
         .into_iter()
         .map(|p| {
             let mtime = get_mtime(&p);

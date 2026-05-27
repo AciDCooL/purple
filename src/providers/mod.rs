@@ -85,17 +85,26 @@ pub trait Provider {
     fn name(&self) -> &str;
     /// Short label for aliases (e.g. "do").
     fn short_label(&self) -> &str;
-    /// Fetch hosts with cancellation support.
+    /// Fetch hosts with cancellation support. `env` carries the resolved
+    /// process environment (home directory, credential env vars) so the few
+    /// providers that read AWS credentials or expand `~` in key paths take
+    /// them from the injected snapshot instead of ambient `std::env` /
+    /// `dirs::home_dir`. Most providers ignore it.
     #[allow(dead_code)]
     fn fetch_hosts_cancellable(
         &self,
         token: &str,
         cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError>;
     /// Fetch all servers from the provider API.
     #[allow(dead_code)]
-    fn fetch_hosts(&self, token: &str) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_cancellable(token, &AtomicBool::new(false))
+    fn fetch_hosts(
+        &self,
+        token: &str,
+        env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_hosts_cancellable(token, &AtomicBool::new(false), env)
     }
     /// Fetch hosts with progress reporting. Default delegates to fetch_hosts_cancellable.
     #[allow(dead_code)]
@@ -103,9 +112,10 @@ pub trait Provider {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
         _progress: &dyn Fn(&str),
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_cancellable(token, cancel)
+        self.fetch_hosts_cancellable(token, cancel, env)
     }
 }
 

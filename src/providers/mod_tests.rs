@@ -607,7 +607,7 @@ fn test_provider_fetch_hosts_delegates_to_cancellable() {
     // fetch_hosts delegates to fetch_hosts_cancellable with AtomicBool(false)
     // We can't actually test this without a server, but we verify the method exists
     // by calling it (will fail with network error, which is fine for this test)
-    let result = provider.fetch_hosts("fake-token");
+    let result = provider.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     assert!(result.is_err()); // Expected: no network
 }
 

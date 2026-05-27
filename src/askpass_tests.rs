@@ -50,7 +50,10 @@ fn describe_source_custom() {
 
 #[test]
 fn marker_path_contains_alias() {
-    let path = marker_path("myserver");
+    let path = marker_path(
+        Some(&crate::runtime::env::Paths::new("/home/u")),
+        "myserver",
+    );
     assert!(path.is_some());
     let p = path.unwrap();
     assert!(p.to_string_lossy().contains(".askpass_myserver"));
@@ -421,7 +424,7 @@ fn parse_config(content: &str) -> SshConfigFile {
 fn find_askpass_source_returns_per_host_source() {
     let config = parse_config("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
     assert_eq!(
-        find_askpass_source(&config, "myserver"),
+        find_askpass_source(&config, None, "myserver"),
         Some("keychain".to_string())
     );
 }
@@ -431,7 +434,7 @@ fn find_askpass_source_returns_none_when_absent() {
     let config = parse_config("Host myserver\n  HostName 10.0.0.1\n");
     // No per-host askpass, and no global default (test env has no ~/.purple/preferences)
     // Returns None unless ~/.purple/preferences has an askpass entry
-    let result = find_askpass_source(&config, "myserver");
+    let result = find_askpass_source(&config, None, "myserver");
     // We can't assert None because the real home dir might have preferences.
     // Instead verify it does NOT return a per-host source.
     if let Some(ref source) = result {
@@ -446,7 +449,7 @@ fn find_askpass_source_returns_vault() {
         "Host myserver\n  HostName 10.0.0.1\n  # purple:askpass vault:secret/ssh#pass\n",
     );
     assert_eq!(
-        find_askpass_source(&config, "myserver"),
+        find_askpass_source(&config, None, "myserver"),
         Some("vault:secret/ssh#pass".to_string())
     );
 }
@@ -457,7 +460,7 @@ fn find_askpass_source_op_uri() {
         "Host myserver\n  HostName 10.0.0.1\n  # purple:askpass op://Vault/SSH/password\n",
     );
     assert_eq!(
-        find_askpass_source(&config, "myserver"),
+        find_askpass_source(&config, None, "myserver"),
         Some("op://Vault/SSH/password".to_string())
     );
 }
@@ -467,7 +470,7 @@ fn find_askpass_source_custom_command() {
     let config =
         parse_config("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass get-pass %a %h\n");
     assert_eq!(
-        find_askpass_source(&config, "myserver"),
+        find_askpass_source(&config, None, "myserver"),
         Some("get-pass %a %h".to_string())
     );
 }
@@ -475,7 +478,7 @@ fn find_askpass_source_custom_command() {
 #[test]
 fn find_askpass_source_wrong_alias_returns_nothing() {
     let config = parse_config("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass keychain\n");
-    let result = find_askpass_source(&config, "otherhost");
+    let result = find_askpass_source(&config, None, "otherhost");
     // otherhost has no per-host source; result depends on global preferences
     if let Some(ref source) = result {
         assert_ne!(source, "keychain");
@@ -496,11 +499,11 @@ Host beta
 ",
     );
     assert_eq!(
-        find_askpass_source(&config, "alpha"),
+        find_askpass_source(&config, None, "alpha"),
         Some("keychain".to_string())
     );
     assert_eq!(
-        find_askpass_source(&config, "beta"),
+        find_askpass_source(&config, None, "beta"),
         Some("vault:secret/ssh#pass".to_string())
     );
 }
@@ -557,21 +560,22 @@ fn is_recent_marker_returns_true_for_fresh_file() {
 #[test]
 fn cleanup_marker_removes_file() {
     let _guard = MARKER_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    // Create a marker file manually
+    // Create a marker file manually in an isolated sandbox.
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = crate::runtime::env::Paths::new(tmp.path());
     let alias = "test_cleanup_marker";
-    let path = marker_path(alias).unwrap();
+    let path = marker_path(Some(&paths), alias).unwrap();
     let _ = std::fs::create_dir_all(path.parent().unwrap());
     let _ = std::fs::write(&path, b"");
     assert!(path.exists());
-    cleanup_marker(alias);
+    cleanup_marker(Some(&paths), alias);
     assert!(!path.exists());
 }
 
 #[test]
 fn cleanup_marker_noop_for_nonexistent() {
-    let _guard = MARKER_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    // Should not panic or error
-    cleanup_marker("nonexistent_test_host_cleanup");
+    // No paths: cleanup is a silent no-op.
+    cleanup_marker(None, "nonexistent_test_host_cleanup");
 }
 
 // =========================================================================
@@ -796,7 +800,7 @@ fn find_askpass_source_per_host_takes_precedence() {
     // When per-host source exists, global default is not consulted
     let config =
         parse_config("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass op://V/I/p\n");
-    let result = find_askpass_source(&config, "myserver");
+    let result = find_askpass_source(&config, None, "myserver");
     assert_eq!(result, Some("op://V/I/p".to_string()));
 }
 
@@ -805,7 +809,7 @@ fn find_askpass_source_bw_source() {
     let config =
         parse_config("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass bw:my-item-id\n");
     assert_eq!(
-        find_askpass_source(&config, "myserver"),
+        find_askpass_source(&config, None, "myserver"),
         Some("bw:my-item-id".to_string())
     );
 }
@@ -815,7 +819,7 @@ fn find_askpass_source_pass_source() {
     let config =
         parse_config("Host myserver\n  HostName 10.0.0.1\n  # purple:askpass pass:ssh/prod\n");
     assert_eq!(
-        find_askpass_source(&config, "myserver"),
+        find_askpass_source(&config, None, "myserver"),
         Some("pass:ssh/prod".to_string())
     );
 }
@@ -841,13 +845,17 @@ fn describe_source_with_exact_picker_values() {
 
 #[test]
 fn marker_path_special_chars_in_alias() {
-    let path = marker_path("my-server_01").unwrap();
+    let path = marker_path(
+        Some(&crate::runtime::env::Paths::new("/home/u")),
+        "my-server_01",
+    )
+    .unwrap();
     assert!(path.to_string_lossy().ends_with(".askpass_my-server_01"));
 }
 
 #[test]
 fn marker_path_is_in_dot_purple_dir() {
-    let path = marker_path("test").unwrap();
+    let path = marker_path(Some(&crate::runtime::env::Paths::new("/home/u")), "test").unwrap();
     assert!(path.to_string_lossy().contains(".purple/"));
 }
 
@@ -1468,8 +1476,10 @@ fn password_command_remove_success_message_format() {
 #[test]
 fn retry_marker_lifecycle_create_then_detect() {
     let _guard = MARKER_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let tmp = tempfile::tempdir().unwrap();
+    let paths = crate::runtime::env::Paths::new(tmp.path());
     let alias = "test_lifecycle_marker";
-    let path = marker_path(alias).unwrap();
+    let path = marker_path(Some(&paths), alias).unwrap();
     let _ = std::fs::create_dir_all(path.parent().unwrap());
 
     // Initially no marker
@@ -1480,7 +1490,7 @@ fn retry_marker_lifecycle_create_then_detect() {
     assert!(is_recent_marker(&path));
 
     // Clean up removes it
-    cleanup_marker(alias);
+    cleanup_marker(Some(&paths), alias);
     assert!(!is_recent_marker(&path));
 }
 
@@ -1536,7 +1546,7 @@ fn find_askpass_source_works_for_any_host() {
     let config =
         parse_config("Host included-server\n  HostName 10.0.0.1\n  # purple:askpass op://V/I/p\n");
     assert_eq!(
-        find_askpass_source(&config, "included-server"),
+        find_askpass_source(&config, None, "included-server"),
         Some("op://V/I/p".to_string())
     );
 }
@@ -1970,7 +1980,7 @@ Host Target
         .expect("should resolve bastion");
     assert_eq!(resolved, "Bastion");
     assert_eq!(
-        find_askpass_source(&config, &resolved),
+        find_askpass_source(&config, None, &resolved),
         Some("vault:secret/ssh/bastion#password".to_string())
     );
 }

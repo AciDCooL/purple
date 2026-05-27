@@ -152,6 +152,7 @@ impl Provider for Tailscale {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         if token.is_empty() {
             self.fetch_from_cli(cancel)

@@ -2983,10 +2983,9 @@ fn test_submit_form_rename_migrates_per_host_state() {
     // `update_host`. State keyed by alias outside the SSH config does
     // not: connection history, jump-bar recents, and the collapsed-
     // fleet preference must be migrated explicitly by submit_form.
-    let recents_dir = tempfile::tempdir().expect("recents tempdir");
-    crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
-
     let mut app = make_app("Host web-old\n  HostName 1.2.3.4\n");
+    // App::new builds a sandboxed Env; seed and read recents through it.
+    let paths = app.env().paths().cloned();
     // Isolate history from any pre-existing ~/.purple/history.tsv on
     // the test runner. `from_entries` leaves `path` empty so the
     // background `save()` is a silent no-op; we assert only the
@@ -3008,7 +3007,7 @@ fn test_submit_form_rename_migrates_per_host_state() {
         ),
         last_used_unix: 100,
     });
-    crate::app::jump::save_recents(&seeded).expect("seed recents");
+    crate::app::jump::save_recents(&seeded, paths.as_ref()).expect("seed recents");
 
     app.screen = Screen::EditHost {
         alias: "web-old".to_string(),
@@ -3043,7 +3042,7 @@ fn test_submit_form_rename_migrates_per_host_state() {
         "collapsed-fleet preference must carry over to the new alias"
     );
 
-    let reloaded = crate::app::jump::load_recents();
+    let reloaded = crate::app::jump::load_recents(paths.as_ref());
     let host_keys: Vec<&str> = reloaded
         .entries
         .iter()
@@ -3051,16 +3050,11 @@ fn test_submit_form_rename_migrates_per_host_state() {
         .map(|e| e.target.key.as_str())
         .collect();
     assert_eq!(host_keys, vec!["web-new"]);
-
-    crate::app::jump::test_path::clear();
 }
 
 /// Rename keeps the host at its recency-based position on MostRecent
 /// and Frecency without waiting for a restart.
 fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
-    let recents_dir = tempfile::tempdir().expect("recents tempdir");
-    crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
-
     // Three hosts. `top-old` has the most recent connection, so on
     // MostRecent / Frecency it must appear at index 0 both before and
     // after a rename to `top-new`.
@@ -3133,8 +3127,6 @@ fn rename_keeps_position_under_sort(sort_mode: crate::app::SortMode) {
         "cursor must follow the renamed host to its new display position on {:?}",
         sort_mode
     );
-
-    crate::app::jump::test_path::clear();
 }
 
 #[test]
@@ -3151,9 +3143,6 @@ fn test_submit_form_rename_keeps_position_on_frecency() {
 fn test_submit_form_rename_carries_ping_and_container_cache() {
     // Rename preserves alias-keyed caches (ping, container_cache,
     // in-flight dedup sets) end-to-end through submit_form.
-    let recents_dir = tempfile::tempdir().expect("recents tempdir");
-    crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
-
     let mut app = make_app("Host web-old\n  HostName 1.2.3.4\n");
     // Isolate from any pre-existing ~/.purple/history.tsv on the runner.
     app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
@@ -3227,8 +3216,6 @@ fn test_submit_form_rename_carries_ping_and_container_cache() {
             && app.vault.is_cert_check_in_flight("web-new"),
         "vault.cert_checks_in_flight must follow the rename"
     );
-
-    crate::app::jump::test_path::clear();
 }
 
 #[test]

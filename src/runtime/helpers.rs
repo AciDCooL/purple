@@ -8,23 +8,30 @@ use log::{debug, warn};
 use crate::app::{self, App};
 use crate::{askpass, cli, providers, ssh_config, vault_ssh};
 
-pub fn resolve_config_path(path: &str) -> Result<PathBuf> {
-    expand_user_path(path)
+pub fn resolve_config_path(
+    paths: Option<&crate::runtime::env::Paths>,
+    path: &str,
+) -> Result<PathBuf> {
+    expand_user_path(paths, path)
 }
 
 /// Expand `~/`, `${HOME}/` and `$HOME/` prefixes against the user's home
 /// directory. MCPB clients (e.g. Claude Desktop) do not always substitute
 /// `${HOME}` before passing CLI args, so the binary must handle it.
-pub fn expand_user_path(path: &str) -> Result<PathBuf> {
+pub fn expand_user_path(paths: Option<&crate::runtime::env::Paths>, path: &str) -> Result<PathBuf> {
+    let home = || {
+        paths
+            .map(|p| p.home().to_path_buf())
+            .context("Could not determine home directory")
+    };
     let home_prefixes = ["~/", "${HOME}/", "$HOME/"];
     for prefix in home_prefixes {
         if let Some(rest) = path.strip_prefix(prefix) {
-            let home = dirs::home_dir().context("Could not determine home directory")?;
-            return Ok(home.join(rest));
+            return Ok(home()?.join(rest));
         }
     }
     if path == "~" || path == "${HOME}" || path == "$HOME" {
-        return dirs::home_dir().context("Could not determine home directory");
+        return home();
     }
     Ok(PathBuf::from(path))
 }
@@ -139,7 +146,7 @@ pub fn set_sync_summary(app: &mut App) {
         } else {
             app.notify_background(text);
         }
-        app::SyncRecord::save_all(app.providers.sync_history());
+        app::SyncRecord::save_all(app.providers.sync_history(), app.env().paths());
         app.providers.finish_batch();
     }
 }
@@ -346,14 +353,14 @@ pub fn ensure_vault_cert_for_alias(
     let lock = renewal_lock(alias);
     let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
 
-    let mut config = match ssh_config::model::SshConfigFile::parse(config_path) {
+    let mut config = match ssh_config::model::SshConfigFile::parse_with_env(config_path, env) {
         Ok(c) => c,
         Err(e) => {
             warn!("[config] Vault SSH renewal skipped for '{alias}': {e}");
             return None;
         }
     };
-    let provider_config = providers::config::ProviderConfig::load();
+    let provider_config = providers::config::ProviderConfig::load(env.paths());
     let result =
         ensure_vault_ssh_chain_if_needed(env, alias, config_path, &provider_config, &mut config);
     match &result {

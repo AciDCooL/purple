@@ -175,6 +175,7 @@ impl Provider for Leaseweb {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let agent = super::http_agent();
         let limit = 50u64;

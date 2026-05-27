@@ -152,6 +152,7 @@ impl Provider for UpCloud {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let mut all_servers: Vec<ServerSummary> = Vec::new();
         let limit = 100;

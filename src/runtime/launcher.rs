@@ -26,20 +26,16 @@ use crate::{
 /// init, the subcommand dispatch table and the TUI launch path. Returns
 /// when the chosen mode exits (subcommand return, direct-connect exit,
 /// TUI quit).
-pub fn run(cli: Cli) -> Result<()> {
-    // Resolve the process environment once, at the edge. Everything downstream
-    // takes this snapshot rather than reading `std::env` / `dirs::home_dir`.
-    let env = std::sync::Arc::new(crate::runtime::env::Env::from_process());
-
+pub fn run(cli: Cli, env: std::sync::Arc<crate::runtime::env::Env>) -> Result<()> {
     ui::theme::init(&env);
 
     // Determine if this is a CLI subcommand (log to stderr too) or TUI (file only)
     let is_cli_subcommand = cli.command.is_some() || cli.list || cli.connect.is_some();
-    logging::init(cli.verbose, is_cli_subcommand);
+    logging::init(cli.verbose, is_cli_subcommand, &env);
 
     if let Some(ref name) = cli.theme {
         if let Some(theme) = ui::theme::ThemeDef::find_builtin(name).or_else(|| {
-            ui::theme::ThemeDef::load_custom()
+            ui::theme::ThemeDef::load_custom(env.paths())
                 .into_iter()
                 .find(|t| t.name.eq_ignore_ascii_case(name))
         }) {
@@ -68,7 +64,7 @@ pub fn run(cli: Cli) -> Result<()> {
         return cli::handle_provider_command(&env, command);
     }
     if let Some(Commands::Update) = cli.command {
-        return update::self_update();
+        return update::self_update(&env);
     }
     if let Some(Commands::Password { command }) = cli.command {
         return cli::handle_password_command(&env, command);
@@ -79,22 +75,22 @@ pub fn run(cli: Cli) -> Result<()> {
         audit_log,
     }) = cli.command
     {
-        let config_path = resolve_config_path(&cli.config)?;
+        let config_path = resolve_config_path(env.paths(), &cli.config)?;
         let audit_log_path = if no_audit {
             None
         } else if let Some(path) = audit_log {
-            Some(expand_user_path(&path)?)
+            Some(expand_user_path(env.paths(), &path)?)
         } else {
-            mcp::default_audit_log_path()
+            mcp::default_audit_log_path(env.paths())
         };
         let options = mcp::McpOptions {
             read_only,
             audit_log_path,
         };
-        return mcp::run(&config_path, options);
+        return mcp::run(&config_path, options, std::sync::Arc::clone(&env));
     }
     if let Some(Commands::Logs { tail, clear }) = cli.command {
-        return cli::handle_logs_command(tail, clear);
+        return cli::handle_logs_command(tail, clear, &env);
     }
     if let Some(Commands::Theme { command }) = cli.command {
         return cli::handle_theme_command(&env, command);
@@ -105,8 +101,8 @@ pub fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
-    let config_path = resolve_config_path(&cli.config)?;
-    let mut config = SshConfigFile::parse(&config_path)?;
+    let config_path = resolve_config_path(env.paths(), &cli.config)?;
+    let mut config = SshConfigFile::parse_with_env(&config_path, &env)?;
     let repaired_groups = config.repair_absorbed_group_comments();
     let orphaned_headers = config.remove_all_orphaned_group_headers();
 
@@ -206,8 +202,8 @@ fn write_startup_banner(
     verbose: bool,
     env: &crate::runtime::env::Env,
 ) {
-    let level_str = logging::level_name(verbose);
-    let provider_config = providers::config::ProviderConfig::load();
+    let level_str = logging::level_name(verbose, env);
+    let provider_config = providers::config::ProviderConfig::load(env.paths());
 
     let provider_names: Vec<String> = provider_config
         .sections
@@ -256,25 +252,28 @@ fn write_startup_banner(
     let theme = preferences::load_theme(env.paths()).unwrap_or_else(|| "Purple".to_string());
     let hosts = config.host_entries().len();
     let patterns = config.pattern_entries().len();
-    let snippets = snippet::SnippetStore::load().snippets.len();
+    let snippets = snippet::SnippetStore::load(env.paths()).snippets.len();
     let proxy_env = collect_proxy_env(env);
 
-    logging::write_banner(&logging::BannerInfo {
-        version: env!("CARGO_PKG_VERSION"),
-        config_path: &config_path.display().to_string(),
-        providers: &provider_names,
-        askpass_sources: &askpass_sources,
-        vault_ssh_info: vault_ssh_info.as_deref(),
-        ssh_version: &ssh_version,
-        term: &term,
-        colorterm: &colorterm,
-        level: &level_str,
-        theme: &theme,
-        hosts,
-        patterns,
-        snippets,
-        proxy_env: &proxy_env,
-    });
+    logging::write_banner(
+        &logging::BannerInfo {
+            version: env!("CARGO_PKG_VERSION"),
+            config_path: &config_path.display().to_string(),
+            providers: &provider_names,
+            askpass_sources: &askpass_sources,
+            vault_ssh_info: vault_ssh_info.as_deref(),
+            ssh_version: &ssh_version,
+            term: &term,
+            colorterm: &colorterm,
+            level: &level_str,
+            theme: &theme,
+            hosts,
+            patterns,
+            snippets,
+            proxy_env: &proxy_env,
+        },
+        env.paths(),
+    );
 }
 
 /// Build a compact string describing the proxy-related env vars in effect.
@@ -298,7 +297,7 @@ fn run_direct_connect(
     config_path: &Path,
     env: &crate::runtime::env::Env,
 ) -> Result<()> {
-    let provider_config = providers::config::ProviderConfig::load();
+    let provider_config = providers::config::ProviderConfig::load(env.paths());
     let host_entry = config.host_entries().into_iter().find(|h| h.alias == alias);
     if host_entry.is_some() {
         if let Some((msg, _is_error)) =
@@ -323,10 +322,10 @@ fn run_direct_connect(
     )?;
     let code = result.status.code().unwrap_or(1);
     if code != 255 {
-        history::ConnectionHistory::load().record(&alias);
-        key_activity::KeyActivityLog::record_oneshot(&alias, key_activity::now_secs());
+        history::ConnectionHistory::load(env.paths()).record(&alias);
+        key_activity::KeyActivityLog::record_oneshot(&alias, key_activity::now_secs(), env.paths());
     }
-    askpass::cleanup_marker(&alias);
+    askpass::cleanup_marker(env.paths(), &alias);
     std::process::exit(code);
 }
 
@@ -347,7 +346,7 @@ fn run_positional_alias(
         .find(|h| h.alias == *alias)
         .cloned();
     if let Some(host) = host_opt {
-        let provider_config = providers::config::ProviderConfig::load();
+        let provider_config = providers::config::ProviderConfig::load(env.paths());
         if let Some((msg, _is_error)) = ensure_vault_ssh_chain_if_needed(
             &env,
             &host.alias,
@@ -375,10 +374,14 @@ fn run_positional_alias(
         )?;
         let code = result.status.code().unwrap_or(1);
         if code != 255 {
-            history::ConnectionHistory::load().record(&alias);
-            key_activity::KeyActivityLog::record_oneshot(&alias, key_activity::now_secs());
+            history::ConnectionHistory::load(env.paths()).record(&alias);
+            key_activity::KeyActivityLog::record_oneshot(
+                &alias,
+                key_activity::now_secs(),
+                env.paths(),
+            );
         }
-        askpass::cleanup_marker(&alias);
+        askpass::cleanup_marker(env.paths(), &alias);
         std::process::exit(code);
     }
 

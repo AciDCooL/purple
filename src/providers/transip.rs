@@ -68,18 +68,17 @@ fn request_token(
     agent: &ureq::Agent,
     login: &str,
     key_path: &str,
+    env: &crate::runtime::env::Env,
 ) -> Result<String, ProviderError> {
+    let home = || {
+        env.paths()
+            .map(|p| p.home().to_path_buf())
+            .unwrap_or_default()
+    };
     let resolved_path = if let Some(stripped) = key_path.strip_prefix("~/") {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .join(stripped)
-            .to_string_lossy()
-            .into_owned()
+        home().join(stripped).to_string_lossy().into_owned()
     } else if key_path == "~" {
-        dirs::home_dir()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned()
+        home().to_string_lossy().into_owned()
     } else {
         key_path.to_string()
     };
@@ -144,6 +143,7 @@ impl Provider for TransIp {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         if cancel.load(Ordering::Relaxed) {
             return Err(ProviderError::Cancelled);
@@ -153,7 +153,9 @@ impl Provider for TransIp {
 
         let bearer = match parse_auth(token) {
             TransIpAuth::BearerToken(t) => t.to_string(),
-            TransIpAuth::KeyFile { login, key_path } => request_token(&agent, login, key_path)?,
+            TransIpAuth::KeyFile { login, key_path } => {
+                request_token(&agent, login, key_path, env)?
+            }
         };
 
         if cancel.load(Ordering::Relaxed) {
@@ -604,7 +606,8 @@ mod tests {
     fn test_cancellation_returns_cancelled() {
         let tip = TransIp;
         let cancel = AtomicBool::new(true);
-        let result = tip.fetch_hosts_cancellable("some-token", &cancel);
+        let result =
+            tip.fetch_hosts_cancellable("some-token", &cancel, &crate::runtime::env::Env::empty());
         assert!(matches!(result, Err(ProviderError::Cancelled)));
     }
 

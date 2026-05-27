@@ -146,7 +146,10 @@ pub(crate) fn handle_vault_sign_all_done(
                     }
                 })
                 .collect();
-            match ssh_config::model::SshConfigFile::parse(app.reload.config_path()) {
+            match ssh_config::model::SshConfigFile::parse_with_env(
+                app.reload.config_path(),
+                app.env(),
+            ) {
                 Ok(fresh) => {
                     app.hosts_state.set_ssh_config(fresh);
                     let mut reapplied = 0usize;

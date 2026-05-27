@@ -532,7 +532,7 @@ fn test_gcp_valid_project_id() {
         zones: vec![],
         project: "my-project-123".to_string(),
     };
-    let result = gcp.fetch_hosts("fake-token");
+    let result = gcp.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     // Should NOT be a project validation error
     if let Err(ProviderError::Http(msg)) = &result {
         assert!(!msg.contains("Invalid GCP project ID"), "got: {}", msg);
@@ -545,7 +545,7 @@ fn test_gcp_domain_scoped_project_id() {
         zones: vec![],
         project: "example.com:my-project".to_string(),
     };
-    let result = gcp.fetch_hosts("fake-token");
+    let result = gcp.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     if let Err(ProviderError::Http(msg)) = &result {
         assert!(!msg.contains("Invalid GCP project ID"), "got: {}", msg);
     }
@@ -557,7 +557,7 @@ fn test_gcp_rejects_uppercase_project_id() {
         zones: vec![],
         project: "My-Project".to_string(),
     };
-    let result = gcp.fetch_hosts("fake-token");
+    let result = gcp.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     match result {
         Err(ProviderError::Http(msg)) => assert!(msg.contains("Invalid GCP project ID")),
         other => panic!(
@@ -573,7 +573,7 @@ fn test_gcp_rejects_special_chars_in_project_id() {
         zones: vec![],
         project: "my_project".to_string(),
     };
-    let result = gcp.fetch_hosts("fake-token");
+    let result = gcp.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     match result {
         Err(ProviderError::Http(msg)) => assert!(msg.contains("Invalid GCP project ID")),
         other => panic!(
@@ -589,7 +589,7 @@ fn test_gcp_rejects_space_in_project_id() {
         zones: vec![],
         project: "my project".to_string(),
     };
-    let result = gcp.fetch_hosts("fake-token");
+    let result = gcp.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     match result {
         Err(ProviderError::Http(msg)) => assert!(msg.contains("Invalid GCP project ID")),
         other => panic!("Expected Http error for space in project, got: {:?}", other),
@@ -607,7 +607,7 @@ fn test_gcp_empty_zones_accepted() {
         zones: vec![],
         project: "my-project".to_string(),
     };
-    let result = gcp.fetch_hosts("fake-token");
+    let result = gcp.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     // Should fail at network level, not validation
     if let Err(ProviderError::Http(msg)) = &result {
         assert!(!msg.contains("zone"), "got: {}", msg);
@@ -634,7 +634,7 @@ fn test_gcp_no_project_error() {
         zones: vec![],
         project: String::new(),
     };
-    let result = gcp.fetch_hosts("fake-token");
+    let result = gcp.fetch_hosts("fake-token", &crate::runtime::env::Env::empty());
     match result {
         Err(ProviderError::Http(msg)) => assert!(msg.contains("No GCP project")),
         other => panic!("Expected Http error, got: {:?}", other),

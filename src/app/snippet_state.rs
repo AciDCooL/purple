@@ -126,9 +126,9 @@ impl SnippetState {
     }
 
     /// Construct with snippet store loaded from disk.
-    pub fn with_store_loaded() -> Self {
+    pub fn with_store_loaded(paths: Option<&crate::runtime::env::Paths>) -> Self {
         Self {
-            store: crate::snippet::SnippetStore::load(),
+            store: crate::snippet::SnippetStore::load(paths),
             ..Self::default()
         }
     }

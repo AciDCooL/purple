@@ -27,27 +27,41 @@ pub struct SnippetStore {
     pub path_override: Option<PathBuf>,
 }
 
-fn config_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".purple/snippets"))
+fn config_path(paths: Option<&crate::runtime::env::Paths>) -> Option<PathBuf> {
+    paths.map(crate::runtime::env::Paths::snippets_dir)
 }
 
 impl SnippetStore {
-    /// Load snippets from ~/.purple/snippets.
-    /// Returns empty store if file doesn't exist (normal first-use).
-    pub fn load() -> Self {
-        let path = match config_path() {
+    /// Load snippets from `~/.purple/snippets`, resolved from the injected
+    /// `paths`. The resolved path is stored as `path_override` so a later
+    /// `save()` writes back to the same location without re-resolving.
+    /// Returns an empty store when the file does not exist (normal
+    /// first-use) or when no home directory is known.
+    pub fn load(paths: Option<&crate::runtime::env::Paths>) -> Self {
+        let path = match config_path(paths) {
             Some(p) => p,
             None => return Self::default(),
         };
         let content = match std::fs::read_to_string(&path) {
             Ok(c) => c,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => return Self::default(),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                return Self {
+                    path_override: Some(path),
+                    ..Self::default()
+                };
+            }
             Err(e) => {
                 log::warn!("[config] Could not read {}: {}", path.display(), e);
-                return Self::default();
+                return Self {
+                    path_override: Some(path),
+                    ..Self::default()
+                };
             }
         };
-        Self::parse(&content)
+        Self {
+            path_override: Some(path),
+            ..Self::parse(&content)
+        }
     }
 
     /// Parse INI-style snippet config.
@@ -108,17 +122,11 @@ impl SnippetStore {
         if crate::demo_flag::is_demo() {
             return Ok(());
         }
-        let path = match &self.path_override {
-            Some(p) => p.clone(),
-            None => match config_path() {
-                Some(p) => p,
-                None => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        "Could not determine home directory",
-                    ));
-                }
-            },
+        let Some(path) = self.path_override.clone() else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Could not determine home directory",
+            ));
         };
 
         let mut content = String::new();
@@ -657,6 +665,7 @@ pub fn spawn_snippet_execution(
     run_id: u64,
     askpass_map: Vec<(String, Option<String>)>,
     config_path: PathBuf,
+    env: std::sync::Arc<crate::runtime::env::Env>,
     command: String,
     bw_session: Option<String>,
     tunnel_aliases: std::collections::HashSet<String>,
@@ -706,6 +715,7 @@ pub fn spawn_snippet_execution(
                     }
 
                     let config_path = config_path.clone();
+                    let env = std::sync::Arc::clone(&env);
                     let command = command.clone();
                     let bw_session = bw_session.clone();
                     let has_tunnel = tunnel_aliases.contains(&alias);
@@ -733,6 +743,7 @@ pub fn spawn_snippet_execution(
                             askpass: askpass.as_deref(),
                             bw_session: bw_session.as_deref(),
                             has_tunnel,
+                            env: &env,
                         };
                         let guard = execute_host(run_id, &host_ctx, &command, &tx);
 
@@ -770,6 +781,7 @@ pub fn spawn_snippet_execution(
                         askpass: askpass.as_deref(),
                         bw_session: bw_session.as_deref(),
                         has_tunnel,
+                        env: &env,
                     };
                     let guard = execute_host(run_id, &host_ctx, &command, &tx);
 
@@ -795,9 +807,11 @@ pub fn spawn_snippet_execution(
 /// When `capture` is true, stdout/stderr are piped and returned in the result.
 /// When `capture` is false, stdout/stderr are inherited (streamed to terminal
 /// in real-time) and the returned strings are empty.
+#[allow(clippy::too_many_arguments)]
 pub fn run_snippet(
     alias: &str,
     config_path: &Path,
+    env: &crate::runtime::env::Env,
     command: &str,
     askpass: Option<&str>,
     bw_session: Option<&str>,
@@ -807,11 +821,7 @@ pub fn run_snippet(
     // Renew the Vault SSH cert before connecting so container listing,
     // inspect, logs, actions and file-browser operations get a fresh cert
     // just like the interactive connect path does. No-op for non-vault hosts.
-    crate::runtime::helpers::ensure_vault_cert_for_alias(
-        &crate::runtime::env::Env::from_process(),
-        alias,
-        config_path,
-    );
+    crate::runtime::helpers::ensure_vault_cert_for_alias(env, alias, config_path);
 
     let mut cmd = base_ssh_command(
         alias,

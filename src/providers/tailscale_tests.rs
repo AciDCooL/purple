@@ -554,7 +554,11 @@ fn test_tailscale_short_label() {
 fn test_auth_key_rejected() {
     let ts = Tailscale;
     let cancel = AtomicBool::new(false);
-    let result = ts.fetch_hosts_cancellable("tskey-auth-abc123", &cancel);
+    let result = ts.fetch_hosts_cancellable(
+        "tskey-auth-abc123",
+        &cancel,
+        &crate::runtime::env::Env::empty(),
+    );
     assert!(result.is_err());
     let err = result.unwrap_err().to_string();
     assert!(

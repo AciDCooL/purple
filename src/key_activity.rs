@@ -17,6 +17,7 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::fs_util;
+use crate::runtime::env::Paths;
 
 /// Retention window for events. Older rows are dropped on load and on
 /// every record so the file does not grow unbounded. 90 days is the
@@ -32,28 +33,8 @@ const SECS_PER_DAY: u64 = 86_400;
 /// itself only matters in concert with the timestamps demo.rs seeds.
 pub const DEMO_NOW_SECS: u64 = 1_778_932_800; // 2026-05-16 12:00:00 UTC
 
-#[cfg(test)]
-thread_local! {
-    static PATH_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-/// Override the activity log path. Test-only. The override is
-/// thread-local so parallel test threads stay isolated.
-#[cfg(test)]
-pub fn set_path_override(path: PathBuf) {
-    PATH_OVERRIDE.with(|p| *p.borrow_mut() = Some(path));
-}
-
-fn activity_path() -> Option<PathBuf> {
-    #[cfg(test)]
-    {
-        PATH_OVERRIDE.with(|p| p.borrow().clone())
-    }
-    #[cfg(not(test))]
-    {
-        dirs::home_dir().map(|h| h.join(".purple/key_activity.json"))
-    }
+fn activity_path(paths: Option<&Paths>) -> Option<PathBuf> {
+    paths.map(Paths::key_activity)
 }
 
 /// Current wall-clock epoch seconds. Demo-aware rendering uses
@@ -96,8 +77,8 @@ impl KeyActivityLog {
     /// Missing files yield an empty log. Corrupt files are renamed aside
     /// to `<path>.corrupt-<unix_ts>` before defaulting so a future
     /// debugger can recover the data.
-    pub fn load() -> Self {
-        let Some(path) = activity_path() else {
+    pub fn load(paths: Option<&Paths>) -> Self {
+        let Some(path) = activity_path(paths) else {
             return Self::default();
         };
         match std::fs::read_to_string(&path) {
@@ -148,12 +129,12 @@ impl KeyActivityLog {
     }
 
     /// Serialize to JSON and write atomically. Suppressed in demo mode so
-    /// `--demo` never mutates the user's real activity log. Tests that
-    /// exercise this path set `PATH_OVERRIDE` to redirect writes into a
-    /// tempdir, so the demo check fires uniformly in production and tests.
-    /// The demo-suppress branch logs intent so `--demo --verbose` shows
-    /// that recording is happening, just not landing on disk.
-    pub fn flush(&self) -> io::Result<()> {
+    /// `--demo` never mutates the user's real activity log. The path is
+    /// resolved from the injected `paths`; a `None` (no home) silently
+    /// skips the write. The demo-suppress branch logs intent so
+    /// `--demo --verbose` shows that recording is happening, just not
+    /// landing on disk.
+    pub fn flush(&self, paths: Option<&Paths>) -> io::Result<()> {
         if crate::demo_flag::is_demo() {
             debug!(
                 "[purple] key_activity: demo mode, skipping disk flush ({} events held in memory)",
@@ -161,7 +142,7 @@ impl KeyActivityLog {
             );
             return Ok(());
         }
-        let Some(path) = activity_path() else {
+        let Some(path) = activity_path(paths) else {
             return Ok(());
         };
         let body = serde_json::to_vec_pretty(self)
@@ -172,10 +153,10 @@ impl KeyActivityLog {
     /// One-shot record. For non-TUI call sites (CLI mode) that do not
     /// hold an in-memory log between connects. Caller passes `now`;
     /// production CLI paths pass `now_secs()`.
-    pub fn record_oneshot(alias: &str, now: u64) {
-        let mut log = Self::load();
+    pub fn record_oneshot(alias: &str, now: u64, paths: Option<&Paths>) {
+        let mut log = Self::load(paths);
         log.record(alias, now);
-        if let Err(e) = log.flush() {
+        if let Err(e) = log.flush(paths) {
             debug!("[purple] key_activity: flush failed: {e}");
         }
     }
@@ -209,9 +190,9 @@ impl KeyActivityLog {
 /// borrow on `App`, where the `App::record_key_use` method would be
 /// rejected by the borrow checker. Caller passes `now`; production
 /// call sites pass `now_secs()`.
-pub fn record_and_flush(log: &mut KeyActivityLog, alias: &str, now: u64) {
+pub fn record_and_flush(log: &mut KeyActivityLog, alias: &str, now: u64, paths: Option<&Paths>) {
     log.record(alias, now);
-    if let Err(e) = log.flush() {
+    if let Err(e) = log.flush(paths) {
         debug!("[purple] key_activity: flush failed: {e}");
     }
 }
@@ -299,18 +280,18 @@ mod tests {
     /// demo mode is active, so a concurrent test flipping the flag
     /// between `record()` and `flush()` would silently suppress the
     /// write. The mutex serialises every test that exercises that path.
-    fn setup() -> (tempfile::TempDir, std::sync::MutexGuard<'static, ()>) {
+    fn setup() -> (tempfile::TempDir, Paths, std::sync::MutexGuard<'static, ()>) {
         let guard = crate::demo_flag::GLOBAL_TEST_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
         let dir = tempfile::tempdir().expect("tempdir");
-        set_path_override(dir.path().join("key_activity.json"));
-        (dir, guard)
+        let paths = Paths::new(dir.path());
+        (dir, paths, guard)
     }
 
     #[test]
     fn record_appends_event() {
-        let (_g, _lock) = setup();
+        let (_g, _paths, _lock) = setup();
         let mut log = KeyActivityLog::default();
         log.record("prod-eu1", now_secs());
         assert_eq!(log.events.len(), 1);
@@ -319,7 +300,7 @@ mod tests {
 
     #[test]
     fn record_prunes_events_past_retention() {
-        let (_g, _lock) = setup();
+        let (_g, _paths, _lock) = setup();
         let mut log = KeyActivityLog::default();
         let now = now_secs();
         let very_old = now - (RETENTION_DAYS + 10) * SECS_PER_DAY;
@@ -334,26 +315,26 @@ mod tests {
 
     #[test]
     fn load_after_flush_roundtrips() {
-        let (_g, _lock) = setup();
+        let (_g, paths, _lock) = setup();
         let mut log = KeyActivityLog::default();
         let now = now_secs();
         log.record("eric-bastion", now);
         log.record("aws-api-prod", now);
-        log.flush().unwrap();
-        let reloaded = KeyActivityLog::load();
+        log.flush(Some(&paths)).unwrap();
+        let reloaded = KeyActivityLog::load(Some(&paths));
         assert_eq!(reloaded.events.len(), 2);
     }
 
     #[test]
     fn load_missing_file_returns_default() {
-        let (_g, _lock) = setup();
-        let log = KeyActivityLog::load();
+        let (_g, paths, _lock) = setup();
+        let log = KeyActivityLog::load(Some(&paths));
         assert!(log.events.is_empty());
     }
 
     #[test]
     fn last_use_returns_most_recent() {
-        let (_g, _lock) = setup();
+        let (_g, _paths, _lock) = setup();
         let mut log = KeyActivityLog::default();
         log.events.push(ConnectEvent {
             alias: "h".into(),
@@ -373,7 +354,7 @@ mod tests {
 
     #[test]
     fn last_use_none_for_no_matches() {
-        let (_g, _lock) = setup();
+        let (_g, _paths, _lock) = setup();
         let log = KeyActivityLog::default();
         let aliases = vec!["nobody".to_string()];
         assert!(log.last_use_for_aliases(&aliases).is_none());
@@ -391,9 +372,9 @@ mod tests {
 
     #[test]
     fn record_oneshot_persists_to_disk() {
-        let (_g, _lock) = setup();
-        KeyActivityLog::record_oneshot("h1", now_secs());
-        let reloaded = KeyActivityLog::load();
+        let (_g, paths, _lock) = setup();
+        KeyActivityLog::record_oneshot("h1", now_secs(), Some(&paths));
+        let reloaded = KeyActivityLog::load(Some(&paths));
         assert_eq!(reloaded.events.len(), 1);
         assert_eq!(reloaded.events[0].alias, "h1");
     }
@@ -451,7 +432,7 @@ mod tests {
 
     #[test]
     fn prune_keeps_event_at_exactly_retention_boundary() {
-        let (_g, _lock) = setup();
+        let (_g, _paths, _lock) = setup();
         let now = 200 * SECS_PER_DAY;
         let mut log = KeyActivityLog::default();
         log.events.push(ConnectEvent {
@@ -470,23 +451,25 @@ mod tests {
 
     #[test]
     fn load_corrupt_json_returns_empty_log() {
-        let (g, _lock) = setup();
-        let path = g.path().join("key_activity.json");
+        let (_g, paths, _lock) = setup();
+        let path = paths.key_activity();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"not valid json {{").unwrap();
-        let log = KeyActivityLog::load();
+        let log = KeyActivityLog::load(Some(&paths));
         assert!(log.events.is_empty());
     }
 
     #[test]
     fn load_corrupt_json_preserves_file_under_corrupt_suffix() {
-        let (g, _lock) = setup();
-        let path = g.path().join("key_activity.json");
+        let (_g, paths, _lock) = setup();
+        let path = paths.key_activity();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, b"definitely not json").unwrap();
-        let _ = KeyActivityLog::load();
+        let _ = KeyActivityLog::load(Some(&paths));
         // Original file must be gone.
         assert!(!path.exists(), "corrupt file should have been renamed");
         // A sibling with the .corrupt- suffix must exist with original bytes.
-        let preserved: Vec<_> = std::fs::read_dir(g.path())
+        let preserved: Vec<_> = std::fs::read_dir(path.parent().unwrap())
             .unwrap()
             .filter_map(|e| e.ok())
             .filter(|e| {
@@ -502,15 +485,15 @@ mod tests {
 
     #[test]
     fn flush_in_demo_mode_does_not_write_file() {
-        let (g, _lock) = setup();
+        let (_g, paths, _lock) = setup();
         crate::demo_flag::enable();
         let mut log = KeyActivityLog::default();
         log.record("h", now_secs());
-        let result = log.flush();
+        let result = log.flush(Some(&paths));
         crate::demo_flag::disable();
 
         assert!(result.is_ok());
-        let path = g.path().join("key_activity.json");
+        let path = paths.key_activity();
         assert!(
             !path.exists(),
             "demo mode must not write the activity log to disk"
@@ -519,7 +502,7 @@ mod tests {
 
     #[test]
     fn now_for_render_returns_demo_constant_in_demo_mode() {
-        let (_g, _lock) = setup();
+        let (_g, _paths, _lock) = setup();
         crate::demo_flag::enable();
         let n = now_for_render();
         crate::demo_flag::disable();
@@ -528,7 +511,7 @@ mod tests {
 
     #[test]
     fn now_for_render_returns_wall_clock_outside_demo() {
-        let (_g, _lock) = setup();
+        let (_g, _paths, _lock) = setup();
         // Sanity: outside demo mode the function must NOT freeze at
         // DEMO_NOW_SECS. Compare against now_secs() which the helper
         // delegates to in the wall-clock branch.

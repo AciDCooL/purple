@@ -544,7 +544,12 @@ fn test_oracle_empty_compartment_error() {
     };
     let cancel = AtomicBool::new(false);
     let err = oracle
-        .fetch_hosts_with_progress("some_token", &cancel, &|_| {})
+        .fetch_hosts_with_progress(
+            "some_token",
+            &cancel,
+            &crate::runtime::env::Env::empty(),
+            &|_| {},
+        )
         .unwrap_err();
     assert!(err.to_string().contains("compartment"));
 }

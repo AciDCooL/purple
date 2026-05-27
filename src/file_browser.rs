@@ -372,6 +372,7 @@ fn shell_escape(path: &str) -> String {
 pub fn get_remote_home(
     alias: &str,
     config_path: &Path,
+    env: &crate::runtime::env::Env,
     askpass: Option<&str>,
     bw_session: Option<&str>,
     has_active_tunnel: bool,
@@ -379,6 +380,7 @@ pub fn get_remote_home(
     let result = crate::snippet::run_snippet(
         alias,
         config_path,
+        env,
         "pwd",
         askpass,
         bw_session,
@@ -408,6 +410,7 @@ pub fn fetch_remote_listing(
     let result = crate::snippet::run_snippet(
         ctx.alias,
         ctx.config_path,
+        ctx.env,
         &command,
         ctx.askpass,
         ctx.bw_session,
@@ -466,6 +469,7 @@ pub fn spawn_remote_listing<F>(
             askpass: ctx.askpass.as_deref(),
             bw_session: ctx.bw_session.as_deref(),
             has_tunnel: ctx.has_tunnel,
+            env: &ctx.env,
         };
         let listing = fetch_remote_listing(&borrowed, &remote_path, show_hidden, sort);
         send(ctx.alias, remote_path, listing);
@@ -486,6 +490,7 @@ pub struct ScpResult {
 pub fn run_scp(
     alias: &str,
     config_path: &Path,
+    env: &crate::runtime::env::Env,
     askpass: Option<&str>,
     bw_session: Option<&str>,
     has_active_tunnel: bool,
@@ -493,11 +498,7 @@ pub fn run_scp(
 ) -> anyhow::Result<ScpResult> {
     // Renew the Vault SSH cert before transferring so a file copy never
     // fails on an expired cert. No-op for non-vault hosts.
-    crate::runtime::helpers::ensure_vault_cert_for_alias(
-        &crate::runtime::env::Env::from_process(),
-        alias,
-        config_path,
-    );
+    crate::runtime::helpers::ensure_vault_cert_for_alias(env, alias, config_path);
 
     let mut cmd = Command::new("scp");
     cmd.arg("-F").arg(config_path);

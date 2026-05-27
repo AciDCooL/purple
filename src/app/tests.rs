@@ -7571,9 +7571,8 @@ fn resolve_recent_ref_snippet_dangling_returns_none() {
 #[test]
 fn record_jump_hit_round_trips_via_recents() {
     // End-to-end: record a hit through the public API, then opening the
-    // jump again should surface it as a recent.
-    let recents_dir = tempfile::tempdir().expect("tempdir");
-    crate::app::jump::test_path::set(recents_dir.path().join("recents.json"));
+    // jump again should surface it as a recent. App::new builds a sandboxed
+    // Env, so the round-trip stays isolated without a path override.
     let mut app = make_jump_app("Host visited\n  HostName visited.example\n");
     let hit = JumpHit::Host(crate::app::HostHit {
         alias: "visited".into(),
@@ -7594,7 +7593,6 @@ fn record_jump_hit_round_trips_via_recents() {
             .any(|h| matches!(h, JumpHit::Host(host) if host.alias == "visited")),
         "recorded hit should surface as a recent on next open"
     );
-    crate::app::jump::test_path::clear();
 }
 
 // --- ProxyJump candidate ranking tests ---
@@ -8766,10 +8764,9 @@ fn apply_alias_renames_migrates_history_and_recents_in_batch() {
     // the in-memory cache layer: connection history and jump recents.
     // collapsed_hosts migrates earlier via `migrate_alias_keyed_caches`
     // so its prune in `reload_hosts` sees the new alias as live.
-    let dir = tempfile::tempdir().expect("tempdir");
-    crate::app::jump::test_path::set(dir.path().join("recents.json"));
-
     let mut app = make_app("Host a\n  HostName 1.2.3.4\nHost c\n  HostName 5.6.7.8\n");
+    // App::new builds a sandboxed Env; seed and read recents through it.
+    let paths = app.env().paths().cloned();
     app.history = crate::history::ConnectionHistory::from_entries(std::collections::HashMap::new());
     app.history.upsert_entry(crate::history::HistoryEntry {
         alias: "a".to_string(),
@@ -8799,7 +8796,7 @@ fn apply_alias_renames_migrates_history_and_recents_in_batch() {
         ),
         last_used_unix: 200,
     });
-    crate::app::jump::save_recents(&seeded).expect("seed recents");
+    crate::app::jump::save_recents(&seeded, paths.as_ref()).expect("seed recents");
 
     // Batch: real rename + an identity pair that must be a no-op. The
     // identity pair guards against an accidental wipe when the SSH
@@ -8820,7 +8817,7 @@ fn apply_alias_renames_migrates_history_and_recents_in_batch() {
     assert_eq!(app.history.entry("b").unwrap().count, 3);
     assert_eq!(app.history.entry("c").unwrap().count, 7);
 
-    let reloaded = crate::app::jump::load_recents();
+    let reloaded = crate::app::jump::load_recents(paths.as_ref());
     let mut host_keys: Vec<String> = reloaded
         .entries
         .iter()
@@ -8829,8 +8826,6 @@ fn apply_alias_renames_migrates_history_and_recents_in_batch() {
         .collect();
     host_keys.sort();
     assert_eq!(host_keys, vec!["b".to_string(), "c".to_string()]);
-
-    crate::app::jump::test_path::clear();
 }
 
 #[test]
@@ -8961,8 +8956,8 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
     // both route through this function; if a future refactor splits
     // the protocol again, this test fails before the user sees a
     // regression.
-    let dir = tempfile::tempdir().expect("tempdir");
-    crate::app::jump::test_path::set(dir.path().join("recents.json"));
+    // App::new builds a sandboxed Env, so the rename's recents write stays
+    // isolated without a path override.
 
     // Two hosts. After rename the SSH config has top-new + bot; history
     // for top-old should follow to top-new and keep its index-0 slot on
@@ -9037,8 +9032,6 @@ fn rename_aliases_full_protocol_migrates_caches_history_and_resorts() {
         Some("top-new"),
         "rename_aliases must re-sort so the migrated host keeps its recency slot"
     );
-
-    crate::app::jump::test_path::clear();
 }
 
 #[test]
@@ -9063,10 +9056,9 @@ fn migrate_renames_persistent_state_moves_history_recents_and_collapsed_on_disk(
     // when the SSH config rename lands on disk. Same migration as
     // `App::apply_alias_renames` but without in-memory state.
     let dir = tempfile::tempdir().expect("tempdir");
-    let history_path = dir.path().join("history.tsv");
-    crate::history::test_path::set(history_path.clone());
-    crate::app::jump::test_path::set(dir.path().join("recents.json"));
     let paths = crate::runtime::env::Paths::new(dir.path());
+    std::fs::create_dir_all(paths.purple_dir()).unwrap();
+    let history_path = paths.history();
 
     // Seed history.tsv. Schema: alias \t last_connected \t count \t csv-of-timestamps.
     std::fs::write(&history_path, "web-old\t1700000000\t12\t1700000000\n").unwrap();
@@ -9080,7 +9072,7 @@ fn migrate_renames_persistent_state_moves_history_recents_and_collapsed_on_disk(
         ),
         last_used_unix: 100,
     });
-    crate::app::jump::save_recents(&recents).expect("seed recents");
+    crate::app::jump::save_recents(&recents, Some(&paths)).expect("seed recents");
 
     // Seed the collapsed-hosts preference.
     let mut collapsed = std::collections::HashSet::new();
@@ -9107,7 +9099,7 @@ fn migrate_renames_persistent_state_moves_history_recents_and_collapsed_on_disk(
         "old alias must be gone: {history_after:?}"
     );
 
-    let recents_after = crate::app::jump::load_recents();
+    let recents_after = crate::app::jump::load_recents(Some(&paths));
     let host_keys: Vec<String> = recents_after
         .entries
         .iter()
@@ -9119,37 +9111,35 @@ fn migrate_renames_persistent_state_moves_history_recents_and_collapsed_on_disk(
     let collapsed_after = crate::preferences::load_containers_collapsed_hosts(Some(&paths));
     assert!(collapsed_after.contains("web-new"));
     assert!(!collapsed_after.contains("web-old"));
-
-    crate::history::test_path::clear();
-    crate::app::jump::test_path::clear();
 }
 
 #[test]
 fn migrate_renames_persistent_state_skips_identity_pairs() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let history_path = dir.path().join("history.tsv");
-    crate::history::test_path::set(history_path.clone());
+    let paths = crate::runtime::env::Paths::new(dir.path());
+    std::fs::create_dir_all(paths.purple_dir()).unwrap();
+    let history_path = paths.history();
 
     // Seed an entry. An identity-pair rename must leave it untouched
     // (same key, same count, same timestamps). Guards against a future
     // refactor that accidentally rewrites the file on every call.
     std::fs::write(&history_path, "web\t1700000000\t5\t1700000000\n").unwrap();
 
-    crate::app::migrate_renames_persistent_state(None, &[("web".to_string(), "web".to_string())]);
+    crate::app::migrate_renames_persistent_state(
+        Some(&paths),
+        &[("web".to_string(), "web".to_string())],
+    );
 
     let after = std::fs::read_to_string(&history_path).unwrap();
     assert!(after.contains("web\t1700000000\t5"));
-
-    crate::history::test_path::clear();
 }
 
 #[test]
 fn migrate_renames_persistent_state_empty_input_is_no_op() {
     let dir = tempfile::tempdir().expect("tempdir");
-    crate::history::test_path::set(dir.path().join("history.tsv"));
+    let paths = crate::runtime::env::Paths::new(dir.path());
     // History file deliberately absent. The helper must not panic.
-    crate::app::migrate_renames_persistent_state(None, &[]);
-    crate::history::test_path::clear();
+    crate::app::migrate_renames_persistent_state(Some(&paths), &[]);
 }
 
 #[test]
@@ -9165,9 +9155,6 @@ fn record_key_use_persists_via_app_boundary() {
         .lock()
         .unwrap_or_else(|p| p.into_inner());
 
-    let activity_dir = tempfile::tempdir().expect("activity tempdir");
-    crate::key_activity::set_path_override(activity_dir.path().join("key_activity.json"));
-
     let scratch = tempfile::tempdir().expect("scratch tempdir");
     let config = crate::ssh_config::model::SshConfigFile {
         elements: crate::ssh_config::model::SshConfigFile::parse_content(""),
@@ -9175,13 +9162,15 @@ fn record_key_use_persists_via_app_boundary() {
         crlf: false,
         bom: false,
     };
+    // App::new builds a sandboxed Env; record_key_use flushes into it.
     let mut app = crate::app::App::new(config);
+    let paths = app.env().paths().cloned();
 
     let before = crate::key_activity::now_secs();
     app.record_key_use("prod-eu1", crate::key_activity::now_secs());
     let after = crate::key_activity::now_secs();
 
-    let reloaded = KeyActivityLog::load();
+    let reloaded = KeyActivityLog::load(paths.as_ref());
     assert_eq!(reloaded.events.len(), 1);
     assert_eq!(reloaded.events[0].alias, "prod-eu1");
     // Verify the timestamp came from the wall clock, not a stale or

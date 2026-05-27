@@ -460,14 +460,16 @@ impl Provider for Azure {
         &self,
         token: &str,
         cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_with_progress(token, cancel, &|_| {})
+        self.fetch_hosts_with_progress(token, cancel, _env, &|_| {})
     }
 
     fn fetch_hosts_with_progress(
         &self,
         token: &str,
         cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
         progress: &dyn Fn(&str),
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         if self.subscriptions.is_empty() {

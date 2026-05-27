@@ -3,7 +3,11 @@ use super::*;
 /// Build a default `McpContext` and dispatch. Lets existing tests stay focused
 /// on input/output without re-stating the no-op default options every time.
 fn mcp_dispatch(method: &str, params: Option<Value>, path: &std::path::Path) -> JsonRpcResponse {
-    let ctx = McpContext::new(path.to_path_buf(), McpOptions::default());
+    let ctx = McpContext::new(
+        path.to_path_buf(),
+        McpOptions::default(),
+        std::sync::Arc::new(crate::runtime::env::Env::empty()),
+    );
     dispatch(method, params, &ctx)
 }
 
@@ -14,7 +18,11 @@ fn mcp_dispatch_with(
     path: &std::path::Path,
     options: McpOptions,
 ) -> (JsonRpcResponse, McpContext) {
-    let ctx = McpContext::new(path.to_path_buf(), options);
+    let ctx = McpContext::new(
+        path.to_path_buf(),
+        options,
+        std::sync::Arc::new(crate::runtime::env::Env::empty()),
+    );
     let resp = dispatch(method, params, &ctx);
     (resp, ctx)
 }
@@ -1155,6 +1163,7 @@ fn audit_log_appends_multiple_entries() {
     let ctx = McpContext::new(
         std::path::PathBuf::from("tests/fixtures/mcp_test_config"),
         opts,
+        std::sync::Arc::new(crate::runtime::env::Env::empty()),
     );
     for _ in 0..3 {
         dispatch(
@@ -1186,6 +1195,7 @@ fn audit_log_handles_concurrent_writes() {
             read_only: false,
             audit_log_path: Some(log_path.clone()),
         },
+        std::sync::Arc::new(crate::runtime::env::Env::empty()),
     ));
     let handles: Vec<_> = (0..16)
         .map(|i| {

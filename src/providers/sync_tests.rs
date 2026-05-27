@@ -50,6 +50,7 @@ impl Provider for MockProvider {
         &self,
         _token: &str,
         _cancel: &std::sync::atomic::AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, super::super::ProviderError> {
         Ok(Vec::new())
     }
@@ -2724,6 +2725,7 @@ impl Provider for MockProvider2 {
         &self,
         _token: &str,
         _cancel: &std::sync::atomic::AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, super::super::ProviderError> {
         Ok(Vec::new())
     }
@@ -5961,6 +5963,7 @@ impl Provider for MockProxmox {
         &self,
         _token: &str,
         _cancel: &std::sync::atomic::AtomicBool,
+        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, super::super::ProviderError> {
         Ok(Vec::new())
     }

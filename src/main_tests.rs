@@ -1732,65 +1732,114 @@ fn cli_legacy_vault_sign_flat_form_rejected() {
 #[test]
 fn expand_user_path_tilde_slash() {
     let home = dirs::home_dir().unwrap();
-    let result = super::expand_user_path("~/.ssh/config").unwrap();
+    let result = super::expand_user_path(
+        Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+        "~/.ssh/config",
+    )
+    .unwrap();
     assert_eq!(result, home.join(".ssh/config"));
 }
 
 #[test]
 fn expand_user_path_dollar_brace_home_slash() {
     let home = dirs::home_dir().unwrap();
-    let result = super::expand_user_path("${HOME}/.ssh/config").unwrap();
+    let result = super::expand_user_path(
+        Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+        "${HOME}/.ssh/config",
+    )
+    .unwrap();
     assert_eq!(result, home.join(".ssh/config"));
 }
 
 #[test]
 fn expand_user_path_dollar_home_slash() {
     let home = dirs::home_dir().unwrap();
-    let result = super::expand_user_path("$HOME/.purple/mcp-audit.log").unwrap();
+    let result = super::expand_user_path(
+        Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+        "$HOME/.purple/mcp-audit.log",
+    )
+    .unwrap();
     assert_eq!(result, home.join(".purple/mcp-audit.log"));
 }
 
 #[test]
 fn expand_user_path_bare_tilde() {
     let home = dirs::home_dir().unwrap();
-    assert_eq!(super::expand_user_path("~").unwrap(), home);
+    assert_eq!(
+        super::expand_user_path(
+            Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+            "~"
+        )
+        .unwrap(),
+        home
+    );
 }
 
 #[test]
 fn expand_user_path_bare_dollar_brace_home() {
     let home = dirs::home_dir().unwrap();
-    assert_eq!(super::expand_user_path("${HOME}").unwrap(), home);
+    assert_eq!(
+        super::expand_user_path(
+            Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+            "${HOME}"
+        )
+        .unwrap(),
+        home
+    );
 }
 
 #[test]
 fn expand_user_path_bare_dollar_home() {
     let home = dirs::home_dir().unwrap();
-    assert_eq!(super::expand_user_path("$HOME").unwrap(), home);
+    assert_eq!(
+        super::expand_user_path(
+            Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+            "$HOME"
+        )
+        .unwrap(),
+        home
+    );
 }
 
 #[test]
 fn expand_user_path_absolute_unchanged() {
-    let result = super::expand_user_path("/etc/ssh/ssh_config").unwrap();
+    let result = super::expand_user_path(
+        Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+        "/etc/ssh/ssh_config",
+    )
+    .unwrap();
     assert_eq!(result, std::path::PathBuf::from("/etc/ssh/ssh_config"));
 }
 
 #[test]
 fn expand_user_path_relative_unchanged() {
-    let result = super::expand_user_path("config/ssh.conf").unwrap();
+    let result = super::expand_user_path(
+        Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+        "config/ssh.conf",
+    )
+    .unwrap();
     assert_eq!(result, std::path::PathBuf::from("config/ssh.conf"));
 }
 
 #[test]
 fn expand_user_path_does_not_expand_mid_string() {
     // Only the prefix is expanded. Mid-string ${HOME} stays literal.
-    let result = super::expand_user_path("/tmp/${HOME}/foo").unwrap();
+    let result = super::expand_user_path(
+        Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+        "/tmp/${HOME}/foo",
+    )
+    .unwrap();
     assert_eq!(result, std::path::PathBuf::from("/tmp/${HOME}/foo"));
 }
 
 #[test]
 fn expand_user_path_tilde_other_user_not_expanded() {
     // `~user` (other-user home) is intentionally not supported.
-    let result = super::expand_user_path("~root").unwrap();
+    let result = super::expand_user_path(
+        Some(&crate::runtime::env::Paths::new(dirs::home_dir().unwrap())),
+        "~root",
+    )
+    .unwrap();
     assert_eq!(result, std::path::PathBuf::from("~root"));
 }
 

@@ -10,10 +10,13 @@ use super::model::{
 const MAX_INCLUDE_DEPTH: usize = 16;
 
 impl SshConfigFile {
-    /// Parse an SSH config file from the given path.
-    /// Preserves all formatting, comments, and unknown directives for round-trip fidelity.
+    /// Parse an SSH config file from the given path. Convenience wrapper that
+    /// captures the process environment once for `${VAR}` / `~` expansion.
+    /// Production code threads its injected `Env` via
+    /// [`SshConfigFile::parse_with_env`]; this shim keeps a path-only entry
+    /// point for tests and external callers without scattering ambient reads.
     pub fn parse(path: &Path) -> Result<Self> {
-        Self::parse_with_depth(path, 0, &|n| std::env::var(n).ok())
+        Self::parse_with_env(path, &crate::runtime::env::Env::from_process())
     }
 
     /// Parse with `${VAR}` expansion resolved from an injected environment
@@ -345,7 +348,7 @@ impl SshConfigFile {
         let mut seen = std::collections::HashSet::new();
 
         for single in Self::split_include_patterns(pattern) {
-            let expanded = Self::expand_env_vars_with(&Self::expand_tilde(single), lookup);
+            let expanded = Self::expand_env_vars_with(&Self::expand_tilde(single, lookup), lookup);
 
             // If relative path, resolve against config dir
             let glob_pattern = if expanded.starts_with('/') {
@@ -413,11 +416,13 @@ impl SshConfigFile {
         files
     }
 
-    /// Expand ~ to the home directory.
-    pub(crate) fn expand_tilde(pattern: &str) -> String {
+    /// Expand `~` to the home directory, resolved from the injected `lookup`
+    /// (`$HOME`) so expansion stays free of ambient `dirs::home_dir()`. On the
+    /// supported Unix platforms `$HOME` is the same source `dirs` reads.
+    pub(crate) fn expand_tilde(pattern: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
         if let Some(rest) = pattern.strip_prefix("~/") {
-            if let Some(home) = dirs::home_dir() {
-                return format!("{}/{}", home.display(), rest);
+            if let Some(home) = lookup("HOME") {
+                return format!("{}/{}", home, rest);
             }
         }
         pattern.to_string()
@@ -738,11 +743,15 @@ Host myserver
             hostname: "10.0.0.1".to_string(),
             ..Default::default()
         };
-        let default_path = dirs::home_dir().unwrap().join(".ssh/config");
-        assert_eq!(entry.ssh_command(&default_path), "ssh -- 'myserver'");
+        let paths = crate::runtime::env::Paths::new("/home/testuser");
+        let default_path = paths.ssh_dir().join("config");
+        assert_eq!(
+            entry.ssh_command(Some(&paths), &default_path),
+            "ssh -- 'myserver'"
+        );
         let custom_path = PathBuf::from("/tmp/my_config");
         assert_eq!(
-            entry.ssh_command(&custom_path),
+            entry.ssh_command(Some(&paths), &custom_path),
             "ssh -F '/tmp/my_config' -- 'myserver'"
         );
     }

@@ -239,9 +239,14 @@ impl App {
         }
     }
     pub fn scan_keys(&mut self) {
-        let ssh_dir = self.env().paths().map(crate::runtime::env::Paths::ssh_dir);
+        let paths = self.env().paths().cloned();
+        let ssh_dir = paths.as_ref().map(crate::runtime::env::Paths::ssh_dir);
         if let Some(ssh_dir) = ssh_dir {
-            self.keys.list = ssh_keys::discover_keys(Path::new(&ssh_dir), &self.hosts_state.list);
+            self.keys.list = ssh_keys::discover_keys(
+                paths.as_ref(),
+                Path::new(&ssh_dir),
+                &self.hosts_state.list,
+            );
             if !self.keys.list.is_empty() && self.keys.list_state.selected().is_none() {
                 self.keys.list_state.select(Some(0));
             }

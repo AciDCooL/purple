@@ -181,13 +181,17 @@ pub fn filtered_key_indices(keys: &[SshKeyInfo], query: Option<&str>) -> Vec<usi
 /// fingerprint is currently loaded in the agent. The result is a snapshot:
 /// keys added to or removed from the agent after this call will not show
 /// up until the next discover_keys() invocation (host reload).
-pub fn discover_keys(ssh_dir: &Path, hosts: &[HostEntry]) -> Vec<SshKeyInfo> {
+pub fn discover_keys(
+    paths: Option<&crate::runtime::env::Paths>,
+    ssh_dir: &Path,
+    hosts: &[HostEntry],
+) -> Vec<SshKeyInfo> {
     let entries = match std::fs::read_dir(ssh_dir) {
         Ok(entries) => entries,
         Err(_) => return Vec::new(),
     };
 
-    let home = dirs::home_dir();
+    let home = paths.map(|p| p.home().to_path_buf());
     let agent_fingerprints = agent_loaded_fingerprints();
 
     let mut keys: Vec<SshKeyInfo> = entries

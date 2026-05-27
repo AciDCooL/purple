@@ -17,12 +17,11 @@ pub struct SyncRecord {
 impl SyncRecord {
     /// Load sync history from ~/.purple/sync_history.tsv.
     /// Format: provider\ttimestamp\tis_error\tmessage
-    pub fn load_all() -> HashMap<String, SyncRecord> {
+    pub fn load_all(paths: Option<&crate::runtime::env::Paths>) -> HashMap<String, SyncRecord> {
         let mut map = HashMap::new();
-        let Some(home) = dirs::home_dir() else {
+        let Some(path) = paths.map(crate::runtime::env::Paths::sync_history) else {
             return map;
         };
-        let path = home.join(".purple").join("sync_history.tsv");
         let Ok(content) = std::fs::read_to_string(&path) else {
             return map;
         };
@@ -48,13 +47,16 @@ impl SyncRecord {
     }
 
     /// Save sync history to ~/.purple/sync_history.tsv.
-    pub fn save_all(history: &HashMap<String, SyncRecord>) {
+    pub fn save_all(
+        history: &HashMap<String, SyncRecord>,
+        paths: Option<&crate::runtime::env::Paths>,
+    ) {
         if crate::demo_flag::is_demo() {
             return;
         }
-        let Some(home) = dirs::home_dir() else { return };
-        let dir = home.join(".purple");
-        let path = dir.join("sync_history.tsv");
+        let Some(path) = paths.map(crate::runtime::env::Paths::sync_history) else {
+            return;
+        };
         let mut lines = Vec::new();
         for (provider, record) in history {
             lines.push(format!(
@@ -429,7 +431,7 @@ impl ProviderState {
 impl Default for ProviderState {
     /// Truly empty default. No disk I/O. Call sites that need persisted
     /// state (App::new) construct with struct-update syntax:
-    /// `ProviderState { config: ProviderConfig::load(), sync_history: SyncRecord::load_all(), ..Default::default() }`.
+    /// `ProviderState { config: ProviderConfig::load(paths), sync_history: SyncRecord::load_all(paths), ..Default::default() }`.
     fn default() -> Self {
         Self {
             config: ProviderConfig::default(),
@@ -453,10 +455,10 @@ impl Default for ProviderState {
 
 impl ProviderState {
     /// Construct with persisted state loaded from disk.
-    pub fn load() -> Self {
+    pub fn load(paths: Option<&crate::runtime::env::Paths>) -> Self {
         Self {
-            config: crate::providers::config::ProviderConfig::load(),
-            sync_history: SyncRecord::load_all(),
+            config: crate::providers::config::ProviderConfig::load(paths),
+            sync_history: SyncRecord::load_all(paths),
             ..Self::default()
         }
     }

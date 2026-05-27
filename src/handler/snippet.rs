@@ -162,7 +162,7 @@ fn ctx_from_app(app: &mut App) -> SnippetCtx<'_> {
 
 pub(super) fn open_snippet_picker(app: &mut App, aliases: Vec<String>) {
     let mut ctx = ctx_from_app(app);
-    *ctx.snippets.store_mut() = crate::snippet::SnippetStore::load();
+    *ctx.snippets.store_mut() = crate::snippet::SnippetStore::load(ctx.env.paths());
     *ctx.ui.snippet_picker_state_mut() = ratatui::widgets::ListState::default();
     if !ctx.snippets.store().snippets.is_empty() {
         ctx.ui.snippet_picker_state_mut().select(Some(0));
@@ -376,6 +376,7 @@ fn start_snippet_output(
         run_id,
         askpass_map,
         ctx.config_path.to_path_buf(),
+        std::sync::Arc::new(ctx.env.clone()),
         snippet.command.clone(),
         ctx.bw_session.map(str::to_string),
         tunnel_aliases,

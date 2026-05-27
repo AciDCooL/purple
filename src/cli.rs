@@ -117,7 +117,7 @@ pub fn handle_import(
     let result = if known_hosts {
         import::import_from_known_hosts(env.paths(), &mut config, group)
     } else if let Some(path) = file {
-        let resolved = super::resolve_config_path(path)?;
+        let resolved = super::resolve_config_path(env.paths(), path)?;
         import::import_from_file(&mut config, &resolved, group)
     } else {
         eprintln!("{}", crate::messages::cli::IMPORT_NO_FILE);
@@ -172,7 +172,7 @@ pub fn handle_sync(
         dry_run,
         remove
     );
-    let provider_config = providers::config::ProviderConfig::load();
+    let provider_config = providers::config::ProviderConfig::load(env.paths());
     // The positional argument accepts either a bare provider name (sync ALL
     // configs of that provider) or a labeled identifier `provider:label`
     // (sync exactly that one config). No explicit flag form.
@@ -250,6 +250,7 @@ pub fn handle_sync(
         let fetch_result = provider.fetch_hosts_with_progress(
             &section.token,
             &std::sync::atomic::AtomicBool::new(false),
+            env,
             &progress,
         );
         let summary = last_summary.into_inner();
@@ -436,7 +437,7 @@ pub fn handle_provider_command(
             }
 
             // When updating an existing section, fall back to stored values for fields not supplied
-            let existing_section = providers::config::ProviderConfig::load()
+            let existing_section = providers::config::ProviderConfig::load(env.paths())
                 .section(&provider)
                 .cloned();
 
@@ -636,7 +637,7 @@ pub fn handle_provider_command(
                 std::process::exit(1);
             }
 
-            let mut config = providers::config::ProviderConfig::load();
+            let mut config = providers::config::ProviderConfig::load(env.paths());
 
             // Resolve the target ProviderConfigId given --label and the
             // provider's existing config layout. Rules:
@@ -696,7 +697,7 @@ pub fn handle_provider_command(
             Ok(())
         }
         ProviderCommands::List => {
-            let config = providers::config::ProviderConfig::load();
+            let config = providers::config::ProviderConfig::load(env.paths());
             let sections = config.configured_providers();
             if sections.is_empty() {
                 println!("{}", crate::messages::cli::NO_PROVIDERS);
@@ -727,7 +728,7 @@ pub fn handle_provider_command(
                     std::process::exit(1);
                 }
             };
-            let mut config = providers::config::ProviderConfig::load();
+            let mut config = providers::config::ProviderConfig::load(env.paths());
             let removed = match &id.label {
                 Some(_) => {
                     if config.section_by_id(&id).is_none() {
@@ -990,7 +991,7 @@ pub fn handle_snippet_command(
     log::info!("[purple] cli snippet: dispatch");
     match command {
         SnippetCommands::List => {
-            let store = snippet::SnippetStore::load();
+            let store = snippet::SnippetStore::load(env.paths());
             if store.snippets.is_empty() {
                 println!("{}", crate::messages::cli::NO_SNIPPETS);
             } else {
@@ -1023,7 +1024,7 @@ pub fn handle_snippet_command(
                     std::process::exit(1);
                 }
             }
-            let mut store = snippet::SnippetStore::load();
+            let mut store = snippet::SnippetStore::load(env.paths());
             let is_update = store.get(&name).is_some();
             store.set(snippet::Snippet {
                 name: name.clone(),
@@ -1039,7 +1040,7 @@ pub fn handle_snippet_command(
             Ok(())
         }
         SnippetCommands::Remove { name } => {
-            let mut store = snippet::SnippetStore::load();
+            let mut store = snippet::SnippetStore::load(env.paths());
             if store.get(&name).is_none() {
                 eprintln!("{}", crate::messages::cli::snippet_not_found(&name));
                 std::process::exit(1);
@@ -1056,7 +1057,7 @@ pub fn handle_snippet_command(
             all,
             parallel,
         } => {
-            let store = snippet::SnippetStore::load();
+            let store = snippet::SnippetStore::load(env.paths());
             let snip = match store.get(&name) {
                 Some(s) => s.clone(),
                 None => {
@@ -1106,6 +1107,7 @@ pub fn handle_snippet_command(
                 match snippet::run_snippet(
                     &host.alias,
                     config_path,
+                    env,
                     &snip.command,
                     askpass.as_deref(),
                     bw_session.as_deref(),
@@ -1174,18 +1176,21 @@ pub fn handle_snippet_command(
                     })
                     .collect();
                 let command = snip.command.clone();
+                let env = std::sync::Arc::new(env.clone());
                 thread::spawn(move || {
                     for (alias, askpass) in targets_info {
                         let _ = slot_rx.recv();
                         let slot_tx = slot_tx.clone();
                         let tx = tx.clone();
                         let config_path = config_path.clone();
+                        let env = std::sync::Arc::clone(&env);
                         let command = command.clone();
                         let bw_session = bw_session.clone();
                         thread::spawn(move || {
                             let result = snippet::run_snippet(
                                 &alias,
                                 &config_path,
+                                &env,
                                 &command,
                                 askpass.as_deref(),
                                 bw_session.as_deref(),
@@ -1235,6 +1240,7 @@ pub fn handle_snippet_command(
                     match snippet::run_snippet(
                         &host.alias,
                         config_path,
+                        env,
                         &snip.command,
                         askpass.as_deref(),
                         bw_session.as_deref(),
@@ -1263,8 +1269,8 @@ pub fn handle_snippet_command(
     }
 }
 
-pub fn handle_logs_command(tail: bool, clear: bool) -> Result<()> {
-    let path = logging::log_path().context("Could not determine log path")?;
+pub fn handle_logs_command(tail: bool, clear: bool, env: &crate::runtime::env::Env) -> Result<()> {
+    let path = logging::log_path(env.paths()).context("Could not determine log path")?;
     if clear {
         if path.exists() {
             std::fs::remove_file(&path)?;
@@ -1299,7 +1305,7 @@ pub fn handle_theme_command(env: &crate::runtime::env::Env, command: ThemeComman
                 };
                 println!("  {} {}", marker, theme.name);
             }
-            let custom = ui::theme::ThemeDef::load_custom();
+            let custom = ui::theme::ThemeDef::load_custom(env.paths());
             if !custom.is_empty() {
                 println!("{}", crate::messages::cli::CUSTOM_THEMES);
                 for theme in &custom {
@@ -1314,7 +1320,7 @@ pub fn handle_theme_command(env: &crate::runtime::env::Env, command: ThemeComman
         }
         ThemeCommands::Set { name } => {
             let found = ui::theme::ThemeDef::find_builtin(&name).or_else(|| {
-                ui::theme::ThemeDef::load_custom()
+                ui::theme::ThemeDef::load_custom(env.paths())
                     .into_iter()
                     .find(|t| t.name.eq_ignore_ascii_case(&name))
             });
@@ -1352,7 +1358,7 @@ pub fn handle_vault_sign_command(
             );
         }
     }
-    let provider_config = providers::config::ProviderConfig::load();
+    let provider_config = providers::config::ProviderConfig::load(env.paths());
     let entries = config.host_entries();
 
     if all {

@@ -14,8 +14,8 @@ use simplelog::{
 const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024; // 5MB
 
 /// Return the path to the log file: ~/.purple/purple.log
-pub fn log_path() -> Option<PathBuf> {
-    dirs::home_dir().map(|h| h.join(".purple").join("purple.log"))
+pub fn log_path(paths: Option<&crate::runtime::env::Paths>) -> Option<PathBuf> {
+    paths.map(crate::runtime::env::Paths::log_file)
 }
 
 /// Rotate log file if it exceeds MAX_LOG_SIZE.
@@ -53,8 +53,10 @@ fn resolve_level(verbose: bool, env_override: Option<&str>) -> LevelFilter {
 ///
 /// - `verbose`: whether --verbose was passed
 /// - `cli_stderr`: if true, also log to stderr (for CLI subcommands, not TUI)
-pub fn init(verbose: bool, cli_stderr: bool) {
-    let Some(path) = log_path() else { return };
+pub fn init(verbose: bool, cli_stderr: bool, env: &crate::runtime::env::Env) {
+    let Some(path) = log_path(env.paths()) else {
+        return;
+    };
 
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
@@ -62,8 +64,7 @@ pub fn init(verbose: bool, cli_stderr: bool) {
 
     rotate_if_needed(&path);
 
-    let env_val = std::env::var("PURPLE_LOG").ok();
-    let level = resolve_level(verbose, env_val.as_deref());
+    let level = resolve_level(verbose, env.var("PURPLE_LOG"));
     let config = ConfigBuilder::new()
         .set_time_format_rfc3339()
         .set_target_level(LevelFilter::Off)
@@ -155,8 +156,8 @@ pub struct BannerInfo<'a> {
 /// Note: writes directly to the log file, bypassing simplelog's CombinedLogger.
 /// This means the banner will not appear on stderr in CLI mode. This is intentional:
 /// the banner is diagnostic context for the log file, not user-facing output.
-pub fn write_banner(info: &BannerInfo<'_>) {
-    let Some(path) = log_path() else { return };
+pub fn write_banner(info: &BannerInfo<'_>, paths: Option<&crate::runtime::env::Paths>) {
+    let Some(path) = log_path(paths) else { return };
     let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) else {
         return;
     };
@@ -210,9 +211,8 @@ pub fn write_banner(info: &BannerInfo<'_>) {
 }
 
 /// Return the effective log level name as a lowercase string.
-pub fn level_name(verbose: bool) -> String {
-    let env_val = std::env::var("PURPLE_LOG").ok();
-    resolve_level(verbose, env_val.as_deref())
+pub fn level_name(verbose: bool, env: &crate::runtime::env::Env) -> String {
+    resolve_level(verbose, env.var("PURPLE_LOG"))
         .as_str()
         .to_lowercase()
 }
@@ -359,17 +359,17 @@ mod tests {
 
     #[test]
     fn log_path_ends_with_purple_log() {
-        let path = log_path().expect("home dir should exist in test");
+        let paths = crate::runtime::env::Paths::new("/home/u");
+        let path = log_path(Some(&paths)).expect("paths present");
         assert!(path.ends_with(".purple/purple.log"));
     }
 
     #[test]
     fn level_name_defaults_to_warn() {
-        // level_name reads PURPLE_LOG env var internally, so we only test
-        // the verbose=false path (env var is not set in most test runners)
-        let name = level_name(false);
-        // Without PURPLE_LOG set, should be "warn"
-        assert!(name == "warn" || std::env::var("PURPLE_LOG").is_ok());
+        // With no PURPLE_LOG in the injected env, the default is "warn".
+        let env = crate::runtime::env::Env::empty();
+        let name = level_name(false, &env);
+        assert_eq!(name, "warn");
     }
 
     #[test]
