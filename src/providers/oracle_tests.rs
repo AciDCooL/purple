@@ -1105,3 +1105,129 @@ fn test_http_list_compartments_auth_failure() {
     }
     mock.assert();
 }
+
+#[test]
+fn fetch_region_drives_full_pipeline_against_mock() {
+    // Drives the production per-region pipeline end to end through the
+    // endpoint seam: OCI request signing, the compartment/instance/VNIC/image
+    // multi-step join, deserialize and ProviderHost mapping. Both the Identity
+    // and Compute bases point at one mock server.
+    let mut server = mockito::Server::new();
+    let compartments = server
+        .mock("GET", "/20160918/compartments")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body("[]")
+        .create();
+    let instances = server
+        .mock("GET", "/20160918/instances")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"[{
+                "id": "ocid1.instance.oc1..inst1",
+                "displayName": "web-prod-1",
+                "lifecycleState": "RUNNING",
+                "shape": "VM.Standard2.1",
+                "imageId": "ocid1.image.oc1..img1"
+            }]"#,
+        )
+        .create();
+    let attachments = server
+        .mock("GET", "/20160918/vnicAttachments")
+        .match_query(mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"[{
+                "instanceId": "ocid1.instance.oc1..inst1",
+                "vnicId": "ocid1.vnic.oc1..vnic1",
+                "lifecycleState": "ATTACHED",
+                "isPrimary": true
+            }]"#,
+        )
+        .create();
+    let image = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"/20160918/images/.*".into()),
+        )
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"displayName": "Oracle-Linux-8.9"}"#)
+        .create();
+    let vnic = server
+        .mock("GET", mockito::Matcher::Regex(r"/20160918/vnics/.*".into()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"publicIp": "129.146.10.1", "privateIp": "10.0.0.5"}"#)
+        .create();
+
+    let oracle = Oracle {
+        regions: vec!["us-ashburn-1".to_string()],
+        compartment: "ocid1.compartment.oc1..aaa".to_string(),
+    };
+    let creds = make_creds(load_test_key());
+    let rsa_key = parse_private_key(&creds.key_pem).unwrap();
+    let base = server.url();
+    let hosts = oracle
+        .fetch_region(
+            &creds,
+            &rsa_key,
+            &OciRegionCtx {
+                region: "us-ashburn-1",
+                iaas_base: &base,
+                identity_base: &base,
+            },
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .expect("fetch_region must succeed against the mock");
+    compartments.assert();
+    instances.assert();
+    attachments.assert();
+    image.assert();
+    vnic.assert();
+
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].server_id, "ocid1.instance.oc1..inst1");
+    assert_eq!(hosts[0].name, "web-prod-1");
+    assert_eq!(hosts[0].ip, "129.146.10.1");
+}
+
+#[test]
+fn fetch_region_maps_auth_failure_to_provider_error() {
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", mockito::Matcher::Any)
+        .with_status(401)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"code": "NotAuthenticated"}"#)
+        .create();
+
+    let oracle = Oracle {
+        regions: vec!["us-ashburn-1".to_string()],
+        compartment: "ocid1.compartment.oc1..aaa".to_string(),
+    };
+    let creds = make_creds(load_test_key());
+    let rsa_key = parse_private_key(&creds.key_pem).unwrap();
+    let base = server.url();
+    let result = oracle.fetch_region(
+        &creds,
+        &rsa_key,
+        &OciRegionCtx {
+            region: "us-ashburn-1",
+            iaas_base: &base,
+            identity_base: &base,
+        },
+        &AtomicBool::new(false),
+        &|_| {},
+    );
+    mock.assert();
+    assert!(
+        matches!(result, Err(ProviderError::AuthFailed)),
+        "401 must map to AuthFailed, got {result:?}"
+    );
+}

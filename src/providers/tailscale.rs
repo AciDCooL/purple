@@ -157,12 +157,16 @@ impl Provider for Tailscale {
         if token.is_empty() {
             self.fetch_from_cli(cancel)
         } else {
-            self.fetch_from_api(token, cancel)
+            self.fetch_from(Self::API_BASE, token, cancel)
         }
     }
 }
 
 impl Tailscale {
+    /// Real API host. Overridable per call via `fetch_from` so tests can point
+    /// the full API fetch pipeline at a mock server.
+    const API_BASE: &'static str = "https://api.tailscale.com";
+
     fn fetch_from_cli(&self, cancel: &AtomicBool) -> Result<Vec<ProviderHost>, ProviderError> {
         let binary = find_tailscale_binary()?;
 
@@ -300,8 +304,12 @@ impl Tailscale {
         Ok(hosts)
     }
 
-    fn fetch_from_api(
+    /// Fetch hosts from the API against an explicit base. Production passes
+    /// `API_BASE`; tests pass a mock server URL. Single seam covering token
+    /// validation, Basic/Bearer auth selection, error mapping and mapping.
+    fn fetch_from(
         &self,
+        base_url: &str,
         token: &str,
         cancel: &AtomicBool,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
@@ -328,8 +336,9 @@ impl Tailscale {
             format!("Bearer {}", token)
         };
 
+        let url = format!("{}/api/v2/tailnet/-/devices?fields=all", base_url);
         let resp: ApiResponse = agent
-            .get("https://api.tailscale.com/api/v2/tailnet/-/devices?fields=all")
+            .get(&url)
             .header("Authorization", &auth_header)
             .call()
             .map_err(map_ureq_error)?

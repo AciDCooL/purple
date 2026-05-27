@@ -366,6 +366,7 @@ fn fetch_paginated<T: serde::de::DeserializeOwned>(
     agent: &ureq::Agent,
     initial_url: &str,
     access_token: &str,
+    api_base: &str,
     cancel: &AtomicBool,
     resource_name: &str,
     progress: &dyn Fn(&str),
@@ -436,37 +437,38 @@ fn fetch_paginated<T: serde::de::DeserializeOwned>(
             }
         }
 
+        // Only follow nextLinks that point back at the same API host we were
+        // told to use. In production that pins follow-on requests to the real
+        // Azure management host; in tests it pins them to the mock server.
+        // The byte after `api_base` must be '/' so a look-alike host like
+        // `https://management.azure.com.evil/` cannot smuggle the Bearer token
+        // off to an attacker (`api_base` carries no trailing slash).
         next_url = body
             .get("nextLink")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
-            .filter(|s| s.starts_with("https://management.azure.com/"))
+            .filter(|s| {
+                s.strip_prefix(api_base)
+                    .is_some_and(|rest| rest.starts_with('/'))
+            })
             .map(|s| s.to_string());
     }
 
     Ok(all_items)
 }
 
-impl Provider for Azure {
-    fn name(&self) -> &str {
-        "azure"
-    }
+impl Azure {
+    /// Real ARM management host. Overridable via `fetch_with_endpoint` so
+    /// tests can drive the VM/NIC/public-IP join against a mock server.
+    const API_BASE: &'static str = "https://management.azure.com";
 
-    fn short_label(&self) -> &str {
-        "az"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Fetch VMs across subscriptions against an explicit management API base.
+    /// Production passes `API_BASE`; tests pass a mock URL (plus a plain bearer
+    /// token so the OAuth exchange is skipped), exercising URL construction,
+    /// the auth header, the VM/NIC/public-IP join and `ProviderHost` mapping.
+    fn fetch_with_endpoint(
         &self,
-        token: &str,
-        cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
-    ) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_with_progress(token, cancel, _env, &|_| {})
-    }
-
-    fn fetch_hosts_with_progress(
-        &self,
+        api_base: &str,
         token: &str,
         cancel: &AtomicBool,
         _env: &crate::runtime::env::Env,
@@ -507,7 +509,7 @@ impl Provider for Azure {
 
             progress(&format!("Subscription {}/{} ({})...", i + 1, total, sub));
 
-            match self.fetch_subscription(&agent, &access_token, sub, cancel, progress) {
+            match self.fetch_subscription(&agent, &access_token, sub, api_base, cancel, progress) {
                 Ok(hosts) => all_hosts.extend(hosts),
                 Err(ProviderError::Cancelled) => return Err(ProviderError::Cancelled),
                 Err(ProviderError::AuthFailed) => return Err(ProviderError::AuthFailed),
@@ -535,24 +537,30 @@ impl Provider for Azure {
         progress(&format!("{} VMs", all_hosts.len()));
         Ok(all_hosts)
     }
-}
 
-impl Azure {
     fn fetch_subscription(
         &self,
         agent: &ureq::Agent,
         access_token: &str,
         subscription_id: &str,
+        api_base: &str,
         cancel: &AtomicBool,
         progress: &dyn Fn(&str),
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         // 1. Fetch all VMs (with instanceView expanded for power state)
         let vm_url = format!(
-            "https://management.azure.com/subscriptions/{}/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01&$expand=instanceView",
-            subscription_id
+            "{}/subscriptions/{}/providers/Microsoft.Compute/virtualMachines?api-version=2024-07-01&$expand=instanceView",
+            api_base, subscription_id
         );
-        let vms: Vec<VirtualMachine> =
-            fetch_paginated(agent, &vm_url, access_token, cancel, "VMs", progress)?;
+        let vms: Vec<VirtualMachine> = fetch_paginated(
+            agent,
+            &vm_url,
+            access_token,
+            api_base,
+            cancel,
+            "VMs",
+            progress,
+        )?;
 
         if cancel.load(Ordering::Relaxed) {
             return Err(ProviderError::Cancelled);
@@ -560,11 +568,18 @@ impl Azure {
 
         // 2. Fetch all NICs
         let nic_url = format!(
-            "https://management.azure.com/subscriptions/{}/providers/Microsoft.Network/networkInterfaces?api-version=2024-05-01",
-            subscription_id
+            "{}/subscriptions/{}/providers/Microsoft.Network/networkInterfaces?api-version=2024-05-01",
+            api_base, subscription_id
         );
-        let nics: Vec<Nic> =
-            fetch_paginated(agent, &nic_url, access_token, cancel, "NICs", progress)?;
+        let nics: Vec<Nic> = fetch_paginated(
+            agent,
+            &nic_url,
+            access_token,
+            api_base,
+            cancel,
+            "NICs",
+            progress,
+        )?;
 
         if cancel.load(Ordering::Relaxed) {
             return Err(ProviderError::Cancelled);
@@ -572,13 +587,14 @@ impl Azure {
 
         // 3. Fetch all public IPs
         let pip_url = format!(
-            "https://management.azure.com/subscriptions/{}/providers/Microsoft.Network/publicIPAddresses?api-version=2024-05-01",
-            subscription_id
+            "{}/subscriptions/{}/providers/Microsoft.Network/publicIPAddresses?api-version=2024-05-01",
+            api_base, subscription_id
         );
         let public_ips: Vec<PublicIp> = fetch_paginated(
             agent,
             &pip_url,
             access_token,
+            api_base,
             cancel,
             "public IPs",
             progress,
@@ -619,6 +635,35 @@ impl Azure {
         }
 
         Ok(hosts)
+    }
+}
+
+impl Provider for Azure {
+    fn name(&self) -> &str {
+        "azure"
+    }
+
+    fn short_label(&self) -> &str {
+        "az"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_hosts_with_progress(token, cancel, env, &|_| {})
+    }
+
+    fn fetch_hosts_with_progress(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
+        progress: &dyn Fn(&str),
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_with_endpoint(Self::API_BASE, token, cancel, env, progress)
     }
 }
 

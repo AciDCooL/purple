@@ -712,3 +712,74 @@ fn test_http_devices_auth_failure() {
     }
     mock.assert();
 }
+
+#[test]
+fn fetch_from_drives_full_pipeline_against_mock() {
+    // Drives the production API fetch path end to end through fetch_from:
+    // token-prefix validation, Basic auth header, JSON deserialize and
+    // ProviderHost mapping. The tskey-api- token format is accepted by the
+    // validator so the request reaches the mock.
+    let mut server = mockito::Server::new();
+    let api_key = "tskey-api-kABC123-CNTRL";
+    let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{}:", api_key));
+    let expected_auth = format!("Basic {}", encoded);
+
+    let mock = server
+        .mock("GET", "/api/v2/tailnet/-/devices")
+        .match_query(mockito::Matcher::UrlEncoded("fields".into(), "all".into()))
+        .match_header("Authorization", expected_auth.as_str())
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{
+                "devices": [
+                    {
+                        "nodeId": "nSEAM01",
+                        "hostname": "web-1",
+                        "name": "web-1.ts.net",
+                        "addresses": ["100.64.0.10", "fd7a:115c::1"],
+                        "os": "linux",
+                        "authorized": true,
+                        "connectedToControl": true,
+                        "tags": ["tag:prod"]
+                    }
+                ]
+            }"#,
+        )
+        .create();
+
+    let hosts = Tailscale
+        .fetch_from(&server.url(), api_key, &AtomicBool::new(false))
+        .expect("fetch_from must succeed against the mock");
+    mock.assert();
+
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].server_id, "nSEAM01");
+    assert_eq!(hosts[0].name, "web-1");
+    assert_eq!(hosts[0].ip, "100.64.0.10");
+    assert_eq!(hosts[0].tags, vec!["prod"]);
+    assert!(
+        hosts[0]
+            .metadata
+            .iter()
+            .any(|(k, v)| k == "status" && v == "online")
+    );
+}
+
+#[test]
+fn fetch_from_maps_auth_failure_to_provider_error() {
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", "/api/v2/tailnet/-/devices")
+        .match_query(mockito::Matcher::Any)
+        .with_status(401)
+        .with_body(r#"{"message": "Unauthorized"}"#)
+        .create();
+
+    let result = Tailscale.fetch_from(&server.url(), "tskey-api-bad", &AtomicBool::new(false));
+    mock.assert();
+    assert!(
+        matches!(result, Err(ProviderError::AuthFailed)),
+        "401 must map to ProviderError::AuthFailed, got {result:?}"
+    );
+}

@@ -1244,3 +1244,177 @@ fn test_http_list_public_ips_roundtrip() {
     );
     mock.assert();
 }
+
+#[test]
+fn fetch_from_drives_full_pipeline_against_mock() {
+    // Drives the production VM/NIC/public-IP join through the management API
+    // base seam: URL construction across three resource endpoints, the Bearer
+    // header, the join and ProviderHost mapping. A plain token skips the OAuth
+    // exchange so the mock host serves every request.
+    let mut server = mockito::Server::new();
+    let vms = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"/subscriptions/.*/virtualMachines".into()),
+        )
+        .match_header("Authorization", "Bearer plain-token")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"value": [{
+                "name": "web-1",
+                "properties": {
+                    "vmId": "abc-123",
+                    "networkProfile": {
+                        "networkInterfaces": [
+                            {"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic1"}
+                        ]
+                    }
+                }
+            }]}"#,
+        )
+        .create();
+    let nics = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"/subscriptions/.*/networkInterfaces".into()),
+        )
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"value": [{
+                "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic1",
+                "properties": {
+                    "ipConfigurations": [
+                        {"properties": {"privateIPAddress": "10.0.0.4"}}
+                    ]
+                }
+            }]}"#,
+        )
+        .create();
+    let pips = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"/subscriptions/.*/publicIPAddresses".into()),
+        )
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"value": []}"#)
+        .create();
+
+    let azure = Azure {
+        subscriptions: vec!["12345678-1234-1234-1234-123456789012".to_string()],
+    };
+    let hosts = azure
+        .fetch_with_endpoint(
+            &server.url(),
+            "plain-token",
+            &AtomicBool::new(false),
+            &crate::runtime::env::Env::empty(),
+            &|_| {},
+        )
+        .expect("fetch_with_endpoint must succeed against the mock");
+    vms.assert();
+    nics.assert();
+    pips.assert();
+
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].server_id, "abc-123");
+    assert_eq!(hosts[0].name, "web-1");
+    assert_eq!(hosts[0].ip, "10.0.0.4");
+}
+
+#[test]
+fn fetch_from_maps_auth_failure_to_provider_error() {
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", mockito::Matcher::Any)
+        .with_status(401)
+        .with_body(r#"{"error": {"code": "AuthenticationFailed"}}"#)
+        .create();
+
+    let azure = Azure {
+        subscriptions: vec!["12345678-1234-1234-1234-123456789012".to_string()],
+    };
+    let result = azure.fetch_with_endpoint(
+        &server.url(),
+        "plain-token",
+        &AtomicBool::new(false),
+        &crate::runtime::env::Env::empty(),
+        &|_| {},
+    );
+    mock.assert();
+    assert!(
+        matches!(result, Err(ProviderError::AuthFailed)),
+        "401 must map to AuthFailed, got {result:?}"
+    );
+}
+
+#[test]
+fn fetch_paginated_does_not_follow_cross_host_next_link() {
+    // Security guard: a nextLink pointing at a look-alike host
+    // (management.azure.com.evil) must NOT be followed, or the Bearer token
+    // would leak to that host. Page 1 returns one VM and a hostile nextLink;
+    // the loop must stop and never request the hostile URL.
+    let mut server = mockito::Server::new();
+    let evil = format!("{}.evil.example/subscriptions/x/page2", server.url());
+    let vms = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"/subscriptions/.*/virtualMachines".into()),
+        )
+        .expect(1) // exactly one request: the hostile nextLink must not be fetched
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(format!(
+            r#"{{"value": [{{
+                "name": "web-1",
+                "properties": {{"vmId": "abc-123", "networkProfile": {{"networkInterfaces": [
+                    {{"id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic1"}}
+                ]}}}}
+            }}], "nextLink": "{evil}"}}"#
+        ))
+        .create();
+    let nics = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"/subscriptions/.*/networkInterfaces".into()),
+        )
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"value": [{
+                "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/nic1",
+                "properties": {"ipConfigurations": [{"properties": {"privateIPAddress": "10.0.0.4"}}]}
+            }]}"#,
+        )
+        .create();
+    let pips = server
+        .mock(
+            "GET",
+            mockito::Matcher::Regex(r"/subscriptions/.*/publicIPAddresses".into()),
+        )
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"value": []}"#)
+        .create();
+
+    let azure = Azure {
+        subscriptions: vec!["12345678-1234-1234-1234-123456789012".to_string()],
+    };
+    let hosts = azure
+        .fetch_with_endpoint(
+            &server.url(),
+            "plain-token",
+            &AtomicBool::new(false),
+            &crate::runtime::env::Env::empty(),
+            &|_| {},
+        )
+        .expect("fetch must succeed");
+    // `.expect(1)` on the VM mock asserts the hostile nextLink was not followed.
+    vms.assert();
+    nics.assert();
+    pips.assert();
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].ip, "10.0.0.4");
+}

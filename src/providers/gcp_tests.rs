@@ -994,3 +994,86 @@ fn test_http_aggregated_instances_auth_failure() {
     }
     mock.assert();
 }
+
+#[test]
+fn fetch_from_drives_full_pipeline_against_mock() {
+    // Drives the production aggregated-list pipeline through the API base
+    // seam: URL construction, Bearer header, JSON deserialize and
+    // ProviderHost mapping. A plain token skips the OAuth exchange so a
+    // single mock endpoint suffices.
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", mockito::Matcher::Regex("/compute/v1/.*".into()))
+        .match_header("Authorization", "Bearer plain-token")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{
+                "items": {
+                    "zones/us-central1-a": {
+                        "instances": [
+                            {
+                                "id": "1234567890123456789",
+                                "name": "web-1",
+                                "status": "RUNNING",
+                                "machineType": "projects/p/zones/us-central1-a/machineTypes/e2-micro",
+                                "zone": "projects/p/zones/us-central1-a",
+                                "networkInterfaces": [{
+                                    "networkIP": "10.0.0.2",
+                                    "accessConfigs": [{"natIP": "35.192.0.1"}]
+                                }]
+                            }
+                        ]
+                    }
+                }
+            }"#,
+        )
+        .create();
+
+    let gcp = Gcp {
+        zones: vec![],
+        project: "my-project".to_string(),
+    };
+    let hosts = gcp
+        .fetch_with_endpoint(
+            &server.url(),
+            "plain-token",
+            &AtomicBool::new(false),
+            &crate::runtime::env::Env::empty(),
+            &|_| {},
+        )
+        .expect("fetch_with_endpoint must succeed against the mock");
+    mock.assert();
+
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].server_id, "1234567890123456789");
+    assert_eq!(hosts[0].name, "web-1");
+    assert_eq!(hosts[0].ip, "35.192.0.1");
+}
+
+#[test]
+fn fetch_from_maps_auth_failure_to_provider_error() {
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", mockito::Matcher::Regex("/compute/v1/.*".into()))
+        .with_status(401)
+        .with_body(r#"{"error": {"code": 401, "message": "Invalid Credentials"}}"#)
+        .create();
+
+    let gcp = Gcp {
+        zones: vec![],
+        project: "my-project".to_string(),
+    };
+    let result = gcp.fetch_with_endpoint(
+        &server.url(),
+        "plain-token",
+        &AtomicBool::new(false),
+        &crate::runtime::env::Env::empty(),
+        &|_| {},
+    );
+    mock.assert();
+    assert!(
+        matches!(result, Err(ProviderError::AuthFailed)),
+        "401 must map to AuthFailed, got {result:?}"
+    );
+}

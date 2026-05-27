@@ -411,26 +411,18 @@ fn url_encode(s: &str) -> String {
     super::percent_encode(s)
 }
 
-impl Provider for Gcp {
-    fn name(&self) -> &str {
-        "gcp"
-    }
+impl Gcp {
+    /// Real Compute API host. Overridable via `fetch_with_endpoint` so tests
+    /// can drive the full list pipeline against a mock server.
+    const API_BASE: &'static str = "https://compute.googleapis.com";
 
-    fn short_label(&self) -> &str {
-        "gcp"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Fetch instances against an explicit Compute API base. Production passes
+    /// `API_BASE`; tests pass a mock URL (and a plain bearer token so the
+    /// OAuth exchange is skipped), exercising URL construction, the auth
+    /// header, pagination, partial-failure handling and `ProviderHost` mapping.
+    fn fetch_with_endpoint(
         &self,
-        token: &str,
-        cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
-    ) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_with_progress(token, cancel, _env, &|_| {})
-    }
-
-    fn fetch_hosts_with_progress(
-        &self,
+        api_base: &str,
         token: &str,
         cancel: &AtomicBool,
         _env: &crate::runtime::env::Env,
@@ -479,8 +471,8 @@ impl Provider for Gcp {
             }
 
             let mut url = format!(
-                "https://compute.googleapis.com/compute/v1/projects/{}/aggregated/instances?maxResults=500&returnPartialSuccess=true",
-                self.project
+                "{}/compute/v1/projects/{}/aggregated/instances?maxResults=500&returnPartialSuccess=true",
+                api_base, self.project
             );
             if let Some(ref pt) = page_token {
                 url.push_str(&format!("&pageToken={}", url_encode(pt)));
@@ -563,6 +555,35 @@ impl Provider for Gcp {
 
         progress(&format!("{} instances", all_hosts.len()));
         Ok(all_hosts)
+    }
+}
+
+impl Provider for Gcp {
+    fn name(&self) -> &str {
+        "gcp"
+    }
+
+    fn short_label(&self) -> &str {
+        "gcp"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_hosts_with_progress(token, cancel, _env, &|_| {})
+    }
+
+    fn fetch_hosts_with_progress(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
+        progress: &dyn Fn(&str),
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_with_endpoint(Self::API_BASE, token, cancel, env, progress)
     }
 }
 

@@ -1,3 +1,9 @@
+## 3.18.5 - 2026-05-27
+
+- feat: Special characters in your SSH config save reliably.
+- feat: Paths, hostnames and proxy jumps that contain spaces, "#" or quotes are written and read back exactly, whether you edit them yourself or provider sync writes them.
+- change: Provider sync is now verified end to end for every supported cloud, so a broken request, header or page cursor is caught before it ever reaches your host list.
+
 ## 3.18.4 - 2026-05-27
 
 - change: Safer foundations under every sync, sign and connect.

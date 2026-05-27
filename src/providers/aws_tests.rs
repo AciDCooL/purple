@@ -858,3 +858,111 @@ fn test_http_describe_images_auth_failure() {
     }
     mock.assert();
 }
+
+#[test]
+fn fetch_from_drives_full_pipeline_against_mock() {
+    // Exercises the production per-region pipeline end to end through the
+    // endpoint seam: SigV4 signing, DescribeInstances + DescribeImages,
+    // XML deserialize and ProviderHost mapping. Before the seam these were
+    // only covered by re-issuing equivalent requests inline.
+    let mut server = mockito::Server::new();
+    let instances = server
+        .mock("GET", "/")
+        .match_query(mockito::Matcher::UrlEncoded(
+            "Action".into(),
+            "DescribeInstances".into(),
+        ))
+        .match_header("Authorization", mockito::Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "text/xml")
+        .with_body(
+            r#"<DescribeInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+  <reservationSet><item><instancesSet><item>
+    <instanceId>i-1234567890</instanceId>
+    <instanceState><name>running</name></instanceState>
+    <privateIpAddress>10.0.0.1</privateIpAddress>
+    <ipAddress>54.1.2.3</ipAddress>
+    <imageId>ami-12345678</imageId>
+    <instanceType>t3.micro</instanceType>
+    <tagSet><item><key>Name</key><value>web-1</value></item></tagSet>
+  </item></instancesSet></item></reservationSet>
+</DescribeInstancesResponse>"#,
+        )
+        .create();
+    let images = server
+        .mock("GET", "/")
+        .match_query(mockito::Matcher::UrlEncoded(
+            "Action".into(),
+            "DescribeImages".into(),
+        ))
+        .with_status(200)
+        .with_header("content-type", "text/xml")
+        .with_body(
+            r#"<DescribeImagesResponse xmlns="http://ec2.amazonaws.com/doc/2016-11-15/">
+  <imagesSet><item><imageId>ami-12345678</imageId><name>amzn2-ami-hvm-2.0</name></item></imagesSet>
+</DescribeImagesResponse>"#,
+        )
+        .create();
+
+    let aws = Aws {
+        regions: vec!["us-east-1".to_string()],
+        profile: String::new(),
+    };
+    let url = server.url();
+    let hosts = aws
+        .fetch_with_endpoint(
+            |_region| url.clone(),
+            "AKID:SECRET",
+            &AtomicBool::new(false),
+            &crate::runtime::env::Env::empty(),
+            &|_| {},
+        )
+        .expect("fetch_with_endpoint must succeed against the mock");
+    instances.assert();
+    images.assert();
+
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].server_id, "i-1234567890");
+    assert_eq!(hosts[0].name, "web-1");
+    assert_eq!(hosts[0].ip, "54.1.2.3");
+    assert!(
+        hosts[0]
+            .metadata
+            .contains(&("region".to_string(), "us-east-1".to_string()))
+    );
+    assert!(
+        hosts[0]
+            .metadata
+            .contains(&("os".to_string(), "amzn2-ami-hvm-2.0".to_string()))
+    );
+}
+
+#[test]
+fn fetch_from_maps_auth_failure_to_provider_error() {
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", "/")
+        .match_query(mockito::Matcher::Any)
+        .with_status(401)
+        .with_header("content-type", "text/xml")
+        .with_body("<Error><Code>AuthFailure</Code></Error>")
+        .create();
+
+    let aws = Aws {
+        regions: vec!["us-east-1".to_string()],
+        profile: String::new(),
+    };
+    let url = server.url();
+    let result = aws.fetch_with_endpoint(
+        |_region| url.clone(),
+        "AKID:SECRET",
+        &AtomicBool::new(false),
+        &crate::runtime::env::Env::empty(),
+        &|_| {},
+    );
+    mock.assert();
+    assert!(
+        matches!(result, Err(ProviderError::AuthFailed)),
+        "a 401 from the region must surface as AuthFailed, got {result:?}"
+    );
+}

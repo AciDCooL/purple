@@ -455,7 +455,14 @@ impl Provider for Oracle {
                 return Err(ProviderError::Cancelled);
             }
             progress(&format!("Syncing {} ...", region));
-            match self.fetch_region(&creds, &rsa_key, region, cancel, progress) {
+            let iaas_base = format!("https://iaas.{}.oraclecloud.com", region);
+            let identity_base = format!("https://identity.{}.oraclecloud.com", region);
+            let ctx = OciRegionCtx {
+                region,
+                iaas_base: &iaas_base,
+                identity_base: &identity_base,
+            };
+            match self.fetch_region(&creds, &rsa_key, &ctx, cancel, progress) {
                 Ok(mut hosts) => all_hosts.append(&mut hosts),
                 Err(ProviderError::AuthFailed) => return Err(ProviderError::AuthFailed),
                 Err(ProviderError::RateLimited) => return Err(ProviderError::RateLimited),
@@ -486,6 +493,23 @@ impl Provider for Oracle {
         }
         Ok(all_hosts)
     }
+}
+
+/// Authority (host[:port]) portion of a scheme-qualified base URL, used as
+/// the signing host. `https://iaas.eu.oraclecloud.com` -> `iaas.eu.oraclecloud.com`;
+/// a mock `http://127.0.0.1:1234` -> `127.0.0.1:1234`.
+fn authority_of(base: &str) -> &str {
+    base.split_once("://").map(|(_, a)| a).unwrap_or(base)
+}
+
+/// Per-region endpoint context for one OCI fetch: the region label plus the
+/// full scheme+host of the Compute and Identity endpoints. Real OCI hosts in
+/// production, a mock URL in tests.
+#[derive(Clone, Copy)]
+struct OciRegionCtx<'a> {
+    region: &'a str,
+    iaas_base: &'a str,
+    identity_base: &'a str,
 }
 
 impl Oracle {
@@ -531,15 +555,19 @@ impl Oracle {
     }
 
     /// List active sub-compartments (Identity API supports compartmentIdInSubtree).
+    /// `identity_base` is the full scheme+host of the Identity endpoint
+    /// (`https://identity.{region}.oraclecloud.com` in production, a mock URL
+    /// in tests). The signing host is derived from it so signed_get's path
+    /// extraction stays consistent.
     fn list_compartments(
         &self,
         creds: &OciCredentials,
         rsa_key: &rsa::RsaPrivateKey,
         agent: &ureq::Agent,
-        region: &str,
+        identity_base: &str,
         cancel: &AtomicBool,
     ) -> Result<Vec<String>, ProviderError> {
-        let host = format!("identity.{}.oraclecloud.com", region);
+        let host = authority_of(identity_base);
         let compartment_encoded = urlencoding_encode(&self.compartment);
 
         let mut compartment_ids = vec![self.compartment.clone()];
@@ -551,18 +579,18 @@ impl Oracle {
 
             let url = match &next_page {
                 Some(page) => format!(
-                    "https://{}/20160918/compartments?compartmentId={}&compartmentIdInSubtree=true&lifecycleState=ACTIVE&limit=100&page={}",
-                    host,
+                    "{}/20160918/compartments?compartmentId={}&compartmentIdInSubtree=true&lifecycleState=ACTIVE&limit=100&page={}",
+                    identity_base,
                     compartment_encoded,
                     urlencoding_encode(page)
                 ),
                 None => format!(
-                    "https://{}/20160918/compartments?compartmentId={}&compartmentIdInSubtree=true&lifecycleState=ACTIVE&limit=100",
-                    host, compartment_encoded
+                    "{}/20160918/compartments?compartmentId={}&compartmentIdInSubtree=true&lifecycleState=ACTIVE&limit=100",
+                    identity_base, compartment_encoded
                 ),
             };
 
-            let mut resp = self.signed_get(creds, rsa_key, agent, &host, &url)?;
+            let mut resp = self.signed_get(creds, rsa_key, agent, host, &url)?;
 
             let opc_next = resp
                 .headers()
@@ -591,20 +619,30 @@ impl Oracle {
         Ok(compartment_ids)
     }
 
+    /// Fetch one region against explicit endpoint bases. `iaas_base` and
+    /// `identity_base` are the full scheme+host of the Compute and Identity
+    /// endpoints (real OCI hosts in production, a mock URL in tests). The
+    /// signing host is derived from `iaas_base`.
     fn fetch_region(
         &self,
         creds: &OciCredentials,
         rsa_key: &rsa::RsaPrivateKey,
-        region: &str,
+        ctx: &OciRegionCtx,
         cancel: &AtomicBool,
         progress: &dyn Fn(&str),
     ) -> Result<Vec<ProviderHost>, ProviderError> {
+        let OciRegionCtx {
+            region,
+            iaas_base,
+            identity_base,
+        } = *ctx;
         let agent = super::http_agent();
-        let host = format!("iaas.{}.oraclecloud.com", region);
+        let host = authority_of(iaas_base);
 
         // Step 0: Discover all compartments (root + sub-compartments)
         progress("Listing compartments...");
-        let compartment_ids = self.list_compartments(creds, rsa_key, &agent, region, cancel)?;
+        let compartment_ids =
+            self.list_compartments(creds, rsa_key, &agent, identity_base, cancel)?;
         let total_compartments = compartment_ids.len();
 
         // Step 1: List instances across all compartments (paginated per compartment)
@@ -631,18 +669,18 @@ impl Oracle {
 
                 let url = match &next_page {
                     Some(page) => format!(
-                        "https://{}/20160918/instances?compartmentId={}&limit=100&page={}",
-                        host,
+                        "{}/20160918/instances?compartmentId={}&limit=100&page={}",
+                        iaas_base,
                         compartment_encoded,
                         urlencoding_encode(page)
                     ),
                     None => format!(
-                        "https://{}/20160918/instances?compartmentId={}&limit=100",
-                        host, compartment_encoded
+                        "{}/20160918/instances?compartmentId={}&limit=100",
+                        iaas_base, compartment_encoded
                     ),
                 };
 
-                let mut resp = self.signed_get(creds, rsa_key, &agent, &host, &url)?;
+                let mut resp = self.signed_get(creds, rsa_key, &agent, host, &url)?;
 
                 let opc_next = resp
                     .headers()
@@ -685,18 +723,18 @@ impl Oracle {
 
                 let url = match &next_page {
                     Some(page) => format!(
-                        "https://{}/20160918/vnicAttachments?compartmentId={}&limit=100&page={}",
-                        host,
+                        "{}/20160918/vnicAttachments?compartmentId={}&limit=100&page={}",
+                        iaas_base,
                         compartment_encoded,
                         urlencoding_encode(page)
                     ),
                     None => format!(
-                        "https://{}/20160918/vnicAttachments?compartmentId={}&limit=100",
-                        host, compartment_encoded
+                        "{}/20160918/vnicAttachments?compartmentId={}&limit=100",
+                        iaas_base, compartment_encoded
                     ),
                 };
 
-                let mut resp = self.signed_get(creds, rsa_key, &agent, &host, &url)?;
+                let mut resp = self.signed_get(creds, rsa_key, &agent, host, &url)?;
 
                 let opc_next = resp
                     .headers()
@@ -737,8 +775,8 @@ impl Oracle {
             }
             progress(&format!("Resolving images ({}/{})...", n + 1, total_images));
 
-            let url = format!("https://{}/20160918/images/{}", host, image_id);
-            match self.signed_get(creds, rsa_key, &agent, &host, &url) {
+            let url = format!("{}/20160918/images/{}", iaas_base, image_id);
+            match self.signed_get(creds, rsa_key, &agent, host, &url) {
                 Ok(mut resp) => {
                     if let Ok(img) = resp.body_mut().read_json::<OciImage>() {
                         if let Some(name) = img.display_name {
@@ -765,8 +803,8 @@ impl Oracle {
             let ip = if instance.lifecycle_state == "RUNNING" {
                 match select_vnic_for_instance(&attachments, &instance.id) {
                     Some(vnic_id) => {
-                        let url = format!("https://{}/20160918/vnics/{}", host, vnic_id);
-                        match self.signed_get(creds, rsa_key, &agent, &host, &url) {
+                        let url = format!("{}/20160918/vnics/{}", iaas_base, vnic_id);
+                        match self.signed_get(creds, rsa_key, &agent, host, &url) {
                             Ok(mut resp) => match resp.body_mut().read_json::<OciVnic>() {
                                 Ok(vnic) => {
                                     let raw = select_ip(&vnic);

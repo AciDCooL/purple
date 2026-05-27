@@ -1111,3 +1111,112 @@ fn test_http_server_detail_auth_failure() {
     }
     mock.assert();
 }
+
+#[test]
+fn fetch_from_drives_full_pipeline_against_mock() {
+    // Exercises the production fetch path end to end: list pagination, per-server
+    // detail fetch, IP selection, tag/metadata mapping and ProviderHost output,
+    // all through fetch_from rather than re-issuing equivalent requests inline.
+    let mut server = mockito::Server::new();
+    let list = server
+        .mock("GET", "/1.3/server")
+        .match_query(mockito::Matcher::AllOf(vec![
+            mockito::Matcher::UrlEncoded("limit".into(), "100".into()),
+            mockito::Matcher::UrlEncoded("offset".into(), "0".into()),
+        ]))
+        .match_header("Authorization", "Bearer uc-tk-42")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{
+                "servers": {
+                    "server": [
+                        {
+                            "uuid": "00c148cb-ef71-46cb-a76f-1bb53e791e8a",
+                            "title": "Web Frontend",
+                            "hostname": "web-frontend.example.com",
+                            "tags": {"tag": ["PRODUCTION", "WEB"]},
+                            "labels": {"label": [{"key": "env", "value": "prod"}]},
+                            "zone": "fi-hel1",
+                            "plan": "2xCPU-4GB",
+                            "state": "started"
+                        }
+                    ]
+                }
+            }"#,
+        )
+        .create();
+    let detail = server
+        .mock("GET", "/1.3/server/00c148cb-ef71-46cb-a76f-1bb53e791e8a")
+        .match_header("Authorization", "Bearer uc-tk-42")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{
+                "server": {
+                    "networking": {
+                        "interfaces": {
+                            "interface": [
+                                {
+                                    "type": "public",
+                                    "ip_addresses": {
+                                        "ip_address": [
+                                            {"address": "94.237.42.10", "family": "IPv4"}
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "storage_devices": {
+                        "storage_device": [
+                            {"storage_title": "Ubuntu Server 24.04 LTS", "boot_disk": "1"}
+                        ]
+                    }
+                }
+            }"#,
+        )
+        .create();
+
+    let hosts = UpCloud
+        .fetch_from(&server.url(), "uc-tk-42", &AtomicBool::new(false))
+        .expect("fetch_from must succeed against the mock");
+    list.assert();
+    detail.assert();
+
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].server_id, "00c148cb-ef71-46cb-a76f-1bb53e791e8a");
+    assert_eq!(hosts[0].name, "Web Frontend");
+    assert_eq!(hosts[0].ip, "94.237.42.10");
+    assert_eq!(hosts[0].tags, vec!["env=prod", "production", "web"]);
+    assert!(
+        hosts[0]
+            .metadata
+            .contains(&("zone".to_string(), "fi-hel1".to_string()))
+    );
+    assert!(
+        hosts[0]
+            .metadata
+            .contains(&("image".to_string(), "Ubuntu Server 24.04 LTS".to_string()))
+    );
+}
+
+#[test]
+fn fetch_from_maps_auth_failure_to_provider_error() {
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", "/1.3/server")
+        .match_query(mockito::Matcher::Any)
+        .with_status(401)
+        .with_body(
+            r#"{"error": {"error_code": "AUTHENTICATION_FAILED", "error_message": "Authentication failed."}}"#,
+        )
+        .create();
+
+    let result = UpCloud.fetch_from(&server.url(), "bad", &AtomicBool::new(false));
+    mock.assert();
+    assert!(
+        matches!(result, Err(ProviderError::AuthFailed)),
+        "401 must map to ProviderError::AuthFailed, got {result:?}"
+    );
+}

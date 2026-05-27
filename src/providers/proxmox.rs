@@ -653,6 +653,22 @@ impl Provider for Proxmox {
             ));
         }
 
+        self.fetch_from(&base, token, cancel, progress)
+    }
+}
+
+impl Proxmox {
+    /// Fetch hosts against an already-validated base URL. The trait entrypoint
+    /// keeps the empty-URL and HTTPS gates; this seam holds the actual fetch so
+    /// a test can drive the full resource-list + per-VM IP-resolve pipeline
+    /// against a mock server (which serves http).
+    fn fetch_from(
+        &self,
+        base: &str,
+        token: &str,
+        cancel: &AtomicBool,
+        progress: &dyn Fn(&str),
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
         let agent = self.make_agent()?;
         let auth = auth_header(token);
 
@@ -708,12 +724,12 @@ impl Provider for Proxmox {
                 .filter(|ip| !is_unusable_ip(ip));
             let outcome = if let Some(ip) = cluster_ip {
                 // Cluster IP available; still fetch config for ostype
-                let ostype = self.fetch_ostype(&agent, &base, &auth, resource);
+                let ostype = self.fetch_ostype(&agent, base, &auth, resource);
                 ResolveOutcome::Resolved(ip, ostype)
             } else if resource.resource_type == "qemu" {
-                self.resolve_qemu_ip(&agent, &base, &auth, resource)
+                self.resolve_qemu_ip(&agent, base, &auth, resource)
             } else {
-                self.resolve_lxc_ip(&agent, &base, &auth, resource)
+                self.resolve_lxc_ip(&agent, base, &auth, resource)
             };
 
             let (ip, ostype) = match outcome {

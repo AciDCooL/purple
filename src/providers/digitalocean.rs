@@ -6,6 +6,92 @@ use super::{Provider, ProviderError, ProviderHost, map_ureq_error};
 
 pub struct DigitalOcean;
 
+impl DigitalOcean {
+    /// Real API host. Overridable per call via `fetch_from` so tests can point
+    /// the full fetch pipeline at a mock server.
+    const API_BASE: &'static str = "https://api.digitalocean.com";
+
+    /// Fetch hosts against an explicit API base. Production passes
+    /// `API_BASE`; tests pass a mock server URL. This is the single seam that
+    /// makes URL construction, the auth header, error mapping, pagination and
+    /// `ProviderHost` mapping testable end to end.
+    fn fetch_from(
+        &self,
+        base_url: &str,
+        token: &str,
+        cancel: &AtomicBool,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        let agent = super::http_agent();
+        let per_page = 200u64;
+
+        super::paginate(cancel, |idx| {
+            let page = idx + 1;
+            let url = format!(
+                "{}/v2/droplets?page={}&per_page={}",
+                base_url, page, per_page
+            );
+            let resp: DropletResponse = agent
+                .get(&url)
+                .header("Authorization", &format!("Bearer {}", token))
+                .call()
+                .map_err(map_ureq_error)?
+                .body_mut()
+                .read_json()
+                .map_err(|e| ProviderError::Parse(e.to_string()))?;
+
+            let mut hosts = Vec::new();
+            for droplet in &resp.droplets {
+                // Prefer public IPv4, fall back to public IPv6
+                let ip = droplet
+                    .networks
+                    .v4
+                    .iter()
+                    .find(|n| n.net_type == "public")
+                    .or_else(|| droplet.networks.v6.iter().find(|n| n.net_type == "public"))
+                    .map(|n| n.ip_address.clone());
+                if let Some(ip) = ip {
+                    let mut metadata = Vec::new();
+                    if let Some(ref region) = droplet.region {
+                        if !region.slug.is_empty() {
+                            metadata.push(("region".to_string(), region.slug.clone()));
+                        }
+                    }
+                    if !droplet.size_slug.is_empty() {
+                        metadata.push(("size".to_string(), droplet.size_slug.clone()));
+                    }
+                    if let Some(ref image) = droplet.image {
+                        let label = match (&image.distribution, &image.name) {
+                            (Some(dist), Some(name)) if !dist.is_empty() && !name.is_empty() => {
+                                format!("{} {}", dist, name)
+                            }
+                            (Some(dist), _) if !dist.is_empty() => dist.clone(),
+                            (_, Some(name)) if !name.is_empty() => name.clone(),
+                            _ => String::new(),
+                        };
+                        if !label.is_empty() {
+                            metadata.push(("image".to_string(), label));
+                        }
+                    }
+                    if !droplet.status.is_empty() {
+                        metadata.push(("status".to_string(), droplet.status.clone()));
+                    }
+                    hosts.push(ProviderHost {
+                        server_id: droplet.id.to_string(),
+                        name: droplet.name.clone(),
+                        ip,
+                        tags: droplet.tags.clone(),
+                        metadata,
+                    });
+                }
+            }
+
+            let fetched = page * per_page;
+            let more = !resp.droplets.is_empty() && fetched < resp.meta.total;
+            Ok(super::PageResult { hosts, more })
+        })
+    }
+}
+
 #[derive(Deserialize)]
 struct DropletResponse {
     droplets: Vec<Droplet>,
@@ -76,74 +162,7 @@ impl Provider for DigitalOcean {
         cancel: &AtomicBool,
         _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        let agent = super::http_agent();
-        let per_page = 200u64;
-
-        super::paginate(cancel, |idx| {
-            let page = idx + 1;
-            let url = format!(
-                "https://api.digitalocean.com/v2/droplets?page={}&per_page={}",
-                page, per_page
-            );
-            let resp: DropletResponse = agent
-                .get(&url)
-                .header("Authorization", &format!("Bearer {}", token))
-                .call()
-                .map_err(map_ureq_error)?
-                .body_mut()
-                .read_json()
-                .map_err(|e| ProviderError::Parse(e.to_string()))?;
-
-            let mut hosts = Vec::new();
-            for droplet in &resp.droplets {
-                // Prefer public IPv4, fall back to public IPv6
-                let ip = droplet
-                    .networks
-                    .v4
-                    .iter()
-                    .find(|n| n.net_type == "public")
-                    .or_else(|| droplet.networks.v6.iter().find(|n| n.net_type == "public"))
-                    .map(|n| n.ip_address.clone());
-                if let Some(ip) = ip {
-                    let mut metadata = Vec::new();
-                    if let Some(ref region) = droplet.region {
-                        if !region.slug.is_empty() {
-                            metadata.push(("region".to_string(), region.slug.clone()));
-                        }
-                    }
-                    if !droplet.size_slug.is_empty() {
-                        metadata.push(("size".to_string(), droplet.size_slug.clone()));
-                    }
-                    if let Some(ref image) = droplet.image {
-                        let label = match (&image.distribution, &image.name) {
-                            (Some(dist), Some(name)) if !dist.is_empty() && !name.is_empty() => {
-                                format!("{} {}", dist, name)
-                            }
-                            (Some(dist), _) if !dist.is_empty() => dist.clone(),
-                            (_, Some(name)) if !name.is_empty() => name.clone(),
-                            _ => String::new(),
-                        };
-                        if !label.is_empty() {
-                            metadata.push(("image".to_string(), label));
-                        }
-                    }
-                    if !droplet.status.is_empty() {
-                        metadata.push(("status".to_string(), droplet.status.clone()));
-                    }
-                    hosts.push(ProviderHost {
-                        server_id: droplet.id.to_string(),
-                        name: droplet.name.clone(),
-                        ip,
-                        tags: droplet.tags.clone(),
-                        metadata,
-                    });
-                }
-            }
-
-            let fetched = page * per_page;
-            let more = !resp.droplets.is_empty() && fetched < resp.meta.total;
-            Ok(super::PageResult { hosts, more })
-        })
+        self.fetch_from(Self::API_BASE, token, cancel)
     }
 }
 
@@ -682,6 +701,81 @@ mod tests {
         assert_eq!(r2.droplets.len(), 1);
         page1.assert();
         page2.assert();
+    }
+
+    #[test]
+    fn fetch_from_drives_full_pipeline_against_mock() {
+        // Exercises the production fetch path end to end: URL construction,
+        // auth header, JSON deserialize, ProviderHost mapping and pagination
+        // termination. Before the seam, these were only tested by re-issuing
+        // an equivalent request inline, never through fetch_hosts_cancellable.
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v2/droplets")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "200".into()),
+            ]))
+            .match_header("Authorization", "Bearer tk-42")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "droplets": [
+                        {
+                            "id": 99001,
+                            "name": "web-prod-1",
+                            "networks": {
+                                "v4": [
+                                    {"ip_address": "10.0.0.5", "type": "private"},
+                                    {"ip_address": "203.0.113.10", "type": "public"}
+                                ]
+                            },
+                            "tags": ["prod", "web"],
+                            "size_slug": "s-2vcpu-4gb",
+                            "region": {"slug": "nyc3"},
+                            "status": "active",
+                            "image": {"name": "22.04 (LTS) x64", "distribution": "Ubuntu"}
+                        }
+                    ],
+                    "meta": {"total": 1}
+                }"#,
+            )
+            .create();
+
+        let hosts = DigitalOcean
+            .fetch_from(&server.url(), "tk-42", &AtomicBool::new(false))
+            .expect("fetch_from must succeed against the mock");
+        mock.assert();
+
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].server_id, "99001");
+        assert_eq!(hosts[0].name, "web-prod-1");
+        assert_eq!(hosts[0].ip, "203.0.113.10");
+        assert_eq!(hosts[0].tags, vec!["prod", "web"]);
+        assert!(
+            hosts[0]
+                .metadata
+                .contains(&("region".to_string(), "nyc3".to_string()))
+        );
+    }
+
+    #[test]
+    fn fetch_from_maps_auth_failure_to_provider_error() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v2/droplets")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"id": "Unauthorized", "message": "bad token"}"#)
+            .create();
+
+        let result = DigitalOcean.fetch_from(&server.url(), "bad", &AtomicBool::new(false));
+        mock.assert();
+        assert!(
+            matches!(result, Err(ProviderError::AuthFailed)),
+            "401 must map to ProviderError::AuthFailed, got {result:?}"
+        );
     }
 
     #[test]

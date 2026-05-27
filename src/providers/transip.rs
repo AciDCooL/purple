@@ -66,6 +66,7 @@ fn parse_auth(token: &str) -> TransIpAuth<'_> {
 /// Request a Bearer token from the TransIP API using RSA-SHA512 signing.
 fn request_token(
     agent: &ureq::Agent,
+    base_url: &str,
     login: &str,
     key_path: &str,
     env: &crate::runtime::env::Env,
@@ -117,7 +118,7 @@ fn request_token(
     let sig_b64 = STANDARD.encode(signature.to_bytes());
 
     let mut resp = agent
-        .post("https://api.transip.nl/v6/auth")
+        .post(&format!("{}/v6/auth", base_url))
         .header("Signature", &sig_b64)
         .content_type("application/json")
         .send(&body_bytes)
@@ -130,17 +131,19 @@ fn request_token(
     Ok(resp.token)
 }
 
-impl Provider for TransIp {
-    fn name(&self) -> &str {
-        "transip"
-    }
+impl TransIp {
+    /// Real API host. Overridable per call via `fetch_from` so tests can point
+    /// the full fetch pipeline (auth token exchange and VPS listing) at a mock
+    /// server.
+    const API_BASE: &'static str = "https://api.transip.nl";
 
-    fn short_label(&self) -> &str {
-        "tip"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Fetch hosts against an explicit API base. Production passes `API_BASE`;
+    /// tests pass a mock server URL. Single seam covering the optional RSA token
+    /// exchange, URL construction, auth header, error mapping, pagination and
+    /// `ProviderHost` mapping.
+    fn fetch_from(
         &self,
+        base_url: &str,
         token: &str,
         cancel: &AtomicBool,
         env: &crate::runtime::env::Env,
@@ -154,7 +157,7 @@ impl Provider for TransIp {
         let bearer = match parse_auth(token) {
             TransIpAuth::BearerToken(t) => t.to_string(),
             TransIpAuth::KeyFile { login, key_path } => {
-                request_token(&agent, login, key_path, env)?
+                request_token(&agent, base_url, login, key_path, env)?
             }
         };
 
@@ -166,10 +169,7 @@ impl Provider for TransIp {
 
         super::paginate(cancel, |idx| {
             let page = idx + 1;
-            let url = format!(
-                "https://api.transip.nl/v6/vps?page={}&pageSize={}",
-                page, per_page
-            );
+            let url = format!("{}/v6/vps?page={}&pageSize={}", base_url, page, per_page);
             let resp: VpsListResponse = agent
                 .get(&url)
                 .header("Authorization", &format!("Bearer {}", bearer))
@@ -222,6 +222,25 @@ impl Provider for TransIp {
             let more = !resp.vpss.is_empty() && resp.vpss.len() >= per_page;
             Ok(super::PageResult { hosts, more })
         })
+    }
+}
+
+impl Provider for TransIp {
+    fn name(&self) -> &str {
+        "transip"
+    }
+
+    fn short_label(&self) -> &str {
+        "tip"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from(Self::API_BASE, token, cancel, env)
     }
 }
 
@@ -682,5 +701,87 @@ mod tests {
     fn test_pagination_stops_on_empty() {
         let resp: VpsListResponse = serde_json::from_str(r#"{"vpss": []}"#).unwrap();
         assert!(resp.vpss.is_empty());
+    }
+
+    // ── fetch_from seam tests (mockito) ─────────────────────────────
+
+    #[test]
+    fn fetch_from_drives_full_pipeline_against_mock() {
+        // Drives the production fetch path end to end through fetch_from with a
+        // pre-generated Bearer token (no key-file auth step): URL construction,
+        // auth header, JSON deserialize, ProviderHost mapping and pagination
+        // termination.
+        let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2dpbiI6InQifQ.sig";
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v6/vps")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("pageSize".into(), "200".into()),
+            ]))
+            .match_header("Authorization", format!("Bearer {}", jwt).as_str())
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "vpss": [{
+                        "name": "example-vps",
+                        "uuid": "uuid-1",
+                        "description": "Web server",
+                        "productName": "vps-bladevps-x1",
+                        "operatingSystem": "ubuntu-22.04",
+                        "status": "running",
+                        "ipAddress": "37.97.254.6",
+                        "availabilityZone": "ams0",
+                        "tags": ["prod"]
+                    }]
+                }"#,
+            )
+            .create();
+
+        let hosts = TransIp
+            .fetch_from(
+                &server.url(),
+                jwt,
+                &AtomicBool::new(false),
+                &crate::runtime::env::Env::empty(),
+            )
+            .expect("fetch_from must succeed against the mock");
+        mock.assert();
+
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].server_id, "uuid-1");
+        assert_eq!(hosts[0].name, "Web server");
+        assert_eq!(hosts[0].ip, "37.97.254.6");
+        assert_eq!(hosts[0].tags, vec!["prod"]);
+        assert!(
+            hosts[0]
+                .metadata
+                .contains(&("zone".to_string(), "ams0".to_string()))
+        );
+    }
+
+    #[test]
+    fn fetch_from_maps_auth_failure_to_provider_error() {
+        let jwt = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2dpbiI6InQifQ.sig";
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v6/vps")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"error": "Your access token is invalid"}"#)
+            .create();
+
+        let result = TransIp.fetch_from(
+            &server.url(),
+            jwt,
+            &AtomicBool::new(false),
+            &crate::runtime::env::Env::empty(),
+        );
+        mock.assert();
+        assert!(
+            matches!(result, Err(ProviderError::AuthFailed)),
+            "401 must map to ProviderError::AuthFailed, got {result:?}"
+        );
     }
 }

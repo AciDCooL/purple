@@ -312,9 +312,18 @@ fn ec2_get(
     agent: &ureq::Agent,
     creds: &AwsCredentials,
     region: &str,
+    endpoint: &str,
     params: Vec<(String, String)>,
 ) -> Result<String, ProviderError> {
-    let host = format!("ec2.{}.amazonaws.com", region);
+    // Host used for SigV4 signing and the request URL. Derived from the
+    // injected endpoint so tests can point the signed request at a mock; the
+    // authority is everything after the scheme (e.g. "ec2.us-east-1.amazonaws.com"
+    // or "127.0.0.1:1234").
+    let host = endpoint
+        .split_once("://")
+        .map(|(_, authority)| authority)
+        .unwrap_or(endpoint)
+        .to_string();
     let epoch = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -334,7 +343,7 @@ fn ec2_get(
         .join("&");
 
     let auth = sign_request(creds, region, &host, &query_string, &timestamp, &datestamp);
-    let url = format!("https://{}/?{}", host, query_string);
+    let url = format!("{}/?{}", endpoint, query_string);
 
     let mut resp = agent
         .get(&url)
@@ -353,6 +362,7 @@ fn describe_instances(
     agent: &ureq::Agent,
     creds: &AwsCredentials,
     region: &str,
+    endpoint: &str,
     cancel: &AtomicBool,
 ) -> Result<Vec<Ec2Instance>, ProviderError> {
     let mut all = Vec::new();
@@ -376,7 +386,7 @@ fn describe_instances(
             params.push(param("NextToken", token));
         }
 
-        let body = ec2_get(agent, creds, region, params)?;
+        let body = ec2_get(agent, creds, region, endpoint, params)?;
         let resp: DescribeInstancesResponse = quick_xml::de::from_str(&body)
             .map_err(|e| ProviderError::Parse(format!("{}: {}", region, e)))?;
 
@@ -408,6 +418,7 @@ fn fetch_image_names(
     agent: &ureq::Agent,
     creds: &AwsCredentials,
     region: &str,
+    endpoint: &str,
     image_ids: &[String],
 ) -> Result<HashMap<String, String>, ProviderError> {
     if image_ids.is_empty() {
@@ -424,7 +435,7 @@ fn fetch_image_names(
             params.push(param(&format!("ImageId.{}", i + 1), id));
         }
 
-        let body = ec2_get(agent, creds, region, params)?;
+        let body = ec2_get(agent, creds, region, endpoint, params)?;
         let resp: DescribeImagesResponse = quick_xml::de::from_str(&body)
             .map_err(|e| ProviderError::Parse(format!("{}: {}", region, e)))?;
 
@@ -455,26 +466,20 @@ fn extract_tags(tag_set: &[Ec2Tag]) -> (String, Vec<String>) {
 
 // --- Provider trait ---
 
-impl Provider for Aws {
-    fn name(&self) -> &str {
-        "aws"
+impl Aws {
+    /// Real EC2 endpoint for a region. Overridable via `fetch_with_endpoint`
+    /// so tests can point the signed request at a mock server.
+    fn region_endpoint(region: &str) -> String {
+        format!("https://ec2.{}.amazonaws.com", region)
     }
 
-    fn short_label(&self) -> &str {
-        "aws"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Per-region fetch pipeline against caller-supplied endpoints. Production
+    /// resolves the real EC2 host per region; tests pass a closure returning a
+    /// mock URL so SigV4 signing, DescribeInstances + DescribeImages, XML
+    /// deserialize and `ProviderHost` mapping all run end to end.
+    fn fetch_with_endpoint(
         &self,
-        token: &str,
-        cancel: &AtomicBool,
-        env: &crate::runtime::env::Env,
-    ) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_with_progress(token, cancel, env, &|_| {})
-    }
-
-    fn fetch_hosts_with_progress(
-        &self,
+        resolve_endpoint: impl Fn(&str) -> String,
         token: &str,
         cancel: &AtomicBool,
         env: &crate::runtime::env::Env,
@@ -514,7 +519,8 @@ impl Provider for Aws {
                 total_regions
             ));
 
-            let instances = match describe_instances(&agent, &creds, region, cancel) {
+            let endpoint = resolve_endpoint(region);
+            let instances = match describe_instances(&agent, &creds, region, &endpoint, cancel) {
                 Ok(instances) => instances,
                 Err(ProviderError::Cancelled) => return Err(ProviderError::Cancelled),
                 Err(ProviderError::AuthFailed) => return Err(ProviderError::AuthFailed),
@@ -539,7 +545,7 @@ impl Provider for Aws {
             // Fetch AMI names (best effort)
             let ami_names = if !ami_ids.is_empty() {
                 progress(&format!("Resolving AMIs for {}...", region));
-                fetch_image_names(&agent, &creds, region, &ami_ids).unwrap_or_default()
+                fetch_image_names(&agent, &creds, region, &endpoint, &ami_ids).unwrap_or_default()
             } else {
                 HashMap::new()
             };
@@ -607,6 +613,35 @@ impl Provider for Aws {
         }
 
         Ok(all_hosts)
+    }
+}
+
+impl Provider for Aws {
+    fn name(&self) -> &str {
+        "aws"
+    }
+
+    fn short_label(&self) -> &str {
+        "aws"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_hosts_with_progress(token, cancel, env, &|_| {})
+    }
+
+    fn fetch_hosts_with_progress(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        env: &crate::runtime::env::Env,
+        progress: &dyn Fn(&str),
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_with_endpoint(Self::region_endpoint, token, cancel, env, progress)
     }
 }
 

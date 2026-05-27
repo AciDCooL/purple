@@ -146,29 +146,30 @@ fn select_ip(server: &ScalewayServer) -> Option<String> {
     None
 }
 
-impl Provider for Scaleway {
-    fn name(&self) -> &str {
-        "scaleway"
-    }
+impl Scaleway {
+    /// Real API host. Overridable per call via `fetch_from` so tests can point
+    /// the full fetch pipeline at a mock server.
+    const API_BASE: &'static str = "https://api.scaleway.com";
 
-    fn short_label(&self) -> &str {
-        "scw"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Fetch hosts against an explicit API base. Production passes `API_BASE`;
+    /// tests pass a mock server URL. The single seam that makes zone fan-out,
+    /// URL construction, the auth header, error mapping, pagination and
+    /// `ProviderHost` mapping testable end to end. Preserves partial-failure
+    /// semantics: only `base_url` is routed through.
+    fn fetch_from(
         &self,
+        base_url: &str,
         token: &str,
         cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
-        self.fetch_hosts_with_progress(token, cancel, _env, &|_| {})
+        self.fetch_from_with_progress(base_url, token, cancel, &|_| {})
     }
 
-    fn fetch_hosts_with_progress(
+    fn fetch_from_with_progress(
         &self,
+        base_url: &str,
         token: &str,
         cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
         progress: &dyn Fn(&str),
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         if self.zones.is_empty() {
@@ -199,7 +200,7 @@ impl Provider for Scaleway {
 
             progress(&format!("Fetching {} ({}/{})...", zone, i + 1, total_zones));
 
-            match fetch_zone(&agent, token, zone, cancel) {
+            match fetch_zone(base_url, &agent, token, zone, cancel) {
                 Ok(hosts) => all_hosts.extend(hosts),
                 Err(ProviderError::Cancelled) => return Err(ProviderError::Cancelled),
                 Err(ProviderError::AuthFailed) => return Err(ProviderError::AuthFailed),
@@ -236,8 +237,38 @@ impl Provider for Scaleway {
     }
 }
 
+impl Provider for Scaleway {
+    fn name(&self) -> &str {
+        "scaleway"
+    }
+
+    fn short_label(&self) -> &str {
+        "scw"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from(Self::API_BASE, token, cancel)
+    }
+
+    fn fetch_hosts_with_progress(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+        progress: &dyn Fn(&str),
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from_with_progress(Self::API_BASE, token, cancel, progress)
+    }
+}
+
 /// Fetch all servers in a single zone (handles pagination).
 fn fetch_zone(
+    base_url: &str,
     agent: &ureq::Agent,
     token: &str,
     zone: &str,
@@ -253,8 +284,8 @@ fn fetch_zone(
         }
 
         let url = format!(
-            "https://api.scaleway.com/instance/v1/zones/{}/servers?page={}&per_page={}",
-            zone, page, per_page
+            "{}/instance/v1/zones/{}/servers?page={}&per_page={}",
+            base_url, zone, page, per_page
         );
         let resp: ListServersResponse = agent
             .get(&url)
@@ -951,5 +982,81 @@ mod tests {
             other => panic!("expected 401 error, got {:?}", other),
         }
         mock.assert();
+    }
+
+    #[test]
+    fn fetch_from_drives_full_pipeline_against_mock() {
+        // Exercises the production fetch path end to end: zone fan-out, URL
+        // construction, auth header, JSON deserialize, ProviderHost mapping and
+        // pagination termination. A single zone keeps one mock endpoint enough.
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/instance/v1/zones/fr-par-1/servers")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "100".into()),
+            ]))
+            .match_header("X-Auth-Token", "scw-tk-42")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": [
+                        {
+                            "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+                            "name": "web-prod-1",
+                            "state": "running",
+                            "commercial_type": "DEV1-S",
+                            "tags": ["production", "web"],
+                            "public_ips": [
+                                {"address": "51.15.42.10", "family": "inet"}
+                            ],
+                            "image": {"id": "img-1", "name": "Ubuntu 22.04 Jammy Jellyfish"},
+                            "zone": "fr-par-1"
+                        }
+                    ],
+                    "total_count": 1
+                }"#,
+            )
+            .create();
+
+        let hosts = Scaleway {
+            zones: vec!["fr-par-1".into()],
+        }
+        .fetch_from(&server.url(), "scw-tk-42", &AtomicBool::new(false))
+        .expect("fetch_from must succeed against the mock");
+        mock.assert();
+
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].server_id, "a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+        assert_eq!(hosts[0].name, "web-prod-1");
+        assert_eq!(hosts[0].ip, "51.15.42.10");
+        assert_eq!(hosts[0].tags, vec!["production", "web"]);
+        assert!(
+            hosts[0]
+                .metadata
+                .contains(&("zone".to_string(), "fr-par-1".to_string()))
+        );
+    }
+
+    #[test]
+    fn fetch_from_maps_auth_failure_to_provider_error() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/instance/v1/zones/fr-par-1/servers")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"message": "Invalid authentication token"}"#)
+            .create();
+
+        let result = Scaleway {
+            zones: vec!["fr-par-1".into()],
+        }
+        .fetch_from(&server.url(), "bad", &AtomicBool::new(false));
+        mock.assert();
+        assert!(
+            matches!(result, Err(ProviderError::AuthFailed)),
+            "401 must map to ProviderError::AuthFailed, got {result:?}"
+        );
     }
 }

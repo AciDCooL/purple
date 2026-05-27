@@ -4871,3 +4871,172 @@ fn parse_three_node_include_cycle_terminates() {
         );
     }
 }
+
+// Value quoting / escaping on write. A directive value containing whitespace
+// (or a "#"-after-space that the parser reads as an inline comment) was
+// written unquoted and silently corrupted on the next parse. The writer must
+// wrap single-token values in double quotes, and the parser must strip the
+// surrounding quotes back to the logical value on the way in.
+
+#[test]
+fn update_host_preserves_value_with_inline_hash() {
+    let mut config = parse_str("Host h\n  HostName 10.0.0.1\n");
+    let entry = HostEntry {
+        alias: "h".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        identity_file: "~/id #note".to_string(),
+        port: 22,
+        ..Default::default()
+    };
+    config.update_host("h", &entry);
+    let out = config.serialize();
+    let reparsed = parse_str(&out);
+    let entries = reparsed.host_entries();
+    assert_eq!(
+        entries[0].identity_file, "~/id #note",
+        "the ' #note' suffix must survive a write/parse round-trip; got output:\n{out}"
+    );
+}
+
+#[test]
+fn update_host_quotes_value_with_space_and_round_trips() {
+    let mut config = parse_str("Host h\n  HostName 10.0.0.1\n");
+    let entry = HostEntry {
+        alias: "h".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        identity_file: "~/my key/id".to_string(),
+        port: 22,
+        ..Default::default()
+    };
+    config.update_host("h", &entry);
+    let out = config.serialize();
+    assert!(
+        out.contains("IdentityFile \"~/my key/id\""),
+        "a value with a space must be double-quoted so real OpenSSH reads it as one token; got:\n{out}"
+    );
+    let reparsed = parse_str(&out);
+    assert_eq!(reparsed.host_entries()[0].identity_file, "~/my key/id");
+}
+
+#[test]
+fn add_host_quotes_hostname_with_space() {
+    let mut config = parse_str("");
+    config.add_host(&HostEntry {
+        alias: "h".to_string(),
+        hostname: "a b".to_string(),
+        port: 22,
+        ..Default::default()
+    });
+    let out = config.serialize();
+    assert!(
+        out.contains("HostName \"a b\""),
+        "a provider-supplied hostname with a space must be quoted; got:\n{out}"
+    );
+    assert_eq!(parse_str(&out).host_entries()[0].hostname, "a b");
+}
+
+#[test]
+fn add_forward_does_not_quote_multi_arg_value() {
+    let mut config = parse_str("Host h\n  HostName 10.0.0.1\n");
+    config.add_forward("h", "LocalForward", "8080 localhost:80");
+    let out = config.serialize();
+    assert!(
+        out.contains("LocalForward 8080 localhost:80"),
+        "a multi-argument forward spec must stay unquoted; got:\n{out}"
+    );
+    assert!(
+        !out.contains("\"8080 localhost:80\""),
+        "the forward spec must not be wrapped as a single quoted token; got:\n{out}"
+    );
+}
+
+#[test]
+fn set_certificate_file_quotes_path_with_space() {
+    let mut config = parse_str("Host h\n  HostName 10.0.0.1\n");
+    // A home directory with a space yields a purple-managed cert path that
+    // still contains a space; it must be quoted on write and round-trip.
+    assert!(config.set_host_certificate_file("h", "~/.purple/certs/my host-cert.pub"));
+    let out = config.serialize();
+    assert!(
+        out.contains("CertificateFile \"~/.purple/certs/my host-cert.pub\""),
+        "a cert path with a space must be quoted; got:\n{out}"
+    );
+    assert_eq!(
+        parse_str(&out).host_entries()[0].certificate_file,
+        "~/.purple/certs/my host-cert.pub"
+    );
+}
+
+#[test]
+fn unchanged_quoted_value_round_trips_byte_identical() {
+    // A hand-authored, fully-quoted directive that the user never edits must
+    // serialize back byte-for-byte (serialize emits raw_line verbatim).
+    let content = "Host h\n  IdentityFile \"~/my key/id\"\n";
+    let config = parse_str(content);
+    assert_eq!(config.serialize(), content);
+}
+
+#[test]
+fn update_host_round_trips_value_with_space_and_quote() {
+    // A single-token value containing BOTH whitespace and a literal quote
+    // must round-trip: render_value escapes the quote and quotes the value;
+    // the parser unescapes it back. Before the escape fix this value was
+    // emitted unquoted and OpenSSH would split it on the space.
+    let mut config = parse_str("Host h\n  HostName 10.0.0.1\n");
+    let entry = HostEntry {
+        alias: "h".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        identity_file: r#"~/a "b c/id"#.to_string(),
+        port: 22,
+        ..Default::default()
+    };
+    config.update_host("h", &entry);
+    let out = config.serialize();
+    assert!(
+        out.contains(r#"IdentityFile "~/a \"b c/id""#),
+        "value must be quoted with the embedded quote escaped; got:\n{out}"
+    );
+    let reparsed = parse_str(&out);
+    assert_eq!(reparsed.host_entries()[0].identity_file, r#"~/a "b c/id"#);
+}
+
+#[test]
+fn update_host_quotes_proxy_jump_with_space() {
+    let mut config = parse_str("Host h\n  HostName 10.0.0.1\n");
+    let entry = HostEntry {
+        alias: "h".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        proxy_jump: "jump host".to_string(),
+        port: 22,
+        ..Default::default()
+    };
+    config.update_host("h", &entry);
+    let out = config.serialize();
+    assert!(
+        out.contains("ProxyJump \"jump host\""),
+        "a ProxyJump value with a space must be quoted; got:\n{out}"
+    );
+    assert_eq!(parse_str(&out).host_entries()[0].proxy_jump, "jump host");
+}
+
+#[test]
+fn value_with_hash_but_no_space_stays_unquoted() {
+    // A "#" with no preceding whitespace is not an inline comment, so the
+    // value needs no quoting and must not gain any.
+    let mut config = parse_str("Host h\n  HostName 10.0.0.1\n");
+    let entry = HostEntry {
+        alias: "h".to_string(),
+        hostname: "10.0.0.1".to_string(),
+        identity_file: "~/id#frag".to_string(),
+        port: 22,
+        ..Default::default()
+    };
+    config.update_host("h", &entry);
+    let out = config.serialize();
+    assert!(out.contains("IdentityFile ~/id#frag"), "got:\n{out}");
+    assert!(
+        !out.contains("\"~/id#frag\""),
+        "must not be quoted; got:\n{out}"
+    );
+    assert_eq!(parse_str(&out).host_entries()[0].identity_file, "~/id#frag");
+}

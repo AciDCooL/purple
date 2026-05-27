@@ -495,6 +495,27 @@ impl HostBlock {
         std::borrow::Cow::Owned(s.replace(['\n', '\r', '\0'], " "))
     }
 
+    /// Render a single-argument directive value for interpolation into a
+    /// `raw_line`. OpenSSH carries an argument containing spaces by wrapping
+    /// it in double quotes (ssh_config(5): "Arguments may optionally be
+    /// enclosed in double quotes"). Without quoting, `~/my key/id` writes as
+    /// three tokens and `~/id #note` loses its tail to inline-comment
+    /// stripping on the next parse. A value that itself contains a `"` is also
+    /// quoted, with embedded `\` and `"` backslash-escaped, so a single-token
+    /// value containing both whitespace and a quote round-trips faithfully
+    /// instead of being emitted unquoted and split by OpenSSH.
+    /// `parser::strip_surrounding_quotes` is the inverse. Only for single-token
+    /// directives (HostName, User, IdentityFile, ProxyJump, CertificateFile);
+    /// multi-arg directives like LocalForward must not be routed through here.
+    pub(super) fn render_value(value: &str) -> std::borrow::Cow<'_, str> {
+        if value.chars().any(char::is_whitespace) || value.contains('"') {
+            let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+            std::borrow::Cow::Owned(format!("\"{escaped}\""))
+        } else {
+            std::borrow::Cow::Borrowed(value)
+        }
+    }
+
     /// Set user tags on a host block. Replaces existing purple:tags comment or adds one.
     pub fn set_tags(&mut self, tags: &[String]) {
         let indent = self.detect_indent();

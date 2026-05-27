@@ -78,29 +78,26 @@ struct Pagination {
     last_page: u64,
 }
 
-impl Provider for Hetzner {
-    fn name(&self) -> &str {
-        "hetzner"
-    }
+impl Hetzner {
+    /// Real API host. Overridable per call via `fetch_from` so tests can point
+    /// the full fetch pipeline at a mock server.
+    const API_BASE: &'static str = "https://api.hetzner.cloud";
 
-    fn short_label(&self) -> &str {
-        "hetzner"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Fetch hosts against an explicit API base. Production passes `API_BASE`;
+    /// tests pass a mock server URL. The single seam that makes URL
+    /// construction, the auth header, error mapping, pagination and
+    /// `ProviderHost` mapping testable end to end.
+    fn fetch_from(
         &self,
+        base_url: &str,
         token: &str,
         cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let agent = super::http_agent();
 
         super::paginate(cancel, |idx| {
             let page = idx + 1;
-            let url = format!(
-                "https://api.hetzner.cloud/v1/servers?page={}&per_page=50",
-                page
-            );
+            let url = format!("{}/v1/servers?page={}&per_page=50", base_url, page);
             let resp: HetznerResponse = agent
                 .get(&url)
                 .header("Authorization", &format!("Bearer {}", token))
@@ -188,6 +185,25 @@ impl Provider for Hetzner {
                 && resp.meta.pagination.page < resp.meta.pagination.last_page;
             Ok(super::PageResult { hosts, more })
         })
+    }
+}
+
+impl Provider for Hetzner {
+    fn name(&self) -> &str {
+        "hetzner"
+    }
+
+    fn short_label(&self) -> &str {
+        "hetzner"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from(Self::API_BASE, token, cancel)
     }
 }
 
@@ -986,5 +1002,100 @@ mod tests {
             other => panic!("expected 401 error, got {:?}", other),
         }
         mock.assert();
+    }
+
+    #[test]
+    fn fetch_from_drives_full_pipeline_against_mock() {
+        // Drives the production seam end to end ACROSS A PAGE BOUNDARY: URL
+        // construction, Bearer header, the page<last_page pagination loop,
+        // label->tag formatting, the IPv6 CIDR-strip fallback and
+        // ProviderHost mapping. Two pages confirm the loop actually advances.
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/v1/servers")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "50".into()),
+            ]))
+            .match_header("Authorization", "Bearer tk-9")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": [{
+                        "id": 101,
+                        "name": "web-1",
+                        "status": "running",
+                        "public_net": {"ipv4": {"ip": "203.0.113.7"}},
+                        "labels": {"env": "prod", "role": ""},
+                        "location": {"name": "fsn1"},
+                        "server_type": {"name": "cx22"}
+                    }],
+                    "meta": {"pagination": {"page": 1, "last_page": 2}}
+                }"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/v1/servers")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "2".into()),
+                mockito::Matcher::UrlEncoded("per_page".into(), "50".into()),
+            ]))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "servers": [{
+                        "id": 102,
+                        "name": "v6-only",
+                        "status": "running",
+                        "public_net": {"ipv6": {"ip": "2a01:4f8::1/64"}},
+                        "labels": {}
+                    }],
+                    "meta": {"pagination": {"page": 2, "last_page": 2}}
+                }"#,
+            )
+            .create();
+
+        let hosts = Hetzner
+            .fetch_from(&server.url(), "tk-9", &AtomicBool::new(false))
+            .expect("fetch_from must succeed against the mock");
+        page1.assert();
+        page2.assert();
+
+        assert_eq!(hosts.len(), 2, "both pages must be collected");
+        assert_eq!(hosts[0].server_id, "101");
+        assert_eq!(hosts[0].name, "web-1");
+        assert_eq!(hosts[0].ip, "203.0.113.7");
+        assert_eq!(
+            hosts[0].tags,
+            vec!["env=prod".to_string(), "role".to_string()]
+        );
+        assert!(
+            hosts[0]
+                .metadata
+                .contains(&("location".to_string(), "fsn1".to_string()))
+        );
+        // IPv6-only server: CIDR suffix must be stripped.
+        assert_eq!(hosts[1].server_id, "102");
+        assert_eq!(hosts[1].ip, "2a01:4f8::1");
+    }
+
+    #[test]
+    fn fetch_from_maps_auth_failure_to_provider_error() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v1/servers")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"error": {"message": "unauthorized", "code": "unauthorized"}}"#)
+            .create();
+
+        let result = Hetzner.fetch_from(&server.url(), "bad", &AtomicBool::new(false));
+        mock.assert();
+        assert!(
+            matches!(result, Err(ProviderError::AuthFailed)),
+            "401 must map to AuthFailed, got {result:?}"
+        );
     }
 }

@@ -90,20 +90,19 @@ fn select_flex_ip(ips: &[FlexMetalIp]) -> Option<String> {
         .map(|ip| super::strip_cidr(&ip.ip).to_string())
 }
 
-impl Provider for I3d {
-    fn name(&self) -> &str {
-        "i3d"
-    }
+impl I3d {
+    /// Real API host. Both list endpoints live on the same host, so a single
+    /// base param is enough. Overridable per call via `fetch_from` so tests can
+    /// point the full fetch pipeline at a mock server.
+    const API_BASE: &'static str = "https://api.i3d.net";
 
-    fn short_label(&self) -> &str {
-        "i3d"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Fetch hosts against an explicit API base. Production passes `API_BASE`;
+    /// tests pass a single mock server URL that serves both list endpoints.
+    fn fetch_from(
         &self,
+        base_url: &str,
         token: &str,
         cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let agent = super::http_agent();
         let results_per_page = 50u32;
@@ -121,7 +120,7 @@ impl Provider for I3d {
         super::paginate(cancel, |_idx| match stage {
             Stage::Hosts => {
                 let mut req = agent
-                    .get("https://api.i3d.net/v3/host")
+                    .get(&format!("{}/v3/host", base_url))
                     .header("PRIVATE-TOKEN", token);
                 if let Some(ref pt) = page_token {
                     req = req.header("PAGE-TOKEN", pt);
@@ -181,7 +180,7 @@ impl Provider for I3d {
             Stage::FlexMetal => {
                 let ranged = format!("start={},results={}", offset, results_per_page);
                 let servers: Vec<FlexMetalServer> = agent
-                    .get("https://api.i3d.net/v3/flexMetal/servers")
+                    .get(&format!("{}/v3/flexMetal/servers", base_url))
                     .header("PRIVATE-TOKEN", token)
                     .header("RANGED-DATA", &ranged)
                     .call()
@@ -234,6 +233,25 @@ impl Provider for I3d {
                 Ok(super::PageResult { hosts, more })
             }
         })
+    }
+}
+
+impl Provider for I3d {
+    fn name(&self) -> &str {
+        "i3d"
+    }
+
+    fn short_label(&self) -> &str {
+        "i3d"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from(Self::API_BASE, token, cancel)
     }
 }
 
@@ -642,6 +660,94 @@ mod tests {
         let err = super::map_ureq_error(result.unwrap_err());
         assert!(matches!(err, ProviderError::AuthFailed));
         mock.assert();
+    }
+
+    // --- fetch_from end-to-end (mockito): production fetch path ---
+
+    #[test]
+    fn fetch_from_drives_full_pipeline_against_mock() {
+        // One mock server serves both endpoints. /v3/host returns one host with
+        // no PAGE-TOKEN (advance to FlexMetal); FlexMetal returns one server
+        // (fewer than 50 -> done). Exercises URL construction, both auth
+        // headers, both deserializers, ProviderHost mapping and stage handoff.
+        let mut server = mockito::Server::new();
+        let hosts_mock = server
+            .mock("GET", "/v3/host")
+            .match_header("PRIVATE-TOKEN", "tk-42")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"[{
+                "id": 12345,
+                "serverName": "game-01",
+                "category": "Dedicated",
+                "ipAddress": [{"ipAddress": "31.204.131.39", "version": 4, "type": 1, "private": 0}],
+                "numCpu": 4,
+                "cpuType": "Xeon"
+            }]"#,
+            )
+            .create();
+        let flex_mock = server
+            .mock("GET", "/v3/flexMetal/servers")
+            .match_header("PRIVATE-TOKEN", "tk-42")
+            .match_header("RANGED-DATA", "start=0,results=50")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"[{
+                "uuid": "flex-uuid-1",
+                "name": "flex-web",
+                "status": "delivered",
+                "location": "Amsterdam",
+                "instanceType": "bm.general1.small",
+                "os": {"slug": "ubuntu-2204-lts"},
+                "ipAddresses": [{"ip": "1.2.3.4", "version": 4, "public": true}],
+                "tags": ["prod"]
+            }]"#,
+            )
+            .create();
+
+        let hosts = I3d
+            .fetch_from(&server.url(), "tk-42", &AtomicBool::new(false))
+            .expect("fetch_from must succeed against the mock");
+        hosts_mock.assert();
+        flex_mock.assert();
+
+        assert_eq!(hosts.len(), 2);
+        assert_eq!(hosts[0].server_id, "host-12345");
+        assert_eq!(hosts[0].name, "game-01");
+        assert_eq!(hosts[0].ip, "31.204.131.39");
+        assert!(
+            hosts[0]
+                .metadata
+                .contains(&("type".to_string(), "Dedicated".to_string()))
+        );
+        assert_eq!(hosts[1].server_id, "flex-flex-uuid-1");
+        assert_eq!(hosts[1].name, "flex-web");
+        assert_eq!(hosts[1].ip, "1.2.3.4");
+        assert_eq!(hosts[1].tags, vec!["prod"]);
+        assert!(
+            hosts[1]
+                .metadata
+                .contains(&("location".to_string(), "Amsterdam".to_string()))
+        );
+    }
+
+    #[test]
+    fn fetch_from_maps_auth_failure_to_provider_error() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v3/host")
+            .with_status(401)
+            .with_body(r#"{"error": "Unauthorized"}"#)
+            .create();
+
+        let result = I3d.fetch_from(&server.url(), "bad", &AtomicBool::new(false));
+        mock.assert();
+        assert!(
+            matches!(result, Err(ProviderError::AuthFailed)),
+            "401 must map to ProviderError::AuthFailed, got {result:?}"
+        );
     }
 
     // --- Metadata tests ---

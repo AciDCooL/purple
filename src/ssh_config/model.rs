@@ -828,7 +828,9 @@ impl SshConfigFile {
                     };
                     // Preserve inline comment from original raw_line (e.g. "# production")
                     let comment_suffix = Self::extract_inline_comment(&d.raw_line, &d.key);
-                    d.raw_line = format!("{}{}{}{}{}", indent, d.key, sep, value, comment_suffix);
+                    let rendered = HostBlock::render_value(value);
+                    d.raw_line =
+                        format!("{}{}{}{}{}", indent, d.key, sep, rendered, comment_suffix);
                 }
                 return;
             }
@@ -840,7 +842,7 @@ impl SshConfigFile {
             Directive {
                 key: key.to_string(),
                 value: value.to_string(),
-                raw_line: format!("{}{} {}", indent, key, value),
+                raw_line: format!("{}{} {}", indent, key, HostBlock::render_value(value)),
                 is_non_directive: false,
             },
         );
@@ -1362,7 +1364,8 @@ impl SshConfigFile {
                     " ".to_string()
                 };
                 let comment_suffix = Self::extract_inline_comment(&d.raw_line, &d.key);
-                d.raw_line = format!("{}{}{}{}{}", indent, d.key, sep, sanitized, comment_suffix);
+                let rendered = HostBlock::render_value(&sanitized);
+                d.raw_line = format!("{}{}{}{}{}", indent, d.key, sep, rendered, comment_suffix);
             }
         } else if is_purple_managed_cert_value(sanitized.as_ref()) {
             // Defensive gate: only insert a NEW CertificateFile line when
@@ -1377,7 +1380,11 @@ impl SshConfigFile {
                 Directive {
                     key: "CertificateFile".to_string(),
                     value: sanitized.to_string(),
-                    raw_line: format!("{}CertificateFile {}", indent, sanitized),
+                    raw_line: format!(
+                        "{}CertificateFile {}",
+                        indent,
+                        HostBlock::render_value(&sanitized)
+                    ),
                     is_non_directive: false,
                 },
             );
@@ -1727,7 +1734,7 @@ impl SshConfigFile {
             directives.push(Directive {
                 key: "HostName".to_string(),
                 value: hostname.to_string(),
-                raw_line: format!("  HostName {}", hostname),
+                raw_line: format!("  HostName {}", HostBlock::render_value(&hostname)),
                 is_non_directive: false,
             });
         }
@@ -1735,7 +1742,7 @@ impl SshConfigFile {
             directives.push(Directive {
                 key: "User".to_string(),
                 value: user.to_string(),
-                raw_line: format!("  User {}", user),
+                raw_line: format!("  User {}", HostBlock::render_value(&user)),
                 is_non_directive: false,
             });
         }
@@ -1751,7 +1758,7 @@ impl SshConfigFile {
             directives.push(Directive {
                 key: "IdentityFile".to_string(),
                 value: identity_file.to_string(),
-                raw_line: format!("  IdentityFile {}", identity_file),
+                raw_line: format!("  IdentityFile {}", HostBlock::render_value(&identity_file)),
                 is_non_directive: false,
             });
         }
@@ -1759,7 +1766,7 @@ impl SshConfigFile {
             directives.push(Directive {
                 key: "ProxyJump".to_string(),
                 value: proxy_jump.to_string(),
-                raw_line: format!("  ProxyJump {}", proxy_jump),
+                raw_line: format!("  ProxyJump {}", HostBlock::render_value(&proxy_jump)),
                 is_non_directive: false,
             });
         }

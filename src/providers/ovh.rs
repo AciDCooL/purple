@@ -113,24 +113,19 @@ fn select_ip(addresses: &[OvhIpAddress]) -> Option<String> {
         .map(|a| super::strip_cidr(&a.ip).to_string())
 }
 
-impl Provider for Ovh {
-    fn name(&self) -> &str {
-        "ovh"
-    }
-
-    fn short_label(&self) -> &str {
-        "ovh"
-    }
-
-    fn fetch_hosts_cancellable(
+impl Ovh {
+    /// Fetch instances against an explicit API base. Production resolves the
+    /// regional OVH host via `endpoint_url`; tests pass a mock URL so the
+    /// server-time fetch, request signing, instance list and `ProviderHost`
+    /// mapping all run end to end.
+    fn fetch_from(
         &self,
+        base: &str,
         token: &str,
         cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let (app_key, app_secret, consumer_key) = parse_token(token)?;
         let agent = super::http_agent();
-        let base = endpoint_url(&self.endpoint);
 
         if self.project.is_empty() {
             return Err(ProviderError::Execute(
@@ -217,6 +212,25 @@ impl Provider for Ovh {
         }
 
         Ok(hosts)
+    }
+}
+
+impl Provider for Ovh {
+    fn name(&self) -> &str {
+        "ovh"
+    }
+
+    fn short_label(&self) -> &str {
+        "ovh"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from(endpoint_url(&self.endpoint), token, cancel)
     }
 }
 
@@ -755,5 +769,98 @@ mod tests {
         let result =
             ovh.fetch_hosts_cancellable("AK:AS:CK", &cancel, &crate::runtime::env::Env::empty());
         assert!(matches!(result, Err(ProviderError::Cancelled)));
+    }
+
+    #[test]
+    fn fetch_from_drives_full_pipeline_against_mock() {
+        // Drives the production pipeline through the API base seam: the
+        // server-time fetch, OVH request signing, the instance list and
+        // ProviderHost mapping all run against a mock server.
+        let mut server = mockito::Server::new();
+        let time = server
+            .mock("GET", "/auth/time")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body("1700000000")
+            .create();
+        let instances = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"/cloud/project/.*/instance".into()),
+            )
+            .match_header("X-Ovh-Application", "app-key")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"[{
+                    "id": "inst-1",
+                    "name": "web-1",
+                    "status": "ACTIVE",
+                    "region": "GRA7",
+                    "ipAddresses": [
+                        {"ip": "10.0.0.2", "type": "private", "version": 4},
+                        {"ip": "51.91.1.2", "type": "public", "version": 4}
+                    ],
+                    "flavor": {"name": "b2-7"}
+                }]"#,
+            )
+            .create();
+
+        let ovh = Ovh {
+            project: "my-project".to_string(),
+            endpoint: String::new(),
+        };
+        let hosts = ovh
+            .fetch_from(
+                &server.url(),
+                "app-key:app-secret:consumer-key",
+                &AtomicBool::new(false),
+            )
+            .expect("fetch_from must succeed against the mock");
+        time.assert();
+        instances.assert();
+
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].server_id, "inst-1");
+        assert_eq!(hosts[0].name, "web-1");
+        assert_eq!(hosts[0].ip, "51.91.1.2");
+        assert!(
+            hosts[0]
+                .metadata
+                .contains(&("region".to_string(), "GRA7".to_string()))
+        );
+    }
+
+    #[test]
+    fn fetch_from_maps_auth_failure_to_provider_error() {
+        let mut server = mockito::Server::new();
+        let _time = server
+            .mock("GET", "/auth/time")
+            .with_status(200)
+            .with_body("1700000000")
+            .create();
+        let mock = server
+            .mock(
+                "GET",
+                mockito::Matcher::Regex(r"/cloud/project/.*/instance".into()),
+            )
+            .with_status(401)
+            .with_body(r#"{"message": "Invalid signature"}"#)
+            .create();
+
+        let ovh = Ovh {
+            project: "my-project".to_string(),
+            endpoint: String::new(),
+        };
+        let result = ovh.fetch_from(
+            &server.url(),
+            "app-key:app-secret:consumer-key",
+            &AtomicBool::new(false),
+        );
+        mock.assert();
+        assert!(
+            matches!(result, Err(ProviderError::AuthFailed)),
+            "401 must map to AuthFailed, got {result:?}"
+        );
     }
 }

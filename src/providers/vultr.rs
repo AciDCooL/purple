@@ -42,29 +42,24 @@ struct VultrLinks {
     next: String,
 }
 
-impl Provider for Vultr {
-    fn name(&self) -> &str {
-        "vultr"
-    }
+impl Vultr {
+    const API_BASE: &'static str = "https://api.vultr.com";
 
-    fn short_label(&self) -> &str {
-        "vultr"
-    }
-
-    fn fetch_hosts_cancellable(
+    fn fetch_from(
         &self,
+        base_url: &str,
         token: &str,
         cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let agent = super::http_agent();
         let mut cursor: Option<String> = None;
 
         super::paginate(cancel, |_idx| {
             let url = match &cursor {
-                None => "https://api.vultr.com/v2/instances?per_page=500".to_string(),
+                None => format!("{}/v2/instances?per_page=500", base_url),
                 Some(c) => format!(
-                    "https://api.vultr.com/v2/instances?per_page=500&cursor={}",
+                    "{}/v2/instances?per_page=500&cursor={}",
+                    base_url,
                     super::percent_encode(c)
                 ),
             };
@@ -117,6 +112,25 @@ impl Provider for Vultr {
             };
             Ok(super::PageResult { hosts, more })
         })
+    }
+}
+
+impl Provider for Vultr {
+    fn name(&self) -> &str {
+        "vultr"
+    }
+
+    fn short_label(&self) -> &str {
+        "vultr"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from(Self::API_BASE, token, cancel)
     }
 }
 
@@ -677,6 +691,85 @@ mod tests {
         assert!(r2.meta.links.next.is_empty());
         page1.assert();
         page2.assert();
+    }
+
+    #[test]
+    fn fetch_from_drives_full_pipeline_against_mock() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v2/instances")
+            .match_query(mockito::Matcher::AllOf(vec![mockito::Matcher::UrlEncoded(
+                "per_page".into(),
+                "500".into(),
+            )]))
+            .match_header("Authorization", "Bearer test-vultr-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "instances": [
+                        {
+                            "id": "cb676a46-66fd-4dfb-b839-443f2e6c0b60",
+                            "label": "web-prod-1",
+                            "main_ip": "149.28.100.10",
+                            "v6_main_ip": "2001:19f0:5001::1",
+                            "tags": ["prod", "web"],
+                            "region": "ewr",
+                            "plan": "vc2-2c-4gb",
+                            "os": "Ubuntu 22.04 LTS x64",
+                            "power_status": "running"
+                        },
+                        {
+                            "id": "pending-1",
+                            "label": "pending",
+                            "main_ip": "0.0.0.0",
+                            "v6_main_ip": "::",
+                            "tags": []
+                        }
+                    ],
+                    "meta": {"links": {"next": ""}}
+                }"#,
+            )
+            .create();
+
+        let hosts = Vultr
+            .fetch_from(&server.url(), "test-vultr-token", &AtomicBool::new(false))
+            .unwrap();
+
+        // The placeholder-only instance is skipped; only the real one maps.
+        assert_eq!(hosts.len(), 1);
+        let h = &hosts[0];
+        assert_eq!(h.server_id, "cb676a46-66fd-4dfb-b839-443f2e6c0b60");
+        assert_eq!(h.name, "web-prod-1");
+        assert_eq!(h.ip, "149.28.100.10");
+        assert_eq!(h.tags, vec!["prod", "web"]);
+        assert_eq!(
+            h.metadata,
+            vec![
+                ("region".to_string(), "ewr".to_string()),
+                ("plan".to_string(), "vc2-2c-4gb".to_string()),
+                ("os".to_string(), "Ubuntu 22.04 LTS x64".to_string()),
+                ("status".to_string(), "running".to_string()),
+            ]
+        );
+        mock.assert();
+    }
+
+    #[test]
+    fn fetch_from_maps_auth_failure_to_provider_error() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v2/instances")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"error": "Invalid API token", "status": 401}"#)
+            .create();
+
+        let err = Vultr
+            .fetch_from(&server.url(), "bad-token", &AtomicBool::new(false))
+            .unwrap_err();
+        assert!(matches!(err, ProviderError::AuthFailed));
+        mock.assert();
     }
 
     #[test]

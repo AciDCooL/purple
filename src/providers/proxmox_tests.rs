@@ -3511,3 +3511,85 @@ fn resource_display_name_uses_name_when_present() {
     };
     assert_eq!(resource_display_name(&resource), "dns-1");
 }
+
+#[test]
+fn fetch_from_drives_full_pipeline_against_mock() {
+    // Drives the production entrypoint pipeline through the base seam:
+    // cluster/resources URL + auth header, the qemu/lxc/template filter, the
+    // cluster-IP fast path, CIDR strip and ProviderHost mapping. The entrypoint
+    // gates HTTPS (production); the seam lets the http mock exercise the rest.
+    let mut server = mockito::Server::new();
+    let resources = server
+        .mock("GET", "/api2/json/cluster/resources")
+        .match_query(mockito::Matcher::UrlEncoded("type".into(), "vm".into()))
+        .match_header("Authorization", "PVEAPIToken=user@pam!t=secret")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{"data": [
+                {"type": "qemu", "vmid": 100, "name": "web-1", "node": "pve1", "status": "running", "template": 0, "ip": "10.0.0.5/24", "tags": "prod;web", "maxcpu": 4, "maxmem": 4294967296},
+                {"type": "qemu", "vmid": 9000, "name": "ubuntu-template", "node": "pve1", "status": "stopped", "template": 1}
+            ]}"#,
+        )
+        .create();
+    // VM config (ostype lookup) is best-effort; serve an empty config.
+    let _config = server
+        .mock("GET", mockito::Matcher::Regex(r".*/config$".into()))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"data": {}}"#)
+        .create();
+
+    let pve = Proxmox {
+        base_url: server.url(),
+        verify_tls: false,
+    };
+    let hosts = pve
+        .fetch_from(
+            &server.url(),
+            "user@pam!t=secret",
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .expect("fetch_from must succeed against the mock");
+    resources.assert();
+
+    // Template (vmid 9000) is filtered out; only the running VM remains.
+    assert_eq!(hosts.len(), 1);
+    assert_eq!(hosts[0].server_id, "qemu:100");
+    assert_eq!(hosts[0].name, "web-1");
+    assert_eq!(hosts[0].ip, "10.0.0.5");
+    assert!(
+        hosts[0]
+            .metadata
+            .contains(&("node".to_string(), "pve1".to_string()))
+    );
+}
+
+#[test]
+fn fetch_from_maps_auth_failure_to_provider_error() {
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", "/api2/json/cluster/resources")
+        .match_query(mockito::Matcher::Any)
+        .with_status(401)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"data": null}"#)
+        .create();
+
+    let pve = Proxmox {
+        base_url: server.url(),
+        verify_tls: false,
+    };
+    let result = pve.fetch_from(
+        &server.url(),
+        "bad@pam!bad=bad",
+        &AtomicBool::new(false),
+        &|_| {},
+    );
+    mock.assert();
+    assert!(
+        matches!(result, Err(ProviderError::AuthFailed)),
+        "a 401 on the resource list must map to AuthFailed, got {result:?}"
+    );
+}

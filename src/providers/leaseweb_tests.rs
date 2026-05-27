@@ -828,6 +828,104 @@ fn test_baremetal_no_ip_skipped() {
 }
 
 // =========================================================================
+// fetch_from end-to-end (mockito): production fetch path
+// =========================================================================
+
+#[test]
+fn fetch_from_drives_full_pipeline_against_mock() {
+    // One mock server serves both list endpoints. Bare-metal returns one
+    // server (totalCount 1 -> advance to cloud), cloud returns one instance
+    // (totalCount 1 -> done). Exercises URL construction, the X-Lsw-Auth
+    // header, both deserializers, ProviderHost mapping and the stage handoff.
+    let mut server = mockito::Server::new();
+    let bm = server
+        .mock("GET", "/bareMetals/v2/servers?limit=50&offset=0")
+        .match_header("X-Lsw-Auth", "tk-42")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{
+            "servers": [{
+                "id": "12345",
+                "reference": "web-01",
+                "networkInterfaces": {"public": {"ip": "85.17.0.1/32"}},
+                "location": {"site": "AMS-01"},
+                "contract": {"deliveryStatus": "ACTIVE"},
+                "specs": {"cpu": {"quantity": 2, "type": "Xeon"}, "ram": {"size": 32, "unit": "GB"}}
+            }],
+            "_metadata": {"totalCount": 1, "limit": 50, "offset": 0}
+        }"#,
+        )
+        .create();
+    let cloud = server
+        .mock("GET", "/publicCloud/v1/instances?limit=50&offset=0")
+        .match_header("X-Lsw-Auth", "tk-42")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(
+            r#"{
+            "instances": [{
+                "id": "uuid-1",
+                "reference": "api-1",
+                "state": "RUNNING",
+                "region": "eu-west-3",
+                "type": "lsw.c3.xlarge",
+                "ips": [{"ip": "1.2.3.4", "version": 4, "networkType": "PUBLIC"}],
+                "image": {"name": "Ubuntu 22.04"}
+            }],
+            "_metadata": {"totalCount": 1, "limit": 50, "offset": 0}
+        }"#,
+        )
+        .create();
+
+    let hosts = Leaseweb
+        .fetch_from(
+            &server.url(),
+            &server.url(),
+            "tk-42",
+            &AtomicBool::new(false),
+        )
+        .expect("fetch_from must succeed against the mock");
+    bm.assert();
+    cloud.assert();
+
+    assert_eq!(hosts.len(), 2);
+    assert_eq!(hosts[0].server_id, "bm-12345");
+    assert_eq!(hosts[0].name, "web-01");
+    assert_eq!(hosts[0].ip, "85.17.0.1");
+    assert!(
+        hosts[0]
+            .metadata
+            .contains(&("location".to_string(), "AMS-01".to_string()))
+    );
+    assert_eq!(hosts[1].server_id, "cloud-uuid-1");
+    assert_eq!(hosts[1].name, "api-1");
+    assert_eq!(hosts[1].ip, "1.2.3.4");
+    assert!(
+        hosts[1]
+            .metadata
+            .contains(&("region".to_string(), "eu-west-3".to_string()))
+    );
+}
+
+#[test]
+fn fetch_from_maps_auth_failure_to_provider_error() {
+    let mut server = mockito::Server::new();
+    let mock = server
+        .mock("GET", "/bareMetals/v2/servers?limit=50&offset=0")
+        .with_status(401)
+        .with_body(r#"{"errorCode": "401", "errorMessage": "Invalid API key"}"#)
+        .create();
+
+    let result = Leaseweb.fetch_from(&server.url(), &server.url(), "bad", &AtomicBool::new(false));
+    mock.assert();
+    assert!(
+        matches!(result, Err(ProviderError::AuthFailed)),
+        "401 must map to ProviderError::AuthFailed, got {result:?}"
+    );
+}
+
+// =========================================================================
 // Bare metal: strip_cidr on IPs
 // =========================================================================
 

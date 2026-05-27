@@ -535,9 +535,50 @@ impl SshConfigFile {
         // Strip inline comments (# preceded by whitespace) from parsed value,
         // but only outside quoted strings. Raw_line is untouched for round-trip fidelity.
         let value = strip_inline_comment(value);
+        // Unwrap a single fully-quoted token into its logical value, so the
+        // form and change-detection see the real path rather than the quoted
+        // form. Symmetric with the writer's render_value. Raw_line keeps the
+        // quotes for round-trip fidelity.
+        let value = strip_surrounding_quotes(value);
 
         Some((key.to_string(), value.to_string()))
     }
+}
+
+/// Strip one wrapping pair of double quotes from a value that is wholly a
+/// single quoted token, unescaping `\\` and `\"` inside. OpenSSH uses `"..."`
+/// to carry an argument containing spaces; the logical value is the unwrapped,
+/// unescaped content. Inverse of `HostBlock::render_value`. A value with an
+/// UNescaped interior quote (a command line such as `ssh -W "%h:%p" gw`) is
+/// not a single quoted token and is left untouched.
+fn strip_surrounding_quotes(value: &str) -> std::borrow::Cow<'_, str> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 2 || bytes[0] != b'"' || bytes[bytes.len() - 1] != b'"' {
+        return std::borrow::Cow::Borrowed(value);
+    }
+    let interior = &value[1..value.len() - 1];
+    let mut out = String::with_capacity(interior.len());
+    let mut chars = interior.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                Some('\\') => out.push('\\'),
+                Some('"') => out.push('"'),
+                // Unknown escape: keep the backslash and the following char
+                // verbatim so no information is lost.
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            },
+            // A bare, unescaped quote inside means this is not a single quoted
+            // token (e.g. two adjacent quoted args); leave the whole value as-is.
+            '"' => return std::borrow::Cow::Borrowed(value),
+            _ => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 /// Detect CRLF only when the MAJORITY of lines use `\r\n`. A single
@@ -875,6 +916,41 @@ Host myserver
         let config = parse_str(content);
         let entries = config.host_entries();
         assert_eq!(entries[0].hostname, "10.0.0.1");
+    }
+
+    #[test]
+    fn test_surrounding_quotes_stripped_from_single_token() {
+        // A value that is one fully-quoted token (OpenSSH's way to carry
+        // spaces) parses to the logical, unquoted value so the form and the
+        // change-detection see the real path, not the quoted form.
+        let config = parse_str("Host h\n  IdentityFile \"~/my key/id\"\n");
+        if let ConfigElement::HostBlock(block) = &config.elements[0] {
+            let d = block
+                .directives
+                .iter()
+                .find(|d| d.key == "IdentityFile")
+                .expect("IdentityFile directive");
+            assert_eq!(d.value, "~/my key/id");
+        } else {
+            panic!("Expected HostBlock");
+        }
+    }
+
+    #[test]
+    fn test_internal_quotes_not_stripped() {
+        // A value whose quotes are internal (a command line) keeps them: only
+        // a value that is wholly wrapped in one quote pair is unwrapped.
+        let config = parse_str("Host h\n  ProxyCommand ssh -W \"%h:%p\" gw\n");
+        if let ConfigElement::HostBlock(block) = &config.elements[0] {
+            let d = block
+                .directives
+                .iter()
+                .find(|d| d.key == "ProxyCommand")
+                .expect("ProxyCommand directive");
+            assert_eq!(d.value, "ssh -W \"%h:%p\" gw");
+        } else {
+            panic!("Expected HostBlock");
+        }
     }
 
     #[test]

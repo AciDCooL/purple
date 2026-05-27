@@ -162,20 +162,22 @@ fn format_baremetal_specs(specs: &BareMetalSpecs) -> String {
     parts.join(", ")
 }
 
-impl Provider for Leaseweb {
-    fn name(&self) -> &str {
-        "leaseweb"
-    }
+impl Leaseweb {
+    /// Real API host. Both list endpoints live on the same host, so a single
+    /// base param is enough. Overridable per call via `fetch_from` so tests can
+    /// point the full fetch pipeline at a mock server.
+    const API_BASE: &'static str = "https://api.leaseweb.com";
 
-    fn short_label(&self) -> &str {
-        "lsw"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Fetch hosts against explicit API bases. Production passes `API_BASE` for
+    /// both; tests pass a single mock server URL that serves both list
+    /// endpoints. `bare_metal_base` and `cloud_base` are separate params so a
+    /// future split host stays expressible, but today they share one host.
+    fn fetch_from(
         &self,
+        bare_metal_base: &str,
+        cloud_base: &str,
         token: &str,
         cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let agent = super::http_agent();
         let limit = 50u64;
@@ -192,8 +194,8 @@ impl Provider for Leaseweb {
         super::paginate(cancel, |_idx| match stage {
             Stage::BareMetal => {
                 let url = format!(
-                    "https://api.leaseweb.com/bareMetals/v2/servers?limit={}&offset={}",
-                    limit, offset
+                    "{}/bareMetals/v2/servers?limit={}&offset={}",
+                    bare_metal_base, limit, offset
                 );
                 let resp: BareMetalListResponse = agent
                     .get(&url)
@@ -267,8 +269,8 @@ impl Provider for Leaseweb {
             }
             Stage::PublicCloud => {
                 let url = format!(
-                    "https://api.leaseweb.com/publicCloud/v1/instances?limit={}&offset={}",
-                    limit, offset
+                    "{}/publicCloud/v1/instances?limit={}&offset={}",
+                    cloud_base, limit, offset
                 );
                 let resp: CloudListResponse = agent
                     .get(&url)
@@ -319,6 +321,25 @@ impl Provider for Leaseweb {
                 Ok(super::PageResult { hosts, more })
             }
         })
+    }
+}
+
+impl Provider for Leaseweb {
+    fn name(&self) -> &str {
+        "leaseweb"
+    }
+
+    fn short_label(&self) -> &str {
+        "lsw"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from(Self::API_BASE, Self::API_BASE, token, cancel)
     }
 }
 

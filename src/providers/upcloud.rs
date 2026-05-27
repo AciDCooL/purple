@@ -139,20 +139,20 @@ fn select_ip(interfaces: &[NetworkInterface]) -> Option<String> {
         .map(|ip| ip.address.clone())
 }
 
-impl Provider for UpCloud {
-    fn name(&self) -> &str {
-        "upcloud"
-    }
+impl UpCloud {
+    /// Real API host. Overridable per call via `fetch_from` so tests can point
+    /// the full fetch pipeline at a mock server.
+    const API_BASE: &'static str = "https://api.upcloud.com";
 
-    fn short_label(&self) -> &str {
-        "uc"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Fetch hosts against an explicit API base. Production passes `API_BASE`;
+    /// tests pass a mock server URL. Single seam covering list pagination, the
+    /// auth header, per-server detail fetch, error mapping and `ProviderHost`
+    /// mapping end to end.
+    fn fetch_from(
         &self,
+        base_url: &str,
         token: &str,
         cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let mut all_servers: Vec<ServerSummary> = Vec::new();
         let limit = 100;
@@ -166,10 +166,7 @@ impl Provider for UpCloud {
                 return Err(ProviderError::Cancelled);
             }
 
-            let url = format!(
-                "https://api.upcloud.com/1.3/server?limit={}&offset={}",
-                limit, offset
-            );
+            let url = format!("{}/1.3/server?limit={}&offset={}", base_url, limit, offset);
             let resp: ServerListResponse = agent
                 .get(&url)
                 .header("Authorization", &format!("Bearer {}", token))
@@ -202,7 +199,7 @@ impl Provider for UpCloud {
                 return Err(ProviderError::Cancelled);
             }
 
-            let url = format!("https://api.upcloud.com/1.3/server/{}", server.uuid);
+            let url = format!("{}/1.3/server/{}", base_url, server.uuid);
             let detail: ServerDetailResponse = match agent
                 .get(&url)
                 .header("Authorization", &format!("Bearer {}", token))
@@ -298,6 +295,25 @@ impl Provider for UpCloud {
         }
 
         Ok(all_hosts)
+    }
+}
+
+impl Provider for UpCloud {
+    fn name(&self) -> &str {
+        "upcloud"
+    }
+
+    fn short_label(&self) -> &str {
+        "uc"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from(Self::API_BASE, token, cancel)
     }
 }
 

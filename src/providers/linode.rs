@@ -52,28 +52,28 @@ fn is_private_ip(ip: &str) -> bool {
                 .is_some_and(|n| (64..=127).contains(&n)))
 }
 
-impl Provider for Linode {
-    fn name(&self) -> &str {
-        "linode"
-    }
+impl Linode {
+    /// Real API host. Overridable per call via `fetch_from` so tests can point
+    /// the full fetch pipeline at a mock server.
+    const API_BASE: &'static str = "https://api.linode.com";
 
-    fn short_label(&self) -> &str {
-        "linode"
-    }
-
-    fn fetch_hosts_cancellable(
+    /// Fetch hosts against an explicit API base. Production passes `API_BASE`;
+    /// tests pass a mock server URL. Single seam making URL construction, the
+    /// auth header, error mapping, pagination and `ProviderHost` mapping
+    /// testable end to end.
+    fn fetch_from(
         &self,
+        base_url: &str,
         token: &str,
         cancel: &AtomicBool,
-        _env: &crate::runtime::env::Env,
     ) -> Result<Vec<ProviderHost>, ProviderError> {
         let agent = super::http_agent();
 
         super::paginate(cancel, |idx| {
             let page = idx + 1;
             let url = format!(
-                "https://api.linode.com/v4/linode/instances?page={}&page_size=500",
-                page
+                "{}/v4/linode/instances?page={}&page_size=500",
+                base_url, page
             );
             let resp: LinodeResponse = agent
                 .get(&url)
@@ -131,6 +131,25 @@ impl Provider for Linode {
             let more = !resp.data.is_empty() && resp.page < resp.pages;
             Ok(super::PageResult { hosts, more })
         })
+    }
+}
+
+impl Provider for Linode {
+    fn name(&self) -> &str {
+        "linode"
+    }
+
+    fn short_label(&self) -> &str {
+        "linode"
+    }
+
+    fn fetch_hosts_cancellable(
+        &self,
+        token: &str,
+        cancel: &AtomicBool,
+        _env: &crate::runtime::env::Env,
+    ) -> Result<Vec<ProviderHost>, ProviderError> {
+        self.fetch_from(Self::API_BASE, token, cancel)
     }
 }
 
@@ -814,5 +833,77 @@ mod tests {
             other => panic!("expected 401 error, got {:?}", other),
         }
         mock.assert();
+    }
+
+    #[test]
+    fn fetch_from_drives_full_pipeline_against_mock() {
+        // Exercises the production fetch path end to end: URL construction,
+        // auth header, JSON deserialize, ProviderHost mapping and pagination
+        // termination through fetch_hosts_cancellable's seam.
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v4/linode/instances")
+            .match_query(mockito::Matcher::AllOf(vec![
+                mockito::Matcher::UrlEncoded("page".into(), "1".into()),
+                mockito::Matcher::UrlEncoded("page_size".into(), "500".into()),
+            ]))
+            .match_header("Authorization", "Bearer tk-42")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "data": [
+                        {
+                            "id": 12345678,
+                            "label": "web-prod-1",
+                            "ipv4": ["192.168.200.1", "45.33.100.10"],
+                            "ipv6": "2600:3c00::f03c:92ff:fe12:3456/128",
+                            "tags": ["prod", "web"],
+                            "region": "us-east",
+                            "type": "g6-standard-2",
+                            "status": "running",
+                            "image": "linode/ubuntu22.04"
+                        }
+                    ],
+                    "page": 1,
+                    "pages": 1
+                }"#,
+            )
+            .create();
+
+        let hosts = Linode
+            .fetch_from(&server.url(), "tk-42", &AtomicBool::new(false))
+            .expect("fetch_from must succeed against the mock");
+        mock.assert();
+
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].server_id, "12345678");
+        assert_eq!(hosts[0].name, "web-prod-1");
+        // Public IPv4 preferred over the private entry and the IPv6.
+        assert_eq!(hosts[0].ip, "45.33.100.10");
+        assert_eq!(hosts[0].tags, vec!["prod", "web"]);
+        assert!(
+            hosts[0]
+                .metadata
+                .contains(&("region".to_string(), "us-east".to_string()))
+        );
+    }
+
+    #[test]
+    fn fetch_from_maps_auth_failure_to_provider_error() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("GET", "/v4/linode/instances")
+            .match_query(mockito::Matcher::Any)
+            .with_status(401)
+            .with_body(r#"{"errors": [{"reason": "Invalid Token"}]}"#)
+            .create();
+
+        let result = Linode.fetch_from(&server.url(), "bad", &AtomicBool::new(false));
+        mock.assert();
+        assert!(
+            matches!(result, Err(ProviderError::AuthFailed)),
+            "401 must map to ProviderError::AuthFailed, got {result:?}"
+        );
     }
 }
