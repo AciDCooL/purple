@@ -1,3 +1,9 @@
+## 3.18.6 - 2026-05-27
+
+- fix: Cleaner, balanced margins on every overlay.
+- fix: What's New, the Transfer dialog, command output, help and the Vault SSH strip now reserve the same breathing room on both sides of the border, so prose and tables read as a tidy frame instead of skimming the right edge.
+- change: The design system check that protects this margin now covers split-render overlays too, so the polish carries over to every new screen as it lands.
+
 ## 3.18.5 - 2026-05-27
 
 - feat: Special characters in your SSH config save reliably.

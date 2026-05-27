@@ -1297,6 +1297,40 @@ fn visual_file_browser() {
 }
 
 #[test]
+fn visual_file_browser_transfer_dialog() {
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    let alias = "bastion-ams".to_string();
+    app.file_browser_session = Some(crate::file_browser::FileBrowserSession {
+        alias: alias.clone(),
+        askpass: None,
+        active_pane: crate::file_browser::BrowserPane::Local,
+        local_path: std::path::PathBuf::from("/demo"),
+        local_entries: Vec::new(),
+        local_list_state: ratatui::widgets::ListState::default(),
+        local_selected: std::collections::HashSet::new(),
+        local_error: None,
+        remote_path: String::new(),
+        remote_entries: Vec::new(),
+        remote_list_state: ratatui::widgets::ListState::default(),
+        remote_selected: std::collections::HashSet::new(),
+        remote_error: None,
+        remote_loading: true,
+        show_hidden: false,
+        sort: crate::file_browser::BrowserSort::Name,
+        confirm_copy: None,
+        transferring: Some(
+            "/demo/very-long-archive-name-that-exercises-the-right-margin.tar.gz".to_string(),
+        ),
+        transfer_error: None,
+        connection_recorded: true,
+    });
+    app.screen = Screen::FileBrowser { alias };
+    let actual = render_screen(&mut app);
+    assert_golden("file_browser_transfer_dialog", &actual);
+}
+
+#[test]
 fn visual_jump() {
     let _g = setup();
     let mut app = demo::build_demo_app();

@@ -30,7 +30,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     );
     frame.render_widget(Clear, area);
     let block = design::overlay_block(msg::TITLE);
-    let inner = block.inner(area);
+    let inner = design::body_area(area);
 
     let sections = changelog::current_for_render();
     let current = semver::Version::parse(super::pkg_version()).ok();

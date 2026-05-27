@@ -2,10 +2,10 @@
 │  purple       hosts      tunnels      containers      keys                   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ VAULT SSH ─ 4 active ────────────────────────────────────────────────────────╮
-│  gateway-vpn   ssh-client-signer/sign/infra  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  7h 0m │
-│  aws-api-prod  ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  6h 0m │
-│  prod-eu1      ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  5h 0m │
-│  prod-eu2      ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄   1:30 │
+│  gateway-vpn   ssh-client-signer/sign/infra  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  7h 0m   │
+│  aws-api-prod  ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  6h 0m   │
+│  prod-eu1      ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  5h 0m   │
+│  prod-eu2      ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄   1:30   │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭ KEYS ─ 1/5 ──────────────╮ ╭ id_ed25519 ─────────────────────────────────────╮
 │▌id_ed25519               │ │ ED25519 256                                     │
@@ -365,16 +365,14 @@
 (63,4) fg=Green bg=Reset mod=DIM
 (64,4) fg=Green bg=Reset mod=DIM
 (65,4) fg=Green bg=Reset mod=DIM
-(66,4) fg=Green bg=Reset mod=DIM
-(67,4) fg=Green bg=Reset mod=DIM
+(66,4) fg=Reset bg=Reset mod=DIM
+(67,4) fg=Reset bg=Reset mod=DIM
 (68,4) fg=Reset bg=Reset mod=DIM
-(69,4) fg=Reset bg=Reset mod=DIM
-(70,4) fg=Reset bg=Reset mod=DIM
+(71,4) fg=Reset bg=Reset mod=DIM
+(72,4) fg=Reset bg=Reset mod=DIM
 (73,4) fg=Reset bg=Reset mod=DIM
 (74,4) fg=Reset bg=Reset mod=DIM
 (75,4) fg=Reset bg=Reset mod=DIM
-(76,4) fg=Reset bg=Reset mod=DIM
-(77,4) fg=Reset bg=Reset mod=DIM
 (79,4) fg=Reset bg=Reset mod=DIM
 (0,5) fg=Reset bg=Reset mod=DIM
 (3,5) fg=Reset bg=Reset mod=BOLD
@@ -434,18 +432,16 @@
 (61,5) fg=Green bg=Reset mod=DIM
 (62,5) fg=Green bg=Reset mod=DIM
 (63,5) fg=Green bg=Reset mod=DIM
-(64,5) fg=Green bg=Reset mod=DIM
+(64,5) fg=Reset bg=Reset mod=DIM
 (65,5) fg=Reset bg=Reset mod=DIM
 (66,5) fg=Reset bg=Reset mod=DIM
 (67,5) fg=Reset bg=Reset mod=DIM
 (68,5) fg=Reset bg=Reset mod=DIM
-(69,5) fg=Reset bg=Reset mod=DIM
-(70,5) fg=Reset bg=Reset mod=DIM
+(71,5) fg=Reset bg=Reset mod=DIM
+(72,5) fg=Reset bg=Reset mod=DIM
 (73,5) fg=Reset bg=Reset mod=DIM
 (74,5) fg=Reset bg=Reset mod=DIM
 (75,5) fg=Reset bg=Reset mod=DIM
-(76,5) fg=Reset bg=Reset mod=DIM
-(77,5) fg=Reset bg=Reset mod=DIM
 (79,5) fg=Reset bg=Reset mod=DIM
 (0,6) fg=Reset bg=Reset mod=DIM
 (3,6) fg=Reset bg=Reset mod=BOLD
@@ -502,7 +498,7 @@
 (58,6) fg=Green bg=Reset mod=DIM
 (59,6) fg=Green bg=Reset mod=DIM
 (60,6) fg=Green bg=Reset mod=DIM
-(61,6) fg=Green bg=Reset mod=DIM
+(61,6) fg=Reset bg=Reset mod=DIM
 (62,6) fg=Reset bg=Reset mod=DIM
 (63,6) fg=Reset bg=Reset mod=DIM
 (64,6) fg=Reset bg=Reset mod=DIM
@@ -510,13 +506,11 @@
 (66,6) fg=Reset bg=Reset mod=DIM
 (67,6) fg=Reset bg=Reset mod=DIM
 (68,6) fg=Reset bg=Reset mod=DIM
-(69,6) fg=Reset bg=Reset mod=DIM
-(70,6) fg=Reset bg=Reset mod=DIM
+(71,6) fg=Reset bg=Reset mod=DIM
+(72,6) fg=Reset bg=Reset mod=DIM
 (73,6) fg=Reset bg=Reset mod=DIM
 (74,6) fg=Reset bg=Reset mod=DIM
 (75,6) fg=Reset bg=Reset mod=DIM
-(76,6) fg=Reset bg=Reset mod=DIM
-(77,6) fg=Reset bg=Reset mod=DIM
 (79,6) fg=Reset bg=Reset mod=DIM
 (0,7) fg=Reset bg=Reset mod=DIM
 (3,7) fg=Reset bg=Reset mod=BOLD
@@ -581,13 +575,11 @@
 (66,7) fg=Reset bg=Reset mod=DIM
 (67,7) fg=Reset bg=Reset mod=DIM
 (68,7) fg=Reset bg=Reset mod=DIM
-(69,7) fg=Reset bg=Reset mod=DIM
-(70,7) fg=Reset bg=Reset mod=DIM
+(71,7) fg=Reset bg=Reset mod=DIM
+(72,7) fg=Reset bg=Reset mod=DIM
 (73,7) fg=Reset bg=Reset mod=DIM
 (74,7) fg=Reset bg=Reset mod=DIM
 (75,7) fg=Reset bg=Reset mod=DIM
-(76,7) fg=Reset bg=Reset mod=DIM
-(77,7) fg=Reset bg=Reset mod=DIM
 (79,7) fg=Reset bg=Reset mod=DIM
 (0,8) fg=Reset bg=Reset mod=DIM
 (1,8) fg=Reset bg=Reset mod=DIM

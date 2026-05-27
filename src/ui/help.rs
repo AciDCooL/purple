@@ -119,7 +119,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         block = block.title_bottom(version.right_aligned());
     }
 
-    let inner = block.inner(area);
+    let inner = design::body_area(area);
     frame.render_widget(block, area);
 
     let rows = if is_main_view {

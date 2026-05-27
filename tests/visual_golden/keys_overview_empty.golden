@@ -2,10 +2,10 @@
 │  purple       hosts      tunnels      containers      keys                                       │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ VAULT SSH ─ 4 active ────────────────────────────────────────────────────────────────────────────╮
-│  gateway-vpn   ssh-client-signer/sign/infra  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  7h 0m │
-│  aws-api-prod  ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  6h 0m │
-│  prod-eu1      ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  5h 0m │
-│  prod-eu2      ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄   1:30 │
+│  gateway-vpn   ssh-client-signer/sign/infra  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  7h 0m   │
+│  aws-api-prod  ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  6h 0m   │
+│  prod-eu1      ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  5h 0m   │
+│  prod-eu2      ssh-client-signer/sign/admin  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄   1:30   │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │                                                                                                  │
@@ -443,18 +443,16 @@
 (81,4) fg=Green bg=Reset mod=DIM
 (82,4) fg=Green bg=Reset mod=DIM
 (83,4) fg=Green bg=Reset mod=DIM
-(84,4) fg=Green bg=Reset mod=DIM
-(85,4) fg=Green bg=Reset mod=DIM
+(84,4) fg=Reset bg=Reset mod=DIM
+(85,4) fg=Reset bg=Reset mod=DIM
 (86,4) fg=Reset bg=Reset mod=DIM
 (87,4) fg=Reset bg=Reset mod=DIM
 (88,4) fg=Reset bg=Reset mod=DIM
-(89,4) fg=Reset bg=Reset mod=DIM
-(90,4) fg=Reset bg=Reset mod=DIM
+(91,4) fg=Reset bg=Reset mod=DIM
+(92,4) fg=Reset bg=Reset mod=DIM
 (93,4) fg=Reset bg=Reset mod=DIM
 (94,4) fg=Reset bg=Reset mod=DIM
 (95,4) fg=Reset bg=Reset mod=DIM
-(96,4) fg=Reset bg=Reset mod=DIM
-(97,4) fg=Reset bg=Reset mod=DIM
 (99,4) fg=Reset bg=Reset mod=DIM
 (0,5) fg=Reset bg=Reset mod=DIM
 (3,5) fg=Reset bg=Reset mod=BOLD
@@ -529,7 +527,7 @@
 (76,5) fg=Green bg=Reset mod=DIM
 (77,5) fg=Green bg=Reset mod=DIM
 (78,5) fg=Green bg=Reset mod=DIM
-(79,5) fg=Green bg=Reset mod=DIM
+(79,5) fg=Reset bg=Reset mod=DIM
 (80,5) fg=Reset bg=Reset mod=DIM
 (81,5) fg=Reset bg=Reset mod=DIM
 (82,5) fg=Reset bg=Reset mod=DIM
@@ -539,13 +537,11 @@
 (86,5) fg=Reset bg=Reset mod=DIM
 (87,5) fg=Reset bg=Reset mod=DIM
 (88,5) fg=Reset bg=Reset mod=DIM
-(89,5) fg=Reset bg=Reset mod=DIM
-(90,5) fg=Reset bg=Reset mod=DIM
+(91,5) fg=Reset bg=Reset mod=DIM
+(92,5) fg=Reset bg=Reset mod=DIM
 (93,5) fg=Reset bg=Reset mod=DIM
 (94,5) fg=Reset bg=Reset mod=DIM
 (95,5) fg=Reset bg=Reset mod=DIM
-(96,5) fg=Reset bg=Reset mod=DIM
-(97,5) fg=Reset bg=Reset mod=DIM
 (99,5) fg=Reset bg=Reset mod=DIM
 (0,6) fg=Reset bg=Reset mod=DIM
 (3,6) fg=Reset bg=Reset mod=BOLD
@@ -614,8 +610,8 @@
 (70,6) fg=Green bg=Reset mod=DIM
 (71,6) fg=Green bg=Reset mod=DIM
 (72,6) fg=Green bg=Reset mod=DIM
-(73,6) fg=Green bg=Reset mod=DIM
-(74,6) fg=Green bg=Reset mod=DIM
+(73,6) fg=Reset bg=Reset mod=DIM
+(74,6) fg=Reset bg=Reset mod=DIM
 (75,6) fg=Reset bg=Reset mod=DIM
 (76,6) fg=Reset bg=Reset mod=DIM
 (77,6) fg=Reset bg=Reset mod=DIM
@@ -630,13 +626,11 @@
 (86,6) fg=Reset bg=Reset mod=DIM
 (87,6) fg=Reset bg=Reset mod=DIM
 (88,6) fg=Reset bg=Reset mod=DIM
-(89,6) fg=Reset bg=Reset mod=DIM
-(90,6) fg=Reset bg=Reset mod=DIM
+(91,6) fg=Reset bg=Reset mod=DIM
+(92,6) fg=Reset bg=Reset mod=DIM
 (93,6) fg=Reset bg=Reset mod=DIM
 (94,6) fg=Reset bg=Reset mod=DIM
 (95,6) fg=Reset bg=Reset mod=DIM
-(96,6) fg=Reset bg=Reset mod=DIM
-(97,6) fg=Reset bg=Reset mod=DIM
 (99,6) fg=Reset bg=Reset mod=DIM
 (0,7) fg=Reset bg=Reset mod=DIM
 (3,7) fg=Reset bg=Reset mod=BOLD
@@ -721,13 +715,11 @@
 (86,7) fg=Reset bg=Reset mod=DIM
 (87,7) fg=Reset bg=Reset mod=DIM
 (88,7) fg=Reset bg=Reset mod=DIM
-(89,7) fg=Reset bg=Reset mod=DIM
-(90,7) fg=Reset bg=Reset mod=DIM
+(91,7) fg=Reset bg=Reset mod=DIM
+(92,7) fg=Reset bg=Reset mod=DIM
 (93,7) fg=Reset bg=Reset mod=DIM
 (94,7) fg=Reset bg=Reset mod=DIM
 (95,7) fg=Reset bg=Reset mod=DIM
-(96,7) fg=Reset bg=Reset mod=DIM
-(97,7) fg=Reset bg=Reset mod=DIM
 (99,7) fg=Reset bg=Reset mod=DIM
 (0,8) fg=Reset bg=Reset mod=DIM
 (1,8) fg=Reset bg=Reset mod=DIM

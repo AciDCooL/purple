@@ -616,46 +616,99 @@ fi
 
 # 23. Paragraph body content must reserve right-margin breathing room.
 #
-# `Paragraph::new(text).block(block)` rendered to a full block area (or
-# `block.inner(area)`) writes the last glyph flush against the right `│`
-# whenever the longest line fills the inner width. Same with Wrap.
+# Two failure modes are checked:
+#
+#  a) Inline: `Paragraph::new(text).block(block)` rendered to a full block
+#     area writes the last glyph flush against the right `│` whenever the
+#     longest line fills the inner width. Same with `.wrap(...)`.
+#  b) Split-render: `let inner = block.inner(area)` followed by
+#     `frame.render_widget(Paragraph::new(...), inner)` (or via a
+#     pre-assigned paragraph variable). Same outcome, no `.block(block)`
+#     on the Paragraph, so (a)'s grep doesn't see it.
+#
 # Render bodies via `design::render_body` / `render_body_wrapped` (which
 # inset by `design::BODY_RIGHT_PAD`), or compute `design::body_area(area)`
 # manually.
-PARAGRAPH_BODY_HITS=$(grep -rEn '\.block\(\s*block\s*\)' src/ui/ --include='*.rs' \
-    | grep -v 'design\.rs' \
-    | grep -v '_tests\.rs' \
-    || true)
-# Filter to the bare pattern `Paragraph::new(...).block(block)`; with no
-# `.wrap(`, no `body_area(`, no `render_body`, and not assigned to a name
-# that is later inset. Heuristic: flag the line if there is no `body_area`
-# OR `render_body` OR `.wrap(` within ±3 lines of the match.
 python3 - <<'PY' || exit 1
-import re, sys, os, pathlib
+import re, sys, pathlib
 
 ROOT = pathlib.Path("src/ui")
 violations = []
-PAT = re.compile(r"\.block\(\s*block\s*\)")
+
+INLINE_PAT = re.compile(r"\.block\(\s*block\s*\)")
+LET_INNER = re.compile(r"\blet\s+(\w+)\s*=\s*block\.inner\(")
+LET_PARA = re.compile(r"\blet\s+(?:mut\s+)?(\w+)\s*=\s*Paragraph::new\(")
+FN_BOUNDARY = re.compile(r"^\s*(pub\s+)?fn\b")
+RENDER_CALL = re.compile(r"\bframe\.render_widget\(")
 
 for path in sorted(ROOT.rglob("*.rs")):
     name = path.name
-    if name in ("design.rs",) or "test" in name:
+    if name == "design.rs" or "test" in name:
         continue
     text = path.read_text()
     lines = text.splitlines()
+
+    # --- (a) Inline Paragraph::new(text).block(block) without wrap/body_area
     for i, line in enumerate(lines):
-        if not PAT.search(line):
+        if not INLINE_PAT.search(line):
             continue
         window = "\n".join(lines[max(0, i - 3) : min(len(lines), i + 4)])
         if "body_area" in window or "render_body" in window or ".wrap(" in window:
             continue
-        # Single-line content (e.g. a one-line title that's already padded by
-        # `format!` is fine. Only flag when the surrounding context indicates
-        # multi-line body text. Heuristic: the variable backing the Paragraph
-        # is named `text` and the same window contains `vec!` building lines.
         if "Paragraph::new(text)" not in line:
             continue
-        violations.append(f"{path}:{i+1}: Paragraph::new(text).block(block) without wrap or body_area")
+        violations.append(
+            f"{path}:{i+1}: Paragraph::new(text).block(block) without wrap or body_area"
+        )
+
+    # --- (b) Split-render: Paragraph rendered into a name that came from
+    # block.inner(...). Walk each function from its `let X = block.inner(...)`
+    # assignment forward until the next function boundary or a new
+    # block.inner assignment, tracking Paragraph variable names on the way.
+    for i, line in enumerate(lines):
+        m = LET_INNER.search(line)
+        if not m:
+            continue
+        inner_name = m.group(1)
+        # Whitelist: if the surrounding block definition (up to 10 lines
+        # before the `let inner = block.inner(...)` line) carries an
+        # explicit `.padding(Padding::new(...))`, the block already
+        # supplies horizontal breathing room, and `block.inner(...)`
+        # returns a rect that excludes that padding on both sides.
+        block_def_window = "\n".join(lines[max(0, i - 10) : i + 1])
+        if ".padding(Padding::" in block_def_window:
+            continue
+        paragraph_vars = set()
+        target_re = re.compile(r",\s*" + re.escape(inner_name) + r"\s*[\),]")
+        found_render = None
+        body_area_seen = False
+
+        for j in range(i + 1, len(lines)):
+            cur = lines[j]
+            if j != i and (FN_BOUNDARY.match(cur) or "block.inner(" in cur):
+                break
+            if "body_area" in cur or "render_body" in cur:
+                body_area_seen = True
+            pm = LET_PARA.search(cur)
+            if pm:
+                paragraph_vars.add(pm.group(1))
+            if not RENDER_CALL.search(cur):
+                continue
+            window = "\n".join(lines[j : min(len(lines), j + 4)])
+            if not target_re.search(window):
+                continue
+            has_paragraph = "Paragraph::new(" in window or any(
+                re.search(r"\b" + re.escape(v) + r"\b", window) for v in paragraph_vars
+            )
+            if has_paragraph:
+                found_render = j
+                break
+
+        if found_render is not None and not body_area_seen:
+            violations.append(
+                f"{path}:{found_render+1}: Paragraph rendered into `{inner_name}` "
+                f"(= block.inner(...) at line {i+1}) without body_area inset"
+            )
 
 if violations:
     print("ERROR: paragraph body content without right-margin breathing room:")
@@ -664,7 +717,7 @@ if violations:
     print()
     print("  Use design::render_body_wrapped(frame, area, block, lines) for prose,")
     print("  design::render_body(frame, area, block, lines) for pre-sized rows,")
-    print("  or render to design::body_area(area) manually for custom layouts.")
+    print("  or `let inner = design::body_area(area);` for split-render layouts.")
     sys.exit(1)
 PY
 

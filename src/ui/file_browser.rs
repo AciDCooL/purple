@@ -412,7 +412,7 @@ fn render_transfer_dialog(frame: &mut Frame, label: &str, area: Rect) {
     frame.render_widget(Clear, dialog_area);
 
     let block = design::overlay_block("Transfer");
-    let inner = block.inner(dialog_area);
+    let inner = design::body_area(dialog_area);
     frame.render_widget(block, dialog_area);
 
     let lines = vec![

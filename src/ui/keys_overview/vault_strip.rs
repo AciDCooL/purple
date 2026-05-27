@@ -24,7 +24,7 @@ pub(super) fn render_vault_strip(frame: &mut Frame, area: Rect, rows: &[ActiveCe
         "VAULT SSH",
         Some(&format!("{} active", rows.len())),
     ));
-    let inner = block.inner(area);
+    let inner = design::body_area(area);
     frame.render_widget(block, area);
 
     if rows.is_empty() {
