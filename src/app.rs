@@ -1,3 +1,4 @@
+use crossterm::event::KeyModifiers;
 use ratatui::widgets::ListState;
 
 use crate::history::ConnectionHistory;
@@ -739,21 +740,37 @@ impl App {
             // When two actions share the same hotkey (e.g. 'a' for `Hosts:
             // Add host` and `Tunnels: Add tunnel`), the one whose target
             // matches the current mode wins, so muscle memory survives.
+            // Multi-char queries get a smaller mode-match nudge so that
+            // typing `sort` from the Tunnels tab still prefers
+            // `Tunnels: Sort` over `Hosts: Sort` even though both labels
+            // contain the same substring.
             if let JumpHit::Action(a) = &hit {
+                let mode_match = matches!(
+                    (state.mode, a.target),
+                    (JumpMode::Hosts, JumpActionTarget::Hosts)
+                        | (JumpMode::Tunnels, JumpActionTarget::Tunnels)
+                        | (JumpMode::Containers, JumpActionTarget::Containers)
+                        | (JumpMode::Keys, JumpActionTarget::Keys)
+                );
                 let single = effective_query.chars().next();
-                if effective_query.chars().count() == 1
+                let exact_hotkey = effective_query.chars().count() == 1
                     && single
                         .map(|c| c.eq_ignore_ascii_case(&a.key))
-                        .unwrap_or(false)
-                {
-                    let mode_match = matches!(
-                        (state.mode, a.target),
-                        (JumpMode::Hosts, JumpActionTarget::Hosts)
-                            | (JumpMode::Tunnels, JumpActionTarget::Tunnels)
-                            | (JumpMode::Containers, JumpActionTarget::Containers)
-                            | (JumpMode::Keys, JumpActionTarget::Keys)
-                    );
-                    let bump = if mode_match { 20_000 } else { 10_000 };
+                        .unwrap_or(false);
+                let bump = if exact_hotkey && mode_match {
+                    20_000
+                } else if exact_hotkey {
+                    10_000
+                } else if mode_match && best > 0 {
+                    // Only nudge when the action already matched on its own.
+                    // Without this guard the boost would float every
+                    // current-mode action above the score floor and surface
+                    // it for unrelated queries.
+                    1_000
+                } else {
+                    0
+                };
+                if bump > 0 {
                     best = best.saturating_add(bump);
                 }
             }
@@ -1462,6 +1479,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Add host",
         aliases: &["new", "create"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'A',
@@ -1469,6 +1487,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Add pattern",
         aliases: &["new pattern", "wildcard"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'e',
@@ -1476,6 +1495,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Edit host",
         aliases: &["modify", "change"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'd',
@@ -1483,6 +1503,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Delete host",
         aliases: &["remove", "rm"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'c',
@@ -1490,6 +1511,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Clone host",
         aliases: &["duplicate", "copy"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'u',
@@ -1497,6 +1519,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Undo delete",
         aliases: &["restore"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 't',
@@ -1504,6 +1527,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Tag host",
         aliases: &["label", "category"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'i',
@@ -1511,6 +1535,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Show all directives",
         aliases: &["raw", "config", "settings"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'y',
@@ -1518,6 +1543,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Clipboard: Copy SSH command",
         aliases: &["yank"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'x',
@@ -1525,6 +1551,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Clipboard: Copy config block",
         aliases: &["yank config"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'X',
@@ -1532,6 +1559,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Purge stale hosts",
         aliases: &["clean", "cleanup"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'F',
@@ -1547,6 +1575,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
             "open",
         ],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'C',
@@ -1554,6 +1583,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Containers: List containers",
         aliases: &["docker", "podman", "ps", "open"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'K',
@@ -1561,6 +1591,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Keys: Manage SSH keys",
         aliases: &["identity", "id_rsa", "id_ed25519", "private key", "open"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'S',
@@ -1568,6 +1599,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Providers: Manage cloud sync",
         aliases: &["cloud", "aws", "gcp", "azure", "hetzner", "sync", "open"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'V',
@@ -1575,6 +1607,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Vault: Sign certificate",
         aliases: &["hashicorp", "ssh cert", "vault ssh"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'I',
@@ -1582,6 +1615,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Import from known_hosts",
         aliases: &["known", "import"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'm',
@@ -1589,6 +1623,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Settings: Switch theme",
         aliases: &["color", "appearance", "dark", "light"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'n',
@@ -1596,6 +1631,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Help: What's new",
         aliases: &["changelog", "news", "release notes"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'r',
@@ -1603,6 +1639,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Snippets: Run snippet",
         aliases: &["execute", "command"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'R',
@@ -1610,6 +1647,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Snippets: Run on all visible",
         aliases: &["batch", "execute all"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'p',
@@ -1617,6 +1655,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Ping host",
         aliases: &["health", "check"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'P',
@@ -1624,6 +1663,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Ping all hosts",
         aliases: &["health all"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: '!',
@@ -1631,6 +1671,55 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Hosts: Show down only",
         aliases: &["filter offline", "down only"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 's',
+        key_str: "s",
+        label: "Hosts: Sort",
+        aliases: &["order", "arrange", "sort by"],
+        target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'g',
+        key_str: "g",
+        label: "Hosts: Cycle grouping",
+        aliases: &["group", "group by", "category"],
+        target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'v',
+        key_str: "v",
+        label: "Hosts: Toggle compact view",
+        aliases: &["view mode", "detail panel", "compact", "detailed"],
+        target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: '#',
+        key_str: "#",
+        label: "Hosts: Filter by tag",
+        aliases: &["tag", "tag filter", "filter tag"],
+        target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: ' ',
+        key_str: " ",
+        label: "Hosts: Mark host",
+        aliases: &["select", "multi-select", "toggle mark", "checkbox"],
+        target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'a',
+        key_str: "a",
+        label: "Hosts: Select all visible",
+        aliases: &["select all", "mark all", "bulk select"],
+        target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::CONTROL,
     },
     // Tunnel-tab actions. Disambiguated by label so they coexist with
     // hosts-tab hotkey letters in the same list. Dispatch switches to
@@ -1641,6 +1730,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Tunnels: Manage tunnels",
         aliases: &["forward", "port forward", "ssh -L", "ssh -R", "open"],
         target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'a',
@@ -1648,6 +1738,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Tunnels: Add tunnel",
         aliases: &["new tunnel", "create tunnel", "forward"],
         target: JumpActionTarget::Tunnels,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'e',
@@ -1655,6 +1746,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Tunnels: Edit tunnel",
         aliases: &["modify tunnel"],
         target: JumpActionTarget::Tunnels,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'd',
@@ -1662,6 +1754,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Tunnels: Delete tunnel",
         aliases: &["remove tunnel"],
         target: JumpActionTarget::Tunnels,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 's',
@@ -1669,6 +1762,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Tunnels: Sort",
         aliases: &["order tunnels"],
         target: JumpActionTarget::Tunnels,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'R',
@@ -1676,6 +1770,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Containers: Refresh all hosts",
         aliases: &["reload containers", "fetch", "rescan"],
         target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 's',
@@ -1683,6 +1778,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Containers: Cycle sort",
         aliases: &["order containers", "sort by host", "sort by name"],
         target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'v',
@@ -1690,6 +1786,71 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Containers: Toggle detail panel",
         aliases: &["show details", "hide details", "compact view"],
         target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'e',
+        key_str: "e",
+        label: "Containers: Exec into container",
+        aliases: &["shell", "bash", "sh", "terminal", "attach"],
+        target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'l',
+        key_str: "l",
+        label: "Containers: View logs",
+        aliases: &["log", "stdout", "stderr", "tail"],
+        target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'K',
+        key_str: "K",
+        label: "Containers: Restart container",
+        aliases: &["bounce", "reload"],
+        target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'S',
+        key_str: "S",
+        label: "Containers: Stop container",
+        aliases: &["halt", "kill", "down"],
+        target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'a',
+        key_str: "a",
+        label: "Containers: Add host",
+        aliases: &["pick host", "scan host", "track host", "new host"],
+        target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'r',
+        key_str: "r",
+        label: "Containers: Refresh selected host",
+        aliases: &["reload host", "rescan host", "refresh host"],
+        target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: ' ',
+        key_str: " ",
+        label: "Containers: Fold or unfold host",
+        aliases: &["collapse", "expand", "toggle host", "group"],
+        target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: 'k',
+        key_str: "k",
+        label: "Containers: Restart compose stack",
+        aliases: &["stack", "docker compose", "podman compose", "project"],
+        target: JumpActionTarget::Containers,
+        modifiers: KeyModifiers::CONTROL,
     },
     // Keys tab. Mirror the footer + handler bindings on the Keys tab so
     // typing `:` followed by part of a verb (e.g. `push`, `sign`, `copy`)
@@ -1700,6 +1861,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Keys: Copy public key",
         aliases: &["yank", "clipboard", "pubkey"],
         target: JumpActionTarget::Keys,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'p',
@@ -1707,6 +1869,7 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Keys: Push to host",
         aliases: &["install", "ssh-copy-id", "deploy", "upload"],
         target: JumpActionTarget::Keys,
+        modifiers: KeyModifiers::NONE,
     },
     JumpAction {
         key: 'V',
@@ -1714,6 +1877,15 @@ static ALL_JUMP_ACTIONS: &[JumpAction] = &[
         label: "Keys: Sign Vault SSH certificate",
         aliases: &["vault", "renew cert", "sign"],
         target: JumpActionTarget::Keys,
+        modifiers: KeyModifiers::NONE,
+    },
+    JumpAction {
+        key: '?',
+        key_str: "?",
+        label: "Help: Show keybindings",
+        aliases: &["help", "shortcuts", "manual", "keymap"],
+        target: JumpActionTarget::Hosts,
+        modifiers: KeyModifiers::NONE,
     },
 ];
 

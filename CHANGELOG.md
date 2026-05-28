@@ -1,3 +1,13 @@
+## 3.19.0 - 2026-05-28
+
+- feat: Type any action by name, on every tab.
+- feat: Picking a tunnel from `:` starts or stops it in one Enter, the same one-shot rhythm a host already had.
+- feat: Picking a container from `:` opens its shell in one Enter, no extra keypress on the overview.
+- feat: Sort, group, view toggle, tag filter and multi-select are now reachable by name from `:` on the Hosts tab.
+- feat: Exec, logs, restart, stop, refresh-host, fold-host and compose-stack restart are reachable by name from `:` on the Containers tab.
+- feat: Modifier-bound shortcuts like Ctrl-a select-all and Ctrl-k stack-restart show up in `:` too, so they are findable instead of memorised.
+- feat: `?` Help is one search away from anywhere.
+
 ## 3.18.7 - 2026-05-27
 
 - change: Snappier overlays. Vault cert checks throttled.

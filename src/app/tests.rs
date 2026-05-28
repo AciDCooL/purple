@@ -7202,10 +7202,12 @@ fn message_class_is_error() {
 
 #[test]
 fn jump_commands_have_unique_keys_per_target() {
-    // Hotkey letters are unique within a `JumpActionTarget`. Across
-    // targets, the same letter ('a') can map to two distinct actions
-    // (Hosts: Add host vs Tunnels: Add tunnel) because dispatch routes
-    // by `target` first, then synthesises the hotkey for that handler.
+    // The (key, modifiers) tuple is unique within a `JumpActionTarget`.
+    // The same letter can map to two distinct actions within a target
+    // when only the modifier differs (e.g. plain `a` Add host vs Ctrl+a
+    // Select all). Across targets the same key+modifier can coexist
+    // because dispatch routes by `target` first, then synthesises the
+    // keypress for that handler.
     let commands = PaletteCommand::all();
     let mut seen_hosts = std::collections::HashSet::new();
     let mut seen_tunnels = std::collections::HashSet::new();
@@ -7219,9 +7221,10 @@ fn jump_commands_have_unique_keys_per_target() {
             crate::app::JumpActionTarget::Keys => &mut seen_keys,
         };
         assert!(
-            bucket.insert(cmd.key),
-            "duplicate jump key '{}' within target {:?}",
+            bucket.insert((cmd.key, cmd.modifiers)),
+            "duplicate jump binding '{}' with {:?} within target {:?}",
             cmd.key,
+            cmd.modifiers,
             cmd.target
         );
     }

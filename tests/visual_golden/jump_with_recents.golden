@@ -13,7 +13,7 @@
 │   ● prod-e│   bastion-ams                                     bastion.ams.example   │            │
 │   ● custom│   Help: What's new                                                  n   │────────────╯
 │   ● custom│                                                                         │────────────╮
-│   ✖ legacy│   Actions   6 of 34                                                     │            │
+│   ✖ legacy│   Actions   6 of 49                                                     │            │
 │   ● aws-ap│   Hosts: Add host                                                   a   │            │
 │   ● aws-ap│   Tunnels: Manage tunnels                                           T   │            │
 │   ● aws-wo│   Containers: List containers                                       C   │▄▃▃  ▄ ▁    │

@@ -12879,3 +12879,367 @@ fn logs_overlay_cursor_handles_unicode_grapheme() {
     let _ = handle_key_event(&mut app, key(KeyCode::Backspace), &tx);
     assert!(search_state(&app).unwrap().query.is_empty());
 }
+
+// --- Palette dispatch tests for the newly added per-tab actions ---
+//
+// Each test opens the jump bar in the correct mode, types a query that
+// uniquely (or via the mode-match nudge) selects the action under test,
+// presses Enter and asserts the resulting handler effect. Acts as a
+// regression net so future scoring or table tweaks cannot silently
+// regress the action set or its routing.
+
+fn open_jump_with_query(app: &mut App, mode: crate::app::JumpMode, query: &str) {
+    app.jump = Some(crate::app::JumpState::for_mode(mode));
+    for c in query.chars() {
+        app.jump.as_mut().unwrap().push_query(c);
+    }
+    app.recompute_jump_hits();
+}
+
+fn make_hosts_app_with_palette() -> App {
+    let mut app = make_app(
+        "Host alpha\n  HostName alpha.example\n\
+         Host beta\n  HostName beta.example\n",
+    );
+    app.top_page = crate::app::TopPage::Hosts;
+    app.screen = Screen::HostList;
+    // Reset list cursor so the host-aware actions resolve a selection.
+    app.ui.list_state_mut().select(Some(0));
+    app
+}
+
+#[test]
+fn palette_dispatches_hosts_sort_from_hosts_mode() {
+    let mut app = make_hosts_app_with_palette();
+    let initial = app.hosts_state.sort_mode();
+    open_jump_with_query(&mut app, crate::app::JumpMode::Hosts, "sort");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none(), "jump bar closes after dispatch");
+    assert_ne!(
+        app.hosts_state.sort_mode(),
+        initial,
+        "Hosts: Sort must advance the host sort mode"
+    );
+}
+
+#[test]
+fn palette_dispatches_hosts_cycle_grouping_from_hosts_mode() {
+    let mut app = make_hosts_app_with_palette();
+    assert_eq!(app.hosts_state.group_by(), &crate::app::GroupBy::None);
+    open_jump_with_query(&mut app, crate::app::JumpMode::Hosts, "grouping");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert_ne!(
+        app.hosts_state.group_by(),
+        &crate::app::GroupBy::None,
+        "Hosts: Cycle grouping must advance group_by from None"
+    );
+}
+
+#[test]
+fn palette_dispatches_hosts_toggle_compact_view_from_hosts_mode() {
+    let mut app = make_hosts_app_with_palette();
+    let initial = app.hosts_state.view_mode();
+    open_jump_with_query(&mut app, crate::app::JumpMode::Hosts, "compact");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert_ne!(
+        app.hosts_state.view_mode(),
+        initial,
+        "Hosts: Toggle compact view must flip the view mode"
+    );
+}
+
+#[test]
+fn palette_dispatches_hosts_filter_by_tag_from_hosts_mode() {
+    let mut app = make_hosts_app_with_palette();
+    // Give one host a tag so the picker has something to show.
+    app.hosts_state.list_mut()[0].tags = vec!["prod".into()];
+    open_jump_with_query(&mut app, crate::app::JumpMode::Hosts, "filter by tag");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert!(
+        matches!(app.screen, Screen::TagPicker),
+        "Hosts: Filter by tag must open the TagPicker, got {:?}",
+        app.screen
+    );
+}
+
+#[test]
+fn palette_dispatches_containers_exec_from_containers_mode() {
+    let mut app = make_containers_overview_app();
+    open_jump_with_query(&mut app, crate::app::JumpMode::Containers, "exec");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert!(
+        matches!(app.screen, Screen::ContainerExecPrompt { .. }),
+        "Containers: Exec must open the exec prompt, got {:?}",
+        app.screen
+    );
+}
+
+#[test]
+fn palette_dispatches_containers_view_logs_from_containers_mode() {
+    let mut app = make_containers_overview_app();
+    open_jump_with_query(&mut app, crate::app::JumpMode::Containers, "view logs");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert!(
+        matches!(app.screen, Screen::ContainerLogs),
+        "Containers: View logs must navigate to the logs screen, got {:?}",
+        app.screen
+    );
+}
+
+#[test]
+fn palette_dispatches_containers_restart_from_containers_mode() {
+    let mut app = make_containers_overview_app();
+    open_jump_with_query(
+        &mut app,
+        crate::app::JumpMode::Containers,
+        "restart container",
+    );
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert!(
+        matches!(app.screen, Screen::ConfirmContainerRestart { .. }),
+        "Containers: Restart must open the restart confirm, got {:?}",
+        app.screen
+    );
+}
+
+#[test]
+fn palette_dispatches_containers_stop_from_containers_mode() {
+    let mut app = make_containers_overview_app();
+    open_jump_with_query(&mut app, crate::app::JumpMode::Containers, "stop container");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert!(
+        matches!(app.screen, Screen::ConfirmContainerStop { .. }),
+        "Containers: Stop must open the stop confirm, got {:?}",
+        app.screen
+    );
+}
+
+#[test]
+fn palette_dispatches_containers_add_host_from_containers_mode() {
+    let mut app = make_containers_overview_app();
+    open_jump_with_query(&mut app, crate::app::JumpMode::Containers, "add host");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert!(
+        matches!(app.screen, Screen::ContainerHostPicker),
+        "Containers: Add host must open the container host picker, got {:?}",
+        app.screen
+    );
+}
+
+#[test]
+fn palette_dispatches_containers_refresh_selected_from_containers_mode() {
+    let mut app = make_containers_overview_app();
+    open_jump_with_query(
+        &mut app,
+        crate::app::JumpMode::Containers,
+        "refresh selected",
+    );
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    let toast = app
+        .status_center
+        .toast()
+        .expect("Containers: Refresh selected host must emit a refreshing toast");
+    assert!(
+        toast.text.contains("Refreshing"),
+        "expected refreshing toast, got {:?}",
+        toast.text
+    );
+}
+
+#[test]
+fn palette_dispatches_hosts_mark_host_via_space_action() {
+    let mut app = make_hosts_app_with_palette();
+    assert!(app.hosts_state.multi_select().is_empty());
+    open_jump_with_query(&mut app, crate::app::JumpMode::Hosts, "mark");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert!(
+        !app.hosts_state.multi_select().is_empty(),
+        "Hosts: Mark host must toggle a host into the multi-select set"
+    );
+}
+
+#[test]
+fn palette_dispatches_hosts_select_all_visible_via_ctrl_a() {
+    let mut app = make_hosts_app_with_palette();
+    assert!(app.hosts_state.multi_select().is_empty());
+    open_jump_with_query(&mut app, crate::app::JumpMode::Hosts, "select all");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    let selected = app.hosts_state.multi_select().len();
+    assert!(
+        selected >= 2,
+        "Hosts: Select all visible must mark every visible host, marked={}",
+        selected
+    );
+}
+
+#[test]
+fn palette_dispatches_containers_fold_unfold_host_via_space_action() {
+    let mut app = make_containers_overview_app();
+    // Park cursor on the db host divider (item 0) so the fold action
+    // resolves a host alias rather than a container row.
+    app.ui.containers_overview_state_mut().select(Some(0));
+    let initial_collapsed = app.containers_overview.collapsed_hosts().contains("db");
+    open_jump_with_query(&mut app, crate::app::JumpMode::Containers, "fold");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    let now_collapsed = app.containers_overview.collapsed_hosts().contains("db");
+    assert_ne!(
+        now_collapsed, initial_collapsed,
+        "Containers: Fold or unfold host must flip the collapse state"
+    );
+}
+
+#[test]
+fn palette_dispatches_containers_restart_compose_stack_via_ctrl_k() {
+    // The fixture seeds no inspect cache entries, so the stack-restart
+    // handler short-circuits with a `container_stack_unknown` toast.
+    // Either outcome — the confirm dialog OR the warning toast — proves
+    // the palette dispatch reached the modifier-bound match arm; the
+    // ConfirmStackRestart screen requires a full compose project setup
+    // we deliberately keep out of the unit fixture.
+    let mut app = make_containers_overview_app();
+    open_jump_with_query(&mut app, crate::app::JumpMode::Containers, "compose stack");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    let toast = app.status_center.toast();
+    let reached_handler = matches!(app.screen, Screen::ConfirmStackRestart)
+        || toast.is_some_and(|t| {
+            t.text.to_lowercase().contains("stack") || t.text.to_lowercase().contains("compose")
+        });
+    assert!(
+        reached_handler,
+        "Containers: Restart compose stack must reach the stack restart handler; \
+         screen={:?} toast={:?}",
+        app.screen,
+        toast.map(|t| t.text.clone())
+    );
+}
+
+#[test]
+fn palette_dispatches_help_from_any_tab() {
+    // Open palette from the Tunnels tab and pick the universal Help action.
+    // The dispatch switches to the Hosts tab and opens the help overlay;
+    // the side-effect under test is that Screen ends up at Help, not the
+    // tab-switch itself.
+    let mut app = make_tunnels_overview_app();
+    open_jump_with_query(&mut app, crate::app::JumpMode::Tunnels, "keybindings");
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    assert!(app.jump.is_none());
+    assert!(
+        matches!(app.screen, Screen::Help { .. }),
+        "Help: Show keybindings must open the help overlay, got {:?}",
+        app.screen
+    );
+}
+
+#[test]
+fn palette_tunnel_hit_auto_toggles_picked_tunnel() {
+    // Picking a tunnel from the palette is a one-shot action: the cursor
+    // lands on the tunnel row AND fires Enter, just like picking a host
+    // is a one-shot connect. Without this the user would have to press
+    // Enter a second time on the overview, which the help overlay does
+    // not document.
+    let mut app = make_app("Host web\n  HostName web.example\n  LocalForward 8080 localhost:80\n");
+    app.top_page = crate::app::TopPage::Hosts;
+    app.screen = Screen::HostList;
+    assert!(
+        !app.tunnels.active_contains("web"),
+        "tunnel starts inactive in the fixture"
+    );
+    app.jump = Some(crate::app::JumpState::default());
+    let tunnel_hit = crate::app::JumpHit::Tunnel(crate::app::TunnelHit {
+        alias: "web".into(),
+        bind_port: 8080,
+        bind_port_str: "8080".into(),
+        destination: "localhost:80".into(),
+        active: false,
+    });
+    if let Some(p) = app.jump.as_mut() {
+        p.set_hits(vec![tunnel_hit]);
+        for c in "web".chars() {
+            p.push_query(c);
+        }
+    }
+    // Demo mode short-circuits the spawn with a toast so the test does
+    // not depend on a working `ssh` binary. Either toast text proves the
+    // tunnels handler reached its Enter arm — the assertion under test.
+    app.demo_mode = true;
+    let (tx, _rx) = mpsc::channel();
+    handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
+    assert!(app.jump.is_none(), "jump bar closes after dispatch");
+    assert!(matches!(app.top_page, crate::app::TopPage::Tunnels));
+    let toast = app
+        .status_center
+        .toast()
+        .expect("dispatch must produce a toast (demo-disabled or started)");
+    assert!(
+        toast.text.to_lowercase().contains("tunnel") || toast.text.to_lowercase().contains("demo"),
+        "expected a tunnel-related toast, got {:?}",
+        toast.text
+    );
+}
+
+#[test]
+fn palette_container_hit_auto_queues_shell_exec() {
+    // Mirror of the tunnel-hit auto-Enter test: picking a container from
+    // the palette must land on the row AND fire Enter so the gesture
+    // matches the one-shot host-connect rhythm. Enter on a container row
+    // queues an interactive shell exec (not the one-off exec prompt that
+    // `e` opens); the assertion targets the queued request.
+    let mut app = make_containers_overview_app();
+    app.top_page = crate::app::TopPage::Hosts;
+    app.screen = Screen::HostList;
+    assert!(
+        app.container_state.pending_exec_request().is_none(),
+        "no pending exec before dispatch"
+    );
+    app.jump = Some(crate::app::JumpState::default());
+    let container_hit = crate::app::JumpHit::Container(crate::app::ContainerHit {
+        alias: "web".into(),
+        container_name: "nginx".into(),
+        container_id: "c1".into(),
+        state: "running".into(),
+    });
+    if let Some(p) = app.jump.as_mut() {
+        p.set_hits(vec![container_hit]);
+        for c in "nginx".chars() {
+            p.push_query(c);
+        }
+    }
+    let (tx, _rx) = mpsc::channel();
+    handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
+    assert!(app.jump.is_none());
+    assert!(matches!(app.top_page, crate::app::TopPage::Containers));
+    let queued = app
+        .container_state
+        .pending_exec_request()
+        .expect("Container hit must auto-queue a shell exec request");
+    assert_eq!(queued.alias, "web");
+    assert_eq!(queued.container_id, "c1");
+}

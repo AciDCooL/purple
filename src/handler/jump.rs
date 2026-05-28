@@ -123,11 +123,25 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
                 &app.tunnels,
                 &app.history,
             );
-            if let Some(idx) = pairs
+            let landed_on_match = pairs
                 .iter()
                 .position(|(alias, rule)| alias == &t.alias && rule.bind_port == t.bind_port)
-            {
-                app.ui.tunnels_overview_state_mut().select(Some(idx));
+                .map(|idx| {
+                    app.ui.tunnels_overview_state_mut().select(Some(idx));
+                    true
+                })
+                .unwrap_or(false);
+            // Mirror the host-hit auto-Enter: trigger the tunnel's primary
+            // action (start / stop) so picking a tunnel from the palette
+            // is a one-shot toggle, just like picking a host is a one-shot
+            // connect. Only fire when the cursor actually landed on the
+            // matching tunnel; otherwise we would toggle whichever row
+            // happens to be selected and confuse the user.
+            if landed_on_match {
+                super::tunnels_overview::handle_key(
+                    app,
+                    KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
+                );
             }
         }
         JumpHit::Container(c) => {
@@ -138,28 +152,42 @@ fn dispatch_hit(app: &mut App, hit: &JumpHit, _mode: JumpMode, events_tx: &mpsc:
             // longer carries the container.
             app.top_page = TopPage::Containers;
             app.set_screen(Screen::HostList);
-            let target_idx = crate::ui::containers_overview::position_of_container(
+            let landed_on_container = crate::ui::containers_overview::position_of_container(
                 app,
                 &c.alias,
                 &c.container_id,
-            )
-            .or_else(|| {
-                crate::ui::containers_overview::visible_items(app)
-                    .iter()
-                    .position(|item| match item {
-                        crate::ui::containers_overview::ContainerListItem::HostHeader {
-                            alias,
-                            ..
-                        } => alias == &c.alias,
-                        _ => false,
-                    })
-            })
-            .or_else(|| {
-                crate::ui::containers_overview::first_visible_index(
-                    &crate::ui::containers_overview::visible_items(app),
-                )
-            });
+            );
+            let target_idx = landed_on_container
+                .or_else(|| {
+                    crate::ui::containers_overview::visible_items(app)
+                        .iter()
+                        .position(|item| match item {
+                            crate::ui::containers_overview::ContainerListItem::HostHeader {
+                                alias,
+                                ..
+                            } => alias == &c.alias,
+                            _ => false,
+                        })
+                })
+                .or_else(|| {
+                    crate::ui::containers_overview::first_visible_index(
+                        &crate::ui::containers_overview::visible_items(app),
+                    )
+                });
             app.ui.containers_overview_state_mut().select(target_idx);
+            // Mirror the host-hit auto-Enter: when the cursor lands on the
+            // actual container row (not a fallback host-divider), trigger
+            // the primary action (exec prompt) so picking a container
+            // from the palette is a one-shot shell-in. Skip the synthetic
+            // Enter when we fell back to a host header because Enter on a
+            // header is a no-op and would silently consume the gesture.
+            if landed_on_container.is_some() {
+                super::containers_overview::handle_key(
+                    app,
+                    KeyEvent::new(KeyCode::Enter, crossterm::event::KeyModifiers::NONE),
+                    events_tx,
+                );
+            }
         }
         JumpHit::Snippet(_s) => {
             // The snippet picker requires at least one target host. If the
@@ -189,8 +217,7 @@ fn execute_action(
     action: &crate::app::JumpAction,
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
-    use crossterm::event::KeyModifiers;
-    let key = KeyEvent::new(KeyCode::Char(action.key), KeyModifiers::NONE);
+    let key = KeyEvent::new(KeyCode::Char(action.key), action.modifiers);
     match action.target {
         JumpActionTarget::Hosts => {
             app.top_page = TopPage::Hosts;

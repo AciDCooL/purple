@@ -147,6 +147,11 @@ pub struct JumpAction {
     /// hotkey keypress, so `Tunnels: Add tunnel` works from the Hosts
     /// tab and vice versa.
     pub target: JumpActionTarget,
+    /// Modifier flags applied to the synthesised keypress. Lets the
+    /// palette dispatch modifier-bound shortcuts like Ctrl-k (restart
+    /// compose stack) that the underlying handler routes through a
+    /// distinct match arm. `KeyModifiers::NONE` for the common case.
+    pub modifiers: crossterm::event::KeyModifiers,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
