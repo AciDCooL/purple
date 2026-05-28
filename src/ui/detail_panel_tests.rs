@@ -877,3 +877,111 @@ fn pattern_detail_multiple_negations() {
     let info = compute_pattern_detail_info(&patterns[0], &hosts);
     assert_eq!(info.matching_aliases, vec!["db-01"]);
 }
+
+// ---------------------------------------------------------------------------
+// Pattern DIRECTIVES card: per-category grouping
+// ---------------------------------------------------------------------------
+
+fn line_plain(line: &Line) -> String {
+    line.spans.iter().map(|s| s.content.as_ref()).collect()
+}
+
+/// Titles of the category cards in render order. A section_open line starts
+/// with the top-left box glyph and carries its title in the second span.
+fn directive_card_titles(lines: &[Line]) -> Vec<String> {
+    lines
+        .iter()
+        .filter(|l| line_plain(l).starts_with(design::BOX_TL))
+        .filter_map(|l| l.spans.get(1).map(|s| s.content.to_string()))
+        .collect()
+}
+
+#[test]
+fn pattern_directives_empty_renders_nothing() {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    render_pat_directives(&mut lines, &[], 60);
+    assert!(lines.is_empty());
+}
+
+#[test]
+fn pattern_directives_group_into_category_cards_in_canonical_order() {
+    // Scrambled input order; cards must emit in canonical category order and
+    // skip categories with no directives. The unknown keyword lands in OTHER.
+    let directives = vec![
+        ("SetEnv".to_string(), "TERM=xterm".to_string()),
+        ("ProxyJump".to_string(), "bastion".to_string()),
+        ("User".to_string(), "deploy".to_string()),
+        ("Ciphers".to_string(), "aes256-gcm@openssh.com".to_string()),
+        ("FooTypo".to_string(), "bar".to_string()),
+        ("Port".to_string(), "22".to_string()),
+    ];
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    render_pat_directives(&mut lines, &directives, 60);
+    assert_eq!(
+        directive_card_titles(&lines),
+        vec![
+            "CONNECTION",
+            "PROXY & JUMP",
+            "CRYPTO",
+            "ENVIRONMENT",
+            "OTHER"
+        ]
+    );
+}
+
+#[test]
+fn pattern_directives_preserve_file_order_within_a_card() {
+    // User then Port both land in CONNECTION; their config order is kept.
+    let directives = vec![
+        ("User".to_string(), "deploy".to_string()),
+        ("Port".to_string(), "2222".to_string()),
+    ];
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    render_pat_directives(&mut lines, &directives, 60);
+    assert_eq!(directive_card_titles(&lines), vec!["CONNECTION"]);
+    let rows: Vec<String> = lines
+        .iter()
+        .map(line_plain)
+        .filter(|t| t.contains("User") || t.contains("Port"))
+        .collect();
+    assert_eq!(rows.len(), 2);
+    assert!(rows[0].contains("User"), "User must render before Port");
+    assert!(rows[1].contains("Port"), "Port must render after User");
+}
+
+#[test]
+fn cumulative_directives_render_as_multiple_rows_in_one_card() {
+    let directives = vec![
+        ("IdentityFile".to_string(), "~/.ssh/a".to_string()),
+        ("IdentityFile".to_string(), "~/.ssh/b".to_string()),
+    ];
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    render_pat_directives(&mut lines, &directives, 60);
+    assert_eq!(directive_card_titles(&lines), vec!["AUTHENTICATION"]);
+    let rows = lines
+        .iter()
+        .filter(|l| line_plain(l).contains("IdentityFile"))
+        .count();
+    assert_eq!(rows, 2);
+}
+
+#[test]
+fn long_directive_keyword_keeps_a_space_before_value() {
+    // PubkeyAcceptedAlgorithms is 24 chars, past the 14-col label column. The
+    // value must never glue to the keyword.
+    let directives = vec![(
+        "PubkeyAcceptedAlgorithms".to_string(),
+        "ssh-ed25519".to_string(),
+    )];
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    render_pat_directives(&mut lines, &directives, 80);
+    let row = lines
+        .iter()
+        .map(line_plain)
+        .find(|t| t.contains("PubkeyAcceptedAlgorithms"))
+        .expect("directive row must render");
+    assert!(
+        row.contains("PubkeyAcceptedAlgorithms ssh-ed25519"),
+        "long keyword must keep a space before its value, got: {row:?}"
+    );
+}

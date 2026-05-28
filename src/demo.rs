@@ -252,6 +252,23 @@ Host pve-backup
   # purple:provider proxmox:107
   # purple:meta node=pve2,type=lxc,specs=2c/8GiB,os=Debian 12,status=stopped
   # purple:stale 1743800000
+
+Host pve-*
+  User ops
+  AddKeysToAgent yes
+  IdentitiesOnly yes
+  PubkeyAcceptedAlgorithms ssh-ed25519,rsa-sha2-512
+  ForwardAgent no
+  StrictHostKeyChecking accept-new
+  HashKnownHosts yes
+  Ciphers aes256-gcm@openssh.com,chacha20-poly1305@openssh.com
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+  ControlMaster auto
+  ControlPath ~/.ssh/cm/%r@%h:%p
+  ControlPersist 10m
+  SetEnv TERM=xterm-256color
+  LogLevel INFO
 ";
 
 const DEMO_SNIPPETS: &str = "\
@@ -2348,6 +2365,29 @@ mod tests {
         // 22 original + 2 do-personal + 1 podman-edge + 1 db-proton
         // + 5 (prod-eu1, prod-eu2, customer-jump, customer-db-1, legacy-prod) = 31
         assert_eq!(app.hosts_state.list().len(), 31);
+    }
+
+    #[test]
+    fn demo_app_has_categorized_pattern() {
+        let (app, _guard) = demo_app();
+        // The pve-* pattern drives the per-category pattern detail panel in
+        // --demo. Its directives must span several categories incl. a long key.
+        let pve = app
+            .hosts_state
+            .patterns()
+            .iter()
+            .find(|p| p.pattern == "pve-*")
+            .expect("demo must include a pve-* pattern");
+        let keys: Vec<&str> = pve.directives.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(keys.contains(&"SetEnv"), "expected ENVIRONMENT directive");
+        assert!(
+            keys.contains(&"PubkeyAcceptedAlgorithms"),
+            "expected a long AUTHENTICATION keyword"
+        );
+        assert!(
+            keys.contains(&"ControlMaster"),
+            "expected MULTIPLEXING directive"
+        );
     }
 
     #[test]

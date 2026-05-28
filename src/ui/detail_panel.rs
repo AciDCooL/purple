@@ -935,7 +935,7 @@ fn render_pattern_detail(
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     render_pat_header(&mut lines, &pattern.pattern, box_width);
-    render_pat_directives(&mut lines, &pattern.directives, max_value_width, box_width);
+    render_pat_directives(&mut lines, &pattern.directives, box_width);
     render_pat_tags(&mut lines, &pattern.tags, box_width);
     render_pat_matches(&mut lines, &pattern.pattern, app, box_width);
     render_pat_source(&mut lines, &pattern.source_file, max_value_width, box_width);
@@ -979,21 +979,53 @@ fn render_pat_header(lines: &mut Vec<Line<'static>>, pattern: &str, box_width: u
     section_close(lines, box_width);
 }
 
-/// Renders the DIRECTIVES card; skipped when there are no directives.
+/// Renders one card per directive category present in the block, in canonical
+/// order. Skipped entirely when there are no directives; empty categories
+/// produce no card. Unrecognized keywords land in the OTHER card so nothing
+/// the user wrote is hidden.
 fn render_pat_directives(
     lines: &mut Vec<Line<'static>>,
     directives: &[(String, String)],
-    max_value_width: usize,
     box_width: usize,
 ) {
+    use crate::ssh_config::directive_category::DirectiveCategory;
     if directives.is_empty() {
         return;
     }
-    section_open(lines, "DIRECTIVES", box_width);
-    for (key, value) in directives {
-        section_field(lines, key, value, max_value_width, box_width);
+    for category in DirectiveCategory::DISPLAY_ORDER {
+        let mut opened = false;
+        for (key, value) in directives {
+            if DirectiveCategory::for_key(key) != category {
+                continue;
+            }
+            if !opened {
+                section_open(lines, category.title(), box_width);
+                opened = true;
+            }
+            push_directive_row(lines, key, value, box_width);
+        }
+        if opened {
+            section_close(lines, box_width);
+        }
     }
-    section_close(lines, box_width);
+}
+
+/// Push a directive row inside a category card: muted keyword, bold value.
+/// The keyword column is at least `LABEL_WIDTH` wide so short keys align, and
+/// always keeps one space before the value so long keywords never glue to it.
+fn push_directive_row(lines: &mut Vec<Line<'static>>, key: &str, value: &str, box_width: usize) {
+    let label_w = (key.width() + 1).max(LABEL_WIDTH);
+    let value_budget = box_width.saturating_sub(4).saturating_sub(label_w);
+    let display = if value_budget > 0 && value.width() > value_budget {
+        super::truncate(value, value_budget)
+    } else {
+        value.to_string()
+    };
+    let spans = vec![
+        Span::styled(format!("{key:<label_w$}"), theme::muted()),
+        Span::styled(display, theme::bold()),
+    ];
+    section_line(lines, spans, box_width);
 }
 
 /// Renders the TAGS card; skipped when there are no tags.

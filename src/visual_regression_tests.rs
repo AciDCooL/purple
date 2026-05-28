@@ -1729,3 +1729,25 @@ fn visual_host_detail_with_tags() {
     let actual = render_screen(&mut app);
     assert_golden("host_detail_with_tags", &actual);
 }
+
+/// Select the pve-* pattern so the detail panel renders the per-category
+/// directive cards (CONNECTION, AUTHENTICATION, ... MULTIPLEXING) instead of a
+/// single flat DIRECTIVES card. Exercises the long-keyword row layout too.
+#[test]
+fn visual_pattern_detail() {
+    use crate::app::HostListItem;
+    let _g = setup();
+    let mut app = demo::build_demo_app();
+    let pos = app
+        .hosts_state
+        .display_list()
+        .iter()
+        .position(|item| matches!(item, HostListItem::Pattern { .. }));
+    assert!(
+        pos.is_some(),
+        "demo config must contain a selectable pattern"
+    );
+    app.ui.list_state_mut().select(pos);
+    let actual = render_screen(&mut app);
+    assert_golden("pattern_detail", &actual);
+}
