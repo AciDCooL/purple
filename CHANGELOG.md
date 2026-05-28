@@ -1,3 +1,9 @@
+## 3.20.0 - 2026-05-28
+
+- feat: Pattern SSH settings, grouped into clear cards.
+- feat: Select a wildcard pattern and its directives now split into per-purpose cards. Connection, Authentication, Forwarding, Crypto, Keepalive and more, each shown only when the pattern sets it, so you read a pattern the way you read a host.
+- feat: The host list wraps as you move. Scroll past the bottom and you land at the top, past the top and you land at the bottom, matching the Tunnels, Containers and Keys tabs. Page Up and Page Down wrap at the edges too.
+
 ## 3.19.0 - 2026-05-28
 
 - feat: Type any action by name, on every tab.

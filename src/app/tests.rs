@@ -5511,10 +5511,10 @@ fn clear_group_filter_noop_when_already_none() {
     assert_eq!(app.hosts_state.group_filter, None);
 }
 
-// --- select_next_skipping_headers / select_prev_skipping_headers ---
+// --- select_next / select_prev: header skipping + wrap-around ---
 
 #[test]
-fn select_next_skipping_headers_skips_group_header() {
+fn select_next_skips_group_header() {
     let content = "\
 Host web1
   HostName 1.1.1.1
@@ -5538,7 +5538,7 @@ Host web2
         .unwrap();
     app.ui.list_state.select(Some(first_host_pos));
 
-    app.select_next_skipping_headers();
+    app.select_next();
 
     let selected = app.ui.list_state.selected().unwrap();
     assert!(
@@ -5555,7 +5555,7 @@ Host web2
 }
 
 #[test]
-fn select_prev_skipping_headers_skips_group_header() {
+fn select_prev_skips_group_header() {
     let content = "\
 Host web1
   HostName 1.1.1.1
@@ -5578,7 +5578,7 @@ Host web2
         .unwrap();
     app.ui.list_state.select(Some(last_host_pos));
 
-    app.select_prev_skipping_headers();
+    app.select_prev();
 
     let selected = app.ui.list_state.selected().unwrap();
     assert!(
@@ -5592,29 +5592,82 @@ Host web2
 }
 
 #[test]
-fn select_next_skipping_headers_stays_at_end() {
+fn select_next_wraps_to_first_at_end() {
+    // From the last host, select_next wraps back to the first, like the
+    // other tabs. Group headers in between are skipped.
     let content = "\
 Host web1
   HostName 1.1.1.1
   # purple:provider digitalocean:1
+
+Host web2
+  HostName 2.2.2.2
+  # purple:provider aws:2
 ";
     let mut app = make_app(content);
     app.hosts_state.group_by = GroupBy::Provider;
     app.apply_sort();
 
-    // Put selection on the only Host item
-    let host_pos = app
+    let first_host_pos = app
         .hosts_state
         .display_list
         .iter()
         .position(|item| matches!(item, HostListItem::Host { .. }))
         .unwrap();
-    app.ui.list_state.select(Some(host_pos));
+    let last_host_pos = app
+        .hosts_state
+        .display_list
+        .iter()
+        .rposition(|item| matches!(item, HostListItem::Host { .. }))
+        .unwrap();
+    app.ui.list_state.select(Some(last_host_pos));
 
-    app.select_next_skipping_headers();
+    app.select_next();
 
-    // Should stay at the same position since there is no next host
-    assert_eq!(app.ui.list_state.selected(), Some(host_pos));
+    assert_eq!(
+        app.ui.list_state.selected(),
+        Some(first_host_pos),
+        "select_next at the end should wrap to the first host"
+    );
+}
+
+#[test]
+fn select_prev_wraps_to_last_at_start() {
+    // From the first host, select_prev wraps to the last, like the other tabs.
+    let content = "\
+Host web1
+  HostName 1.1.1.1
+  # purple:provider digitalocean:1
+
+Host web2
+  HostName 2.2.2.2
+  # purple:provider aws:2
+";
+    let mut app = make_app(content);
+    app.hosts_state.group_by = GroupBy::Provider;
+    app.apply_sort();
+
+    let first_host_pos = app
+        .hosts_state
+        .display_list
+        .iter()
+        .position(|item| matches!(item, HostListItem::Host { .. }))
+        .unwrap();
+    let last_host_pos = app
+        .hosts_state
+        .display_list
+        .iter()
+        .rposition(|item| matches!(item, HostListItem::Host { .. }))
+        .unwrap();
+    app.ui.list_state.select(Some(first_host_pos));
+
+    app.select_prev();
+
+    assert_eq!(
+        app.ui.list_state.selected(),
+        Some(last_host_pos),
+        "select_prev at the start should wrap to the last host"
+    );
 }
 
 // --- Scoped search ---
@@ -5932,6 +5985,78 @@ Host aws1
             HostListItem::Host { .. } | HostListItem::Pattern { .. }
         ),
         "page_down should not land on a GroupHeader"
+    );
+}
+
+#[test]
+fn page_down_at_end_wraps_to_first() {
+    // On the last host, PageDown wraps to the first, like j/Down at the end.
+    let content = "\
+Host web1
+  HostName 1.1.1.1
+
+Host web2
+  HostName 2.2.2.2
+";
+    let mut app = make_app(content);
+    app.apply_sort();
+
+    let first = app
+        .hosts_state
+        .display_list
+        .iter()
+        .position(|item| matches!(item, HostListItem::Host { .. }))
+        .unwrap();
+    let last = app
+        .hosts_state
+        .display_list
+        .iter()
+        .rposition(|item| matches!(item, HostListItem::Host { .. }))
+        .unwrap();
+    app.ui.list_state.select(Some(last));
+
+    app.page_down_host();
+
+    assert_eq!(
+        app.ui.list_state.selected(),
+        Some(first),
+        "PageDown at the bottom should wrap to the first host"
+    );
+}
+
+#[test]
+fn page_up_at_start_wraps_to_last() {
+    // On the first host, PageUp wraps to the last, like k/Up at the start.
+    let content = "\
+Host web1
+  HostName 1.1.1.1
+
+Host web2
+  HostName 2.2.2.2
+";
+    let mut app = make_app(content);
+    app.apply_sort();
+
+    let first = app
+        .hosts_state
+        .display_list
+        .iter()
+        .position(|item| matches!(item, HostListItem::Host { .. }))
+        .unwrap();
+    let last = app
+        .hosts_state
+        .display_list
+        .iter()
+        .rposition(|item| matches!(item, HostListItem::Host { .. }))
+        .unwrap();
+    app.ui.list_state.select(Some(first));
+
+    app.page_up_host();
+
+    assert_eq!(
+        app.ui.list_state.selected(),
+        Some(last),
+        "PageUp at the top should wrap to the last host"
     );
 }
 

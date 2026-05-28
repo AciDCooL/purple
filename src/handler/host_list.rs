@@ -112,11 +112,11 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             }
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.select_next_skipping_headers();
+            app.select_next();
             super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.select_prev_skipping_headers();
+            app.select_prev();
             super::ping::refresh_selected_if_stale(app, events_tx);
         }
         KeyCode::Tab => {

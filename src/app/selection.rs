@@ -202,16 +202,17 @@ impl App {
         }
     }
 
-    /// Page down in the host list, skipping group headers when ungrouped.
+    /// Page down in the host list: jump PAGE_SIZE selectable items forward,
+    /// skipping group headers and clamping at the last item. When already on
+    /// the last item, wrap to the first, mirroring single-step navigation.
     pub fn page_down_host(&mut self) {
         self.ui.detail_scroll = 0;
         const PAGE_SIZE: usize = 10;
+        let before = self.ui.list_state.selected();
         if self.search.query.is_some() {
-            super::page_down(
-                &mut self.ui.list_state,
-                self.search.filtered_indices.len(),
-                PAGE_SIZE,
-            );
+            let total =
+                self.search.filtered_indices.len() + self.search.filtered_pattern_indices.len();
+            super::page_down(&mut self.ui.list_state, total, PAGE_SIZE);
         } else {
             let current = self.ui.list_state.selected().unwrap_or(0);
             let mut target = current;
@@ -229,22 +230,25 @@ impl App {
                     }
                 }
             }
-            if target != current {
-                self.ui.list_state.select(Some(target));
-            }
+            self.ui.list_state.select(Some(target));
+        }
+        // Already at the bottom: wrap to the top, like j/Down does.
+        if self.ui.list_state.selected() == before {
+            self.select_next();
         }
     }
 
-    /// Page up in the host list, skipping group headers.
+    /// Page up in the host list: jump PAGE_SIZE selectable items back, skipping
+    /// group headers and clamping at the first item. When already on the first
+    /// item, wrap to the last, mirroring single-step navigation.
     pub fn page_up_host(&mut self) {
         self.ui.detail_scroll = 0;
         const PAGE_SIZE: usize = 10;
+        let before = self.ui.list_state.selected();
         if self.search.query.is_some() {
-            super::page_up(
-                &mut self.ui.list_state,
-                self.search.filtered_indices.len(),
-                PAGE_SIZE,
-            );
+            let total =
+                self.search.filtered_indices.len() + self.search.filtered_pattern_indices.len();
+            super::page_up(&mut self.ui.list_state, total, PAGE_SIZE);
         } else {
             let current = self.ui.list_state.selected().unwrap_or(0);
             let mut target = current;
@@ -261,9 +265,11 @@ impl App {
                     }
                 }
             }
-            if target != current {
-                self.ui.list_state.select(Some(target));
-            }
+            self.ui.list_state.select(Some(target));
+        }
+        // Already at the top: wrap to the bottom, like k/Up does.
+        if self.ui.list_state.selected() == before {
+            self.select_prev();
         }
     }
     pub fn scan_keys(&mut self) {
@@ -693,35 +699,6 @@ impl App {
             self.snippets.store.snippets.len(),
             true,
         );
-    }
-
-    /// Poll active tunnels for exit status. Returns messages for any that exited.
-    /// Move selection to the next non-header item.
-    pub fn select_next_skipping_headers(&mut self) {
-        let current = self.ui.list_state.selected().unwrap_or(0);
-        for i in (current + 1)..self.hosts_state.display_list.len() {
-            if !matches!(
-                self.hosts_state.display_list[i],
-                HostListItem::GroupHeader(_)
-            ) {
-                self.ui.list_state.select(Some(i));
-                return;
-            }
-        }
-    }
-
-    /// Move selection to the previous non-header item.
-    pub fn select_prev_skipping_headers(&mut self) {
-        let current = self.ui.list_state.selected().unwrap_or(0);
-        for i in (0..current).rev() {
-            if !matches!(
-                self.hosts_state.display_list[i],
-                HostListItem::GroupHeader(_)
-            ) {
-                self.ui.list_state.select(Some(i));
-                return;
-            }
-        }
     }
 }
 
