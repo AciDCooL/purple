@@ -260,7 +260,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent) {
             app.notify(crate::messages::sorted_by(app.tunnels.sort_mode().label()));
         }
         KeyCode::Char(':') => {
-            log::debug!("jump: opened from tunnels overview");
+            log::debug!("[purple] jump: opened from tunnels overview");
             app.open_jump(crate::app::JumpMode::Tunnels);
         }
         KeyCode::Tab => {

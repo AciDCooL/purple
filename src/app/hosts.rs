@@ -89,8 +89,13 @@ impl App {
         }
         if let Err(e) = self.hosts_state.ssh_config.write() {
             self.hosts_state.ssh_config.elements.truncate(len_before);
+            log::warn!("[config] failed to save new host: alias={alias}: {e}");
             return Err(crate::messages::failed_to_save(&e));
         }
+        log::debug!(
+            "[purple] host added: alias={alias} is_pattern={}",
+            self.forms.host.is_pattern
+        );
         // Form submit writes the full config including any pending vault mutations
         self.vault.pending_config_write = false;
         self.update_last_modified();
@@ -299,8 +304,15 @@ impl App {
                     .ssh_config
                     .set_host_certificate_file(&old_entry.alias, "");
             }
+            log::warn!(
+                "[config] failed to save host edit: alias={alias} old_alias={old_alias}: {e}"
+            );
             return Err(crate::messages::failed_to_save(&e));
         }
+        log::debug!(
+            "[purple] host edited: alias={alias} old_alias={old_alias} renamed={}",
+            alias != old_alias
+        );
         // Form submit writes the full config including any pending vault mutations
         self.vault.pending_config_write = false;
         self.update_last_modified();
@@ -381,7 +393,7 @@ impl App {
             let mut recents = crate::app::jump::load_recents(paths.as_ref());
             if crate::app::jump::rename_host_recent(&mut recents, old_alias, new_alias) {
                 if let Err(e) = crate::app::jump::save_recents(&recents, paths.as_ref()) {
-                    log::warn!("[config] failed to save recents after rename: {e}");
+                    log::warn!("[purple] failed to save recents after rename: {e}");
                 }
             }
         }
@@ -518,6 +530,7 @@ impl App {
         let section = match self.providers.config.section_by_id(&id).cloned() {
             Some(s) => s,
             None => {
+                log::warn!("[config] sync skipped: no config for provider={provider}");
                 return (
                     format!(
                         "{} sync skipped: no config.",
@@ -534,6 +547,7 @@ impl App {
         let provider_impl = match crate::providers::get_provider_with_config(&section) {
             Some(p) => p,
             None => {
+                log::warn!("[config] sync skipped: unknown provider={provider}");
                 return (
                     format!(
                         "Unknown provider: {}.",
@@ -568,6 +582,9 @@ impl App {
             // sync after reviewing their edits.
             if self.external_config_changed() {
                 self.hosts_state.ssh_config = config_backup;
+                log::warn!(
+                    "[config] sync write refused: external config change for provider={provider}"
+                );
                 return (
                     crate::messages::sync_skipped_external_change().to_string(),
                     true,
@@ -579,12 +596,21 @@ impl App {
             }
             if let Err(e) = self.hosts_state.ssh_config.write() {
                 self.hosts_state.ssh_config = config_backup;
+                log::warn!("[purple] sync write failed for provider={provider}, rolled back: {e}");
                 return (format!("Sync failed to save: {}", e), true, total, 0, 0, 0);
             }
             self.hosts_state.undo_stack.clear();
             self.update_last_modified();
             self.rename_aliases(&result.renames);
         }
+        log::debug!(
+            "[purple] sync applied: provider={provider} added={} updated={} unchanged={} stale={} renames={}",
+            result.added,
+            result.updated,
+            result.unchanged,
+            result.stale,
+            result.renames.len()
+        );
         let name = crate::providers::provider_display_name(provider);
         let mut msg = format!(
             "Synced {}: added {}, updated {}, unchanged {}",
@@ -659,7 +685,7 @@ pub fn migrate_renames_persistent_state(
         let mut recents = crate::app::jump::load_recents(paths);
         if crate::app::jump::rename_host_recent(&mut recents, old_alias, new_alias) {
             if let Err(e) = crate::app::jump::save_recents(&recents, paths) {
-                log::warn!("[config] failed to save recents after cli sync rename: {e}");
+                log::warn!("[purple] failed to save recents after cli sync rename: {e}");
             }
         }
 

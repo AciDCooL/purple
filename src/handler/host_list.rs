@@ -449,7 +449,7 @@ pub(super) fn handle_main_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Se
             }
         }
         KeyCode::Char(':') => {
-            log::debug!("jump: opened from host list");
+            log::debug!("[purple] jump: opened from host list");
             app.open_jump(crate::app::JumpMode::Hosts);
         }
         KeyCode::Char('F') => actions::open_file_browser(app, events_tx),

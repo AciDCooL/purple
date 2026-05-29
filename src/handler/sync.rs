@@ -20,7 +20,7 @@ pub fn spawn_provider_sync(
     let section_clone = section.clone();
     let tx_fallback = tx.clone();
     let name_fallback = name.clone();
-    log::debug!("Spawning provider sync thread: {name}");
+    log::debug!("[purple] Spawning provider sync thread: {name}");
     if let Err(e) = std::thread::Builder::new()
         .name(format!("sync-{}", name))
         .spawn(move || {
@@ -35,7 +35,7 @@ pub fn spawn_provider_sync(
                     return;
                 }
             };
-            info!("Provider sync started: {name}");
+            info!("[external] Provider sync started: {name}");
             let progress_tx = tx.clone();
             let progress_name = name.clone();
             let progress = move |msg: &str| {
@@ -49,7 +49,7 @@ pub fn spawn_provider_sync(
                     if hosts.is_empty() {
                         warn!("[config] Provider sync returned 0 hosts: {name} (check API token permissions)");
                     } else {
-                        info!("Provider sync completed: {name}, {} hosts found", hosts.len());
+                        info!("[external] Provider sync completed: {name}, {} hosts found", hosts.len());
                     }
                     let _ = tx.send(AppEvent::SyncComplete {
                         provider: name,

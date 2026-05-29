@@ -214,6 +214,7 @@ fn picker_key(ctx: &mut SnippetCtx, key: KeyEvent, events_tx: &mpsc::Sender<AppE
                                 .snippet_picker_state_mut()
                                 .select(Some(ctx.snippets.store().snippets.len() - 1));
                         }
+                        debug!("[purple] snippet removed: {}", removed.name);
                         ctx.notify(crate::messages::snippet_removed(&removed.name));
                     }
                 }
@@ -844,6 +845,7 @@ fn submit_snippet_form(ctx: &mut SnippetCtx, target_aliases: &[String], editing:
         .position(|s| s.name == name);
     ctx.ui.snippet_picker_state_mut().select(new_idx);
 
+    debug!("[purple] snippet saved: {name} (new={is_new})");
     if is_new {
         ctx.notify(crate::messages::snippet_added(&name));
     } else {

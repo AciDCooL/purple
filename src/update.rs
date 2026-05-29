@@ -195,12 +195,12 @@ pub fn spawn_version_check(
     let _ = std::thread::Builder::new()
         .name("version-check".to_string())
         .spawn(move || {
-            debug!("Version check started");
+            debug!("[external] Version check started");
             // Check cache first — skip API call if fresh result exists
             match read_cached_version(env.paths()) {
                 Some(Some(cached)) => {
                     debug!(
-                        "Version check: current={} latest={}",
+                        "[external] Version check: current={} latest={}",
                         current_version(),
                         cached.version
                     );
@@ -224,7 +224,10 @@ pub fn spawn_version_check(
             match check_latest_release(&agent) {
                 Ok(info) => {
                     let current = current_version();
-                    debug!("Version check: current={current} latest={}", info.version);
+                    debug!(
+                        "[external] Version check: current={current} latest={}",
+                        info.version
+                    );
                     let headline = extract_headline(&info.notes);
                     write_version_cache(&info.version, headline.as_deref(), env.paths());
                     if is_newer(current, &info.version) {

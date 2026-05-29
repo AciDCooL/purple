@@ -63,9 +63,11 @@ fn tag_input_key(ctx: &mut TagInputCtx, key: KeyEvent, selected: Option<&HostEnt
                     if let Err(e) = ctx.hosts.ssh_config().write() {
                         // Restore old tags on write failure
                         let _ = ctx.hosts.ssh_config_mut().set_host_tags(&alias, &old_tags);
+                        log::warn!("[config] failed to save host tags: alias={alias}: {e}");
                         ctx.notify_error(crate::messages::failed_to_save(&e));
                     } else {
                         let count = tags.len();
+                        log::debug!("[purple] host tags updated: alias={alias} tags={count}");
                         // update_last_modified, reload_hosts and
                         // select_host_by_alias touch most of App and must run
                         // in this order (select re-selects in the reloaded

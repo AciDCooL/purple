@@ -420,7 +420,7 @@ pub fn sign_certificate(
     crate::fs_util::atomic_write(&cert_dest, signed_key.as_bytes())
         .with_context(|| crate::messages::vault_write_cert_failed(&cert_dest.display()))?;
 
-    info!("Vault SSH certificate signed for {}", alias);
+    info!("[external] Vault SSH certificate signed for {}", alias);
     Ok(SignResult {
         cert_path: cert_dest,
     })
@@ -618,7 +618,7 @@ pub fn ensure_cert(
 
     if !needs_renewal(&status) {
         info!(
-            "Vault SSH certificate cache hit: alias={} role={} path={}",
+            "[purple] Vault SSH certificate cache hit: alias={} role={} path={}",
             alias,
             role,
             check_path.display()
@@ -627,7 +627,7 @@ pub fn ensure_cert(
     }
 
     log::debug!(
-        "Vault SSH certificate cache miss: alias={} role={} status={:?} -> signing",
+        "[purple] Vault SSH certificate cache miss: alias={} role={} status={:?} -> signing",
         alias,
         role,
         status

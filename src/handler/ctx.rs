@@ -89,7 +89,7 @@ pub(super) trait Nav {
         let current = self.screen_mut();
         if *current != new {
             log::debug!(
-                "screen: {} → {}",
+                "[purple] screen: {} → {}",
                 current.variant_name(),
                 new.variant_name()
             );
@@ -105,7 +105,7 @@ pub(super) trait Nav {
         if matches!(*current, Screen::Help { .. }) {
             return;
         }
-        log::debug!("screen: {} → Help", current.variant_name());
+        log::debug!("[purple] screen: {} → Help", current.variant_name());
         let old = std::mem::replace(current, Screen::HostList);
         *current = Screen::Help {
             return_screen: Box::new(old),
@@ -122,7 +122,7 @@ pub(super) trait Nav {
             };
             std::mem::replace(&mut **return_screen, Screen::HostList)
         };
-        log::debug!("screen: Help → {}", returned.variant_name());
+        log::debug!("[purple] screen: Help → {}", returned.variant_name());
         *self.screen_mut() = returned;
     }
 }
@@ -148,7 +148,7 @@ pub(super) trait Notify {
             sticky: false,
             created_at: std::time::Instant::now(),
         };
-        log::debug!("toast <- Warning: {}", msg.text);
+        log::debug!("[purple] toast <- Warning: {}", msg.text);
         self.status_mut().push_toast(msg);
     }
 }

@@ -166,6 +166,9 @@ jobs:
       - name: Keybinding invariants
         run: ./scripts/check-keybindings.sh
 
+      - name: Conventions (fault-domain log tags, atomic writes, em-dashes)
+        run: ./scripts/check-conventions.sh
+
   smoke-tui:
     name: TUI smoke test
     runs-on: ubuntu-22.04

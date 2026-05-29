@@ -829,7 +829,7 @@ pub fn handle_tunnel_command(mut config: SshConfigFile, command: TunnelCommands)
                 alias
             );
             if let Err(e) = config.write() {
-                log::warn!("[config] cli tunnel add: write failed: {}", e);
+                log::warn!("[purple] cli tunnel add: write failed: {}", e);
                 eprintln!("{}", crate::messages::cli::save_config_failed(&e));
                 std::process::exit(1);
             }
@@ -869,7 +869,7 @@ pub fn handle_tunnel_command(mut config: SshConfigFile, command: TunnelCommands)
                 alias
             );
             if let Err(e) = config.write() {
-                log::warn!("[config] cli tunnel remove: write failed: {}", e);
+                log::warn!("[purple] cli tunnel remove: write failed: {}", e);
                 eprintln!("{}", crate::messages::cli::save_config_failed(&e));
                 std::process::exit(1);
             }

@@ -20,7 +20,7 @@ impl App {
     pub fn set_screen(&mut self, screen: Screen) {
         if self.screen != screen {
             log::debug!(
-                "screen: {} → {}",
+                "[purple] screen: {} → {}",
                 self.screen.variant_name(),
                 screen.variant_name()
             );
@@ -35,7 +35,7 @@ impl App {
         if matches!(self.screen, Screen::Help { .. }) {
             return;
         }
-        log::debug!("screen: {} → Help", self.screen.variant_name());
+        log::debug!("[purple] screen: {} → Help", self.screen.variant_name());
         let old = std::mem::replace(&mut self.screen, Screen::HostList);
         self.screen = Screen::Help {
             return_screen: Box::new(old),
@@ -52,7 +52,7 @@ impl App {
             };
             std::mem::replace(&mut **return_screen, Screen::HostList)
         };
-        log::debug!("screen: Help → {}", returned.variant_name());
+        log::debug!("[purple] screen: Help → {}", returned.variant_name());
         self.screen = returned;
     }
 

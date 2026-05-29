@@ -115,15 +115,15 @@ pub fn handle(env: &crate::runtime::env::Env) -> Result<()> {
     let marker = marker_path(env.paths(), &resolved_alias);
     if let Some(marker_path) = &marker {
         if is_recent_marker(marker_path) {
-            debug!("Askpass retry detected for {resolved_alias}");
+            debug!("[purple] Askpass retry detected for {resolved_alias}");
             let _ = std::fs::remove_file(marker_path);
             std::process::exit(1);
         }
         if let Err(e) = std::fs::create_dir_all(marker_path.parent().unwrap()) {
-            debug!("[config] Failed to create askpass marker directory: {e}");
+            debug!("[purple] Failed to create askpass marker directory: {e}");
         }
         if let Err(e) = crate::fs_util::atomic_write(marker_path, b"") {
-            debug!("[config] Failed to write askpass marker: {e}");
+            debug!("[purple] Failed to write askpass marker: {e}");
         }
     }
 
@@ -134,12 +134,12 @@ pub fn handle(env: &crate::runtime::env::Env) -> Result<()> {
         None => std::process::exit(1),
     };
 
-    debug!("Askpass invoked for alias={resolved_alias} source={source}");
+    debug!("[purple] Askpass invoked for alias={resolved_alias} source={source}");
 
     let hostname = find_hostname(&config, &resolved_alias);
     match retrieve_password(env, &source, &resolved_alias, &hostname) {
         Ok(password) => {
-            debug!("Askpass retrieved password for {resolved_alias} via {source}");
+            debug!("[purple] Askpass retrieved password for {resolved_alias} via {source}");
             print!("{}", password);
             Ok(())
         }
@@ -746,7 +746,7 @@ pub fn proton_status(env: &crate::runtime::env::Env) -> ProtonStatus {
         Ok(out) if out.status.success() => ProtonStatus::Authenticated,
         Ok(_) => ProtonStatus::NotAuthenticated,
     };
-    debug!("Proton Pass status: {status:?}");
+    debug!("[external] Proton Pass status: {status:?}");
     status
 }
 
@@ -766,10 +766,10 @@ pub fn proton_login(env: &crate::runtime::env::Env, pat: &str) -> Result<()> {
         .context("Failed to run Proton Pass CLI (pass-cli)")?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        debug!("Proton Pass login failed: {}", stderr.trim());
+        debug!("[external] Proton Pass login failed: {}", stderr.trim());
         anyhow::bail!("{}", stderr.trim());
     }
-    debug!("Proton Pass login succeeded");
+    debug!("[external] Proton Pass login succeeded");
     Ok(())
 }
 
@@ -826,7 +826,7 @@ fn retrieve_from_proton_pass(env: &crate::runtime::env::Env, spec: &str) -> Resu
         warn!("[external] Proton Pass returned empty secret");
         anyhow::bail!("Proton Pass returned empty secret");
     }
-    debug!("Proton Pass lookup succeeded");
+    debug!("[external] Proton Pass lookup succeeded");
     Ok(value)
 }
 

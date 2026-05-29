@@ -18,7 +18,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
 
     match key.code {
         KeyCode::Esc => {
-            log::debug!("jump: closed via Esc");
+            log::debug!("[purple] jump: closed via Esc");
             app.close_jump();
         }
         KeyCode::Down => {
@@ -47,7 +47,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 .as_ref()
                 .and_then(|p| p.visible_hits().get(p.selected()).cloned());
             if let Some(hit) = chosen {
-                log::debug!("jump: dispatching {:?} via Enter", hit.identity());
+                log::debug!("[purple] jump: dispatching {:?} via Enter", hit.identity());
                 app.record_jump_hit(&hit);
                 let mode = app
                     .jump
@@ -65,7 +65,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
                 .map(|p| p.query().is_empty())
                 .unwrap_or(true);
             if close {
-                log::debug!("jump: closed via Backspace on empty query");
+                log::debug!("[purple] jump: closed via Backspace on empty query");
                 app.close_jump();
             } else if let Some(p) = app.jump.as_mut() {
                 p.pop_query();

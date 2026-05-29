@@ -154,7 +154,7 @@ fn keys_key(ctx: &mut KeysCtx, key: KeyEvent, push_in_flight: bool) {
             log::debug!("[purple] keys: opened search");
         }
         KeyCode::Char(':') => {
-            log::debug!("jump: opened from keys overview");
+            log::debug!("[purple] jump: opened from keys overview");
             ctx.defer(|app| app.open_jump(crate::app::JumpMode::Keys));
         }
         KeyCode::Char('n') => {

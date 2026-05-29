@@ -80,7 +80,7 @@ impl StatusCenter {
         if msg.is_toast() {
             self.push_toast(msg);
         } else {
-            log::debug!("footer <- {:?}: {}", msg.class, msg.text);
+            log::debug!("[purple] footer <- {:?}: {}", msg.class, msg.text);
             self.status = Some(msg);
         }
     }
@@ -92,7 +92,7 @@ impl StatusCenter {
     /// background hint that held the slot. The queue is capped at
     /// `TOAST_QUEUE_MAX` to bound memory.
     pub(crate) fn push_toast(&mut self, msg: StatusMessage) {
-        log::debug!("toast <- {:?}: {}", msg.class, msg.text);
+        log::debug!("[purple] toast <- {:?}: {}", msg.class, msg.text);
         if msg.class == MessageClass::Success {
             self.toast = Some(msg);
             self.toast_queue.clear();
@@ -106,7 +106,7 @@ impl StatusCenter {
         if active_blocks {
             if self.toast_queue.len() >= crate::ui::design::TOAST_QUEUE_MAX {
                 if let Some(dropped) = self.toast_queue.front() {
-                    log::debug!("toast queue full, dropping: {}", dropped.text);
+                    log::debug!("[purple] toast queue full, dropping: {}", dropped.text);
                 }
                 self.toast_queue.pop_front();
             }
@@ -114,7 +114,7 @@ impl StatusCenter {
         } else {
             if let Some(ref dropped) = self.toast {
                 log::debug!(
-                    "toast promoted: replacing Success '{}' with {:?}",
+                    "[purple] toast promoted: replacing Success '{}' with {:?}",
                     dropped.text,
                     msg.class
                 );
@@ -126,7 +126,7 @@ impl StatusCenter {
     /// Set an Info-class status message that displays in the footer only.
     pub fn set_info_status(&mut self, text: impl Into<String>) {
         let text = text.into();
-        log::debug!("footer <- Info: {}", text);
+        log::debug!("[purple] footer <- Info: {}", text);
         self.status = Some(StatusMessage {
             text,
             class: MessageClass::Info,
@@ -160,7 +160,7 @@ impl StatusCenter {
             );
             return;
         }
-        log::debug!("footer <- Info: {}", text);
+        log::debug!("[purple] footer <- Info: {}", text);
         self.status = Some(StatusMessage {
             text,
             class: MessageClass::Info,
@@ -181,7 +181,7 @@ impl StatusCenter {
         } else {
             MessageClass::Progress
         };
-        log::debug!("footer <- sticky {:?}: {}", class, text);
+        log::debug!("[purple] footer <- sticky {:?}: {}", class, text);
         self.status = Some(StatusMessage {
             text,
             class,
@@ -197,7 +197,7 @@ impl StatusCenter {
     /// variant is `clear_sticky_status`.
     pub(crate) fn clear_status(&mut self) {
         if let Some(s) = &self.status {
-            log::debug!("footer <- clear: {}", s.text);
+            log::debug!("[purple] footer <- clear: {}", s.text);
         }
         self.status = None;
     }
@@ -209,7 +209,7 @@ impl StatusCenter {
     pub fn clear_sticky_status(&mut self) {
         if let Some(s) = &self.status {
             if s.sticky {
-                log::debug!("footer <- clear sticky: {}", s.text);
+                log::debug!("[purple] footer <- clear sticky: {}", s.text);
                 self.status = None;
             }
         }
@@ -226,7 +226,7 @@ impl StatusCenter {
             let timeout_ms = toast.timeout_ms();
             if timeout_ms != u64::MAX && toast.created_at.elapsed().as_millis() as u64 > timeout_ms
             {
-                log::debug!("toast expired: {}", toast.text);
+                log::debug!("[purple] toast expired: {}", toast.text);
                 self.toast = self.toast_queue.pop_front();
             }
         }

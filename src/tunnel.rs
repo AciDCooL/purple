@@ -391,7 +391,7 @@ pub fn start_tunnel(
     }
 
     debug!(
-        "Tunnel SSH command: ssh -v -N -F {} -- {alias}",
+        "[external] Tunnel SSH command: ssh -v -N -F {} -- {alias}",
         config_path.display()
     );
 

@@ -69,7 +69,7 @@ fn refresh_stale(
         return;
     }
     log::debug!(
-        "stale-refresh: marking {} Checking and probing {}:{}",
+        "[external] stale-refresh: marking {} Checking and probing {}:{}",
         ping_alias,
         hostname,
         port

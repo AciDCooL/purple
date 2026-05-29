@@ -3343,6 +3343,79 @@ fn test_edit_host_sets_vault_ssh_and_certificate_file() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn add_host_from_form_logs_what_changed() {
+    let mut app = make_app("");
+    app.forms.host = HostForm::new();
+    app.forms.host.alias = "loghost".to_string();
+    app.forms.host.hostname = "10.0.0.9".to_string();
+    let records = crate::logging::capture::capture(|| {
+        let result = app.add_host_from_form();
+        assert!(result.is_ok(), "add failed: {:?}", result);
+    });
+    assert!(
+        crate::logging::capture::has(
+            &records,
+            log::Level::Debug,
+            "[purple] host added: alias=loghost"
+        ),
+        "expected host-added debug log, got: {:?}",
+        records
+    );
+}
+
+#[test]
+fn add_host_from_form_logs_save_failure() {
+    let mut app = make_app("");
+    // Point the config at a missing parent dir so the atomic write fails.
+    let bad = app
+        .hosts_state
+        .ssh_config
+        .path
+        .parent()
+        .unwrap()
+        .join("missing_dir")
+        .join("config");
+    app.hosts_state.ssh_config.path = bad;
+    app.forms.host = HostForm::new();
+    app.forms.host.alias = "loghost".to_string();
+    app.forms.host.hostname = "10.0.0.9".to_string();
+    let records = crate::logging::capture::capture(|| {
+        let result = app.add_host_from_form();
+        assert!(result.is_err(), "expected save failure");
+    });
+    assert!(
+        crate::logging::capture::has(
+            &records,
+            log::Level::Warn,
+            "[config] failed to save new host: alias=loghost"
+        ),
+        "expected save-failure warn log, got: {:?}",
+        records
+    );
+}
+
+#[test]
+fn edit_host_from_form_logs_what_changed() {
+    let mut app = make_app("Host myserver\n  HostName 10.0.0.1\n");
+    let host = app.hosts_state.list[0].clone();
+    app.forms.host = HostForm::from_entry(&host, Default::default());
+    app.forms.host.user = "admin".to_string();
+    let records = crate::logging::capture::capture(|| {
+        let result = app.edit_host_from_form("myserver");
+        assert!(result.is_ok(), "edit failed: {:?}", result);
+    });
+    assert!(
+        crate::logging::capture::has(
+            &records,
+            log::Level::Debug,
+            "[purple] host edited: alias=myserver"
+        ),
+        "expected host-edited debug log, got: {:?}",
+        records
+    );
+}
+
 /// Regression: editing a host that already has a user-set custom
 /// CertificateFile must NOT overwrite that path with purple's default
 /// when the host has a Vault SSH role. The whole point of the

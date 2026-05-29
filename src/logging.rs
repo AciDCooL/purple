@@ -7,9 +7,10 @@ use simplelog::{
     ColorChoice, CombinedLogger, ConfigBuilder, SharedLogger, TermLogger, TerminalMode, WriteLogger,
 };
 
-// Fault domain convention:
-// - error! and warn! statements carry a prefix: [external], [config], or [purple]
-// - info! and debug! are operational flow markers without prefixes
+// Fault domain convention: every log statement carries a prefix.
+// - [external] = an external tool, binary, network or remote host failed.
+// - [config]   = a user config, parse or user-data problem.
+// - [purple]   = our own internal state, flow or invariant.
 
 const MAX_LOG_SIZE: u64 = 5 * 1024 * 1024; // 5MB
 
@@ -256,6 +257,61 @@ pub fn detect_ssh_version() -> String {
                 .unwrap_or_else(|_| "unknown".to_string())
         }
         _ => "unknown".to_string(),
+    }
+}
+
+/// Thread-local log capture for tests. The global logger writes records into a
+/// per-thread sink that is only active inside `capture`, so parallel test
+/// threads never see each other's records and no global lock is needed.
+#[cfg(test)]
+pub(crate) mod capture {
+    use std::cell::RefCell;
+    use std::sync::Once;
+
+    use log::{Level, Log, Metadata, Record};
+
+    thread_local! {
+        static SINK: RefCell<Option<Vec<(Level, String)>>> = const { RefCell::new(None) };
+    }
+
+    struct CaptureLogger;
+
+    impl Log for CaptureLogger {
+        fn enabled(&self, _: &Metadata) -> bool {
+            true
+        }
+        fn log(&self, record: &Record) {
+            SINK.with(|s| {
+                if let Some(buf) = s.borrow_mut().as_mut() {
+                    buf.push((record.level(), record.args().to_string()));
+                }
+            });
+        }
+        fn flush(&self) {}
+    }
+
+    static LOGGER: CaptureLogger = CaptureLogger;
+    static INSTALL: Once = Once::new();
+
+    /// Run `f` and return every log record it emitted on this thread.
+    pub(crate) fn capture<F: FnOnce()>(f: F) -> Vec<(Level, String)> {
+        INSTALL.call_once(|| {
+            // No production test installs a logger, so this wins. If one ever
+            // does, our per-thread sink simply stays empty (set_logger errors).
+            if log::set_logger(&LOGGER).is_ok() {
+                log::set_max_level(log::LevelFilter::Trace);
+            }
+        });
+        SINK.with(|s| *s.borrow_mut() = Some(Vec::new()));
+        f();
+        SINK.with(|s| s.borrow_mut().take().unwrap_or_default())
+    }
+
+    /// True when any captured record matches `level` and contains `needle`.
+    pub(crate) fn has(records: &[(Level, String)], level: Level, needle: &str) -> bool {
+        records
+            .iter()
+            .any(|(lvl, msg)| *lvl == level && msg.contains(needle))
     }
 }
 

@@ -365,7 +365,7 @@ pub fn ensure_vault_cert_for_alias(
         ensure_vault_ssh_chain_if_needed(env, alias, config_path, &provider_config, &mut config);
     match &result {
         Some((msg, true)) => warn!("[external] Vault SSH renewal for '{alias}': {msg}"),
-        Some((msg, false)) => debug!("Vault SSH renewal for '{alias}': {msg}"),
+        Some((msg, false)) => debug!("[external] Vault SSH renewal for '{alias}': {msg}"),
         None => {}
     }
     result
@@ -464,40 +464,44 @@ pub fn ensure_proton_login_with<S, P>(
     }
     match status_fn() {
         askpass::ProtonStatus::Authenticated => {
-            debug!("Proton Pass pre-flight: already authenticated");
+            debug!("[external] Proton Pass pre-flight: already authenticated");
         }
         askpass::ProtonStatus::NotInstalled => {
-            debug!("Proton Pass pre-flight: pass-cli not installed");
+            debug!("[config] Proton Pass pre-flight: pass-cli not installed");
             eprintln!("{}", crate::messages::askpass::PROTON_NOT_FOUND);
         }
         askpass::ProtonStatus::NotAuthenticated => {
-            debug!("Proton Pass pre-flight: not authenticated, prompting for PAT");
+            debug!("[external] Proton Pass pre-flight: not authenticated, prompting for PAT");
             for attempt in 0..2 {
                 let pat = match prompt_pat() {
                     Ok(Some(p)) if !p.is_empty() => p,
                     Ok(Some(_)) => {
-                        debug!("Proton Pass pre-flight: empty PAT, aborting");
+                        debug!("[external] Proton Pass pre-flight: empty PAT, aborting");
                         eprintln!("{}", crate::messages::askpass::EMPTY_PASSWORD);
                         return;
                     }
                     Ok(None) => {
-                        debug!("Proton Pass pre-flight: PAT prompt dismissed (Esc/EOF)");
+                        debug!("[external] Proton Pass pre-flight: PAT prompt dismissed (Esc/EOF)");
                         return;
                     }
                     Err(e) => {
-                        warn!("[config] Proton Pass PAT prompt read failed: {e}");
+                        warn!("[external] Proton Pass PAT prompt read failed: {e}");
                         eprintln!("{}", crate::messages::askpass::read_failed(&e));
                         return;
                     }
                 };
                 match askpass::proton_login(env, &pat) {
                     Ok(()) => {
-                        debug!("Proton Pass pre-flight: login succeeded on attempt {attempt}");
+                        debug!(
+                            "[external] Proton Pass pre-flight: login succeeded on attempt {attempt}"
+                        );
                         eprintln!("{}", crate::messages::askpass::PROTON_LOGIN_SUCCESS);
                         return;
                     }
                     Err(e) => {
-                        debug!("Proton Pass pre-flight: login attempt {attempt} failed: {e}");
+                        debug!(
+                            "[external] Proton Pass pre-flight: login attempt {attempt} failed: {e}"
+                        );
                         if attempt == 0 {
                             eprintln!(
                                 "{}",

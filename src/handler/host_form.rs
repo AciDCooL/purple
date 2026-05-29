@@ -209,7 +209,7 @@ fn smart_paste(forms: &mut FormState, status: &mut StatusCenter) {
             forms.host_mut().apply_smart_paste(parsed, clean_alias);
             status.notify(crate::messages::SMART_PARSED);
             log::debug!(
-                "host_form: smart-paste parsed alias={} host={} user={} port={}",
+                "[purple] host_form: smart-paste parsed alias={} host={} user={} port={}",
                 forms.host().alias,
                 forms.host().hostname,
                 forms.host().user,
@@ -238,7 +238,7 @@ fn smart_paste(forms: &mut FormState, status: &mut StatusCenter) {
         // stays unchanged so the user keeps full control over the alias.
         forms.host_mut().hostname = trimmed.to_string();
         status.notify(crate::messages::LOOKS_LIKE_ADDRESS);
-        log::debug!("host_form: auto-suggest hostname={trimmed}");
+        log::debug!("[purple] host_form: auto-suggest hostname={trimmed}");
     }
 }
 

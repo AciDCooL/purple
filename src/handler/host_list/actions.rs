@@ -396,6 +396,7 @@ pub(super) fn undo_last(app: &mut App) {
             let count = snapshot.len();
             app.update_last_modified();
             app.reload_hosts();
+            log::debug!("[purple] undo: restored tags on {count} host(s)");
             app.notify(crate::messages::restored_tags(count));
         }
     } else if let Some(deleted) = app.hosts_state.pop_undo() {
@@ -424,6 +425,7 @@ pub(super) fn undo_last(app: &mut App) {
             // Restored host has no container_cache entry, queue an initial
             // fetch for THIS alias only.
             app.container_state.queue_fetch(alias.clone());
+            log::debug!("[purple] undo: restored host {alias}");
             app.notify(crate::messages::host_restored(&alias));
         }
     } else {

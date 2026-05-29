@@ -1,3 +1,10 @@
+## 3.20.1 - 2026-05-29
+
+- change: Clearer logs make every issue faster to track down.
+- change: Every logged event in your purple.log now carries a fault-domain tag ([external], [config] or [purple]), so you can grep straight to whether a problem comes from a remote tool, your SSH config or purple itself.
+- change: Routine non-zero exit codes from remote commands no longer show up as errors. The error level is reserved for genuine SSH connection failures, so a real problem stands out instead of drowning in noise.
+- change: Host deletes, provider syncs, undo and container actions now record what changed, so a support log tells the full story.
+
 ## 3.20.0 - 2026-05-28
 
 - feat: Pattern SSH settings, grouped into clear cards.

@@ -36,7 +36,7 @@ pub fn is_in_tmux(_env: &crate::runtime::env::Env) -> bool {
 /// Hosts with a password source therefore keep using the suspend-TUI `connect()`
 /// flow instead.
 pub fn connect_tmux_window(alias: &str, config_path: &Path, has_active_tunnel: bool) -> Result<()> {
-    info!("SSH connection via tmux: {alias}");
+    info!("[external] SSH connection via tmux: {alias}");
 
     let config_str = config_path
         .to_str()
@@ -50,7 +50,7 @@ pub fn connect_tmux_window(alias: &str, config_path: &Path, has_active_tunnel: b
 
     args.extend(["--", alias]);
 
-    debug!("tmux args: {:?}", args);
+    debug!("[external] tmux args: {:?}", args);
 
     let status = Command::new("tmux")
         .args(&args)
@@ -58,7 +58,7 @@ pub fn connect_tmux_window(alias: &str, config_path: &Path, has_active_tunnel: b
         .with_context(|| format!("Failed to launch tmux new-window for '{alias}'"))?;
 
     if status.success() {
-        info!("tmux window created: {alias}");
+        info!("[external] tmux window created: {alias}");
         Ok(())
     } else {
         let code = status.code().unwrap_or(-1);
@@ -138,6 +138,48 @@ impl Drop for SignalMaskGuard {
 ///
 /// `log_label` is interpolated into the started/ended/failed log lines
 /// so a reader can tell host-login from container-exec at a glance.
+///
+/// Exit 255 is ssh's own failure (auth, network, host-key). Any other code is
+/// either a remote-command exit status or a signal-kill (`-1`), both routine.
+pub(crate) fn is_ssh_transport_failure(code: i32) -> bool {
+    code == 255
+}
+
+/// Intended log severity for an ssh exit code. The single source of truth for
+/// the started/ended/failed routing in `spawn_ssh_and_wait` and the MCP
+/// `run_command` tool, so the error-vs-debug decision is testable as data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SshExitClass {
+    /// Exit 0: the command ran and succeeded.
+    Success,
+    /// Exit 255: ssh's own transport failure (auth, network, host-key). Error.
+    TransportFailure,
+    /// Any other non-zero code: the remote command's own status. Routine.
+    RemoteStatus,
+}
+
+pub(crate) fn classify_ssh_exit(code: i32) -> SshExitClass {
+    if code == 0 {
+        SshExitClass::Success
+    } else if is_ssh_transport_failure(code) {
+        SshExitClass::TransportFailure
+    } else {
+        SshExitClass::RemoteStatus
+    }
+}
+
+/// Log level for a failed ssh-backed remote command. Only ssh's own transport
+/// failure (exit 255) is an actionable error; a routine non-zero remote status
+/// is debug noise. Call sites that run a remote command and branch on the exit
+/// code (container list/actions, ...) route their failure log through here so
+/// the error level stays reserved for genuine connection failures.
+pub(crate) fn remote_exit_log_level(code: i32) -> log::Level {
+    match classify_ssh_exit(code) {
+        SshExitClass::TransportFailure => log::Level::Error,
+        SshExitClass::Success | SshExitClass::RemoteStatus => log::Level::Debug,
+    }
+}
+
 fn spawn_ssh_and_wait(mut cmd: Command, alias: &str, log_label: &str) -> Result<ConnectResult> {
     cmd.stdin(std::process::Stdio::inherit())
         .stdout(std::process::Stdio::inherit())
@@ -197,18 +239,26 @@ fn spawn_ssh_and_wait(mut cmd: Command, alias: &str, log_label: &str) -> Result<
     });
 
     let code = status.code().unwrap_or(-1);
-    if code == 0 {
-        info!("SSH {} ended: {alias} (exit 0)", log_label);
-    } else {
-        error!("[external] SSH {} failed: {alias} (exit {code})", log_label);
-        if !stderr_output.is_empty() {
-            let stderr = stderr_output.trim();
-            let lower = stderr.to_lowercase();
-            if lower.contains("are too open") || lower.contains("bad permissions") {
-                warn!("[config] SSH key permission issue: {stderr}");
-            } else {
-                debug!("[external] SSH stderr: {stderr}");
+    match classify_ssh_exit(code) {
+        SshExitClass::Success => {
+            info!("[external] SSH {} ended: {alias} (exit 0)", log_label);
+        }
+        SshExitClass::TransportFailure => {
+            error!("[external] SSH {} failed: {alias} (exit {code})", log_label);
+            if !stderr_output.is_empty() {
+                let stderr = stderr_output.trim();
+                let lower = stderr.to_lowercase();
+                if lower.contains("are too open") || lower.contains("bad permissions") {
+                    warn!("[config] SSH key permission issue: {stderr}");
+                } else {
+                    debug!("[external] SSH stderr: {stderr}");
+                }
             }
+        }
+        SshExitClass::RemoteStatus => {
+            // Remote-command status or a signal-kill: routine flow, not a
+            // must-act error.
+            debug!("[external] SSH {} ended: {alias} (exit {code})", log_label);
         }
     }
 
@@ -231,8 +281,11 @@ pub fn connect(
     bw_session: Option<&str>,
     has_active_tunnel: bool,
 ) -> Result<ConnectResult> {
-    info!("SSH connection started: {alias}");
-    debug!("SSH command: ssh -F {} -- {alias}", config_path.display());
+    info!("[external] SSH connection started: {alias}");
+    debug!(
+        "[external] SSH command: ssh -F {} -- {alias}",
+        config_path.display()
+    );
 
     let mut cmd = Command::new("ssh");
     cmd.arg("-F").arg(config_path);
@@ -277,9 +330,9 @@ pub fn connect_with_remote_command(
     has_active_tunnel: bool,
     remote_command: &str,
 ) -> Result<ConnectResult> {
-    info!("SSH exec started: {alias}");
+    info!("[external] SSH exec started: {alias}");
     debug!(
-        "SSH command: ssh -F {} -t -- {alias} {}",
+        "[external] SSH command: ssh -F {} -t -- {alias} {}",
         config_path.display(),
         remote_command
     );
@@ -321,7 +374,7 @@ pub fn connect_tmux_window_with_remote_command(
     remote_command: &str,
     window_label: &str,
 ) -> Result<()> {
-    info!("SSH exec via tmux: {alias}");
+    info!("[external] SSH exec via tmux: {alias}");
 
     // Renew the Vault SSH cert before exec'ing into a container so an
     // expired cert is refreshed, mirroring the interactive connect path.
@@ -349,7 +402,7 @@ pub fn connect_tmux_window_with_remote_command(
 
     args.extend(["--", alias, remote_command]);
 
-    debug!("tmux exec args: {:?}", args);
+    debug!("[external] tmux exec args: {:?}", args);
 
     let status = Command::new("tmux")
         .args(&args)
@@ -357,7 +410,7 @@ pub fn connect_tmux_window_with_remote_command(
         .with_context(|| format!("Failed to launch tmux exec window for '{alias}'"))?;
 
     if status.success() {
-        info!("tmux exec window created: {alias}");
+        info!("[external] tmux exec window created: {alias}");
         Ok(())
     } else {
         let code = status.code().unwrap_or(-1);
@@ -443,6 +496,49 @@ pub fn parse_host_key_error(stderr: &str) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transport_failure_is_only_code_255() {
+        assert!(is_ssh_transport_failure(255));
+        // Remote-command passthrough statuses are not ssh transport failures.
+        assert!(!is_ssh_transport_failure(0));
+        assert!(!is_ssh_transport_failure(1));
+        assert!(!is_ssh_transport_failure(2));
+        assert!(!is_ssh_transport_failure(254));
+        assert!(!is_ssh_transport_failure(-1));
+    }
+
+    #[test]
+    fn classify_ssh_exit_routes_only_255_to_error() {
+        // Pins the error-vs-debug routing shared by spawn_ssh_and_wait and the
+        // MCP run_command tool. A revert to "any non-zero is an error" fails here.
+        assert_eq!(classify_ssh_exit(0), SshExitClass::Success);
+        assert_eq!(classify_ssh_exit(255), SshExitClass::TransportFailure);
+        // Routine remote-command statuses stay out of the error arm.
+        assert_eq!(classify_ssh_exit(1), SshExitClass::RemoteStatus);
+        assert_eq!(classify_ssh_exit(2), SshExitClass::RemoteStatus);
+        assert_eq!(classify_ssh_exit(126), SshExitClass::RemoteStatus);
+        assert_eq!(classify_ssh_exit(127), SshExitClass::RemoteStatus);
+        assert_eq!(classify_ssh_exit(254), SshExitClass::RemoteStatus);
+        // Signal-killed ssh (status.code() == None -> -1) is routine teardown.
+        assert_eq!(classify_ssh_exit(-1), SshExitClass::RemoteStatus);
+    }
+
+    #[test]
+    fn remote_exit_log_level_reserves_error_for_transport_failure() {
+        // Pins the level every remote-command call site (container list/actions,
+        // ...) uses for a failed exit. Only ssh's 255 transport failure is an
+        // error; routine remote statuses are debug. A revert to "non-zero is an
+        // error" fails here.
+        assert_eq!(remote_exit_log_level(255), log::Level::Error);
+        for code in [0, 1, 2, 126, 127, 130, 254, -1] {
+            assert_eq!(
+                remote_exit_log_level(code),
+                log::Level::Debug,
+                "exit {code} must not log at error level"
+            );
+        }
+    }
 
     #[test]
     fn connect_fails_with_nonexistent_config() {

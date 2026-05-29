@@ -267,6 +267,13 @@ fn execute_purge_stale(app: &mut App, provider: Option<&str>) {
     app.hosts_state.clear_undo();
     app.update_last_modified();
     app.reload_hosts();
+    log::debug!(
+        "[purple] purged {} stale host(s){}",
+        count,
+        provider
+            .map(|p| format!(" provider={p}"))
+            .unwrap_or_default()
+    );
     let msg = if let Some(prov) = provider {
         let display = crate::providers::provider_display_name(prov);
         format!(
@@ -325,6 +332,10 @@ pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
                     }
                     app.update_last_modified();
                     app.reload_hosts();
+                    log::debug!(
+                        "[purple] host alias stripped: alias={alias}, {} sibling(s) kept",
+                        siblings.len()
+                    );
                     app.notify(crate::messages::siblings_stripped(&alias, siblings.len()));
                 }
             } else if let Some((element, position)) = app
@@ -374,6 +385,7 @@ pub(super) fn handle_delete_key(app: &mut App, key: KeyEvent) {
                     }
                     app.update_last_modified();
                     app.reload_hosts();
+                    log::debug!("[purple] host deleted: alias={alias} (undoable)");
                     if let Some(warning) = cert_cleanup_warning {
                         app.notify_error(warning);
                     } else {
@@ -985,7 +997,7 @@ fn start_key_push(
         Ok(s) => s,
         Err(crate::key_push::PubkeyValidationError::TooLarge(n)) => {
             log::warn!(
-                "[purple] key_push: pubkey too large path={} bytes={}",
+                "[config] key_push: pubkey too large path={} bytes={}",
                 pub_path.display(),
                 n
             );
@@ -997,7 +1009,7 @@ fn start_key_push(
         }
         Err(crate::key_push::PubkeyValidationError::NotARegularFile) => {
             log::warn!(
-                "[purple] key_push: pubkey not a regular file path={}",
+                "[config] key_push: pubkey not a regular file path={}",
                 pub_path.display()
             );
             app.notify_error(crate::messages::key_push_pubkey_not_regular(&key_info.name));
@@ -1028,7 +1040,7 @@ fn start_key_push(
                 _ => "unexpected format",
             };
             log::warn!(
-                "[purple] key_push: invalid pubkey path={} err={:?}",
+                "[config] key_push: invalid pubkey path={} err={:?}",
                 pub_path.display(),
                 err
             );

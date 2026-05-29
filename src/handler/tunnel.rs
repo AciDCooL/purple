@@ -132,7 +132,7 @@ impl TunnelCtx<'_> {
             Ok(child) => {
                 for rule in &rules {
                     info!(
-                        "Tunnel started: type={} local={} remote={}:{} alias={alias}",
+                        "[external] Tunnel started: type={} local={} remote={}:{} alias={alias}",
                         rule.tunnel_type.label(),
                         rule.bind_port,
                         rule.remote_host,
@@ -171,14 +171,21 @@ impl TunnelCtx<'_> {
             .ssh_config_mut()
             .remove_forward(alias, key, value)
         {
+            debug!(
+                "[purple] tunnel forward removal skipped: alias={alias} {key} {value} not found"
+            );
             self.notify_warning(crate::messages::TUNNEL_NOT_FOUND);
             return false;
         }
         if let Err(e) = self.hosts.ssh_config().write() {
             self.hosts.set_ssh_config(config_backup);
+            log::warn!(
+                "[config] failed to save tunnel forward removal: alias={alias} {key} {value}: {e}"
+            );
             self.notify_error(crate::messages::failed_to_save(&e));
             return false;
         }
+        debug!("[purple] tunnel forward removed: alias={alias} {key} {value}");
         self.update_last_modified();
         self.reload_hosts();
         true
@@ -498,8 +505,16 @@ fn submit_tunnel_form(ctx: &mut TunnelCtx, alias: &str, editing: Option<usize>) 
         .add_forward(alias, directive_key, &directive_value);
     if let Err(e) = ctx.hosts.ssh_config().write() {
         ctx.hosts.set_ssh_config(config_backup);
+        log::warn!(
+            "[config] failed to save tunnel forward: alias={alias} {directive_key} {directive_value}: {e}"
+        );
         ctx.notify_error(crate::messages::failed_to_save(&e));
         return;
+    }
+    if editing.is_some() {
+        debug!("[purple] tunnel forward edited: alias={alias} {directive_key} {directive_value}");
+    } else {
+        debug!("[purple] tunnel forward added: alias={alias} {directive_key} {directive_value}");
     }
 
     ctx.hosts.clear_undo(); // Clear undo buffer. Positions may have shifted.

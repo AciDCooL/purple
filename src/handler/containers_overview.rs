@@ -937,7 +937,7 @@ pub(super) fn handle_key(app: &mut App, key: KeyEvent, events_tx: &mpsc::Sender<
             }
         }
         KeyCode::Char(':') => {
-            log::debug!("jump: opened from containers overview");
+            log::debug!("[purple] jump: opened from containers overview");
             app.open_jump(JumpMode::Containers);
         }
         KeyCode::Tab => {

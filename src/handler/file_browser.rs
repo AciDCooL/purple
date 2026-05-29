@@ -1,7 +1,7 @@
 use std::sync::mpsc;
 
 use crossterm::event::{KeyCode, KeyEvent};
-use log::{debug, error, info};
+use log::{debug, info};
 
 use super::ctx::{Effectful, Effects, Nav};
 use crate::app::{App, Screen, TunnelState};
@@ -121,7 +121,7 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
                     crate::file_browser::BrowserPane::Remote => "download",
                 };
                 info!(
-                    "SCP transfer started: {direction} {} <-> {alias}:{}",
+                    "[external] SCP transfer started: {direction} {} <-> {alias}:{}",
                     local_path.display(),
                     remote_path
                 );
@@ -131,7 +131,10 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
                 let tx = events_tx.clone();
                 let direction_str = direction.to_string();
                 std::thread::spawn(move || {
-                    debug!("SCP command: scp -F {} ...", config_path.display());
+                    debug!(
+                        "[external] SCP command: scp -F {} ...",
+                        config_path.display()
+                    );
                     let result = crate::file_browser::run_scp(
                         &alias,
                         &config_path,
@@ -143,12 +146,14 @@ fn file_browser_key(ctx: &mut FileBrowserCtx, key: KeyEvent, events_tx: &mpsc::S
                     );
                     let (success, message) = match result {
                         Ok(r) if r.status.success() => {
-                            info!("SCP transfer completed: {direction_str} {alias}");
+                            info!("[external] SCP transfer completed: {direction_str} {alias}");
                             (true, String::new())
                         }
                         Ok(r) => {
+                            // A non-zero scp exit is a routine remote failure
+                            // (file missing, no permission), already logged at
+                            // warn by run_scp; do not re-log it as an error.
                             let code = r.status.code().unwrap_or(1);
-                            error!("[external] SCP transfer failed: {alias} exit={code}");
                             let err = crate::file_browser::filter_ssh_warnings(&r.stderr_output);
                             if !err.is_empty() {
                                 debug!("[external] SCP stderr: {}", err.trim());

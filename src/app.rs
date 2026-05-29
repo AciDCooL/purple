@@ -576,7 +576,7 @@ impl App {
     /// Open the unified jump in the given mode. Loads recents
     /// from disk and seeds the empty-query view. Recomputes hits.
     pub fn open_jump(&mut self, mode: JumpMode) {
-        log::debug!("jump: open mode={:?}", mode);
+        log::debug!("[purple] jump: open mode={:?}", mode);
         let mut state = JumpState::for_mode(mode);
         let recents_file = jump::load_recents(self.env.paths());
         state.recents = self.resolve_recents(&recents_file);
@@ -820,7 +820,7 @@ impl App {
             .unwrap_or(0);
         state.selected = restore_selection(&display, prior_identity.as_ref(), top_display);
         log::debug!(
-            "jump: recompute selected={} of {} hits (top_display={})",
+            "[purple] jump: recompute selected={} of {} hits (top_display={})",
             state.selected,
             state.hits.len(),
             top_display
@@ -889,7 +889,7 @@ impl App {
     /// state, even though `jump::save_recents` only needs `&File`.
     pub fn record_jump_hit(&mut self, hit: &JumpHit) {
         if self.demo_mode {
-            log::debug!("jump: record skipped (demo mode)");
+            log::debug!("[purple] jump: record skipped (demo mode)");
             return;
         }
         let paths = self.env.paths().cloned();
@@ -997,7 +997,7 @@ impl App {
             sticky: false,
             created_at: std::time::Instant::now(),
         };
-        log::debug!("toast <- Warning: {}", msg.text);
+        log::debug!("[purple] toast <- Warning: {}", msg.text);
         self.status_center.push_toast(msg);
     }
 
@@ -1042,7 +1042,7 @@ impl App {
             let timeout_ms = status.timeout_ms();
             if timeout_ms != u64::MAX && status.created_at.elapsed().as_millis() as u64 > timeout_ms
             {
-                log::debug!("footer status expired: {}", status.text);
+                log::debug!("[purple] footer status expired: {}", status.text);
                 self.status_center.status = None;
             }
         }
@@ -1374,7 +1374,7 @@ pub(crate) fn apply_bulk_tags(
     }
 
     log::debug!(
-        "bulk tag apply: {} hosts, +{} -{}, skipped {}",
+        "[purple] bulk tag apply: {} hosts, +{} -{}, skipped {}",
         changed_hosts.len(),
         added,
         removed,

@@ -4220,6 +4220,80 @@ fn test_tunnel_list_d_n_cancels_delete() {
     assert_eq!(app.tunnels.list().len(), 1);
 }
 
+#[test]
+fn test_tunnel_delete_logs_removed_forward() {
+    let mut app = make_app("Host test\n  HostName test.com\n  LocalForward 8080 localhost:80\n");
+    app.screen = Screen::TunnelList {
+        alias: "test".to_string(),
+    };
+    app.refresh_tunnel_list("test");
+    app.ui.tunnel_list_state_mut().select(Some(0));
+    let (tx, _rx) = mpsc::channel();
+    let _ = handle_key_event(&mut app, key(KeyCode::Char('d')), &tx);
+    let records = crate::logging::capture::capture(|| {
+        let _ = handle_key_event(&mut app, key(KeyCode::Char('y')), &tx);
+    });
+    assert_eq!(app.tunnels.list().len(), 0);
+    assert!(
+        crate::logging::capture::has(
+            &records,
+            log::Level::Debug,
+            "[purple] tunnel forward removed: alias=test"
+        ),
+        "expected tunnel-removed debug log, got: {:?}",
+        records
+    );
+}
+
+#[test]
+fn test_tunnel_add_logs_added_forward() {
+    let mut app = make_app("Host test\n  HostName test.com\n");
+    app.open_tunnel_add_form("test".to_string());
+    {
+        let form = app.tunnels.form_mut();
+        form.tunnel_type = crate::tunnel::TunnelType::Local;
+        form.bind_port = "9090".to_string();
+        form.remote_host = "localhost".to_string();
+        form.remote_port = "90".to_string();
+    }
+    let (tx, _rx) = mpsc::channel();
+    let records = crate::logging::capture::capture(|| {
+        let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    });
+    assert!(
+        crate::logging::capture::has(
+            &records,
+            log::Level::Debug,
+            "[purple] tunnel forward added: alias=test"
+        ),
+        "expected tunnel-added debug log, got: {:?}",
+        records
+    );
+}
+
+#[test]
+fn test_tunnel_edit_logs_edited_forward() {
+    let mut app = make_app("Host test\n  HostName test.com\n  LocalForward 8080 localhost:80\n");
+    app.refresh_tunnel_list("test");
+    let rule = app.tunnels.list()[0].clone();
+    app.open_tunnel_edit_form("test".to_string(), &rule, 0);
+    // Change the bind port so the edited directive is not a duplicate.
+    app.tunnels.form_mut().bind_port = "9999".to_string();
+    let (tx, _rx) = mpsc::channel();
+    let records = crate::logging::capture::capture(|| {
+        let _ = handle_key_event(&mut app, key(KeyCode::Enter), &tx);
+    });
+    assert!(
+        crate::logging::capture::has(
+            &records,
+            log::Level::Debug,
+            "[purple] tunnel forward edited: alias=test"
+        ),
+        "expected tunnel-edited debug log, got: {:?}",
+        records
+    );
+}
+
 // --- Host form: baseline cleared after submit ---
 
 #[test]
@@ -8024,6 +8098,27 @@ fn t_opens_single_host_input_when_no_selection() {
     assert!(
         app.tags.input().is_some(),
         "must fall back to existing single-host tag input"
+    );
+}
+
+#[test]
+fn test_tag_edit_logs_updated_tags() {
+    let mut app = bulk_make_app();
+    let tx = mpsc::channel().0;
+    // 't' with no multi-select opens the single-host tag input for host "a".
+    handle_key_event(&mut app, key(KeyCode::Char('t')), &tx).unwrap();
+    assert!(app.tags.input().is_some());
+    let records = crate::logging::capture::capture(|| {
+        handle_key_event(&mut app, key(KeyCode::Enter), &tx).unwrap();
+    });
+    assert!(
+        crate::logging::capture::has(
+            &records,
+            log::Level::Debug,
+            "[purple] host tags updated: alias=a"
+        ),
+        "expected tag-updated debug log, got: {:?}",
+        records
     );
 }
 

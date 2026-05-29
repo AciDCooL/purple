@@ -13,7 +13,7 @@ pub fn import_from_file(
     path: &Path,
     group: Option<&str>,
 ) -> Result<(usize, usize, usize, usize), String> {
-    info!("Import started: source={}", path.display());
+    info!("[config] Import started: source={}", path.display());
     let file = std::fs::File::open(path)
         .map_err(|e| crate::messages::import_open_failed(&path.display(), &e))?;
     let reader = std::io::BufReader::new(file);
@@ -67,7 +67,7 @@ pub fn import_from_file(
     }
 
     let (imported, skipped) = add_entries(config, &entries, group)?;
-    info!("Import completed: {imported} hosts added, {skipped} skipped");
+    info!("[config] Import completed: {imported} hosts added, {skipped} skipped");
     Ok((imported, skipped, parse_failures, read_errors))
 }
 
@@ -102,7 +102,7 @@ pub fn import_from_known_hosts(
     config: &mut SshConfigFile,
     group: Option<&str>,
 ) -> Result<(usize, usize, usize, usize), String> {
-    info!("Import started: source=~/.ssh/known_hosts");
+    info!("[config] Import started: source=~/.ssh/known_hosts");
     let known_hosts_path = paths
         .ok_or(crate::messages::IMPORT_HOME_DIR_UNKNOWN)?
         .ssh_dir()
@@ -143,7 +143,7 @@ pub fn import_from_known_hosts(
     }
 
     let (imported, skipped) = add_entries(config, &entries, group)?;
-    info!("Import completed: {imported} hosts added, {skipped} skipped");
+    info!("[config] Import completed: {imported} hosts added, {skipped} skipped");
     Ok((imported, skipped, parse_failures, read_errors))
 }
 

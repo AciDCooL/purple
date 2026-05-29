@@ -99,7 +99,7 @@ impl Drop for FileLock {
 /// silently keeps the OLD content. Common dotfiles managers (chezmoi, stow)
 /// use symlinks rather than hard links so this is rare, but worth surfacing.
 pub fn atomic_write(path: &Path, content: &[u8]) -> io::Result<()> {
-    debug!("Atomic write: {}", path.display());
+    debug!("[purple] Atomic write: {}", path.display());
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

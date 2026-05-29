@@ -525,7 +525,13 @@ pub fn fetch_containers(
         Ok(r) => {
             let stderr = r.stderr.trim().to_string();
             let msg = friendly_container_error(&stderr, r.status.code());
-            error!("[external] Container fetch failed: alias={alias}: {msg}");
+            // A non-zero remote exit (docker missing, daemon down, ...) is a
+            // routine remote status, not an ssh connection failure: keep it out
+            // of the error level.
+            log::log!(
+                crate::connection::remote_exit_log_level(r.status.code().unwrap_or(-1)),
+                "[external] Container fetch failed: alias={alias}: {msg}"
+            );
             Err(ContainerError {
                 runtime: cached_runtime,
                 message: msg,
@@ -588,7 +594,7 @@ pub fn spawn_container_action<F>(
         }
         let alias = &ctx.alias;
         info!(
-            "Container action: {} container={container_id} alias={alias}",
+            "[external] Container action: {} container={container_id} alias={alias}",
             action.as_str()
         );
         let command = container_action_command(runtime, action, &container_id);
@@ -606,7 +612,11 @@ pub fn spawn_container_action<F>(
             Ok(r) if r.status.success() => send(ctx.alias, action, Ok(())),
             Ok(r) => {
                 let err = friendly_container_error(r.stderr.trim(), r.status.code());
-                error!(
+                // Routine remote exit (already stopped, no such container, ...)
+                // stays out of the error level; only an ssh transport failure
+                // (255) is a genuine connection error.
+                log::log!(
+                    crate::connection::remote_exit_log_level(r.status.code().unwrap_or(-1)),
                     "[external] Container {} failed: alias={alias} container={container_id}: {err}",
                     action.as_str()
                 );

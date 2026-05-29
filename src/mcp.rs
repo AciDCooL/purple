@@ -639,7 +639,7 @@ fn handle_tools_call(params: Option<Value>, ctx: &McpContext) -> JsonRpcResponse
         .unwrap_or(serde_json::json!({}));
 
     if !ctx.is_tool_allowed(tool_name) {
-        debug!("MCP tool denied (read-only mode): tool={tool_name}");
+        debug!("[purple] MCP tool denied (read-only mode): tool={tool_name}");
         let result = mcp_tool_error(messages::MCP_TOOL_DENIED_READ_ONLY);
         if let Some(audit) = ctx.audit.as_ref() {
             audit.record(tool_name, &args, AuditOutcome::Denied);
@@ -802,11 +802,20 @@ fn tool_run_command(args: &Value, config_path: &Path, env: &crate::runtime::env:
     // Do not log the command body. It can carry secrets (passwords, tokens)
     // passed as shell arguments. The audit log redacts the same field; the
     // application log must not be a side channel that leaks them.
-    debug!("MCP tool: run_command alias={alias}");
+    debug!("[purple] MCP tool: run_command alias={alias}");
     match ssh_exec(alias, config_path, command, timeout_secs) {
         Ok((exit_code, stdout, stderr)) => {
-            if exit_code != 0 {
-                error!("[external] MCP ssh_exec failed: alias={alias} exit={exit_code}");
+            // 255 is an ssh transport failure (auth, network, host-key) the
+            // caller must act on; 1-254 is the remote command's own status,
+            // already returned in the JSON result, so it stays at debug.
+            match crate::connection::classify_ssh_exit(exit_code) {
+                crate::connection::SshExitClass::TransportFailure => {
+                    error!("[external] MCP ssh_exec failed: alias={alias} exit={exit_code}");
+                }
+                crate::connection::SshExitClass::RemoteStatus => {
+                    debug!("[external] MCP ssh_exec exit: alias={alias} exit={exit_code}");
+                }
+                crate::connection::SshExitClass::Success => {}
             }
             let result = serde_json::json!({
                 "exit_code": exit_code,
@@ -971,7 +980,7 @@ pub fn run(
     env: std::sync::Arc<crate::runtime::env::Env>,
 ) -> anyhow::Result<()> {
     info!(
-        "MCP server starting (read_only={}, audit_log={})",
+        "[purple] MCP server starting (read_only={}, audit_log={})",
         options.read_only,
         options
             .audit_log_path
@@ -1009,14 +1018,14 @@ pub fn run(
 
         // Notifications (no id) don't get responses
         if request.id.is_none() {
-            debug!("MCP notification: {}", request.method);
+            debug!("[purple] MCP notification: {}", request.method);
             continue;
         }
 
-        debug!("MCP request: method={}", request.method);
+        debug!("[purple] MCP request: method={}", request.method);
         let mut response = dispatch(&request.method, request.params, &ctx);
         debug!(
-            "MCP response: method={} success={}",
+            "[purple] MCP response: method={} success={}",
             request.method,
             response.error.is_none()
         );

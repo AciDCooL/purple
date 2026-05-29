@@ -389,6 +389,11 @@ pub(crate) fn handle_container_action_complete(
     result: Result<(), String>,
     events_tx: &mpsc::Sender<AppEvent>,
 ) {
+    log::debug!(
+        "[purple] container action result: {} alias={alias} ok={}",
+        action.as_str(),
+        result.is_ok()
+    );
     // Check if overlay matches and extract refresh info before notify
     let should_refresh = if let Some(ref mut state) = app.container_session {
         if state.alias == alias {

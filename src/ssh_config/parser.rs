@@ -84,7 +84,7 @@ impl SshConfigFile {
             .filter(|e| matches!(e, super::model::ConfigElement::HostBlock(_)))
             .count();
         debug!(
-            "SSH config loaded: {} ({} hosts)",
+            "[config] SSH config loaded: {} ({} hosts)",
             path.display(),
             host_count
         );

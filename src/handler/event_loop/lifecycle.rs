@@ -91,7 +91,7 @@ pub(crate) fn handle_ping_result(
         let status = app::classify_ping(rtt_ms, app.ping.slow_threshold_ms());
         let now = Instant::now();
         log::debug!(
-            "ping-result: {} → {:?} (rtt={:?}ms, gen={})",
+            "[external] ping-result: {} → {:?} (rtt={:?}ms, gen={})",
             alias,
             status,
             rtt_ms,
@@ -115,7 +115,7 @@ pub(crate) fn handle_ping_result(
         }
         if propagated > 0 {
             log::debug!(
-                "ping-result: propagated bastion {} status+timestamp to {} dependent(s)",
+                "[purple] ping-result: propagated bastion {} status+timestamp to {} dependent(s)",
                 alias,
                 propagated
             );

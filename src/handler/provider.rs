@@ -142,6 +142,7 @@ pub(super) fn handle_provider_list_key(
                         {
                             app.providers.expanded_providers_mut().remove(&id.provider);
                         }
+                        log::debug!("[config] provider config removed: {id}");
                         let display_name = crate::providers::provider_display_name(&id.provider);
                         app.notify(crate::messages::provider_removed(display_name));
                     }
@@ -159,6 +160,7 @@ pub(super) fn handle_provider_list_key(
                             app.env.paths(),
                         );
                         app.providers.expanded_providers_mut().remove(&name);
+                        log::debug!("[config] provider config removed: {name}");
                         let display_name = crate::providers::provider_display_name(name.as_str());
                         app.notify(crate::messages::provider_removed(display_name));
                     }
@@ -206,7 +208,7 @@ pub(super) fn handle_provider_list_key(
                         let n = name.clone();
                         let now_expanded = app.providers.toggle_expanded(&n);
                         log::debug!(
-                            "provider tree: {} '{}'",
+                            "[purple] provider tree: {} '{}'",
                             if now_expanded {
                                 "expanded"
                             } else {
@@ -241,7 +243,7 @@ pub(super) fn handle_provider_list_key(
                     if *config_count >= 2 {
                         let now_expanded = app.providers.toggle_expanded(name);
                         log::debug!(
-                            "provider tree: {} '{}'",
+                            "[purple] provider tree: {} '{}'",
                             if now_expanded {
                                 "expanded"
                             } else {
@@ -605,7 +607,10 @@ fn open_add_config_flow(app: &mut App, provider_name: &str) {
             // Lazy migration: existing config is bare. Prompt for both
             // labels (existing + new) on one screen so step 2 is the
             // standard provider form without an extra label field.
-            log::debug!("provider lazy migration: started for '{}'", provider_name);
+            log::debug!(
+                "[config] provider lazy migration: started for '{}'",
+                provider_name
+            );
             app.providers
                 .set_pending_label_migration(Some(crate::app::PendingLabelMigration {
                     provider: provider_name.to_string(),
@@ -1146,7 +1151,7 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
             .rewrite_legacy_markers_to_label(&migration.provider, &migration.existing_label);
         if rewritten > 0 {
             log::debug!(
-                "provider lazy migration: rewrote {} legacy marker(s) for '{}' to label '{}'",
+                "[config] provider lazy migration: rewrote {} legacy marker(s) for '{}' to label '{}'",
                 rewritten,
                 migration.provider,
                 migration.existing_label
@@ -1155,7 +1160,10 @@ fn submit_provider_form(app: &mut App, events_tx: &mpsc::Sender<AppEvent>) {
                 app.notify_error(crate::messages::failed_to_save(&e));
             }
         }
-        log::debug!("provider lazy migration: completed for '{}'", provider_name);
+        log::debug!(
+            "[config] provider lazy migration: completed for '{}'",
+            provider_name
+        );
     }
     app.providers.cancel_label_migration();
 
