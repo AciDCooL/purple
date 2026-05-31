@@ -1,3 +1,10 @@
+## 3.21.1 - 2026-05-31
+
+- feat: Your cloud hosts stay grouped under their provider.
+- feat: Every cloud provider keeps one clean group header in ~/.ssh/config and the purple host list, so your hosts read the same in the file and on screen.
+- feat: Newly synced and imported hosts always land inside their provider's group, so your config stays organized as it grows.
+- feat: Grouping holds whether your hosts live in your main config or an Included file.
+
 ## 3.21.0 - 2026-05-31
 
 - feat: Tidy SSH config with a blank line between hosts.

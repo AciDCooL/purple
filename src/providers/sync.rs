@@ -108,10 +108,18 @@ pub fn sync_provider(
     // Track which server IDs are still in the remote set (also deduplicates)
     let mut remote_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    // Only add group header if this PROVIDER (any config) has no existing hosts.
-    // Group headers are shared across labeled configs of the same provider so
-    // both `[do:work]` and `[do:personal]` hosts live under one "DigitalOcean" header.
-    let mut needs_header = !dry_run && config.find_hosts_by_provider(provider.name()).is_empty();
+    // Add a group header when this provider has no TOP-LEVEL host yet. The
+    // header and every synced host live at top level (Include files are
+    // read-only), so this must agree with find_provider_insert_position, which
+    // is also top-level only. Using the include-aware find_hosts_by_provider
+    // here left a new host header-less when the provider's existing hosts lived
+    // solely in an Include. Group headers are still shared across labeled
+    // configs of one provider: the second labeled config finds the first
+    // config's top-level host and skips a duplicate header.
+    let mut needs_header = !dry_run
+        && config
+            .find_provider_insert_position(provider.name())
+            .is_none();
 
     for remote in remote_hosts {
         if !remote_ids.insert(remote.server_id.clone()) {

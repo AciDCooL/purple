@@ -12,25 +12,13 @@
 
 use super::model::{ConfigElement, SshConfigFile};
 
-/// Display name for a provider used in `# purple:group` headers.
-/// Mirrors `providers::provider_display_name()` without a cross-module
-/// dependency.
+/// Display name for a provider used in `# purple:group` headers. Delegates to
+/// the provider registry so the cleanup matcher and the sync writer can never
+/// disagree. A previous hand-maintained copy here drifted: ovh, i3d, leaseweb
+/// and transip were missing, so their headers were deleted on startup despite
+/// active hosts.
 pub(super) fn provider_group_display_name(name: &str) -> &str {
-    match name {
-        "digitalocean" => "DigitalOcean",
-        "vultr" => "Vultr",
-        "linode" => "Linode",
-        "hetzner" => "Hetzner",
-        "upcloud" => "UpCloud",
-        "proxmox" => "Proxmox VE",
-        "aws" => "AWS EC2",
-        "scaleway" => "Scaleway",
-        "gcp" => "GCP",
-        "azure" => "Azure",
-        "tailscale" => "Tailscale",
-        "oracle" => "Oracle Cloud",
-        other => other,
-    }
+    crate::providers::provider_display_name(name)
 }
 
 impl SshConfigFile {
@@ -77,26 +65,14 @@ impl SshConfigFile {
     /// group header. This protects hand-written comments from being silently
     /// scrubbed by the next-startup `remove_all_orphaned_group_headers` pass.
     pub fn repair_absorbed_group_comments(&mut self) -> usize {
-        // Build the set of known provider display names once. The list is
-        // closed under purple's supported providers and tiny, so allocation
-        // cost is negligible.
-        let known_providers: std::collections::HashSet<&str> = [
-            "DigitalOcean",
-            "Vultr",
-            "Linode",
-            "Hetzner",
-            "UpCloud",
-            "Proxmox VE",
-            "AWS EC2",
-            "Scaleway",
-            "GCP",
-            "Azure",
-            "Tailscale",
-            "Oracle Cloud",
-        ]
-        .iter()
-        .copied()
-        .collect();
+        // Derive known provider display names from the registry so this matcher
+        // can never drift from the sync writer. A hand-maintained copy here
+        // previously omitted ovh, leaseweb, i3d and transip, so their absorbed
+        // group comments were never relocated to top-level GlobalLines.
+        let known_providers: std::collections::HashSet<&str> = crate::providers::PROVIDER_NAMES
+            .iter()
+            .map(|n| crate::providers::provider_display_name(n))
+            .collect();
 
         let is_known_group = |raw: &str| -> bool {
             raw.trim()

@@ -5797,6 +5797,199 @@ fn test_sync_consecutive_provider_hosts_separated() {
     assert!(!output.contains("\n\n\n"), "triple blank lines:\n{output}");
 }
 
+// --- Include-file and grouping consistency tests ---
+
+#[test]
+fn sync_includes_only_host_gets_top_level_group_header() {
+    // A provider whose only existing host lives in an Include file. A newly
+    // synced host must be written at top level WITH its group header, not
+    // appended bare at the end of the file. needs_header (include-aware) and
+    // find_provider_insert_position (top-level only) must agree.
+    use crate::ssh_config::model::{IncludeDirective, IncludedFile};
+    let included_file = IncludedFile {
+        path: PathBuf::from("/tmp/inc_grp_config"),
+        elements: SshConfigFile::parse_content(
+            "Host do-inc\n  HostName 1.2.3.4\n  # purple:provider digitalocean:inc1\n",
+        ),
+    };
+    let mut config = SshConfigFile {
+        elements: vec![ConfigElement::Include(IncludeDirective {
+            raw_line: "Include inc_grp_config".to_string(),
+            pattern: "inc_grp_config".to_string(),
+            resolved_files: vec![included_file],
+        })],
+        path: test_config_path(),
+        crlf: false,
+        bom: false,
+    };
+    let section = make_section();
+    // Remote: the included host (dedup, no add) plus a brand-new one.
+    let remote = vec![
+        ProviderHost::new("inc1".into(), "inc".into(), "1.2.3.4".into(), Vec::new()),
+        ProviderHost::new("999".into(), "fresh".into(), "9.9.9.9".into(), Vec::new()),
+    ];
+    let result = sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(
+        result.added, 1,
+        "only the new host is added (included host deduped)"
+    );
+
+    let output = config.serialize();
+    // The new top-level host must be present.
+    assert!(
+        output.contains("Host do-fresh"),
+        "new host missing:\n{output}"
+    );
+    // It must carry a DigitalOcean group header at top level.
+    let has_top_level_header = config.elements.iter().any(
+        |e| matches!(e, ConfigElement::GlobalLine(l) if l.trim() == "# purple:group DigitalOcean"),
+    );
+    assert!(
+        has_top_level_header,
+        "new top-level synced host must get a DigitalOcean group header:\n{output}"
+    );
+}
+
+#[test]
+fn sync_labeled_configs_share_one_group_header() {
+    // Two labeled configs of the same provider (do:work, do:personal) must
+    // share exactly ONE group header (the documented design), with both hosts
+    // grouped under it. Locks in the adversarial verdict that this is correct.
+    let mut config = empty_config();
+    let work = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "work"),
+        alias_prefix: "do-work".to_string(),
+        ..make_section()
+    };
+    let personal = ProviderSection {
+        id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "personal"),
+        alias_prefix: "do-personal".to_string(),
+        ..make_section()
+    };
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &[ProviderHost::new(
+            "1".into(),
+            "a".into(),
+            "1.1.1.1".into(),
+            Vec::new(),
+        )],
+        &work,
+        false,
+        false,
+        false,
+    );
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &[ProviderHost::new(
+            "2".into(),
+            "b".into(),
+            "2.2.2.2".into(),
+            Vec::new(),
+        )],
+        &personal,
+        false,
+        false,
+        false,
+    );
+
+    let header_count = config
+        .elements
+        .iter()
+        .filter(|e| matches!(e, ConfigElement::GlobalLine(l) if l.trim() == "# purple:group DigitalOcean"))
+        .count();
+    assert_eq!(
+        header_count,
+        1,
+        "labeled configs of one provider share exactly one header:\n{}",
+        config.serialize()
+    );
+    // Both hosts present and after the single header.
+    let header_pos = config
+        .elements
+        .iter()
+        .position(|e| matches!(e, ConfigElement::GlobalLine(l) if l.trim() == "# purple:group DigitalOcean"))
+        .expect("header present");
+    let work_pos = config
+        .elements
+        .iter()
+        .position(|e| matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == "do-work-a"))
+        .expect("work host present");
+    let personal_pos = config
+        .elements
+        .iter()
+        .position(|e| matches!(e, ConfigElement::HostBlock(b) if b.host_pattern == "do-personal-b"))
+        .expect("personal host present");
+    assert!(work_pos > header_pos && personal_pos > header_pos);
+}
+
+#[test]
+fn sync_orphan_top_level_header_plus_include_no_duplicate() {
+    // Edge case for the needs_header fix: a top-level group header already
+    // exists (no top-level host under it yet) AND the provider has a host in an
+    // Include. Syncing a new host must not pile up a second top-level header;
+    // serialize collapses and at most one header should remain meaningful.
+    use crate::ssh_config::model::{IncludeDirective, IncludedFile};
+    let included_file = IncludedFile {
+        path: PathBuf::from("/tmp/inc_orphan_config"),
+        elements: SshConfigFile::parse_content(
+            "Host do-inc\n  HostName 1.2.3.4\n  # purple:provider digitalocean:inc1\n",
+        ),
+    };
+    let mut config = SshConfigFile {
+        elements: vec![
+            ConfigElement::GlobalLine("# purple:group DigitalOcean".to_string()),
+            ConfigElement::GlobalLine(String::new()),
+            ConfigElement::Include(IncludeDirective {
+                raw_line: "Include inc_orphan_config".to_string(),
+                pattern: "inc_orphan_config".to_string(),
+                resolved_files: vec![included_file],
+            }),
+        ],
+        path: test_config_path(),
+        crlf: false,
+        bom: false,
+    };
+    let section = make_section();
+    let remote = vec![
+        ProviderHost::new("inc1".into(), "inc".into(), "1.2.3.4".into(), Vec::new()),
+        ProviderHost::new("999".into(), "fresh".into(), "9.9.9.9".into(), Vec::new()),
+    ];
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
+
+    let output = config.serialize();
+    // The new host is present.
+    assert!(
+        output.contains("Host do-fresh"),
+        "new host missing:\n{output}"
+    );
+    // No more than two headers, and serialize must not stack blank-line noise.
+    let header_count = output.matches("# purple:group DigitalOcean").count();
+    assert!(
+        header_count <= 2,
+        "excessive duplicate headers ({header_count}):\n{output}"
+    );
+    assert!(!output.contains("\n\n\n"), "triple blank lines:\n{output}");
+}
+
 // --- Multi-config provider tests ---
 
 #[test]
