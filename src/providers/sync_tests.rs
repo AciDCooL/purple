@@ -647,7 +647,7 @@ fn test_sync_include_host_skips_update() {
     let mut config = config_with_include_provider_host();
     let section = make_section();
 
-    // Remote has same server with different IP — should NOT update included host
+    // Remote has same server with different IP. Should NOT update included host
     let remote = vec![ProviderHost::new(
         "inc1".to_string(),
         "included".to_string(),
@@ -678,7 +678,7 @@ fn test_sync_include_host_skips_remove() {
     let mut config = config_with_include_provider_host();
     let section = make_section();
 
-    // Empty remote + remove_deleted — should NOT remove included host
+    // Empty remote + remove_deleted. Should NOT remove included host
     let result = sync_provider(
         &mut config,
         &MockProvider,
@@ -723,7 +723,7 @@ fn test_sync_dry_run_remove_count() {
     );
     assert_eq!(config.host_entries().len(), 2);
 
-    // Dry-run remove with empty remote — should count but not mutate
+    // Dry-run remove with empty remote. Should count but not mutate
     let result = sync_provider(&mut config, &MockProvider, &[], &section, true, false, true);
     assert_eq!(result.removed, 2);
     assert_eq!(config.host_entries().len(), 2); // Still there
@@ -752,7 +752,7 @@ fn test_sync_tags_cleared_remotely_preserved_locally() {
     );
     assert_eq!(config.host_entries()[0].provider_tags, vec!["production"]);
 
-    // Second sync: remote tags empty — provider_tags cleared
+    // Second sync: remote tags empty. provider_tags cleared
     let remote = vec![ProviderHost::new(
         "123".to_string(),
         "web-1".to_string(),
@@ -962,7 +962,7 @@ fn test_sync_no_rename_when_prefix_unchanged() {
         false,
     );
 
-    // Same prefix, same everything — should be unchanged
+    // Same prefix, same everything. Should be unchanged
     let result = sync_provider(
         &mut config,
         &MockProvider,
@@ -1195,7 +1195,7 @@ fn test_sync_merges_new_provider_tag_with_user_tags() {
     // User manually adds a tag
     let _ = config.set_host_tags("do-web-1", &["nyc1".to_string(), "critical".to_string()]);
 
-    // Second sync: provider adds a new tag — user tag must be preserved
+    // Second sync: provider adds a new tag. User tag must be preserved
     let remote = vec![ProviderHost::new(
         "123".to_string(),
         "web-1".to_string(),
@@ -1248,7 +1248,7 @@ fn test_sync_migration_cleans_overlapping_user_tags() {
     let _ = config.set_host_tags("do-web-1", &["nyc1".to_string(), "prod".to_string()]);
     assert_eq!(config.host_entries()[0].tags, vec!["nyc1", "prod"]);
 
-    // Provider_tags match remote but user tags overlap — migration cleanup runs
+    // Provider_tags match remote but user tags overlap. Migration cleanup runs
     let result = sync_provider(
         &mut config,
         &MockProvider,
@@ -1417,7 +1417,7 @@ fn test_sync_merge_case_insensitive() {
     );
     assert_eq!(config.host_entries()[0].provider_tags, vec!["prod"]);
 
-    // Second sync: provider returns same tag with different casing — no duplicate
+    // Second sync: provider returns same tag with different casing. No duplicate
     let remote = vec![ProviderHost::new(
         "123".to_string(),
         "web-1".to_string(),
@@ -5706,6 +5706,97 @@ Host pve-testvm
     );
 }
 
+/// Assert every Host block in the serialized config is preceded by a blank
+/// line or a top-level group-header comment. This is the separator guarantee
+/// `add_host` provides; sync must match it so synced hosts never glue together.
+fn assert_host_blocks_separated(output: &str) {
+    let lines: Vec<&str> = output.lines().collect();
+    for w in lines.windows(2) {
+        let (prev, cur) = (w[0], w[1]);
+        if cur.starts_with("Host ") {
+            let prev_is_blank = prev.trim().is_empty();
+            // A non-indented comment above a Host is a group header (intended
+            // glue). An indented comment or any directive means the previous
+            // block ran into this one: the bug.
+            let prev_is_top_level_comment = prev.starts_with('#');
+            assert!(
+                prev_is_blank || prev_is_top_level_comment,
+                "Host block glued to previous content (no blank separator):\n{output}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_sync_first_sync_separates_multiple_hosts() {
+    // Syncing several new hosts in one call must leave a blank line between
+    // each, matching add_host. Previously consecutive synced hosts glued
+    // together because the insert path only guaranteed a blank AFTER a host.
+    let mut config = empty_config();
+    let section = make_section();
+    let remote = vec![
+        ProviderHost::new("1".into(), "web".into(), "1.1.1.1".into(), Vec::new()),
+        ProviderHost::new("2".into(), "db".into(), "2.2.2.2".into(), Vec::new()),
+        ProviderHost::new("3".into(), "api".into(), "3.3.3.3".into(), Vec::new()),
+    ];
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
+
+    let output = config.serialize();
+    assert_host_blocks_separated(&output);
+    assert!(!output.contains("\n\n\n"), "triple blank lines:\n{output}");
+    assert_eq!(config.host_entries().len(), 3);
+}
+
+#[test]
+fn test_sync_consecutive_provider_hosts_separated() {
+    // Existing DO group with one host; a later sync adds two more. All three
+    // DO hosts must be blank-separated, not glued to one another.
+    let mut config = empty_config();
+    let section = make_section();
+    sync_provider(
+        &mut config,
+        &MockProvider,
+        &[ProviderHost::new(
+            "1".into(),
+            "web".into(),
+            "1.1.1.1".into(),
+            Vec::new(),
+        )],
+        &section,
+        false,
+        false,
+        false,
+    );
+
+    let remote = vec![
+        ProviderHost::new("1".into(), "web".into(), "1.1.1.1".into(), Vec::new()),
+        ProviderHost::new("2".into(), "db".into(), "2.2.2.2".into(), Vec::new()),
+        ProviderHost::new("3".into(), "api".into(), "3.3.3.3".into(), Vec::new()),
+    ];
+    let result = sync_provider(
+        &mut config,
+        &MockProvider,
+        &remote,
+        &section,
+        false,
+        false,
+        false,
+    );
+    assert_eq!(result.added, 2);
+
+    let output = config.serialize();
+    assert_host_blocks_separated(&output);
+    assert!(!output.contains("\n\n\n"), "triple blank lines:\n{output}");
+}
+
 // --- Multi-config provider tests ---
 
 #[test]
@@ -5783,7 +5874,7 @@ fn multi_config_two_labeled_sections_keep_hosts_isolated() {
 #[test]
 fn multi_config_shares_one_group_header_per_provider() {
     // Adding two labeled configs of the same provider must not produce two
-    // group headers — both configs live under one "DigitalOcean" header.
+    // group headers. Both configs live under one "DigitalOcean" header.
     let mut config = empty_config();
     let work = ProviderSection {
         id: crate::providers::config::ProviderConfigId::labeled("digitalocean", "work"),

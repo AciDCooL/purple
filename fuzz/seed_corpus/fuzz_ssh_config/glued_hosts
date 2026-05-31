@@ -1,0 +1,9 @@
+Host web1
+  HostName 192.168.1.10
+  User admin
+Host web2
+  HostName 192.168.1.11
+host web3
+  HostName 192.168.1.12
+Match host bastion
+  ForwardAgent yes

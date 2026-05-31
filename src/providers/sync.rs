@@ -358,12 +358,24 @@ pub fn sync_provider(
                 };
 
                 if let Some(pos) = insert_pos {
-                    // Insert after last provider host with blank line separation.
-                    config.elements.insert(pos, ConfigElement::HostBlock(block));
-                    // Ensure blank line after the new block if the next element
-                    // is not already a blank (prevents hosts running into group
-                    // headers or other host blocks without visual separation).
-                    let after = pos + 1;
+                    // Mirror add_host: guarantee a blank line BEFORE the new
+                    // block (so consecutive synced hosts never glue together)
+                    // and AFTER it (so it never runs into the next group header
+                    // or host block).
+                    let mut idx = pos;
+                    let needs_blank_before = idx > 0
+                        && !matches!(
+                            config.elements.get(idx - 1),
+                            Some(ConfigElement::GlobalLine(line)) if line.trim().is_empty()
+                        );
+                    if needs_blank_before {
+                        config
+                            .elements
+                            .insert(idx, ConfigElement::GlobalLine(String::new()));
+                        idx += 1;
+                    }
+                    config.elements.insert(idx, ConfigElement::HostBlock(block));
+                    let after = idx + 1;
                     let needs_trailing_blank = config.elements.get(after).is_some_and(
                         |e| !matches!(e, ConfigElement::GlobalLine(line) if line.trim().is_empty()),
                     );

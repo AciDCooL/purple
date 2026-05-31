@@ -42,14 +42,27 @@ impl SshConfigFile {
         // file rather than next to a symlink. Without this, a user with
         // `~/.ssh/config -> /Volumes/dotfiles/ssh_config` would see backups
         // accumulate in `~/.ssh/` even though the actual file lives on the
-        // dotfiles volume — recovery becomes confusing.
+        // dotfiles volume. Recovery becomes confusing.
         if target_path.exists() {
             self.create_backup(&target_path)
                 .context("Failed to create backup of SSH config")?;
             self.prune_backups(&target_path, 5).ok();
         }
 
-        let content = self.serialize();
+        // Persist with one blank line between every top-level block. serialize()
+        // stays byte-for-byte round-trip faithful for undo and comparison; only
+        // the on-disk file is normalized, healing configs whose blocks were
+        // glued together before purple managed them.
+        let raw = self.serialized_lines();
+        let normalized = ensure_block_separators(&raw);
+        let healed = normalized.len() - raw.len();
+        if healed > 0 {
+            debug!(
+                "[config] ssh_config.write: inserted {healed} block separator(s) in {}",
+                target_path.display()
+            );
+        }
+        let content = self.lines_to_string(&normalized);
 
         fs_util::atomic_write(&target_path, content.as_bytes())
             .map_err(|err| {
@@ -73,7 +86,14 @@ impl SshConfigFile {
 
     /// Serialize the config to a string.
     /// Collapses consecutive blank lines to prevent accumulation after deletions.
+    /// Round-trip faithful: blank-line layout is preserved exactly as parsed.
     pub fn serialize(&self) -> String {
+        self.lines_to_string(&self.serialized_lines())
+    }
+
+    /// Flatten the element tree to content lines (no line endings), collapsing
+    /// runs of blank lines to at most one. Shared by `serialize` and `write`.
+    fn serialized_lines(&self) -> Vec<String> {
         let mut lines = Vec::new();
 
         for element in &self.elements {
@@ -104,20 +124,25 @@ impl SshConfigFile {
             prev_blank = is_blank;
             collapsed.push(line);
         }
+        collapsed
+    }
 
+    /// Join content lines with the file's line ending, restoring the BOM and
+    /// guaranteeing exactly one trailing newline.
+    fn lines_to_string(&self, lines: &[String]) -> String {
         let line_ending = if self.crlf { "\r\n" } else { "\n" };
         let mut result = String::new();
         // Restore UTF-8 BOM if the original file had one
         if self.bom {
             result.push('\u{FEFF}');
         }
-        for line in &collapsed {
+        for line in lines {
             result.push_str(line);
             result.push_str(line_ending);
         }
         // Ensure files always end with exactly one newline
-        // (check collapsed instead of result, since BOM makes result non-empty)
-        if collapsed.is_empty() {
+        // (check lines instead of result, since BOM makes result non-empty)
+        if lines.is_empty() {
             result.push_str(line_ending);
         }
         result
@@ -196,6 +221,41 @@ impl SshConfigFile {
         }
         Ok(())
     }
+}
+
+/// True when `line` begins a top-level block (`Host`/`Match` at column 0).
+/// Keyword match is case-insensitive, matching the parser's own detection.
+fn is_block_start(line: &str) -> bool {
+    if line.starts_with(char::is_whitespace) {
+        return false;
+    }
+    match line.split_whitespace().next() {
+        Some(kw) => kw.eq_ignore_ascii_case("Host") || kw.eq_ignore_ascii_case("Match"),
+        None => false,
+    }
+}
+
+/// Insert a single blank line before each top-level block that runs directly
+/// into the previous line, so persisted configs never have glued-together Host
+/// blocks. A block kept glued to a preceding top-level comment (a group header
+/// or hand-written label) is left as-is. Operates on collapsed lines, so it can
+/// never create consecutive blanks.
+fn ensure_block_separators(lines: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(lines.len() + 4);
+    for line in lines {
+        if is_block_start(line) {
+            if let Some(prev) = out.last() {
+                let prev_blank = prev.trim().is_empty();
+                let prev_top_level_comment =
+                    !prev.starts_with(char::is_whitespace) && prev.trim_start().starts_with('#');
+                if !prev_blank && !prev_top_level_comment {
+                    out.push(String::new());
+                }
+            }
+        }
+        out.push(line.clone());
+    }
+    out
 }
 
 #[cfg(test)]
@@ -347,5 +407,156 @@ Host myserver
         assert!(output.contains("ForwardAgent yes"));
         assert!(output.contains("LocalForward 8080 localhost:80"));
         assert!(output.contains("Compression yes"));
+    }
+
+    fn lines(s: &[&str]) -> Vec<String> {
+        s.iter().map(|l| (*l).to_string()).collect()
+    }
+
+    #[test]
+    fn ensure_block_separators_splits_glued_hosts() {
+        let input = lines(&["Host a", "  HostName 1", "Host b", "  HostName 2"]);
+        let out = ensure_block_separators(&input);
+        assert_eq!(
+            out,
+            lines(&["Host a", "  HostName 1", "", "Host b", "  HostName 2"])
+        );
+    }
+
+    #[test]
+    fn ensure_block_separators_leaves_separated_hosts() {
+        let input = lines(&["Host a", "  HostName 1", "", "Host b", "  HostName 2"]);
+        let out = ensure_block_separators(&input);
+        assert_eq!(out, input, "already-separated input must be untouched");
+    }
+
+    #[test]
+    fn ensure_block_separators_keeps_group_header_glue() {
+        // A top-level comment (group header) directly above a Host stays glued:
+        // that separation is intentional, not the bug.
+        let input = lines(&["# purple:group DigitalOcean", "Host a", "  HostName 1"]);
+        let out = ensure_block_separators(&input);
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn ensure_block_separators_splits_three_glued_hosts() {
+        let input = lines(&["Host a", "  HostName 1", "Host b", "  HostName 2", "Host c"]);
+        let out = ensure_block_separators(&input);
+        assert_eq!(
+            out,
+            lines(&[
+                "Host a",
+                "  HostName 1",
+                "",
+                "Host b",
+                "  HostName 2",
+                "",
+                "Host c",
+            ])
+        );
+    }
+
+    #[test]
+    fn ensure_block_separators_splits_glued_match_block() {
+        let input = lines(&["Host a", "  HostName 1", "Match host b", "  User x"]);
+        let out = ensure_block_separators(&input);
+        assert_eq!(
+            out,
+            lines(&["Host a", "  HostName 1", "", "Match host b", "  User x"])
+        );
+    }
+
+    #[test]
+    fn ensure_block_separators_no_leading_blank() {
+        let input = lines(&["Host a", "  HostName 1"]);
+        let out = ensure_block_separators(&input);
+        assert_eq!(out, input, "must not insert a blank before the first block");
+    }
+
+    #[test]
+    fn write_normalization_is_idempotent() {
+        // Writing a healed config and re-parsing it must produce the same bytes
+        // on a second write. Mirrors the fuzz round-trip/idempotency invariant
+        // for the glued-hosts mutation class.
+        let glued = "Host a\n  HostName 1\nhost b\n  HostName 2\nMatch host c\n  User x\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content(glued),
+            path: path.clone(),
+            crlf: false,
+            bom: false,
+        };
+        config.write().unwrap();
+        let first = std::fs::read_to_string(&path).unwrap();
+
+        let reparsed = SshConfigFile {
+            elements: SshConfigFile::parse_content(&first),
+            path: path.clone(),
+            crlf: false,
+            bom: false,
+        };
+        reparsed.write().unwrap();
+        let second = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(first, second, "write normalization must be idempotent");
+        assert!(!first.contains("\n\n\n"), "no triple blanks:\n{first}");
+    }
+
+    #[test]
+    fn ensure_block_separators_case_insensitive_keyword() {
+        // SSH keywords are case-insensitive; lowercase `host`/`match` must heal
+        // too, matching the parser's own case-insensitive detection.
+        let input = lines(&["host a", "  HostName 1", "MATCH host b", "  User x"]);
+        let out = ensure_block_separators(&input);
+        assert_eq!(
+            out,
+            lines(&["host a", "  HostName 1", "", "MATCH host b", "  User x"])
+        );
+    }
+
+    #[test]
+    fn write_normalizes_glued_hosts_on_disk_serialize_stays_pure() {
+        // serialize() must stay byte-for-byte round-trip faithful (glued stays
+        // glued), but the persisted file gets a blank line between the blocks.
+        let glued = "Host a\n  HostName 1.1.1.1\nHost b\n  HostName 2.2.2.2\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content(glued),
+            path: path.clone(),
+            crlf: false,
+            bom: false,
+        };
+
+        // serialize() is unchanged: still glued.
+        assert_eq!(config.serialize(), glued);
+
+        // write() normalizes: blank line between the two blocks on disk.
+        config.write().unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            on_disk,
+            "Host a\n  HostName 1.1.1.1\n\nHost b\n  HostName 2.2.2.2\n"
+        );
+    }
+
+    #[test]
+    fn write_normalizes_glued_hosts_preserves_crlf() {
+        let glued = "Host a\r\n  HostName 1.1.1.1\r\nHost b\r\n  HostName 2.2.2.2\r\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        let config = SshConfigFile {
+            elements: SshConfigFile::parse_content(glued),
+            path: path.clone(),
+            crlf: true,
+            bom: false,
+        };
+        config.write().unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            on_disk,
+            "Host a\r\n  HostName 1.1.1.1\r\n\r\nHost b\r\n  HostName 2.2.2.2\r\n"
+        );
     }
 }

@@ -1,3 +1,8 @@
+## 3.21.0 - 2026-05-31
+
+- feat: Tidy SSH config with a blank line between hosts.
+- feat: Synced and imported hosts now line up cleanly, and your existing config tidies itself the next time purple saves.
+
 ## 3.20.1 - 2026-05-29
 
 - change: Clearer logs make every issue faster to track down.

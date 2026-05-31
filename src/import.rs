@@ -305,6 +305,60 @@ fn add_entries(
 mod tests {
     use super::*;
 
+    /// Every Host block must be preceded by a blank line or a top-level
+    /// group-header comment, matching add_host's separator guarantee.
+    fn assert_host_blocks_separated(output: &str) {
+        let lines: Vec<&str> = output.lines().collect();
+        for w in lines.windows(2) {
+            let (prev, cur) = (w[0], w[1]);
+            if cur.starts_with("Host ") {
+                let prev_is_blank = prev.trim().is_empty();
+                let prev_is_top_level_comment = prev.starts_with('#');
+                assert!(
+                    prev_is_blank || prev_is_top_level_comment,
+                    "Host block glued to previous content (no blank separator):\n{output}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_import_group_hosts_blank_separated() {
+        // Importing several hosts under a group header must leave a blank line
+        // between every host (the first stays glued to the header by design,
+        // like provider sync), so imported blocks never run into one another.
+        let mut config = SshConfigFile {
+            elements: Vec::new(),
+            path: std::path::PathBuf::new(),
+            crlf: false,
+            bom: false,
+        };
+        let entries = vec![
+            HostEntry {
+                alias: "web".into(),
+                hostname: "1.1.1.1".into(),
+                ..Default::default()
+            },
+            HostEntry {
+                alias: "db".into(),
+                hostname: "2.2.2.2".into(),
+                ..Default::default()
+            },
+            HostEntry {
+                alias: "api".into(),
+                hostname: "3.3.3.3".into(),
+                ..Default::default()
+            },
+        ];
+        let (imported, skipped) = add_entries(&mut config, &entries, Some("Imported")).unwrap();
+        assert_eq!(imported, 3);
+        assert_eq!(skipped, 0);
+
+        let output = config.serialize();
+        assert_host_blocks_separated(&output);
+        assert!(!output.contains("\n\n\n"), "triple blank lines:\n{output}");
+    }
+
     #[test]
     fn test_parse_known_hosts_simple() {
         let KnownHostResult::Parsed(entry) = parse_known_hosts_line("example.com ssh-rsa AAAA...")
