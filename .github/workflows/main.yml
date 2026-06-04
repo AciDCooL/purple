@@ -1,25 +1,66 @@
-name: Build Static RHEL 8 Binary
+name: Build Static RHEL 8 Binary (Upstream Sync)
 on:
-  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *' # Run daily at 2:00 AM UTC
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  check-and-build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Get latest upstream release
+        id: upstream
+        run: |
+          LATEST_TAG=$(curl -sL https://api.github.com/repos/erickochen/purple/releases/latest | jq -r .tag_name)
+          echo "tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          echo "Latest upstream release is ${LATEST_TAG}"
+          
+      - name: Check if release already exists in this fork
+        id: check
+        run: |
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/releases/tags/${{ steps.upstream.outputs.tag }})
+          if [ "$HTTP_STATUS" == "200" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Release ${{ steps.upstream.outputs.tag }} already exists. Skipping build."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Release ${{ steps.upstream.outputs.tag }} does not exist. Proceeding with build."
+          fi
+
+      - name: Checkout upstream repository
+        if: steps.check.outputs.exists == 'false'
         uses: actions/checkout@v4
+        with:
+          repository: erickochen/purple
+          ref: ${{ steps.upstream.outputs.tag }}
 
       - name: Install cross
+        if: steps.check.outputs.exists == 'false'
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Force OpenSSL Vendoring
+        if: steps.check.outputs.exists == 'false'
         run: cargo add openssl --features vendored
 
       - name: Build static binary using cross
+        if: steps.check.outputs.exists == 'false'
         run: cross build --release --target x86_64-unknown-linux-musl
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+      - name: Rename binary for release
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          mv target/x86_64-unknown-linux-musl/release/purple purple-rhel8-static-${{ steps.upstream.outputs.tag }}
+
+      - name: Create Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
         with:
-          name: purple-static-linux
-          path: target/x86_64-unknown-linux-musl/release/purple
+          tag_name: ${{ steps.upstream.outputs.tag }}
+          name: Release ${{ steps.upstream.outputs.tag }}
+          body: "Automated static RHEL8 build from upstream release ${{ steps.upstream.outputs.tag }}"
+          files: purple-rhel8-static-${{ steps.upstream.outputs.tag }}
