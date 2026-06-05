@@ -45,10 +45,6 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Force OpenSSL Vendoring
-        if: steps.check.outputs.exists == 'false'
-        run: cargo add openssl --features vendored
-
       - name: Build static binary using cross
         if: steps.check.outputs.exists == 'false'
         run: cross build --release --target x86_64-unknown-linux-musl
