@@ -49,10 +49,11 @@ jobs:
         if: steps.check.outputs.exists == 'false'
         run: cross build --release --target x86_64-unknown-linux-musl
 
-      - name: Rename binary for release
+      - name: Archive binary for release
         if: steps.check.outputs.exists == 'false'
         run: |
-          mv target/x86_64-unknown-linux-musl/release/purple purple-rhel8-static-${{ steps.upstream.outputs.tag }}
+          mv target/x86_64-unknown-linux-musl/release/purple .
+          tar -czf purple-rhel8-static-${{ steps.upstream.outputs.tag }}.tar.gz purple
 
       - name: Create Release
         if: steps.check.outputs.exists == 'false'
@@ -61,4 +62,4 @@ jobs:
           tag_name: ${{ steps.upstream.outputs.tag }}
           name: Release ${{ steps.upstream.outputs.tag }}
           body: "Automated static RHEL8 build from upstream release ${{ steps.upstream.outputs.tag }}"
-          files: purple-rhel8-static-${{ steps.upstream.outputs.tag }}
+          files: purple-rhel8-static-${{ steps.upstream.outputs.tag }}.tar.gz
